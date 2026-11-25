@@ -86,7 +86,8 @@ public sealed class ClaudeSessions : IDisposable
     /// The message a session whose last turn was cut off is resumed with, exactly (Global Constraints). It mirrors what
     /// Claude Code's own daemon sends a session it restarts after a crash (Task 1 note).
     /// </summary>
-    public const string ContinueMessage = "Continue from where you left off. Note: this session was resumed by Deskbar after it stopped.";
+    // Kept in Core (SessionKeeper) so the prompt hook can tell it from Petre's own message (RepliedTasks, task 8bd18246).
+    public const string ContinueMessage = SessionKeeper.ContinueMessage;
 
     // A list read normally answers in well under a second; ten covers a cold start of the CLI without letting a hung
     // one hold the next poll back for long (a read in flight makes the next tick skip, see Read).

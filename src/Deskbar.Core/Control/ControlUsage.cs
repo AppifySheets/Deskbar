@@ -47,6 +47,8 @@ public static class ControlUsage
                 + "      SessionStart, UserPromptSubmit and SessionEnd), with the hook's JSON on stdin: Notification and\n"
                 + "      Stop ask for the user as attention does, and Stop asks a session whose task is still in progress,\n"
                 + "      with no background work, to run task ask when the next move is the user's (once per turn).\n"
+                + "      A session whose question Deskbar set aside while it worked after the user's reply is asked\n"
+                + "      instead to ask it again or run task answered (once per turn, background work or not).\n"
                 + "      Prints only what the session should read, and exits 0\n"
                 + "      even when Deskbar is not running; JSON that is not a hook's exits 1"),
             new("claude-wait", "[--entry <value>] [--attended <value>] [--job <value>] [--from <folder>]",

@@ -162,24 +162,81 @@ public sealed record TaskBoard(IReadOnlyList<TaskItem> Tasks)
     /// <summary>A session needs a decision: the task waits on Petre, shows the question and moves to the top.</summary>
     public Result<TaskBoard> Ask(Guid id, string question, DateTimeOffset now) =>
         CleanText(question, "An ask needs a question").Bind(q =>
-            ChangeOpen(id, t => t with { Status = TaskStatus.WaitingOnYou, Question = q.Trim(), Raised = now, UpdatedAt = now, Assignee = Assignee.Me, WaitingSince = now, Pin = TopPin(TaskStatus.WaitingOnYou, id) }));
+            ChangeOpen(id, t => IsSetAside(t, q.Trim())
+                // The session asks again the very question Deskbar set aside (task 8bd18246): the question never stopped
+                // holding, so it comes back as it was (Restored) rather than as a new one on top of the block.
+                ? Restored(t, now)
+                : t with { Status = TaskStatus.WaitingOnYou, Question = q.Trim(), Raised = now, UpdatedAt = now, Assignee = Assignee.Me, WaitingSince = now, Pin = TopPin(TaskStatus.WaitingOnYou, id) }));
+
+    static bool IsSetAside(TaskItem task, string question) =>
+        task is { Status: TaskStatus.InProgress, QuestionSetAside.HasValue: true } && task.QuestionSetAside.Value == question;
+
+    /// <summary>
+    /// A question Deskbar set aside (TaskItem.QuestionSetAside, task 8bd18246) is Petre's again: the task waits on him with
+    /// it, as it stood before. Its place in the waiting block (Pin) and WaitingSince are kept, so a pull request merged
+    /// meanwhile still settles it (AskedPullRequests counts merges since WaitingSince) and `task answered` still settles the
+    /// session's comments since the first ask. Raised moves to now: RepliedTasks counts replies only after it, so the
+    /// reply that set the question aside cannot set it aside again.
+    /// </summary>
+    static TaskItem Restored(TaskItem task, DateTimeOffset now) =>
+        task with
+        {
+            Status = TaskStatus.WaitingOnYou, Question = task.QuestionSetAside, QuestionSetAside = Maybe<string>.None,
+            Assignee = Assignee.Me, Raised = now, UpdatedAt = now,
+        };
+
+    /// <summary>
+    /// Restores a set-aside question once no session of the task is busy any more (RepliedTasks.Restore): the session
+    /// stopped without asking again or settling it, perhaps because the set-aside landed after its Stop hook had already
+    /// run. Anything but an open, In progress task with a set-aside question returns this same board.
+    /// </summary>
+    public TaskBoard RestoreQuestion(Guid id, DateTimeOffset now) =>
+        Tasks.FirstOrDefault(t => t.Id == id) is { IsOpen: true, Status: TaskStatus.InProgress, QuestionSetAside.HasValue: true } task
+            ? Replaced(Restored(task, now))
+            : this;
 
     /// <summary>
     /// The session's question is settled (`task answered`). Its task, when Waiting on you or Done, goes back to In progress and drops
     /// the question. Anything else, or a session with no open task, returns this same board, so the caller can
     /// tell nothing changed by reference and skip the save.
+    /// <para>
+    /// A question Deskbar SET ASIDE while the session worked after Petre's reply (task 8bd18246, TaskItem.QuestionSetAside)
+    /// is the session's to settle too: the task is already In progress and Claude's, so only the set-aside question goes,
+    /// with the session's comments since the ask, as for a question still waiting.
+    /// </para>
     /// </summary>
     public TaskBoard Answered(string sessionId, DateTimeOffset now) =>
         TaskOf(sessionId)
-            .Where(t => t.Status is TaskStatus.WaitingOnYou or TaskStatus.Done)
+            .Where(t => t.Status is TaskStatus.WaitingOnYou or TaskStatus.Done || (t.Status == TaskStatus.InProgress && t.QuestionSetAside.HasValue))
             // RULING 62: answering a QUESTION settles the session's comments written since it was asked (a Done task resuming
             // was no question, so it settles none). Kept, not deleted.
             .Map(t => Replaced(t with
             {
-                Status = TaskStatus.InProgress, Question = Maybe<string>.None, UpdatedAt = now, Assignee = Assignee.Claude,
-                Comments = t.Status == TaskStatus.WaitingOnYou ? SettledSinceAsk(t, sessionId, now) : t.Comments,
+                Status = TaskStatus.InProgress, Question = Maybe<string>.None, QuestionSetAside = Maybe<string>.None,
+                UpdatedAt = now, Assignee = Assignee.Claude,
+                Comments = t.Status == TaskStatus.Done ? t.Comments : SettledSinceAsk(t, sessionId, now),
             }))
             .GetValueOrDefault(this);
+
+    /// <summary>
+    /// Deskbar sets a waiting task's question ASIDE because Claude is working on the task again after Petre replied
+    /// (RepliedTasks, task 8bd18246): the task goes back to In progress and to Claude, so it leaves the "Waiting on you"
+    /// block while the session works, and the question is kept in <see cref="TaskItem.QuestionSetAside"/> for the session
+    /// to settle or ask again at the end of its turn. Unlike <see cref="SettleQuestion"/> nothing is settled: the session's
+    /// comments since the ask stay as they are, since the question may still hold. Deskbar's own line,
+    /// <paramref name="note"/>, goes into the thread in the same change. Only the question that was read is set aside: a
+    /// task no longer waiting, closed, or waiting on a different question returns this same board.
+    /// </summary>
+    public TaskBoard SetQuestionAside(Guid id, string question, string note, DateTimeOffset now, Guid noteId) =>
+        Tasks.FirstOrDefault(t => t.Id == id) is { IsOpen: true, Status: TaskStatus.WaitingOnYou, Question: { HasValue: true } asked } task
+        && asked.Value == question
+            ? Replaced(task with
+            {
+                Status = TaskStatus.InProgress, Question = Maybe<string>.None, QuestionSetAside = question, UpdatedAt = now,
+                Assignee = Assignee.Claude,
+                Comments = [.. task.Comments, new TaskComment(noteId, TaskComment.DeskbarAuthor, now, note)],
+            })
+            : this;
 
     /// <summary>
     /// Deskbar settles a waiting task's question itself, because the pull requests it links are merged or closed
@@ -500,7 +557,13 @@ public sealed record TaskBoard(IReadOnlyList<TaskItem> Tasks)
         // busy session no longer takes it back.
         Lookup(id).Map(task => task.Assignee == assignee && task.HandedBack.HasNoValue
             ? this
-            : Replaced(task with { Assignee = assignee, UpdatedAt = now, Adopted = false, HandedBack = Maybe<DateTimeOffset>.None }));
+            // A question Deskbar set aside (task 8bd18246) is the session's to settle only while the task is Claude's; once
+            // Petre hands the task to anyone, it goes, so the Stop hook stops asking about it. The thread still quotes it.
+            : Replaced(task with
+            {
+                Assignee = assignee, UpdatedAt = now, Adopted = false, HandedBack = Maybe<DateTimeOffset>.None,
+                QuestionSetAside = assignee.IsClaude ? task.QuestionSetAside : Maybe<string>.None,
+            }));
 
     /// <summary>
     /// A Claude task no session has worked on for a while comes back to Petre (StalledTasks; spec
@@ -510,7 +573,13 @@ public sealed record TaskBoard(IReadOnlyList<TaskItem> Tasks)
     /// </summary>
     public TaskBoard HandBack(Guid id, DateTimeOffset now) =>
         Tasks.FirstOrDefault(t => t.Id == id) is { IsOpen: true, Status: TaskStatus.InProgress, IsClaudes: true } task && task.Assignee.IsClaude
-            ? Replaced(task with { Assignee = Assignee.Me, HandedBack = now, UpdatedAt = now })
+            ? Replaced(task.QuestionSetAside.HasValue
+                // A question Deskbar set aside while the session worked (task 8bd18246) that the session never settled nor
+                // asked again: the session went quiet, so the question is Petre's again, as it stood (Restored). No
+                // handed-back mark: the task waits, and a session's ask or answer moves it from there as from any question.
+                // RepliedTasks.Restore normally does this on the first quiet poll; this is the fallback.
+                ? Restored(task, now)
+                : task with { Assignee = Assignee.Me, HandedBack = now, UpdatedAt = now })
             : this;
 
     /// <summary>
@@ -1107,10 +1176,19 @@ public sealed record TaskBoard(IReadOnlyList<TaskItem> Tasks)
     // moves the assignee or the status (an ask, done, close, a status by hand, a session joining), that is no longer why
     // the task is where it is, so the mark goes. A status line or a comment moves neither and keeps it. HandBack and
     // TakeBack do not come through here: they set the mark themselves.
+    //
+    // The same for a question Deskbar set aside (TaskItem.QuestionSetAside, task 8bd18246): it belongs to the In progress
+    // stretch while the session works after Petre's reply. An ask, done, a status by hand or a close moves the task on, and
+    // the old question no longer stands for anything, so it goes.
     static TaskItem Unmarked(TaskItem was, TaskItem now) =>
-        now.HandedBack.HasValue && (now.Assignee != was.Assignee || now.Status != was.Status)
+        SetAsideKept(now.HandedBack.HasValue && (now.Assignee != was.Assignee || now.Status != was.Status)
             ? now with { HandedBack = Maybe<DateTimeOffset>.None }
-            : now;
+            : now);
+
+    static TaskItem SetAsideKept(TaskItem task) =>
+        task.QuestionSetAside.HasValue && (task.Status != TaskStatus.InProgress || !task.IsOpen)
+            ? task with { QuestionSetAside = Maybe<string>.None }
+            : task;
 
     /// <summary><see cref="Change"/> for the changes a closed task refuses (see the header).</summary>
     Result<TaskBoard> ChangeOpen(Guid id, Func<TaskItem, TaskItem> change) =>

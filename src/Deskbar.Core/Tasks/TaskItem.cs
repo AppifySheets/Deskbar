@@ -232,6 +232,17 @@ public sealed record TaskItem(
     public Maybe<DateTimeOffset> HandedBack { get; init; }
 
     /// <summary>
+    /// The question Deskbar set aside because Claude is working on the task again after Petre's reply (RepliedTasks,
+    /// task 8bd18246), or none. While it is set the task is In progress and Claude's, so it is off the "Waiting on you"
+    /// block; the session is asked at the end of its turn whether the question still holds (the Stop hook's
+    /// SessionBriefing.SetAsideNudge): `task ask` asks again, `task answered` settles it, and either clears this. If no
+    /// session of the task is busy any more and it did neither, the question is restored and the task waits again
+    /// (RepliedTasks.Restore, TaskBoard.RestoreQuestion). Any status change away from In progress clears it
+    /// (TaskBoard.Change), and so does Petre assigning the task (TaskBoard.Assign). A stored optional field, read tolerantly.
+    /// </summary>
+    public Maybe<string> QuestionSetAside { get; init; }
+
+    /// <summary>
     /// Deskbar made this task for a live session no task knew (TaskBoard.AdoptSession; design
     /// docs/superpowers/specs/2026-11-23-tasks-open-claude-sessions-design.md, "Every live session has a task"). Kept so
     /// that when the session joins its own task a moment later (its SessionStart hook can come after the adoption), the

@@ -49,6 +49,34 @@ public static class SessionBriefing
         "Otherwise stop without saying anything.";
 
     /// <summary>
+    /// What the Stop hook tells a session whose question Deskbar set aside while it worked after the user's reply
+    /// (task 8bd18246, RepliedTasks; RemoteControl.ClaudeHook). Once per turn. It leaves no "say nothing" way out, unlike
+    /// <see cref="ParkedNudge"/>: the question is open until the session settles it or asks again, and a session that
+    /// does neither gets it back on the user's board as it stood, as soon as no session of the task is busy
+    /// (RepliedTasks.Restore).
+    /// </summary>
+    public static string SetAsideNudge(string question) =>
+        $"While you worked after the user's reply, Deskbar took your task out of Waiting on you and set your question aside: \"{Cut(question)}\". " +
+        $"If it still holds, or the next move is the user's in another way, run {Shim} task ask with what they must do, the text on stdin, and the pull request or page as a markdown link to click. " +
+        $"If the reply settled it, run {Shim} task answered (and {Shim} task done if the work is finished). Then stop.";
+
+    // The first words of a comment delivered to a session (Commented), named so the prompt hook can tell Deskbar's own
+    // deliveries from Petre typing (DeliveredByDeskbar).
+    const string ManagerCommentOpening = "Deskbar: the manager (the session coordinating the user's tasks) commented on your task ";
+    const string UserCommentOpening = "Deskbar: the user commented on your task ";
+
+    /// <summary>
+    /// Whether a prompt is one Deskbar itself put in the session (task 8bd18246, RepliedTasks): a comment delivered by a
+    /// resume (Commented; Petre's own comment already counts as his reply through the task, and the manager's is not his),
+    /// or the keeper's resume of a cut-off turn (SessionKeeper.ContinueMessage). Only other prompts are Petre replying.
+    /// </summary>
+    public static bool DeliveredByDeskbar(string prompt) =>
+        prompt.TrimStart() is var text
+        && (text.StartsWith(ManagerCommentOpening, StringComparison.Ordinal)
+            || text.StartsWith(UserCommentOpening, StringComparison.Ordinal)
+            || text.TrimEnd() == SessionKeeper.ContinueMessage);
+
+    /// <summary>
     /// What a session reads when Petre's comment wakes it (CommentWake; its waiting Stop hook or a resume hands it this).
     /// The comment whole, image paths already absolute (TaskService.ExpandImages), so a picture in it can be read at once;
     /// and for a Done task the same rule a prompt gets: more work reopens it, a question about the work leaves it done.
@@ -58,10 +86,10 @@ public static class SessionBriefing
     // question). The rest is a request: do the routine part, and ask the user for anything that needs their approval.
     public static string Commented(TaskItem task, string expandedMarkdown, bool byManager = false) =>
         (byManager
-            ? $"Deskbar: the manager (the session coordinating the user's tasks) commented on your task {task.Id.ToString()[..8]} \"{Cut(task.Title)}\":\n\n{expandedMarkdown.Trim()}\n\n"
+            ? $"{ManagerCommentOpening}{task.Id.ToString()[..8]} \"{Cut(task.Title)}\":\n\n{expandedMarkdown.Trim()}\n\n"
               + $"Only the words after \"{ManagerSession.QuoteMarker}\" are the user's; take those as the user's own comment, so they can settle your question. "
               + $"Everything else is the manager's request, not the user's word: do the routine part, and for anything that needs the user's approval (a merge, anything destructive, a design choice) ask the user with {Shim} task ask.\n"
-            : $"Deskbar: the user commented on your task {task.Id.ToString()[..8]} \"{Cut(task.Title)}\":\n\n{expandedMarkdown.Trim()}\n")
+            : $"{UserCommentOpening}{task.Id.ToString()[..8]} \"{Cut(task.Title)}\":\n\n{expandedMarkdown.Trim()}\n")
         // An expanded image line is `![image](<C:\...>)` (TaskImages.Expand); its angle brackets are how it is told apart.
         + (System.Text.RegularExpressions.Regex.IsMatch(expandedMarkdown, @"!\[[^\]\n]*\]\(<[^>\n]+>\)")
             ? "\nRead each image path above with your Read tool.\n" : "")

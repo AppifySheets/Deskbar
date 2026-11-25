@@ -1051,6 +1051,21 @@ PM3. Ask again, linking a pull request that was merged long ago ("now that [#1](
 PM4. Ask linking a pull request, then close it without merging: the question settles, and the line says "closed without
      merging".
 
+## A reply sets the question aside while Claude works
+
+(Task 8bd18246.) The tasks panel open. From a Claude session with a task, run `task ask` with a question on stdin and let
+the turn end.
+
+RA1. The task waits on you at the top of the bar. While the session finishes the asking turn, it stays waiting.
+RA2. Comment on the task with an instruction that takes the session a minute ("count the files under src, then tell me").
+     Within about 45 seconds of the session starting on it, the task leaves "Waiting on you" and shows under "Claude
+     working". Its thread ends with "Deskbar set the question aside at <time>: ...", quoting the question.
+RA3. At the end of that turn the session reads "Stop hook feedback" naming the question, and either asks again (the task
+     is back in "Waiting on you" where it was) or runs `task answered` (it stays in progress). Interrupt a session (Esc)
+     while its question is set aside: within about 15 seconds the task waits on you again with the question.
+RA4. Ask again, then type a reply in the session's terminal instead of commenting: the same as RA2 and RA3.
+RA5. Ask again and reply nothing. A session woken by its own pull request watch (a rebase) leaves the task waiting.
+
 ## Done tasks wait on you
 
 (Task eefb986a.) Three notes on one workspace, one of them flagged urgent and important.

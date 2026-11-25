@@ -263,6 +263,18 @@ public sealed class TaskService(ITaskStore store, Func<DateTimeOffset> now, Func
     /// </summary>
     public void Reconcile(IReadOnlyCollection<ClaudeAgent> live) => CommitIfChanged(Board.Reconcile(live, now()));
 
+    // When each session last had a prompt submitted (its UserPromptSubmit hook), for RepliedTasks (task 8bd18246): a prompt
+    // after a task began waiting is Petre replying in the terminal. In memory only, like the attended set above; a session
+    // that has gone keeps its entry, which costs a time per session until Deskbar restarts.
+    ImmutableDictionary<string, DateTimeOffset> prompted = ImmutableDictionary<string, DateTimeOffset>.Empty;
+
+    /// <summary>A prompt was submitted in this session (RemoteControl.Prompted): remembered for RepliedTasks.</summary>
+    public void Prompted(string sessionId)
+    {
+        var at = now();
+        ImmutableInterlocked.Update(ref prompted, map => map.SetItem(sessionId, at));
+    }
+
     // The quiet clock of StalledTasks: when each watched Claude task last had a session working on it. In memory only;
     // after a restart StalledTasks measures from the task's UpdatedAt instead (see its header).
     ImmutableDictionary<Guid, DateTimeOffset> lastBusy = ImmutableDictionary<Guid, DateTimeOffset>.Empty;
@@ -275,6 +287,25 @@ public sealed class TaskService(ITaskStore store, Func<DateTimeOffset> now, Func
     /// </summary>
     public void Stalled(IReadOnlySet<string> busy, IReadOnlySet<string> working)
     {
+        // First the questions Deskbar set aside whose sessions are quiet again without having asked or settled them: they
+        // wait on Petre again, as they stood (RepliedTasks.Restore, task 8bd18246).
+        RepliedTasks.Restore(Board, busy).ToList().ForEach(id =>
+        {
+            var next = Board.RestoreQuestion(id, now());
+            if (ReferenceEquals(next, Board)) return;
+            trace?.Invoke($"tasks: restored the set-aside question of {Line(next, id)}, no session of it is busy");
+            Commit(next);
+        });
+        // Then the waiting tasks Claude works on again after Petre's reply (RepliedTasks.SetAside): set aside, they are In
+        // progress and Claude's, so the stalled step below already sees them worked on and starts their clock.
+        RepliedTasks.SetAside(Board, working, prompted).ToList().ForEach(found =>
+        {
+            var at = now();
+            var next = Board.SetQuestionAside(found.TaskId, found.Question, RepliedTasks.Note(found.Question, at), at, makeId());
+            if (ReferenceEquals(next, Board)) return;
+            trace?.Invoke($"tasks: set the question of {Line(next, found.TaskId)} aside, its session works on it again after a reply");
+            Commit(next);
+        });
         var step = StalledTasks.Step(Board, busy, working, lastBusy, now());
         lastBusy = step.LastBusy;
         step.HandedBack.Select(id => $"tasks: handed back {Line(step.Board, id)}, no session worked on it for {StalledTasks.After.TotalMinutes:0} minutes")

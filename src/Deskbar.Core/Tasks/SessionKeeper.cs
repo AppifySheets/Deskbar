@@ -47,6 +47,13 @@ namespace Deskbar.Core.Tasks;
 // the list's order.
 public static class SessionKeeper
 {
+    /// <summary>
+    /// The message a session whose last turn was cut off is resumed with, exactly (Global Constraints). It mirrors what
+    /// Claude Code's own daemon sends a session it restarts after a crash (Task 1 note). Here in Core, not in the app's
+    /// ClaudeSessions that sends it, so the prompt hook can tell it from Petre's own message (RepliedTasks, task 8bd18246).
+    /// </summary>
+    public const string ContinueMessage = "Continue from where you left off. Note: this session was resumed by Deskbar after it stopped.";
+
     /// <summary>Within this long of a resume the session is left alone, whatever the list says.</summary>
     public static readonly TimeSpan Grace = TimeSpan.FromSeconds(30);
 

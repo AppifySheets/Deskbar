@@ -89,8 +89,11 @@ public sealed partial class RemoteControl
         // same folder, so the right icon glows and not none of them.
         "Notification" => Quietly(Attention(Folder(from), SessionTitle.Read(hook.Transcript.GetValueOrDefault()))),
         // Stop blinks exactly as before, then may ask a parked session to say so (Parked, below).
+        // A question Deskbar set aside while the session worked (SetAside, below) is asked about first, since it names the
+        // question; otherwise a parked session is asked to say so (Parked).
         "Stop" => Quietly(Attention(Folder(from), SessionTitle.Read(hook.Transcript.GetValueOrDefault()))) is var blinked
-            && Parked(hook) ? Said(ParkedBlock) : blinked,
+            && SetAside(hook) is { HasValue: true } setAside ? Said(SetAsideBlock(setAside.Value))
+            : Parked(hook) ? Said(ParkedBlock) : blinked,
         _ => tasks is { } service && !hook.Headless && manager.State.ClaudeTasksInEffect
             ? TaskEvent(service, hook, Folder(from) ?? Folder(hook.Folder))
             : Quiet,
@@ -108,7 +111,7 @@ public sealed partial class RemoteControl
         "SessionStart" when IsManagerFolder(folder) => Said(SessionBriefing.Manager(hook.SessionId)),
         "UserPromptSubmit" when IsManagerFolder(folder) => Quiet,
         "SessionStart" => Said(SessionStarted(Attended(service, hook), hook, folder)),
-        "UserPromptSubmit" => Said(Prompted(Attended(service, hook), hook.SessionId)),
+        "UserPromptSubmit" => Said(Prompted(Attended(service, hook), hook)),
         "SessionEnd" => Ended(service, hook),
         "PreToolUse" => DialogAsked(service, hook, folder),
         "PostToolUse" when hook.ToolName == DialogQuestion.Tool => DialogAnswered(service, hook),
@@ -195,6 +198,25 @@ public sealed partial class RemoteControl
             .Map(t => t is { IsOpen: true, Status: TaskStatus.InProgress } && t.Assignee.IsClaude)
             .GetValueOrDefault(false);
 
+    // STOP WITH A QUESTION SET ASIDE (task 8bd18246, RepliedTasks): Deskbar took the task out of "Waiting on you" while the
+    // session worked after Petre's reply, and only the session can say whether the question still holds (Ruling 49). So
+    // its turn ends with that question, once (stop_hook_active), when the session is attended, sessions keep their tasks,
+    // and its task is open, In progress and carries a set-aside question. UNLIKE Parked, background work does not excuse
+    // it: a session watching its pull request is exactly the one whose "merge it" question may still hold, and if nothing
+    // asked it, the task would sit as Claude's until StalledTasks hands it back. Returns the question, or none.
+    Maybe<string> SetAside(ClaudeHookEvent hook) =>
+        tasks is { } service
+        && manager.State.ClaudeTasksInEffect
+        && !hook.Headless
+        && !hook.StopHookActive
+            ? service.Board.TaskOf(hook.SessionId)
+                .Where(t => t is { IsOpen: true, Status: TaskStatus.InProgress })
+                .Bind(t => t.QuestionSetAside)
+            : Maybe<string>.None;
+
+    static string SetAsideBlock(string question) =>
+        System.Text.Json.JsonSerializer.Serialize(new { decision = "block", reason = SessionBriefing.SetAsideNudge(question) });
+
     static readonly string ParkedBlock =
         System.Text.Json.JsonSerializer.Serialize(new { decision = "block", reason = SessionBriefing.ParkedNudge });
 
@@ -266,8 +288,15 @@ public sealed partial class RemoteControl
     // tell: the reminder for a Done task (SessionBriefing.Prompt) tells it to run `task join <id>` when the message does
     // give it more work, and Join already moves a Done task back to In progress. Same reasoning as Ruling 49 for a
     // waiting task: the session decides, a prompt proves nothing.
-    string Prompted(TaskService service, string sessionId)
+    //
+    // A PROMPT IS REMEMBERED (task 8bd18246, RepliedTasks): a prompt after a task began waiting is Petre replying in the
+    // terminal, and once the session then works, Deskbar sets the question aside. It settles nothing here (Ruling 49
+    // stands). A prompt Deskbar itself put there (a delivered comment, the keeper's resume message) is not a reply, so it is
+    // left out (SessionBriefing.DeliveredByDeskbar).
+    string Prompted(TaskService service, ClaudeHookEvent hook)
     {
+        var sessionId = hook.SessionId;
+        if (!hook.Prompt.Map(SessionBriefing.DeliveredByDeskbar).GetValueOrDefault(false)) service.Prompted(sessionId);
         var own = service.Board.TaskOf(sessionId);
         return SessionBriefing.Prompt(sessionId, own, own.HasValue ? Maybe<TaskItem>.None : service.Board.ClosedTaskOf(sessionId), service.ExpandImages);
     }

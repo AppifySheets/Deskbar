@@ -113,6 +113,9 @@ public sealed class JsonTaskStore(string baseDirectory, Action<string>? trace = 
         // TaskItem.HandedBack (stalled tasks, spec 2026-11-23-stalled-claude-tasks-design.md): optional, read tolerantly
         // like WaitingSince, so a wrong-typed value reads as not handed back. Still version 2.
         [property: JsonConverter(typeof(TolerantTimeConverter))] DateTimeOffset? HandedBack = null,
+        // TaskItem.QuestionSetAside (task 8bd18246): the question Deskbar set aside while Claude works after Petre's reply,
+        // or null. Read tolerantly like Description, so a wrong-typed value reads as none. Still version 2.
+        [property: JsonConverter(typeof(TolerantStringConverter))] string? QuestionSetAside = null,
         // TaskItem.ParentId (subtasks spec, 2026-11-24-subtasks-design.md): the parent task's id or null. Still version 2.
         Guid? ParentId = null,
         // TaskItem.SnoozedUntil (task 6da8d7eb, snoozing): when a snoozed task comes back, or null. Read tolerantly like
@@ -227,6 +230,7 @@ public sealed class JsonTaskStore(string baseDirectory, Action<string>? trace = 
             t.WaitingSince.HasValue ? t.WaitingSince.Value.ToUniversalTime() : null,
             t.Adopted,
             t.HandedBack.HasValue ? t.HandedBack.Value.ToUniversalTime() : null,
+            t.QuestionSetAside.HasValue ? t.QuestionSetAside.Value : null,
             t.ParentId.HasValue ? t.ParentId.Value : null,
             t.SnoozedUntil.HasValue ? t.SnoozedUntil.Value.ToUniversalTime() : null,
             t.Pin,
@@ -259,6 +263,7 @@ public sealed class JsonTaskStore(string baseDirectory, Action<string>? trace = 
                 .GetValueOrDefault(Assignee.DerivedFor((d.Sessions ?? []).Count > 0, d.Status)),
             Adopted = d.Adopted ?? false,
             HandedBack = d.HandedBack is { } handed ? handed.ToUniversalTime() : Maybe<DateTimeOffset>.None,
+            QuestionSetAside = string.IsNullOrWhiteSpace(d.QuestionSetAside) ? Maybe<string>.None : d.QuestionSetAside,
             ParentId = d.ParentId is { } parent ? parent : Maybe<Guid>.None,
             SnoozedUntil = d.SnoozedUntil is { } snoozed ? snoozed.ToUniversalTime() : Maybe<DateTimeOffset>.None,
             Pin = d.Pin ?? FallbackPin(d.Raised ?? d.Created),

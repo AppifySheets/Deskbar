@@ -95,6 +95,12 @@ public sealed record ClaudeHookEvent(string Event, string SessionId, string Fold
     /// </summary>
     public Maybe<string> DialogQuestion { get; init; }
 
+    /// <summary>
+    /// A UserPromptSubmit hook's prompt: the message submitted, or none. Read so Deskbar can leave its own resume message
+    /// out of the replies that set a waiting task's question aside (RepliedTasks, task 8bd18246).
+    /// </summary>
+    public Maybe<string> Prompt { get; init; }
+
     public static Result<ClaudeHookEvent> Parse(string json, string? entrypoint, string? attended, string? job = null)
     {
         try
@@ -123,6 +129,7 @@ public sealed record ClaudeHookEvent(string Event, string SessionId, string Fold
                 DialogQuestion = Text(root, "tool_name") == Tasks.DialogQuestion.Tool && root.TryGetProperty("tool_input", out var asked)
                     ? Tasks.DialogQuestion.From(asked)
                     : Maybe<string>.None,
+                Prompt = Text(root, "prompt"),
             };
         }
         catch (JsonException e)
