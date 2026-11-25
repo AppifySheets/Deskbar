@@ -1780,7 +1780,8 @@ public partial class TasksWindow : Window
     }
 
     // One subtask in its parent's thread: "↳ title · status · status line", dim when it is done or closed. The whole line
-    // is a button that shows the subtask (TasksBoard.ShowTask).
+    // is a button that shows the subtask (TasksBoard.ShowTaskPastFilters): picked, drawn even with "Subtasks" unticked
+    // (the selected task never folds, task b0526e18), its thread open and scrolled to.
     UIElement SubtaskEntry(SubtaskView sub)
     {
         var text = new TextBlock { FontSize = 11, TextTrimming = TextTrimming.CharacterEllipsis, VerticalAlignment = VerticalAlignment.Center };

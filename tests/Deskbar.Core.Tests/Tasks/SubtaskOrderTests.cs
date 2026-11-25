@@ -217,6 +217,25 @@ public class SubtaskOrderTests
         Assert.Equal(["Asking", "Parent", "Orphan"], Titles(folded[3].Tasks));
     }
 
+    // Task b0526e18 (Petre: "i can't interact with the subtask"): the subtask kept (the one selected in the panel, shown
+    // from its parent's thread) never folds, in the List or the Matrix; its folded siblings stay folded.
+    [Fact]
+    public void Unticked_the_kept_subtask_stays_on_show()
+    {
+        var parent = Task("Parent");
+        var kept = Task("Kept", parent.Id);
+        var sibling = Task("Sibling", parent.Id);
+        var (under, nested) = TaskViews.UnderParents([new TaskGroup(TaskGroupKind.IV, [parent, kept, sibling])]);
+
+        var folded = TaskViews.FoldSubtasks(under, nested, kept.Id);
+        var cells = TaskViews.FoldSubtasks(
+            [new TaskCell(Quadrant.I, []), new TaskCell(Quadrant.II, []), new TaskCell(Quadrant.III, []), new TaskCell(Quadrant.IV, [parent, kept, sibling])],
+            kept.Id);
+
+        Assert.Equal(["Parent", "Kept"], Titles(Assert.Single(folded).Tasks));
+        Assert.Equal(["Parent", "Kept"], Titles(cells[3].Tasks));
+    }
+
     // --- the tasks a drag can nest under --------------------------------------------------------
 
     [Fact]

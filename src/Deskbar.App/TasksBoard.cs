@@ -255,7 +255,10 @@ public sealed class TasksBoard : IDisposable
             SubtaskParent = id => tasks.Board.SubtaskParentFor(id)
                 .Match(p => new SubtaskParentView(p.Id, p.Title, p.WorkspaceId), () => (SubtaskParentView?)null),
             AddSubtask = (title, workspace, quadrant, parent, describe) => AddNote(title, workspace, quadrant, parent, describe).IsSuccess,
-            ShowTask = ShowTask,
+            // A subtask in its parent's thread and the task window's "Show in the tasks panel": both ask for that very
+            // task, so it is let past a filter that hides it (task b0526e18: a closed subtask, which the Open filter
+            // hides, was a link that did nothing), as "Subtask of" lets a parent through.
+            ShowTask = ShowTaskPastFilters,
             SetParent = (id, parent) => Report(tasks.SetParent(id, parent)).IsSuccess,
             NestTargets = id => tasks.Board.ParentCandidates(id).Select(t => t.Id).ToHashSet(),
             Snooze = (id, choice) => Snooze(id, choice),
@@ -1026,7 +1029,10 @@ public sealed class TasksBoard : IDisposable
         // own "· N subtasks" says they are there. Read from the saved state, as OpenFresh reads CurrentWorkspace.
         // A search by id never folds (task 6e4dc116): the subtask asked for by its id would vanish under its parent.
         var showsSubtasks = !PanelState.HideSubtasks || foundById.HasValue;
-        var listed = showsSubtasks ? underParents : TaskViews.FoldSubtasks(underParents, nested);
+        // The selected task never folds (task b0526e18, Petre: "i can't interact with the subtask. i should be able to"):
+        // a subtask shown from its parent's thread is selected, and folded it had no line to open, act on or scroll to.
+        // It folds again once another task is picked.
+        var listed = showsSubtasks ? underParents : TaskViews.FoldSubtasks(underParents, nested, selection.Current);
         var groups = listed
             .Select(g => new TaskGroupView(g.Kind, TaskViews.GroupName(g.Kind), g.Tasks.Select(t => Row(t) with { Nested = nested.Contains(t.Id) }).ToArray()))
             .ToArray();
@@ -1043,7 +1049,7 @@ public sealed class TasksBoard : IDisposable
         var addTarget = shown.Any ? PlaceOf(manager.CurrentWorkspaceId) : PlaceOf(shown.Workspace);
         // The Matrix's four cells (Ruling 28), drawn instead of the groups while the switch says so (AppState.TasksMatrix).
         var matrix = TaskViews.Matrix(board, filter, shown, assigneeFilter);
-        var cells = (showsSubtasks ? matrix : TaskViews.FoldSubtasks(matrix))
+        var cells = (showsSubtasks ? matrix : TaskViews.FoldSubtasks(matrix, selection.Current))
             .Select(c => new TaskCellView(c.Quadrant, TaskViews.GroupName(TaskViews.KindOf(c.Quadrant)), c.Tasks.Select(Row).ToArray()))
             .ToArray();
         var (menuGoals, filterGoals) = showsGoals ? GoalChoices(goalBoard) : NoGoalChoices;
@@ -1498,7 +1504,10 @@ internal sealed record TasksWindowActions(
     /// <summary>Adds a subtask under the parent (the fourth argument), as AddNote adds a note, pictures included; whether it worked.</summary>
     public Func<string, Maybe<Guid>, Quadrant, Guid, Func<Guid, Result<string>>?, bool>? AddSubtask { get; init; }
 
-    /// <summary>Shows one task: picked, its thread open, scrolled into view (TasksBoard.ShowTask). A subtask in a thread uses it.</summary>
+    /// <summary>
+    /// Shows one task: picked, its thread open, scrolled into view, past any filter that hides it
+    /// (TasksBoard.ShowTaskPastFilters). A subtask in a thread and the task window's "Show in the tasks panel" use it.
+    /// </summary>
     public Action<Guid>? ShowTask { get; init; }
 
     /// <summary>Puts a task under another, or (none) makes it a plain task again (TaskService.SetParent); whether it worked.</summary>

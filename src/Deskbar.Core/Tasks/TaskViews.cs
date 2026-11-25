@@ -351,24 +351,34 @@ public static class TaskViews
     /// <see cref="UnderParents"/>) left out, except one waiting on Petre. UnderParents never nests a closed one, and it
     /// nests a subtask waiting on Petre only under a parent that is pinned too (task f41d7857), where it stays on show,
     /// under that parent. A group the folding empties is left out, as UnderParents leaves out one its move empties.
+    /// <para>
+    /// <paramref name="keep"/> never folds either (task b0526e18, Petre: "i can't interact with the subtask. i should be
+    /// able to"): the panel passes the task it has selected, so a subtask shown from its parent's thread (or picked any
+    /// other way) gets a line of its own, with its thread, menu and buttons, until another task is picked.
+    /// </para>
     /// </summary>
-    public static IReadOnlyList<TaskGroup> FoldSubtasks(IReadOnlyList<TaskGroup> groups, IReadOnlySet<Guid> nested) =>
-        groups.Select(g => g with { Tasks = g.Tasks.Where(t => !nested.Contains(t.Id) || t.Status == TaskStatus.WaitingOnYou).ToArray() })
+    public static IReadOnlyList<TaskGroup> FoldSubtasks(IReadOnlyList<TaskGroup> groups, IReadOnlySet<Guid> nested, Maybe<Guid> keep = default) =>
+        groups.Select(g => g with { Tasks = g.Tasks.Where(t => !nested.Contains(t.Id) || t.Status == TaskStatus.WaitingOnYou || Kept(keep, t)).ToArray() })
             .Where(g => g.Tasks.Count > 0)
             .ToArray();
 
     /// <summary>
-    /// The Matrix's cells with every open subtask left out whose parent is in some cell, unless it waits on Petre. The
-    /// Matrix draws no subtask under its parent (each stays in its own quadrant), so the rule is the List's in its own
-    /// terms: folded where the parent is on screen to count it. Every cell stays, empty or not (the Matrix is always four).
+    /// The Matrix's cells with every open subtask left out whose parent is in some cell, unless it waits on Petre or is
+    /// <paramref name="keep"/> (the List's exception above). The Matrix draws no subtask under its parent (each stays in
+    /// its own quadrant), so the rule is the List's in its own terms: folded where the parent is on screen to count it.
+    /// Every cell stays, empty or not (the Matrix is always four).
     /// </summary>
-    public static IReadOnlyList<TaskCell> FoldSubtasks(IReadOnlyList<TaskCell> cells)
+    public static IReadOnlyList<TaskCell> FoldSubtasks(IReadOnlyList<TaskCell> cells, Maybe<Guid> keep = default)
     {
         var shown = cells.SelectMany(c => c.Tasks).Select(t => t.Id).ToHashSet();
         bool Folds(TaskItem t) =>
-            t.IsOpen && t.Status != TaskStatus.WaitingOnYou && t.ParentId is { HasValue: true } p && p.Value != t.Id && shown.Contains(p.Value);
+            t.IsOpen && t.Status != TaskStatus.WaitingOnYou && !Kept(keep, t)
+            && t.ParentId is { HasValue: true } p && p.Value != t.Id && shown.Contains(p.Value);
         return cells.Select(c => c with { Tasks = c.Tasks.Where(t => !Folds(t)).ToArray() }).ToArray();
     }
+
+    // Whether the task is the one the folding keeps on show (the panel's selected task, task b0526e18).
+    static bool Kept(Maybe<Guid> keep, TaskItem t) => keep.HasValue && keep.Value == t.Id;
 
     // --- subtasks on a line (docs/superpowers/specs/2026-11-24-subtasks-design.md, Petre's pick A) ----------------------
 
