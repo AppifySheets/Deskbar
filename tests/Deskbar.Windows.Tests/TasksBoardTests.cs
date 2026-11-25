@@ -5171,6 +5171,30 @@ public class TasksBoardTests
         Assert.True(HasButtonNamed(t.Window, "Subtask Tag the build"));
     });
 
+    // Task 0eb943d8 (Petre: "how do i close subtasks?"): a subtask folded into its parent's thread has no line, so it had
+    // no tick. Its entry now starts with one: it closes the subtask, Undo stands in its place for the undo window and
+    // brings it back, and a closed subtask's entry has no tick.
+    [Fact]
+    public void A_subtask_in_its_parents_thread_closes_from_its_own_tick() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var parent = t.Tasks.AddNote("Ship the release", t.Gepha).Value.Id;
+        var child = t.Tasks.AddNote("Write the notes", t.Gepha, Quadrant.IV, parent).Value.Id;
+        t.Controller.Show();
+        Click(ButtonNamed(t.Window, "Subtasks"));
+        t.Controller.ToggleThread(parent);
+
+        Click(ButtonNamed(t.Window, "Close Write the notes"));
+
+        Assert.False(t.Tasks.Board.Tasks.Single(x => x.Id == child).IsOpen);
+        Assert.False(HasButtonNamed(t.Window, "Close Write the notes"));
+        Click(ButtonNamed(t.Window, "Undo closing Write the notes"));
+        Assert.True(t.Tasks.Board.Tasks.Single(x => x.Id == child).IsOpen);
+        Assert.True(HasButtonNamed(t.Window, "Close Write the notes"));
+        // The parent line's own tick is still the plain "Close", and still refused while the subtask is open.
+        Assert.True(HasButtonNamed(t.Window, "Close"));
+    });
+
     // A closed subtask is listed in its parent's thread too, and the Open filter hides it (task b0526e18: the link did
     // nothing). It opens in place like any other (task 0eb943d8), so the filter stays as it is.
     [Fact]

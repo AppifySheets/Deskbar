@@ -1310,7 +1310,13 @@ public sealed class TasksBoard : IDisposable
             // place, under its entry (task 0eb943d8, Petre: "let subtasks stay where they are, expand their current
             // place"). Subtasks are one level deep, so this never nests further.
             ? tasks.Board.Family(task.Id).Map(f => f.Subtasks.Select(c => new SubtaskView(c.Id, FloatingBar.FirstLine(c.Title), c.Status, c.StatusLine)
-                    { Row = inPlace && c.Id != task.Id && expanded.Contains(c.Id) ? RowOf(c, open: true, inPlace: false) : null }).ToArray())
+                    {
+                        Row = inPlace && c.Id != task.Id && expanded.Contains(c.Id) ? RowOf(c, open: true, inPlace: false) : null,
+                        // Its tick in the thread (task 0eb943d8, "how do i close subtasks?"): Undo while its close can be
+                        // undone, and the tip a line's tick would have.
+                        Closing = pendingCloses.ContainsKey(c.Id),
+                        TickTip = TaskViews.TickTip(c.IsClaudes, tasks.Board.OpenSubtaskCount(c.Id), TaskBoard.ClaudeStillWorking(c)),
+                    }).ToArray())
                 .GetValueOrDefault([])
             : [],
         // TASK LINKS (docs/superpowers/specs/2026-11-25-task-links-design.md): the original a closed duplicate names, for
@@ -1755,6 +1761,12 @@ internal sealed record SubtaskView(Guid Id, string Title, TaskStatus Status, str
     /// any in the Matrix): its entry then goes to that line rather than opening it in place.
     /// </summary>
     public bool HasLine { get; init; }
+
+    /// <summary>Whether the subtask was just closed and can still be undone: its tick in the thread shows Undo.</summary>
+    public bool Closing { get; init; }
+
+    /// <summary>What its tick in the thread says on hover, as a line's tick would (TaskViews.TickTip).</summary>
+    public string TickTip { get; init; } = "";
 }
 
 /// <summary>The parent "Add subtask…" puts a new task under: its id, its title for the chip and its workspace.</summary>

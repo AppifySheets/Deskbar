@@ -604,7 +604,7 @@ public partial class TasksWindow : Window
     // a subtask folded there is in no cell, so opening it in its parent's thread changed nothing the cells' signature
     // read, and the draw never came (review).
     static string SubtasksSignature(TaskRowView r) =>
-        string.Join('\u0004', r.Subtasks.Select(c => $"{c.Id}{c.Title}{c.Status}{c.StatusLine}{c.HasLine}" + (c.Row is { } open ? "{" + ListRowSignature(open) + "}" : "")));
+        string.Join('\u0004', r.Subtasks.Select(c => $"{c.Id}{c.Title}{c.Status}{c.StatusLine}{c.HasLine}{c.Closing}{c.TickTip}" + (c.Row is { } open ? "{" + ListRowSignature(open) + "}" : "")));
 
     static string PlaceSignature(TaskPlaceChoice place) => $"{place.Workspace}{place.Name}{(place.Colour as SolidColorBrush)?.Color}";
 
@@ -1380,10 +1380,18 @@ public partial class TasksWindow : Window
     // just closed. A Claude line has no badge here (Ruling 42, Petre: "don't say
     // claude"): the orange edge at the line's start is its mark.
     UIElement LeftOf(TaskRowView row) =>
-        row.Closing
+        // A parent with open subtasks is refused by the board (task 842e1ba4); the tip says so before the click, and the
+        // click's refusal shows on the problem line (TasksBoard.Close reports it).
+        TickOf(row.Id, row.Status, row.Closing, TaskViews.TickTip(row.Claudes, row.SubtaskCount, row.ClaudeWorking));
+
+    // The tick box itself, or Undo while the task is in its undo window, or nothing once it is closed: a line's (LeftOf)
+    // and a subtask entry's in its parent's thread (SubtaskEntry, task 0eb943d8: "how do i close subtasks?").
+    // `title`, on a subtask entry's tick, tells it from its parent line's for screen readers and the tests.
+    UIElement TickOf(Guid id, TaskStatus status, bool closing, string tip, string? title = null) =>
+        closing
             // A sign, not a word (Petre: "undo sign instead of text"), the bar's own (FloatingBar.UndoSign).
-            ? Small(FloatingBar.UndoSign(12, Ink), "Undo", () => Actions?.Undo(row.Id), "Undo", DoubleClickIgnored)
-            : row.Status == TaskStatus.Closed
+            ? Small(FloatingBar.UndoSign(12, Ink), title is null ? "Undo" : $"Undo closing {title}", () => Actions?.Undo(id), "Undo", DoubleClickIgnored)
+            : status == TaskStatus.Closed
                     ? new TextBlock()
                     : Small(new Border
                     {
@@ -1392,9 +1400,7 @@ public partial class TasksWindow : Window
                         BorderBrush = TickEdge,
                         BorderThickness = new Thickness(1),
                         CornerRadius = new CornerRadius(3),
-                    // A parent with open subtasks is refused by the board (task 842e1ba4); the tip says so before the
-                    // click, and the click's refusal shows on the problem line (TasksBoard.Close reports it).
-                    }, "Close", () => Actions?.Close(row.Id), TaskViews.TickTip(row.Claudes, row.SubtaskCount, row.ClaudeWorking));
+                    }, title is null ? "Close" : $"Close {title}", () => Actions?.Close(id), tip);
 
     // The title (on a line being renamed, the box that renames it), and apart from it what goes under it: the description,
     // its pictures and the detail (the question or the status line). Line puts the two in rows of their own, so what is
@@ -1930,9 +1936,21 @@ public partial class TasksWindow : Window
         }, new Thickness(4, 1, 4, 1));
         entry.Background = Brushes.Transparent;
         entry.HorizontalAlignment = HorizontalAlignment.Left;
-        entry.Margin = new Thickness(0, 0, 0, 4);
         entry.ToolTip = sub.HasLine ? "Show this subtask" : sub.Row is null ? "Open this subtask here" : "Fold this subtask";
-        return entry;
+        // ITS TICK IN FRONT (task 0eb943d8, Petre: "how do i close subtasks?"): a subtask folded into its parent's thread
+        // has no line, so no tick and no menu, and opened in place it still had none. The entry now starts with the same
+        // tick a line has (TickOf): it closes the subtask with Undo in its place for the undo window, by the board's own
+        // rules (a working Claude offers to stop first). Nothing once it is closed, as on a line.
+        // The tick sits in a slot of fixed width, so a closed subtask's entry (no tick) starts at the same x as its open
+        // siblings'. A DockPanel, not a horizontal StackPanel: the entry fills what is left, so its text still trims
+        // with "…" at the thread's edge rather than being clipped mid-word (review).
+        var slot = new Border { Width = 22, VerticalAlignment = VerticalAlignment.Center, Child = TickOf(sub.Id, sub.Status, sub.Closing, sub.TickTip, sub.Title) };
+        DockPanel.SetDock(slot, Dock.Left);
+        return new DockPanel
+        {
+            Margin = new Thickness(0, 0, 0, 4),
+            Children = { slot, entry },
+        };
     }
 
     // One session of the thread (Task 9, the spec's "Task history"): its short id, when it joined and where it stands,

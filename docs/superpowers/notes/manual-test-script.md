@@ -666,7 +666,8 @@ S11. Open the parent in the tasks panel: with Subtasks ticked its thread lists n
     right under it (task 0eb943d8). Untick Subtasks: the thread lists both with their status and status line; click
     one and it opens right there, its own thread (sessions, comments, its comment box) under its entry inside the
     parent's thread, with no line of its own and no second "Subtask of" or **Add subtask**; click it again and it
-    folds. Comment on it there: the comment shows in place. A closed subtask in the thread opens the same way, without
+    folds. Comment on it there: the comment shows in place. Each entry starts with a tick: tick one, it closes with
+    Undo in the tick's place; Undo brings it back; after the undo window its entry says Closed and has no tick. A closed subtask in the thread opens the same way, without
     the filter changing.
 S11a. Adding a subtask in place (task 0eb943d8). Open a note's thread and press **Add subtask**: a box takes its place,
     in the thread, with the keyboard; the add box at the top stays shut. Type a title, Shift+Enter, a second line, Enter:
