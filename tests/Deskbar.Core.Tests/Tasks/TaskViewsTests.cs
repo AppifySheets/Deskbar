@@ -67,7 +67,7 @@ public class TaskViewsTests
     }
 
     [Fact]
-    public void The_open_view_is_waiting_then_the_quadrants_done_keeping_its_place()
+    public void The_open_view_is_waiting_then_done_then_the_quadrants()
     {
         var note = Note("Dishwasher tablets", Free);
         var working = Claudes("DurableFile move guard", ws, "s1");
@@ -80,10 +80,14 @@ public class TaskViewsTests
 
         Assert.Equal(
             [
-                $"WaitingOnYou: {Title(asking)}",
-                $"IV: {Title(done)}, {Title(working)}, {Title(note)}",
+                $"WaitingOnYou: {Title(asking)}, {Title(done)}",
+                $"IV: {Title(working)}, {Title(note)}",
             ],
             Shown(TaskFilter.Open, TaskWorkspaceFilter.All));
+        // A status filter narrows the pinned block as it narrows a quadrant.
+        Assert.Equal([$"WaitingOnYou: {Title(asking)}"], Shown(TaskFilter.WaitingOnYou, TaskWorkspaceFilter.All));
+        Assert.Equal([$"WaitingOnYou: {Title(done)}"], Shown(TaskFilter.Done, TaskWorkspaceFilter.All));
+        Assert.Equal([$"IV: {Title(working)}"], Shown(TaskFilter.InProgress, TaskWorkspaceFilter.All));
     }
 
     // Task 12 (Ruling 28): each quadrant is a group of its own, in Covey's order, captioned in his words; a status filter
@@ -123,13 +127,16 @@ public class TaskViewsTests
         Note("closed", Free);
         Change(x => x.SetFlag(a, TaskFlag.Important, true, clock));
         Change(x => x.SetFlag(w, TaskFlag.Important, true, clock));
+        var d = Note("d", Free);
         Change(x => x.SetStatus(w, TaskStatus.WaitingOnYou, clock));
+        Change(x => x.SetStatus(d, TaskStatus.Done, clock));
         Change(x => x.Close(board.Tasks.Single(t => t.Title == "closed").Id, clock));
 
         var cells = TaskViews.Matrix(board, TaskFilter.Open, TaskWorkspaceFilter.All);
 
+        // A Done task is pinned too (task eefb986a): on top of its own cell, under the questions.
         Assert.Equal([Quadrant.I, Quadrant.II, Quadrant.III, Quadrant.IV], cells.Select(c => c.Quadrant));
-        Assert.Equal([[], ["w", "a"], [], ["b"]], cells.Select(c => c.Tasks.Select(t => t.Title).ToArray()));
+        Assert.Equal([[], ["w", "a"], [], ["d", "b"]], cells.Select(c => c.Tasks.Select(t => t.Title).ToArray()));
         Assert.Equal([[], ["a"], [], ["b"]], TaskViews.Matrix(board, TaskFilter.Backlog, TaskWorkspaceFilter.All).Select(c => c.Tasks.Select(t => t.Title).ToArray()));
         Assert.All(TaskViews.Matrix(board, TaskFilter.Closed, TaskWorkspaceFilter.All), c => Assert.Empty(c.Tasks));
     }

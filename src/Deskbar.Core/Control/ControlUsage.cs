@@ -57,10 +57,10 @@ public static class ControlUsage
         ]),
         new("Tasks", [
             new("task", "list [--closed]",
-                "the open tasks in the bar's order (waiting on you, then quadrants I to IV, each in its own order),\n"
-                + "      as JSON: id, title, workspace, status, statusLine, question, claudes, sessions, comments (a\n"
-                + "      count), updatedAt, important, urgent, quadrant (I to IV) and order (its place in the quadrant,\n"
-                + "      from 1; null while it waits on you);\n"
+                "the open tasks in the bar's order (waiting on you, then done, then quadrants I to IV, each in its\n"
+                + "      own order), as JSON: id, title, workspace, status, statusLine, question, claudes, sessions,\n"
+                + "      comments (a count), updatedAt, important, urgent, quadrant (I to IV) and order (its place in\n"
+                + "      the quadrant, from 1; null while it waits on you or is done);\n"
                 + "      --closed lists the closed ones instead, the latest closed first, to find one to reopen"),
             new("task", "add <title>|- [--workspace <name>|none] [--important] [--urgent] [--parent <id>]",
                 "add a note to the backlog; without --workspace it goes on the workspace of the VS Code window\n"
@@ -79,7 +79,7 @@ public static class ControlUsage
                 + "      in (I urgent and important, II important, III urgent, IV neither)"),
             new("task", "order <id> top|end|<n>",
                 "move a task within its quadrant, as a drag does: to the top, the end or place n counting from 1.\n"
-                + "      A task waiting on you stays on top until it is answered"),
+                + "      A task waiting on you stays on top until it is answered, a done one until it is closed"),
             // Task 9 (docs/superpowers/specs/2026-11-23-tasks-open-claude-sessions-design.md): the twins of a line's
             // double-click, "Start Claude on this" and the thread's Open (RemoteControl.Tasks.cs, TaskSessionCommands).
             new("task", "go <id>",

@@ -792,7 +792,7 @@ public partial class TasksWindow : Window
             DragPress(row.Id, DragMouse.Position(e, DragSurface));
         };
         // A subtask drawn under its parent is dragged (out, to free it) but is no drop target (review of #467, finding 2).
-        dragLines[row.Id] = (row.Quadrant, row.Status == TaskStatus.WaitingOnYou && !row.Closing, row.Closing || row.Status == TaskStatus.Closed, row.Nested);
+        dragLines[row.Id] = (row.Quadrant, row.Status.IsPinned() && !row.Closing, row.Closing || row.Status == TaskStatus.Closed, row.Nested);
         // A right-click anywhere on the line opens its menu at the pointer, Edit first (Ruling 44, OpenMenuFor).
         line.PreviewMouseRightButtonUp += (_, e) =>
         {

@@ -987,6 +987,18 @@ PM3. Ask again, linking a pull request that was merged long ago ("now that [#1](
 PM4. Ask linking a pull request, then close it without merging: the question settles, and the line says "closed without
      merging".
 
+## Done tasks wait on you
+
+(Task eefb986a.) Three notes on one workspace, one of them flagged urgent and important.
+
+DW1. Mark a plain note Done from its menu: it moves up into the top block with the questions, above the urgent one,
+     with its green tick, and no space between it and a question above it.
+DW2. Have a session ask something: its task goes above the done one.
+DW3. In the tasks panel, the done task is under the "Waiting on you" caption. The "Done" chip shows it alone, under
+     the same caption; the "Waiting on you" chip shows only the question.
+DW4. Try to drag the done line: it does not move, and nothing drops above it.
+DW5. Set the done task back to In progress: it goes back to the place it had in its quadrant.
+
 ## Results (2026-08-01)
 
 Status: **pending human execution.** An agent cannot observe the desktop, Task View,

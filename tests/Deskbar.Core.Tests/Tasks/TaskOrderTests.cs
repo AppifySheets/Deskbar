@@ -130,15 +130,49 @@ public class TaskOrderTests
         Assert.Equal([id3, id2, id1], Pile(board));
     }
 
+    // Task eefb986a (Petre: "tasks marked as done should be in the waiting on me section"): a Done task is pinned on
+    // top with the questions, under them, and keeps its rank, so it goes back to its old place when it is resumed.
     [Fact]
-    public void A_done_task_keeps_its_place()
+    public void A_done_task_is_pinned_under_the_questions_and_resumes_at_its_place()
     {
-        var board = Notes(id1, id2, id3);
+        var board = Notes(id1, id2, id3); // IV: 3 2 1
         Later();
 
         board = board.SetStatus(id1, TaskStatus.Done, clock).Value;
+        Assert.Equal([id1, id3, id2], Pile(board));
+        Assert.Equal([id3, id2], Group(board, Quadrant.IV));
+        Assert.True(board.PositionOf(id1).HasNoValue);
 
-        Assert.Equal([id3, id2, id1], Pile(board));
+        Later();
+        board = board.SetStatus(id2, TaskStatus.WaitingOnYou, clock).Value;
+        Assert.Equal([id2, id1, id3], Pile(board));
+
+        board = board.SetStatus(id1, TaskStatus.InProgress, clock).Value;
+        Assert.Equal([id2, id3, id1], Pile(board));
+    }
+
+    [Fact]
+    public void The_latest_done_is_on_top_of_the_done_tasks()
+    {
+        var board = Notes(id1, id2, id3);
+        Later();
+        board = board.SetStatus(id3, TaskStatus.Done, clock).Value;
+        Later();
+        board = board.SetStatus(id1, TaskStatus.Done, clock).Value;
+
+        Assert.Equal([id1, id3, id2], Pile(board));
+    }
+
+    [Fact]
+    public void A_done_task_takes_its_flags_but_no_move()
+    {
+        var board = Notes(id1, id2).SetStatus(id1, TaskStatus.Done, clock).Value;
+
+        Assert.Equal("A done task stays on top until it is closed or resumed; its flags still change",
+            board.Place(id1, Quadrant.IV, TaskPlace.Top, clock).Error);
+        var flagged = board.SetFlag(id1, TaskFlag.Important, true, clock).Value;
+        Assert.True(Get(flagged, id1).Important);
+        Assert.Equal([id1, id2], Pile(flagged));
     }
 
     [Fact]
@@ -344,9 +378,11 @@ public class TaskOrderTests
         var reopened = board.Reopen(id1, clock).Value;
         Assert.Equal([id1, id3, id2], Group(reopened, Quadrant.IV));
 
-        // Set by hand from Closed (a closed task set to Done is reopened as Done) is a reopening too.
+        // Set by hand from Closed (a closed task set to Done is reopened as Done) is a reopening too: pinned while Done,
+        // and on top of its quadrant once it is resumed.
         var done = board.SetStatus(id1, TaskStatus.Done, clock).Value;
-        Assert.Equal([id1, id3, id2], Group(done, Quadrant.IV));
+        Assert.Equal([id1, id3, id2], Pile(done));
+        Assert.Equal([id1, id3, id2], Group(done.SetStatus(id1, TaskStatus.InProgress, clock).Value, Quadrant.IV));
     }
 
     // Undo on a line just closed puts it back where it was, not on top: the line never left its place on screen.
@@ -360,7 +396,9 @@ public class TaskOrderTests
 
         board = board.UndoClose(id2, TaskStatus.Done, Maybe<string>.None, clock).Value.UndoClose(id1, TaskStatus.Backlog, Maybe<string>.None, clock).Value;
 
-        Assert.Equal([id3, id2, id1], Group(board, Quadrant.IV));
+        // id2 is Done again, so pinned on top; its rank is untouched, so resumed it is back between id3 and id1.
+        Assert.Equal([id2, id3, id1], Pile(board));
+        Assert.Equal([id3, id2, id1], Group(board.SetStatus(id2, TaskStatus.InProgress, clock).Value, Quadrant.IV));
         Assert.Equal(TaskStatus.Done, Get(board, id2).Status);
         Assert.Equal(TaskStatus.Backlog, Get(board, id1).Status);
         Assert.True(board.UndoClose(id3, TaskStatus.Backlog, Maybe<string>.None, clock).IsFailure);

@@ -15,9 +15,10 @@ namespace Deskbar.Core.Tasks;
 //     session to carry on with a closed task does not make a duplicate. Renaming, moving, commenting and setting a
 //     status by hand stay open to Petre.
 //   * The order (Task 12, Rulings 24, 25 and 28; TaskOrder.cs): Waiting on you is pinned on top, latest ask first, by
-//     Raised. Below it come Covey's quadrants I to IV, which the two flags name, each in Petre's manual order, the
-//     tasks' Rank. A new task goes to the top of its quadrant, a Done task keeps its place, a closed one leaves and a
-//     reopened one comes back at the top. Undo on a close is not a reopening: the line never left its place on
+//     Raised, and the Done tasks under the questions, latest done first (task eefb986a; TaskStatusPinning). Below them
+//     come Covey's quadrants I to IV, which the two flags name, each in Petre's manual order, the tasks' Rank. A new
+//     task goes to the top of its quadrant, a Done task keeps its rank while pinned and goes back to that place when it
+//     is resumed, a closed one leaves and a reopened one comes back at the top. Undo on a close is not a reopening: the line never left its place on
 //     screen, so it keeps its rank (UndoClose).
 //   * Raised moves when a task is made, when a session asks and when a task becomes Done, and on nothing else; Rank
 //     moves only on Petre's drag, a flag, a reopening and a new task. So a status line, a comment or a session ending
@@ -39,6 +40,7 @@ public sealed record TaskBoard(IReadOnlyList<TaskItem> Tasks)
     const string TaskIsNotClosed = "The task is not closed.";
     const string UseClose = "Use close to close a task";
     const string WaitingStaysOnTop = "A task waiting on you stays on top until it is answered; its flags still change";
+    const string DoneStaysOnTop = "A done task stays on top until it is closed or resumed; its flags still change";
 
     // --- making tasks ------------------------------------------------------------------------------
 
@@ -422,22 +424,23 @@ public sealed record TaskBoard(IReadOnlyList<TaskItem> Tasks)
     /// it in another quadrant than its own sets that quadrant's flags. It takes the middle of its new neighbours'
     /// ranks, so only the moved task changes; when the numbers between two neighbours run out (the same gap halved
     /// some fifty times) the quadrant is numbered afresh and every task whose rank changed is stamped. A drop where the
-    /// task already is returns this same board. Refused: a closed task, a task waiting on Petre (pinned on top until
-    /// answered; Ruling 25), and a place beside a task that is not in that quadrant's order.
+    /// task already is returns this same board. Refused: a closed task, a task waiting on Petre or Done (pinned on top
+    /// until answered or closed; Ruling 25, task eefb986a), and a place beside a task that is not in that quadrant's order.
     /// </summary>
     public Result<TaskBoard> Place(Guid id, Quadrant quadrant, TaskPlace place, DateTimeOffset now) =>
         Lookup(id).Bind(task =>
             !task.IsOpen ? Result.Failure<TaskBoard>(TaskIsClosed)
             : task.Status == TaskStatus.WaitingOnYou ? Result.Failure<TaskBoard>(WaitingStaysOnTop)
+            : task.Status == TaskStatus.Done ? Result.Failure<TaskBoard>(DoneStaysOnTop)
             : IndexFor(task, quadrant, place).Map(index => Placed(task, quadrant, index, now)));
 
     /// <summary>
-    /// One quadrant's tasks in their manual order: open, not waiting on Petre (those are pinned above every quadrant),
-    /// smallest rank first. Two equal ranks (a hand-edited file) fall back to the newest raised first, then the id, so
+    /// One quadrant's tasks in their manual order: open, not waiting on Petre and not Done (both are pinned above every
+    /// quadrant, <see cref="Pinned"/>), smallest rank first. Two equal ranks (a hand-edited file) fall back to the newest raised first, then the id, so
     /// the order is always the same.
     /// </summary>
     public IReadOnlyList<TaskItem> Group(Quadrant quadrant) =>
-        Tasks.Where(t => t.IsOpen && t.Status != TaskStatus.WaitingOnYou && t.Quadrant == quadrant)
+        Tasks.Where(t => t.IsOpen && !t.Status.IsPinned() && t.Quadrant == quadrant)
             .OrderBy(t => t.Rank).ThenByDescending(t => t.Raised).ThenBy(t => t.Id)
             .ToArray();
 
@@ -834,19 +837,28 @@ public sealed record TaskBoard(IReadOnlyList<TaskItem> Tasks)
             : t.Assignee.IsClaude && (t.IsClaudes || ParentOf(t).Map(p => p.IsClaudes).GetValueOrDefault(false))).ToArray();
 
     /// <summary>
-    /// The open tasks in the order the bar shows them (Ruling 25): Waiting on you first, the latest ask on top (by
-    /// <see cref="TaskItem.Raised"/>), whatever their flags; then Covey's quadrants I, II, III and IV, each in its
-    /// manual order (<see cref="Group"/>). A Done task sits in its quadrant at its place. Nothing here reads UpdatedAt,
-    /// so a status line, a comment or a session ending cannot move a line. Closed tasks are left out.
+    /// The open tasks in the order the bar shows them (Ruling 25): the pinned block first (<see cref="Pinned"/>: the
+    /// questions, then the Done tasks), whatever their flags; then Covey's quadrants I, II, III and IV, each in its
+    /// manual order (<see cref="Group"/>). Nothing here reads UpdatedAt, so a status line, a comment or a session ending
+    /// cannot move a line. Closed tasks are left out.
     /// </summary>
     public IReadOnlyList<TaskItem> Pile() =>
-        Tasks.Where(t => t.Status == TaskStatus.WaitingOnYou).OrderByDescending(t => t.Raised)
-            .Concat(Enum.GetValues<Quadrant>().SelectMany(Group))
+        Pinned().Concat(Enum.GetValues<Quadrant>().SelectMany(Group)).ToArray();
+
+    /// <summary>
+    /// The pinned "Waiting on you" block, in its automatic order (task eefb986a, TaskStatusPinning): the tasks waiting on
+    /// Petre's answer first, the latest ask on top, then the Done tasks waiting for him to close them, the latest done
+    /// on top (both by <see cref="TaskItem.Raised"/>, which an ask and becoming Done stamp). A question goes above a Done
+    /// task because a session is stopped on it, while a Done task only waits for a look and a close.
+    /// </summary>
+    public IReadOnlyList<TaskItem> Pinned() =>
+        Tasks.Where(t => t.Status == TaskStatus.WaitingOnYou).OrderByDescending(t => t.Raised).ThenBy(t => t.Id)
+            .Concat(Tasks.Where(t => t.Status == TaskStatus.Done).OrderByDescending(t => t.Raised).ThenBy(t => t.Id))
             .ToArray();
 
     /// <summary>
     /// A task's 1-based place in its quadrant's order, as `task list` prints it and `task order &lt;n&gt;` takes it;
-    /// none for a task waiting on Petre (pinned above the quadrants until answered) or closed.
+    /// none for a task waiting on Petre or Done (pinned above the quadrants, <see cref="Pinned"/>) or closed.
     /// </summary>
     public Maybe<int> PositionOf(Guid id) =>
         Tasks.TryFirst(t => t.Id == id)

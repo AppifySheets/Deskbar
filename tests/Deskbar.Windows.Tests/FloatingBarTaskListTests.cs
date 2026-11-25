@@ -1993,6 +1993,27 @@ public class FloatingBarTaskListTests
         Assert.DoesNotContain(Inside(t.List).OfType<TextBlock>(), b => b.Text.Contains("Urgent") || b.Text.Contains("Important"));
     });
 
+    // Task eefb986a (Petre: "tasks marked as done should be in the waiting on me section"): a Done line joins the pinned
+    // block under the questions, above every quadrant, whatever its flags, with no group break between the two.
+    [Fact]
+    public void A_done_line_sits_in_the_waiting_block_under_the_questions() => StaThread.Run(() =>
+    {
+        using var t = Build(openWindow: () => { });
+        t.Bar.SizeToContent = SizeToContent.Manual;
+        t.Bar.Height = 900;
+        var done = t.Tasks.AddNote("done", t.Gepha).Value.Id;
+        var asked = t.Tasks.AddNote("asked", t.Gepha).Value.Id;
+        var urgent = t.Tasks.AddNote("urgent", t.Gepha).Value.Id;
+        t.Tasks.SetFlag(urgent, TaskFlag.Urgent, true);
+        t.Tasks.SetFlag(urgent, TaskFlag.Important, true);
+        t.Tasks.SetStatus(done, Deskbar.Core.Tasks.TaskStatus.Done);
+        t.Tasks.SetStatus(asked, Deskbar.Core.Tasks.TaskStatus.WaitingOnYou);
+        Settle(t);
+
+        Assert.Equal(["asked", "done", "urgent"], t.Lines.Select(TitleOf));
+        Assert.Equal([false, false, true], t.Lines.Select(l => ((TaskLine)l.Tag).StartsGroup));
+    });
+
     // A closed line in its undo window has no toggles: its task is closed and takes no flag.
     [Fact]
     public void A_closing_line_has_no_toggles() => StaThread.Run(() =>

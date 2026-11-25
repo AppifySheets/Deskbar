@@ -4,11 +4,13 @@ namespace Deskbar.Core.Tasks;
 
 // THE TASKS WINDOW'S GROUPING AND FILTERS, pure. Design: docs/superpowers/specs/2026-11-22-tasks-board-design.md,
 // "The window", with Task 12's order (progress.md Rulings 25 and 28): the window's List view is grouped as the bar is,
-// Waiting on you first (the latest ask on top), then Covey's quadrants I to IV, each in Petre's manual order
+// Waiting on you first (the latest ask on top, then the Done tasks), then Covey's quadrants I to IV, each in Petre's manual order
 // (TaskBoard.Group), each captioned in Covey's words. Filters by status (Closed among them) and by workspace.
 //
-// A status filter keeps the quadrants: "In progress" shows the quadrants with only their tasks in progress, in the
-// same order, so a line sits in the same group whatever the filter. "Waiting on you" is the pinned block alone.
+// A status filter keeps the groups: "In progress" shows the quadrants with only their tasks in progress, in the
+// same order, so a line sits in the same group whatever the filter. The pinned block holds the Done tasks under the
+// questions (task eefb986a, TaskStatusPinning), so "Waiting on you" is that block's questions and "Done" its Done
+// tasks, each still under the block's caption.
 // Closed tasks have no order of their own (closing takes a task out of it): they are one group, the latest closed
 // first, since closing stamps UpdatedAt, the same order `task list --closed` prints.
 //
@@ -121,19 +123,19 @@ public static class TaskViews
         {
             TaskFilter.Closed => [new TaskGroup(TaskGroupKind.Closed,
                 board.Tasks.Where(t => t.Status == TaskStatus.Closed && where.Admits(t)).OrderByDescending(t => t.UpdatedAt).ToArray())],
-            TaskFilter.WaitingOnYou => [Waiting(board, where)],
             TaskFilter.Snoozed => [new TaskGroup(TaskGroupKind.Snoozed,
                 board.Tasks.Where(t => t.IsOpen && t.IsSnoozed && where.Admits(t)).OrderBy(t => t.SnoozedUntil.Value).ThenBy(t => t.Id).ToArray())],
-            TaskFilter.Open => QuadrantGroups(board, where, _ => true).Prepend(Waiting(board, where)),
-            _ => QuadrantGroups(board, where, t => StatusesOf(filter).Contains(t.Status)),
+            TaskFilter.Open => QuadrantGroups(board, where, _ => true).Prepend(Waiting(board, where, _ => true)),
+            _ => QuadrantGroups(board, where, t => StatusesOf(filter).Contains(t.Status))
+                .Prepend(Waiting(board, where, t => StatusesOf(filter).Contains(t.Status))),
         })
         .Where(g => g.Tasks.Count > 0)
         .ToArray();
 
     /// <summary>
     /// The Matrix (Ruling 28): Covey's four cells, I to IV, always all four. Each lists its quadrant's open tasks in
-    /// their order, the ones waiting on Petre first, on top of their own quadrant's cell (pinned, as everywhere,
-    /// the latest ask first), each drawn orange as everywhere. The status filter narrows every cell as it narrows the
+    /// their order, the pinned ones first (waiting on Petre, then Done; TaskBoard.Pinned), on top of their own
+    /// quadrant's cell, the questions drawn orange as everywhere. The status filter narrows every cell as it narrows the
     /// List; the closed tasks have no quadrant order, so under "Closed" every cell is empty, and a snoozed task is out of
     /// view, so under "Snoozed" too (the List shows them) and under every other filter it is left out.
     /// </summary>
@@ -142,7 +144,7 @@ public static class TaskViews
 
     static IReadOnlyList<TaskCell> Matrix(TaskBoard board, TaskFilter filter, Admit where) =>
         Quadrants.Select(q => new TaskCell(q.Quadrant, filter is TaskFilter.Closed or TaskFilter.Snoozed ? []
-            : board.Tasks.Where(t => t.Status == TaskStatus.WaitingOnYou && t.Quadrant == q.Quadrant).OrderByDescending(t => t.Raised)
+            : board.Pinned().Where(t => t.Quadrant == q.Quadrant)
                 .Concat(board.Group(q.Quadrant))
                 .Where(t => where.Admits(t) && StatusesOf(filter).Contains(t.Status) && !t.IsSnoozed)
                 .ToArray()))
@@ -169,9 +171,9 @@ public static class TaskViews
                 _ => StatusName(TaskStatus.Closed),
             });
 
-    static TaskGroup Waiting(TaskBoard board, Admit where) =>
-        new(TaskGroupKind.WaitingOnYou, board.Tasks.Where(t => t.Status == TaskStatus.WaitingOnYou && !t.IsSnoozed && where.Admits(t))
-            .OrderByDescending(t => t.Raised).ToArray());
+    // The pinned block (TaskBoard.Pinned: the questions, then the Done tasks), narrowed by the filters.
+    static TaskGroup Waiting(TaskBoard board, Admit where, Func<TaskItem, bool> shows) =>
+        new(TaskGroupKind.WaitingOnYou, board.Pinned().Where(t => !t.IsSnoozed && where.Admits(t) && shows(t)).ToArray());
 
     static IEnumerable<TaskGroup> QuadrantGroups(TaskBoard board, Admit where, Func<TaskItem, bool> shows) =>
         Quadrants.Select(q => new TaskGroup(q.Kind, board.Group(q.Quadrant).Where(t => where.Admits(t) && !t.IsSnoozed && shows(t)).ToArray()));
