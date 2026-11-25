@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Runtime.ExceptionServices;
+using System.Windows.Threading;
 using Deskbar.Core.Control;
 
 namespace Deskbar.Windows.Tests;
@@ -35,6 +36,28 @@ static class StaThread
             catch (Exception ex)
             {
                 failure = ExceptionDispatchInfo.Capture(ex);
+            }
+            finally
+            {
+                // Shut down the thread's Dispatcher, if the test made one, so WPF unregisters its window classes now
+                // rather than when testhost exits. Every Dispatcher and every HwndWrapper registers a class with a
+                // unique name, and each name holds one of the 16,384 slots of the session's USER atom table, which
+                // every program on every desktop of the session shares. With the threads simply ending, a run held
+                // one or more slots per test until its end, so the 1,500-odd window tests needed well over 1,500
+                // free slots, and on 2026-11-25, with about 1,700 left in a leaking session, the run failed 510 of
+                // 770 with "Not enough memory resources" from Dispatcher..ctor (Deskbar task 4888c75e, measured
+                // by StaThreadTests). Shutdown also disposes windows a test left open, which is what returns
+                // their classes too.
+                try
+                {
+                    Dispatcher.FromThread(Thread.CurrentThread)?.InvokeShutdown();
+                }
+                catch (Exception ex)
+                {
+                    // A window's own Closed handler throwing during shutdown is still a test failure, but never
+                    // one that hides the test's own.
+                    failure ??= ExceptionDispatchInfo.Capture(ex);
+                }
             }
         });
         thread.SetApartmentState(ApartmentState.STA);
