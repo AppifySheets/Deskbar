@@ -465,6 +465,20 @@ public class RemoteControlTaskTests
         Assert.Equal(TaskStatus.Closed, Only.Status);
     }
 
+    // A session can `cd` into a subfolder of its own working folder, so the caller folder arrives as that subfolder.
+    [Fact]
+    public void A_close_from_a_subfolder_of_the_manager_folder_is_refused()
+    {
+        var manager = Started();
+        var id = Prefix(Added(manager));
+        var before = tasks.Board;
+
+        var reply = RunFrom(manager, ManagerDir, Path.Combine(ManagerDir, ".claude"), "task", "close", id);
+
+        AssertRefusedAndUnchanged(reply, before);
+        Assert.Equal(ManagerSession.Refusal, reply.Output.Trim());
+    }
+
     [Fact]
     public void With_no_manager_folder_nobody_is_the_manager()
     {

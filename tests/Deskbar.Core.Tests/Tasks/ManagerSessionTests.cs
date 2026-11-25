@@ -125,10 +125,20 @@ public class ManagerSessionTests
         Assert.True(ManagerSession.IsManager(@"C:\Users\PETRE~1.CHI\x", @"C:\Users\petre.chitashvili\x", Long));
 
     [Fact]
-    public void IsManager_is_false_for_a_subfolder_and_for_null()
+    public void IsManager_is_true_for_a_subfolder_but_not_a_sibling_with_the_same_prefix()
     {
-        Assert.False(ManagerSession.IsManager(@"C:\state\manager\sub", @"C:\state\manager", Long));
+        Assert.True(ManagerSession.IsManager(@"C:\state\manager\.claude", @"C:\state\manager", Long));
+        Assert.True(ManagerSession.IsManager("C:/STATE/manager/sub/", @"C:\state\manager\", Long));
+        Assert.False(ManagerSession.IsManager(@"C:\state\manager2", @"C:\state\manager", Long));
+        Assert.False(ManagerSession.IsManager(@"C:\state\manager2\sub", @"C:\state\manager", Long));
+    }
+
+    [Fact]
+    public void IsManager_is_false_for_null_and_empty()
+    {
         Assert.False(ManagerSession.IsManager(null, @"C:\state\manager", Long));
+        Assert.False(ManagerSession.IsManager("", @"C:\state\manager", Long));
+        Assert.False(ManagerSession.IsManager(@"C:\state\manager", "", Long));
     }
 
     [Fact]

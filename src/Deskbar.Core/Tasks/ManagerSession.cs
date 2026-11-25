@@ -57,9 +57,23 @@ public static class ManagerSession
     // cwd out of every repo and lets its sessions be told apart from the user's by folder alone.
     public static string FolderIn(string stateDir) => Path.Combine(stateDir, FolderName);
 
-    // Same folder by the one comparison every folder uses (short 8.3 forms, slashes, case). A subfolder is not it.
-    public static bool IsManager(string? folder, string managerFolder, Func<string, string> longPath) =>
-        !string.IsNullOrWhiteSpace(folder) && FolderPath.Same(folder, managerFolder, longPath);
+    // The manager folder, or anything UNDER it, by the one normal form every folder uses (short 8.3 forms, slashes,
+    // trailing separators, case). A subfolder counts because the folder the pipe sees is the client's current directory,
+    // and Claude Code lets a session `cd` inside its own working folder without a permission rule: a manager that ran
+    // `cd .claude && <shim> task close <id>` would otherwise arrive as a non-manager and skip every refusal. A sibling
+    // that merely shares the prefix (`manager2`) is NOT it: the prefix must be followed by a path separator. An empty
+    // manager folder matches nothing.
+    public static bool IsManager(string? folder, string managerFolder, Func<string, string> longPath)
+    {
+        var caller = FolderPath.Normalise(folder, longPath);
+        var root = FolderPath.Normalise(managerFolder, longPath);
+        if (caller.Length == 0 || root.Length == 0) return false;
+
+        // Normalise keeps a drive root's separator, so trim before adding one: "C:\" must not become "C:\\".
+        var prefix = root.TrimEnd('\\') + "\\";
+        return string.Equals(caller, root, StringComparison.OrdinalIgnoreCase)
+               || caller.StartsWith(prefix, StringComparison.OrdinalIgnoreCase);
+    }
 
     /// <summary>The listed sessions that are not the manager, so the manager never counts as a task's session.</summary>
     public static IReadOnlyList<ClaudeAgent> Others(IEnumerable<ClaudeAgent> listed, string managerFolder, Func<string, string> longPath) =>
