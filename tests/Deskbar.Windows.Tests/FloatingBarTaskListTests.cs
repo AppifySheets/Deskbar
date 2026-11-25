@@ -2014,6 +2014,21 @@ public class FloatingBarTaskListTests
         again.IsOpen = false;
     });
 
+    // Task 4b6cc9a9: a menu opened at the pointer with no placement target is created on the primary screen and keeps the
+    // primary's scaling, so beside a 150% primary it was drawn one and a half times too large (OwnMenus.AtPointer). The
+    // line's menu therefore names the bar as its target and still opens at the pointer.
+    [Fact]
+    public void A_line_menu_opens_at_the_pointer_with_the_bar_as_its_target() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var id = t.Tasks.AddNote("first", t.Gepha).Value.Id;
+
+        var menu = t.Bar.OpenTaskLineMenu(id)!;
+        Assert.Same(t.Bar, menu.PlacementTarget);
+        Assert.Equal(System.Windows.Controls.Primitives.PlacementMode.MousePoint, menu.Placement);
+        menu.IsOpen = false;
+    });
+
     // The groups are told apart by a little space above the first line of each, and no caption: the bar stays compact.
     [Fact]
     public void A_little_space_separates_the_groups_and_nothing_names_them() => StaThread.Run(() =>

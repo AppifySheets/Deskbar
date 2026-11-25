@@ -1144,7 +1144,7 @@ public partial class TasksWindow : Window
     internal ContextMenu OpenSnoozeMenu(Guid id, UIElement? anchor)
     {
         var menu = anchor is null
-            ? new ContextMenu { Placement = PlacementMode.MousePoint }
+            ? OwnMenus.AtPointer(this) // this window as its target, for its screen's scaling
             : new ContextMenu { PlacementTarget = anchor, Placement = PlacementMode.Bottom };
         SnoozeItems(id).ForEach(item => menu.Items.Add(item));
         OpenMenu(menu);
@@ -2249,7 +2249,7 @@ public partial class TasksWindow : Window
     {
         var row = latest?.Groups.SelectMany(g => g.Rows).FirstOrDefault(r => r.Id == id);
         var menu = atPointer
-            ? new ContextMenu { Placement = PlacementMode.MousePoint }
+            ? OwnMenus.AtPointer(this) // this window as its target, for its screen's scaling
             : new ContextMenu { PlacementTarget = menuButtons.GetValueOrDefault(id), Placement = PlacementMode.Bottom };
         if (row is null) return menu;
 
@@ -2452,7 +2452,7 @@ public partial class TasksWindow : Window
     /// </summary>
     internal ContextMenu OpenStopClaudeMenu(Guid id)
     {
-        var menu = new ContextMenu { Placement = PlacementMode.MousePoint };
+        var menu = OwnMenus.AtPointer(this); // this window as its target, for its screen's scaling
         menu.Items.Add(new MenuItem { Header = new TextBlock { Text = "Claude is still working on this task." }, IsEnabled = false });
         // Run once this menu has closed, so the redraw the close causes is not held back by it (MustWait).
         menu.Items.Add(Item(TaskViews.StopClaudeAndClose, () => Dispatcher.BeginInvoke(() => Actions?.StopClaudeAndClose?.Invoke(id),

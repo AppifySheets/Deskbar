@@ -399,6 +399,9 @@ public partial class FloatingBar
             stripMenu = new ContextMenu { Placement = PlacementMode.MousePoint };
             HoldFadeWhileOpen(stripMenu);
         }
+        // The strip that was clicked, each time: the one menu serves every screen's strip, and its target is what gives
+        // it that screen's scaling (OwnMenus.AtPointer). Kept when the pointer is over none of the app's windows.
+        stripMenu.PlacementTarget = OwnMenus.WindowUnderPointer() ?? stripMenu.PlacementTarget;
         FillBarMenu(stripMenu);
         stripMenu.IsOpen = true;
     }
