@@ -553,6 +553,17 @@ public partial class FloatingBar
             .ToArray();
     }
 
+    // Whether subtasks are drawn under their parent: the tasks panel's "Subtasks" checkbox (AppState.TasksPanel.HideSubtasks,
+    // task 173ef268). An absent panel state is the default, subtasks shown.
+    bool Subtasks => !(manager.State.TasksPanel?.HideSubtasks ?? false);
+
+    // THE "SUBTASKS" CHECKBOX UNTICKED (task 173ef268): every line UnderParents drew under its parent (ShownIn set) goes,
+    // and the parent's "· N subtasks" says they are there. The panel's rule, TaskViews.FoldSubtasks: a subtask whose
+    // parent is not on the bar (a Claude task the bar leaves out) was never nested, so it stays, and a subtask waiting on
+    // Petre stays, because a question must stay findable. Ticked, the lines are as they were.
+    internal static IReadOnlyList<TaskLine> FoldSubtasks(IReadOnlyList<TaskLine> lines, bool shown) =>
+        shown ? lines : lines.Where(l => l.ShownIn is null || l.Status == TaskStatus.WaitingOnYou).ToArray();
+
     // Marks the first line of each group after the first (TaskLine.StartsGroup), over the lines as they are drawn, the
     // closed ones in their undo window included, so the space sits where the eye sees a group begin.
     internal static IReadOnlyList<TaskLine> WithGroupStarts(IReadOnlyList<TaskLine> lines) =>
@@ -902,13 +913,16 @@ public partial class FloatingBar
         // again with the lines in their undo window among them (review of #467, finding 4).
         var flat = Lines(taskService.Board, WorkspaceName, id => workspaceAccents.GetValueOrDefault(id), SessionWindow, GoalTitle)
             .Where(NeedsYou).ToArray();
-        var open = UnderParents(flat);
+        // The tasks panel's "Subtasks" checkbox applies here too (task 173ef268; Petre, with a screenshot of the bar's
+        // Warehouse parent and its subtasks under it: "same checkbox"). One setting, saved by the panel, so the bar and
+        // the panel never disagree; a state pulse rebuilds the bar, and the rebuild repaints this list.
+        var open = FoldSubtasks(UnderParents(flat), Subtasks);
         // A closed line whose task is open again (reopened from the pipe, say) is not pending any more: the task is back
         // in the pile under its own line.
         pendingCloses.Where(p => open.Any(l => l.Id == p.Line.Id)).ToList().ForEach(p => ForgetPendingClose(p, repaint: false));
         var slots = TaskSlotsNow;
         if (open.Count <= slots) taskListExpanded = false;
-        var all = WithGroupStarts(WithPendingCloses(flat, pendingCloses));
+        var all = WithGroupStarts(FoldSubtasks(WithPendingCloses(flat, pendingCloses), Subtasks));
         allTaskLines = all;
         var problem = taskService.LoadProblem;
         var shape = string.Join("\n", all.Select(ShapeOf).Prepend(

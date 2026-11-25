@@ -473,7 +473,7 @@ with their status lines, your descriptions and comments, and every Claude sessio
 conversation is kept in, so it reads what the earlier work found instead of you explaining it again. A subtask is
 drawn right under its parent, starting with "↳", and a parent's line counts its open subtasks; opening a parent in
 the tasks panel lists them. Untick "Subtasks" at the top of the tasks panel to fold them into their parent's
-line, which keeps the count; a subtask waiting on you stays in view. Drag a task onto the middle of another to put it
+line, in the panel and on the bar, which keeps the count; a subtask waiting on you stays in view. Drag a task onto the middle of another to put it
 under that task; drag a subtask out of its parent's block to make it a plain task again. A parent closes last: while
 any of its subtasks is open its tick will not close it, and its tooltip says how many are left.
 

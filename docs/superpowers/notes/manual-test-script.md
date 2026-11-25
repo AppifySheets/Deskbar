@@ -662,7 +662,8 @@ S16. The Subtasks checkbox (task 173ef268). Give a note three subtasks and ask a
     the subtasks are under the parent. Untick it: the two plain subtasks go, the parent still says "· 3 subtasks", the
     asking one stays in Waiting on you, and opening the parent lists all three. Filter to another workspace than the
     parent's with a subtask there: that subtask still shows. Close and reopen the panel, then restart Deskbar: the box
-    is still unticked. Switch to the Matrix: subtasks whose parent is in a cell are gone. Tick it: everything is back.
+    is still unticked. Switch to the Matrix: subtasks whose parent is in a cell are gone. On the bar, the parent's two plain
+    subtasks are gone too and the asking one is still there. Tick it: everything is back, in the panel and on the bar.
 
 ## Goals
 
