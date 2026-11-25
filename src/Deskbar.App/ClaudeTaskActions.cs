@@ -397,13 +397,13 @@ public sealed class ClaudeTaskActions : IDisposable
     /// Starts a background session on the task in the folder (ClaudeSessions.Start) and opens its window once it is
     /// found. Answers at once; what `claude` says comes later, into the task's thread when it fails.
     /// </summary>
-    public Result Start(TaskItem task, string folder)
+    public Result Start(TaskItem task, string folder, Maybe<string> model = default)
     {
         if (!manager.State.ClaudeTasksInEffect) return Result.Failure(FeatureOff);
         // A closed task takes no session (TaskBoard refuses the join), so `claude --bg` would run for nothing (final
         // review, item 12). Judged on the task as the board has it now, not as the caller last saw it.
         if (!Current(task.Id).GetValueOrDefault(task).IsOpen) return Result.Failure(RemoteControl.ClosedTaskRefusal);
-        Observable.FromAsync(() => seams.Start(task, folder))
+        Observable.FromAsync(() => seams.Start(task, folder, model))
             .ObserveOn(scheduler)
             .Subscribe(
                 started => started.Match(
@@ -491,7 +491,7 @@ public sealed class ClaudeTaskActions : IDisposable
 /// with message boxes and Windows' folder picker.
 /// </summary>
 public sealed record ClaudeTaskSeams(
-    Func<TaskItem, string, Task<Result<string>>> Start,
+    Func<TaskItem, string, Maybe<string>, Task<Result<string>>> Start,
     Func<Guid, TaskSession, Task<Result<ClaudeAgent>>> Resume,
     Func<ProgramLaunch, Result<int?>> Launch,
     Func<string, Maybe<nint>> EditorWindow,

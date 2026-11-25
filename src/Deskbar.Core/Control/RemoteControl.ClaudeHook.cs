@@ -370,4 +370,12 @@ public sealed partial class RemoteControl
         claudeResume = manager.State.ClaudeResume ? "on" : "off",
         inEffect = manager.State.ClaudeResumeInEffect,
     };
+
+    // The model task sessions start on (AppState.ClaudeTaskModel; design
+    // docs/superpowers/specs/2026-11-25-session-model-pick-design.md). With no name it only says what is set; the
+    // setting has no box in Manage yet, so this is how it is read and changed.
+    ControlReply ClaudeModel(Maybe<string> model) =>
+        model.Match(name => Reply(manager.SetClaudeTaskModel(name), DescribeClaudeModel), () => Success(DescribeClaudeModel()));
+
+    object DescribeClaudeModel() => new { claudeModel = manager.State.ClaudeTaskModelInEffect };
 }

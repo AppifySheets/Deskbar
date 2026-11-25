@@ -789,7 +789,7 @@ public class RemoteControlTaskTests
              "comment <id> <markdown>|-", "delete <id>", "flag <id> important|urgent on|off", "order <id> top|end|<n>",
              // Task 9: going to a task, starting Claude on it and opening one of its sessions.
              // Task dca4ebeb: `open` is the menus' "Open in window", between go and start.
-             "go <id>", "open <id>", "start <id> [--folder <path>]", "open-session <id> <session>",
+             "go <id>", "open <id>", "start <id> [--folder <path>] [--model <model>]", "open-session <id> <session>",
              // A Claude session's own forms (plan Task 8, RemoteControl.ClaudeHook.cs); `-` reads the text from stdin.
              "join <id> --session <session>", "new <title>|- --session <session>", "status-line <text>|- --session <session>",
              "ask <question>|- --session <session>", "answered --session <session>", "done --session <session>", "comment <markdown>|- --session <session>",
@@ -826,7 +826,7 @@ public class RemoteControlTaskTests
         public TaskSessionCommands Commands => new(
             Go: t => Done($"go:{t.Title}"),
             Folders: _ => Folders,
-            Start: (t, folder) => Done($"start:{t.Title}:{folder}"),
+            Start: (t, folder, model) => Done($"start:{t.Title}:{folder}{model.Match(m => ":" + m, () => "")}"),
             OpenSession: (t, session) => Done($"open:{t.Title}:{session}"))
         {
             StopAndClose = t => (Tasks?.Close(t.Id, stoppingClaude: true) ?? Result.Success()).Bind(() => Done($"stop-and-close:{t.Title}")),
@@ -873,7 +873,7 @@ public class RemoteControlTaskTests
     public void Task_go_start_and_open_session_are_in_ControlUsage_and_dispatch()
     {
         Assert.Contains(ControlUsage.All, c => c.Verb == "task" && c.Arguments == "go <id>");
-        Assert.Contains(ControlUsage.All, c => c.Verb == "task" && c.Arguments == "start <id> [--folder <path>]");
+        Assert.Contains(ControlUsage.All, c => c.Verb == "task" && c.Arguments == "start <id> [--folder <path>] [--model <model>]");
         Assert.Contains(ControlUsage.All, c => c.Verb == "task" && c.Arguments == "open-session <id> <session>");
 
         var manager = Started();
@@ -896,6 +896,17 @@ public class RemoteControlTaskTests
              "open:Fix the bar:884c127f-9633-40eb-bed7-593800bca40f", "open:Fix the bar:884c127f-9633-40eb-bed7-593800bca40f"],
             commands.Calls);
 
+        // Task e52e33cb: --model names the model of that one session, with or without a folder, in either order;
+        // a name that is not one is refused and starts nothing.
+        commands.Calls.Clear();
+        Ok(RunWith(manager, commands, "task", "start", prefix, "--model", "sonnet"));
+        Ok(RunWith(manager, commands, "task", "start", prefix, "--folder", @"D:\other", "--model", "fable"));
+        Ok(RunWith(manager, commands, "task", "start", prefix, "--model", "fable", "--folder", @"D:\other"));
+        Assert.Equal(ControlReply.Failed, RunWith(manager, commands, "task", "start", prefix, "--model", "--resume").ExitCode);
+        Assert.Equal(
+            [@"start:Fix the bar:C:\repos\Deskbar:sonnet", @"start:Fix the bar:D:\other:fable", @"start:Fix the bar:D:\other:fable"],
+            commands.Calls);
+
         // Several folders: refused, naming them, nothing started.
         commands.Folders = [@"C:\repos\Deskbar", @"E:\work\iam.ge"];
         var several = RunWith(manager, commands, "task", "start", prefix);
@@ -911,7 +922,8 @@ public class RemoteControlTaskTests
         // A session that is not the task's.
         var stranger = RunWith(manager, commands, "task", "open-session", prefix, "deadbeef");
         Assert.Equal(ControlReply.Failed, stranger.ExitCode);
-        Assert.Equal(5, commands.Calls.Count);
+        // The three starts with a model, since the list was cleared before them; none of the refusals added a call.
+        Assert.Equal(3, commands.Calls.Count);
 
         // A copy without the commands refuses every one of the three.
         Assert.Equal(ControlReply.Failed, Run(manager, "task", "go", prefix).ExitCode);

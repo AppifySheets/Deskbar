@@ -4464,6 +4464,13 @@ public sealed class WorkspaceManager(
             ? Result.Success()
             : Result.Success().Tap(() => Persist(State with { NoClaudeResume = !on }));
 
+    // The model every task session is started on (AppState.ClaudeTaskModel): `claude-model <name>`. A name `claude`
+    // could misread is refused (ClaudeStart.Model); an unchanged one writes nothing. ClaudeSessions reads the setting
+    // at each start, so it holds from the next session on, and a running session keeps the model it started with.
+    public Result SetClaudeTaskModel(string model) =>
+        Tasks.ClaudeStart.Model(model)
+            .Tap(name => { if (State.ClaudeTaskModelInEffect != name) Persist(State with { ClaudeTaskModel = name }); });
+
     // The focus ring (AppState.FocusRing): Manage's checkbox and `focus-ring on|off`. A no-op when unchanged, like
     // SetClaudeSkill, so Manage can set its box on open without writing state.json. The bar draws or clears the
     // outlines on the state pulse Persist sends.

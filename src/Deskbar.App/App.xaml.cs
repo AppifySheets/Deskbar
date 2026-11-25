@@ -1681,7 +1681,7 @@ public partial class App : Application
             taskSessions: new TaskSessionCommands(
                 Go: GoToTask,
                 Folders: task => claudeActions?.Folders(task) ?? [],
-                Start: (task, folder) => claudeActions?.Start(task, folder) ?? Result.Failure(ClaudeActionsNotReady),
+                Start: (task, folder, model) => claudeActions?.Start(task, folder, model) ?? Result.Failure(ClaudeActionsNotReady),
                 OpenSession: (task, session) => claudeActions?.OpenSession(task, session) ?? Result.Failure(ClaudeActionsNotReady))
             {
                 // `task close --stop-claude` (task 37cd7081), the twin of the ticks' "Stop Claude and close".

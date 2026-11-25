@@ -664,6 +664,13 @@ asking first when one is still running. A folder Claude Code was
 never told to trust puts Claude's message in the thread and offers a terminal there so you can accept the
 trust prompt yourself. A task's thread lists its sessions, newest first, as working, idle, ended or expired,
 each but the expired ones with Open. `deskbar.cmd task go|start|open-session` do the same from a script.
+Every session Deskbar starts on a task names its model, so it does not follow whatever model your Claude Code
+settings hold that day: Opus until you choose another with `deskbar.cmd claude-model <name>` (an alias such as
+`sonnet` or `fable`, or a model's full name; without a name it says what is set), and
+`deskbar.cmd task start <id> --model <name>` picks one for a single session. A session keeps the model it
+started with when it is resumed. The briefing each task session gets also tells it to hand test runs, searches
+and rebases to a subagent on a cheaper model, and to have its strongest model review the diff before it opens
+a pull request.
 The window opens in Deskbar's own "Deskbar Claude" Windows Terminal profile (Dark Modern colours, Claude's
 colours and bold text as Claude draws them, installed while the tasks box is ticked and removed when either
 Claude box is unticked), and closing it leaves the

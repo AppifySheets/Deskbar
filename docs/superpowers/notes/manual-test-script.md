@@ -525,6 +525,13 @@ throwaway folder Claude Code trusts, and tracing on for the `claude actions:` an
     Claude look, attached to a session that is already working on the note (its first message names the task). The
     note turns into a Claude task with that session. The window's icon on the bar is Claude's orange mark, not
     Windows Terminal's; a second tab opened in it (Ctrl+Shift+T) turns the icon back into the terminal's.
+91a. The model (task e52e33cb). `$ts claude-model` answers `opus` on a profile that never set it. Start Claude on a
+    note as in 91 and type `/status` (or `/model`) in its window: the model is Opus, whatever `"model"` in
+    `~/.claude/settings.json` says. `$ts claude-model sonnet`, start Claude on another note: that session is on
+    Sonnet, and the one from before is still on Opus, also after `claude stop <id>` and a click on its task (the
+    resume keeps the model). `$ts task start <id> --model fable` starts one session on Fable and leaves the
+    setting at sonnet. `$ts claude-model "--bare"` is refused and changes nothing. Set it back with
+    `$ts claude-model opus`.
 92. On a note whose workspace knows two folders (tasks with sessions in two repos, or a VS Code window on a second
     repo that some session also used): a short list of the folders opens at the pointer, ending with
     "Choose a folder…". "Choose a folder…" opens Windows' folder picker; cancelling it starts nothing.

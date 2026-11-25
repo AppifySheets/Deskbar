@@ -77,7 +77,7 @@ public class ClaudeSessionsTests
             {
                 ["agents", "--json"] => Agents?.Invoke() ?? Result.Success(Json()),
                 ["--bg", "--resume", var id, ..] => Resume?.Invoke(id) ?? Woken(id, workingDirectory),
-                ["--bg", var message] => Start?.Invoke(message, workingDirectory) ?? Result.Failure<string>("no start scripted"),
+                ["--bg", "--model", _, var message] => Start?.Invoke(message, workingDirectory) ?? Result.Failure<string>("no start scripted"),
                 ["stop", var shortId] => Stop?.Invoke(shortId) ?? Stopped(shortId),
                 _ => Result.Failure<string>($"unexpected claude call: {string.Join(" ", arguments)}"),
             });
@@ -840,12 +840,32 @@ public class ClaudeSessionsTests
 
         Assert.True(started.IsCompleted);
         Assert.Equal(fullId, (await started).Value);
-        var start = Assert.Single(rig.Cli.Calls, c => c.Arguments is ["--bg", _]);
-        Assert.Equal(["--bg", ClaudeStart.FirstMessage(note)], start.Arguments);
+        // Task e52e33cb: the start names its model, opus while the setting is unset.
+        var start = Assert.Single(rig.Cli.Calls, c => c.Arguments is ["--bg", "--model", ..]);
+        Assert.Equal(["--bg", "--model", "opus", ClaudeStart.FirstMessage(note)], start.Arguments);
         Assert.Equal(@"E:\repos\Work", start.Folder);
         var joined = rig.Task(note.Id).Sessions.Single();
         Assert.Equal((fullId, @"E:\repos\Work"), (joined.Id, joined.Folder));
         Assert.Single(rig.Tasks.Board.Tasks);
+    }
+
+    // Task e52e33cb: the setting names the model of every start, and a model given for one start wins over it.
+    [Fact]
+    public void Start_names_the_model_from_the_setting_unless_one_is_given()
+    {
+        using var rig = new Rig();
+        var note = rig.Tasks.AddNote("Fix the login page", Maybe<Guid>.None).Value;
+        rig.Cli.Start = (_, _) => Result.Failure<string>("not the point of this test");
+        var sessions = rig.Begin();
+        Assert.True(rig.Manager.SetClaudeTaskModel("sonnet").IsSuccess);
+
+        sessions.Start(note, @"E:\repos\Work");
+        sessions.Start(note, @"E:\repos\Work", "fable");
+        rig.RunTo(Seconds(30));
+
+        Assert.Equal(
+            ["sonnet", "fable"],
+            rig.Cli.Calls.Where(c => c.Arguments is ["--bg", "--model", ..]).Select(c => c.Arguments[2]));
     }
 
     // An untrusted folder: `claude --bg` exits 1 with its reason on stderr, and that reason is what Start returns.

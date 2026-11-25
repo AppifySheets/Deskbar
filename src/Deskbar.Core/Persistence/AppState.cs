@@ -329,6 +329,16 @@ public sealed record AppState(
     // above is kept, so turning the tasks back on brings the resume back as it was.
     [JsonIgnore] public bool ClaudeResumeInEffect => ClaudeTasksInEffect && ClaudeResume;
 
+    // The model Deskbar names when it starts a Claude Code session on a task (ClaudeStart.Arguments; design
+    // docs/superpowers/specs/2026-11-25-session-model-pick-design.md), what `claude-model <name>` sets. Null in every
+    // state.json that predates it, and null or blank means ClaudeStart.DefaultModel: a start always names a model, so
+    // there is no value that hands the choice back to Claude Code's own settings.
+    public string? ClaudeTaskModel { get; init; }
+
+    // What a start passes to `--model`. Not stored.
+    [JsonIgnore] public string ClaudeTaskModelInEffect =>
+        string.IsNullOrWhiteSpace(ClaudeTaskModel) ? Tasks.ClaudeStart.DefaultModel : ClaudeTaskModel;
+
     // Whether the focused window, and the window in front on each other screen, get an outline on the screen itself
     // (FocusRings in Core, WindowRings in the app). Petre: "can you give each active window a ring, same in color as
     // in the bar?", then "go with proposed", where the proposal was on by default with a box in Manage. Stored as its

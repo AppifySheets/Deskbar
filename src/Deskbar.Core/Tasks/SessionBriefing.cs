@@ -279,6 +279,16 @@ public static class SessionBriefing
         // context (its join reply names this session and its transcript). `task family` is not listed here: the join
         // reply, the start briefing and a subtask's prompt line carry it where it matters.
         $"  {Shim} task subtask - --session {sessionId}   (split off a piece of your work as a subtask; the session that takes it up is briefed on your task and this session)",
+        // Task e52e33cb (design docs/superpowers/specs/2026-11-25-session-model-pick-design.md). A week of Petre's
+        // transcripts, measured: the usage is in the long sessions, and about two thirds of it is the conversation
+        // read again on every turn. So what a session keeps OUT of its own conversation is what saves his limits:
+        // test runs, searches and rebases go to a subagent on a cheaper model, and only the outcome comes back. No
+        // model is named, because which ones a person has depends on their plan.
+        "Keep your own conversation short, because all of it is read again on every turn: give test runs, builds, broad searches, rebases and other mechanical work to a subagent on a cheaper model than yours, and take back only the outcome. Keep the design, the decisions and the code that needs judgement for yourself.",
+        // Petre: "can we also add a review step at the end by a smarter model?". A review reads the diff, not the
+        // session, so it costs a fraction of the work it checks. It finds faults in the change; it does not rescue
+        // a wrong approach, which is why a plan gets the same look before the code is written.
+        "Before you open a pull request, have a subagent on the strongest model you can use review the diff for bugs, and fix what it confirms. When the work needed a plan, have that subagent read the plan before you write the code.",
         "Keep the task lean: say what needs the user, and nothing else. The title is a few words naming the work. The status line is one short phrase, under about 60 characters, saying where it stands. Comments are rare: a comment is for the user and only for what needs their attention or a result they must know (a decision made for them, a blocker, what a release shipped), in one or two short lines, with no progress logs, measurements, spike notes or findings dumps (those belong in the PR, the repo's notes or the session itself). When the user must act or decide, say exactly what the user must do in the first words, through task ask, never a comment: a comment does not move the task to the top.",
         "Never close or delete a task, and leave the user's own notes alone unless they ask.",
     ];

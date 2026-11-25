@@ -95,9 +95,10 @@ public static class ControlUsage
             new("task", "open <id>",
                 "open a task in a window of its own: the whole description, every comment, sessions and subtasks,\n"
                 + "      editable; a task already open in one brings that window forward, onto the desktop in front"),
-            new("task", "start <id> [--folder <path>]",
+            new("task", "start <id> [--folder <path>] [--model <model>]",
                 "start a background Claude session on the task, with the task as its first message, and open a window\n"
-                + "      on it; without --folder it starts where exactly one folder is known and otherwise names them"),
+                + "      on it; without --folder it starts where exactly one folder is known and otherwise names them;\n"
+                + "      --model names the model for this one session, otherwise it is the one claude-model holds"),
             new("task", "open-session <id> <session>",
                 "open one of the task's sessions (its full id or short id) as its thread's Open button does"),
             // A Claude Code session's own forms (RemoteControl.ClaudeHook.cs). --session is the session's id, which the
@@ -262,6 +263,9 @@ public static class ControlUsage
                 "Manage's \"Resume the sessions of open tasks after a restart or a crash\" setting: wake an open task's Claude\n"
                 + "      session with claude --bg --resume when claude agents no longer lists it, or leave it ended (off while\n"
                 + "      claude-tasks is off)"),
+            new("claude-model", "[<model>]",
+                "the model every Claude session started on a task runs on, an alias (opus, sonnet, fable) or a model's\n"
+                + "      full name; opus until set. Without a name it says what is set. A running session keeps its own"),
             new("focus-ring", "on|off",
                 "Outline the focused window in its workspace's colour, and the window in front on each other screen in dim white"),
             new("see-through", "on|off",

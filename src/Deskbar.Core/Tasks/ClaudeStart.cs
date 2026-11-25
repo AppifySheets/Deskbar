@@ -35,6 +35,32 @@ public static class ClaudeStart
         return (head.Length > room ? head[..cut] : head) + "\n" + join;
     }
 
+    // THE MODEL A TASK SESSION RUNS ON (design docs/superpowers/specs/2026-11-25-session-model-pick-design.md). Deskbar
+    // names it on every start, so a task session never runs on whatever `~/.claude/settings.json` holds that day:
+    // Petre's "give each claude session best model for the job, never default". One change of that setting used to
+    // move every task session to the dearest model without anyone choosing it. Opus is what a week of his task
+    // sessions ran on (measured, 99% of their usage), so it is what an unset choice means.
+    public const string DefaultModel = "opus";
+
+    // What `--model` takes: an alias ("opus", "sonnet", "fable") or a model's full name ("claude-opus-5-5", with a
+    // "[1m]" suffix at most). Anything else, a space or a leading dash above all, could be read by `claude` as another
+    // argument, so it is refused before it reaches a command line.
+    static readonly Regex ModelName = new(@"^[A-Za-z0-9][A-Za-z0-9._\-\[\]]{0,63}$", RegexOptions.Compiled);
+
+    /// <summary>A model name as `--model` takes it, trimmed, or why it is not one.</summary>
+    public static Result<string> Model(string given) =>
+        ModelName.IsMatch(given.Trim())
+            ? given.Trim()
+            : Result.Failure<string>($"'{given}' is not a model name. Give an alias such as opus, sonnet or fable, or a model's full name.");
+
+    /// <summary>
+    /// The arguments of `claude` that start a background session on the task: always with <c>--model</c>, then the
+    /// first message. A plain `claude --bg --resume` keeps the model the session started with (measured: it wakes
+    /// "with its saved options"), so only the start names it.
+    /// </summary>
+    public static IReadOnlyList<string> Arguments(TaskItem task, string model) =>
+        ["--bg", "--model", model, FirstMessage(task)];
+
     /// <summary>
     /// Where to start the session, the likeliest first. A task that has had sessions starts at the REPO of its latest
     /// one (a new session starts at the repo, not in an old worktree, because worktrees are deleted after the merge).

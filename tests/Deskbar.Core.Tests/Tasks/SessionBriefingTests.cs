@@ -97,6 +97,19 @@ public sealed class SessionBriefingTests
         Assert.Contains("task done with what to try in the status line", SessionBriefing.ParkedNudge);
     }
 
+    // Task e52e33cb: a session is told to keep mechanical work out of its own conversation, on a cheaper model, and
+    // to have the strongest model review the diff before the pull request. No model is named in either line.
+    [Fact]
+    public void Mechanical_work_goes_to_a_cheaper_subagent_and_the_diff_is_reviewed_by_the_strongest()
+    {
+        var text = SessionBriefing.Start(Start(), Task("Tasks board"), []);
+
+        Assert.Contains("give test runs, builds, broad searches, rebases and other mechanical work to a subagent on a cheaper model than yours", text);
+        Assert.Contains("Before you open a pull request, have a subagent on the strongest model you can use review the diff", text);
+        Assert.DoesNotContain("opus", text, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("sonnet", text, StringComparison.OrdinalIgnoreCase);
+    }
+
     // Task 6e4dc116 (Petre: "still conflicting; you should keep rebasing open prs", then "make that a deskbar level change"):
     // every task session, in any repository, is told to keep its open pull request on top of its base, and to push the
     // rebase at once rather than hold it back while the tests run.

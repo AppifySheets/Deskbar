@@ -5,102 +5,97 @@ with one model and delegate to a cheaper one".
 
 ## Why
 
-Every session Deskbar starts on a task runs `claude --bg "<first message>"` with no model argument
-(`ClaudeSessions.Start`), so it gets the model in `~/.claude/settings.json`: Fable at high effort on Petre's machine,
-for a one-line fix as much as for a design. He runs about 30 task sessions and hits the usage limits. His words:
+A session Deskbar starts on a task ran `claude --bg "<first message>"` with no model argument, so it got the model
+in `~/.claude/settings.json` that day. Petre runs about 30 task sessions and hits the usage limits. His words:
 
 - "give each claude session best model for the job, never default"
 - Asked what it is for: "limits, weekly or 5hr"
 - Asked who picks: "deskbar picks the model; maybe through the deskbar manager agent"
 - "maybe each task starts with the best model and delegates to something cheaper"
-- Asked why Haiku should do the picking, he was told it should not, and agreed to a strong model doing it.
+- "can we also add a review step at the end by a smarter model? i don't know if this whole thing makes sense or if i
+  should stick to opus or some default model"
 
 ## Goals
 
-- Every session Deskbar starts on a task gets an explicit `--model` and `--effort`, chosen for that task.
-- Deskbar chooses without asking Petre. He can see the choice and overrule it.
-- The manager, or anyone on the pipe, can name the model when starting a task.
-- Sessions are told to hand mechanical work to cheaper subagents.
+- Every session Deskbar starts on a task names its model. A change of Claude Code's own default no longer moves
+  every task session with it.
+- One model for all task sessions, changeable, with a one-off choice for a single start.
+- Sessions keep mechanical work out of their own conversation, on a cheaper model.
+- The strongest model reviews the diff before a pull request, and the plan before the code when there is one.
 
 ## Non-goals (this change)
 
-- Moving a running session to a stronger model. Measured below: it means a copy with a new session id, so it is a
-  follow-up with its own design.
-- Reading how much of the usage limit is left. Deskbar has no source for it; the choice goes by the task alone.
-- Changing the manager session's own model (its design fixes it at Fable) or sessions Petre starts by hand.
+- Deskbar choosing a different model per task (see Approaches, 1).
+- Moving a running session to another model. Measured below: it means a copy with a new session id.
+- A box for the model in Manage. The setting is on the pipe only for now.
+- The manager session's own model (its design fixes it) and sessions Petre starts by hand.
 
 ## Anti-goals
 
-- A session started on the settings default because the sizing failed or timed out.
-- A start that waits noticeably longer, or fails, because of the sizing.
-- The sizing costing enough to matter against the limit it protects.
+- A task session started with no `--model`.
+- Model names in the briefing: which models a person has depends on their plan, and the briefing goes to everyone.
 
 ## Measured (2026-11-25, Claude Code 2.1.332)
 
-- A stripped one-shot call, `claude -p --model fable --output-format json --no-session-persistence --tools ""
-  --strict-mcp-config --setting-sources "" --disable-slash-commands --system-prompt "..." "<prompt>"`, sent about 700
-  input tokens and answered in about 2.5 seconds wall time (Haiku: 1.9 seconds). It needs no trusted folder and runs
-  no hooks. So the model that sizes costs next to nothing, and a strong one can do it.
-- `claude --bg --model haiku ...` starts a session whose turns are answered by `claude-haiku-5-5` (read from the
-  transcript's `message.model`).
+Model flags:
+
+- `claude --bg --model haiku ...` starts a session whose turns are answered by `claude-haiku-5-5` (the transcript's
+  `message.model`).
 - `claude --bg --resume <id>` with no flags continues the same session on its saved options, the model among them
   ("woke session ... with its saved options (--tools, --setting-sources, -n, --model)"). The resume paths in
-  `ClaudeSessions` therefore need no change.
+  `ClaudeSessions` therefore pass no model.
 - `claude --bg --resume <id> --model sonnet` does not change the session. It starts a copy under a new id, running or
   stopped ("keeps its own saved options, so the flags you passed started a copy as ..."), and the copy's next turn is
   answered by Sonnet.
+- A stripped one-shot call (`claude -p --model fable --no-session-persistence --tools "" --strict-mcp-config
+  --setting-sources "" --disable-slash-commands --system-prompt ...`) sent about 700 input tokens and took about 2.5
+  seconds. Recorded for approach 1, should it come back.
+
+Where a week of usage went (Petre's transcripts, the 7 days to 2026-11-25, 253 sessions, 93 of them started by
+Deskbar on a task; weighted with output at 5, cache writes at 2 and cache reads at 0.1 of an input token, which is an
+assumption and not Anthropic's limit formula):
+
+- 91% ran on Opus 5.5 and about 8% on Fable. Task sessions ran 99% on Opus. The settings file said `fable` on the
+  day of the measurement, so that had changed recently.
+- Task sessions carried about a quarter of the main transcripts' usage.
+- The largest quarter of task sessions carried 63% of task usage; the smaller half carried 17%.
+- About two thirds of all usage was cache reads (a long conversation read again on every turn), 23% cache writes,
+  9% output.
 
 ## Approaches
 
-1. **Deskbar sizes the task at start** (picked). One stripped call to a strong model with the task's text returns a
-   model and an effort; Deskbar passes them to `claude --bg`. The whole session runs on the right model, which is
-   where the saving is. Its weakness: the sizer reads the task's words, not the code.
-2. **The manager picks.** Better judgment (it knows the board), but it acts only in a turn Petre started, a start
-   from the bar or the panel never passes through it, and each pick would be a Fable turn with the board in context.
-   Kept as an override: `task start` takes `--model`.
-3. **Start every session on the best model and let it delegate down.** The main session still carries the whole
-   conversation on Fable, a handoff drops detail, and delegating is the session's own call each time. Kept as a line
-   in the briefing, not as the mechanism.
+1. **Deskbar sizes each task at start** with one small call to a strong model and passes the model it names. Designed
+   first, then dropped on the numbers above: sizing moves the small tasks to a cheaper model and keeps the hard ones
+   where they are, and the small half is 17% of a quarter of the usage. A few percent saved, against new code, a start
+   that can misjudge a task from its title, and a shipped feature naming models a user's plan may lack.
+2. **The manager picks.** It acts only in a turn Petre started, and a start from the bar or the panel never passes
+   through it. Kept as the one-off `--model` on `task start`, which the manager can use.
+3. **One named model, and the saving inside the session** (picked). The cost is in the long sessions, so what counts
+   is how much a session keeps in its own conversation. The briefing sends mechanical work to a cheaper subagent, and
+   the strongest model is spent where it reads little: on the diff and on the plan. This is Petre's "starts with the
+   best model and delegates to something cheaper", applied inside the session.
 
-Considered and left for later: start cheap and move up when the session finds the work is harder than it read. It
-suits the limit best, but a move is a copy with a new id (measured), which touches joining, the ledger and the
-terminal window.
+Left for later: start cheap and move up when the work proves harder. A move is a copy with a new id (measured), which
+touches joining, the ledger and the terminal window.
 
 ## Design
 
-**Sizing.** `ClaudeStart` (Core, pure) builds the sizing prompt from the task's title, description, parent's title
-and the thread's unsettled comments, cut to about 4,000 characters, and parses the answer. The answer is JSON held to
-a schema (`--json-schema`): `model` (`sonnet`, `opus` or `fable`), `effort` (`medium` or `high`) and a `reason` of
-one short sentence. The system prompt says what each rung is for: Sonnet for a change whose place and shape the task
-already names; Opus for a feature or a bug whose cause is not known; Fable for design, for work across several
-subsystems and for a bug that earlier attempts on the task did not cure. Haiku is not a rung: a task session writes
-code. The call runs on Fable through `ClaudeCli` off the UI thread, with a 20 second limit.
+**The model.** `ClaudeStart.Arguments(task, model)` builds `--bg --model <model> <first message>`, and
+`ClaudeSessions.Start` uses it with the model given for that start, otherwise `AppState.ClaudeTaskModelInEffect`.
+`AppState.ClaudeTaskModel` is null in every older state.json, and null or blank means `ClaudeStart.DefaultModel`,
+`opus`: what last week's task sessions ran on. No value hands the choice back to Claude Code's settings.
 
-**Never the default.** If the call fails, times out or answers outside the schema, the session starts on Sonnet at
-high effort and the reason says the sizing failed. `--model` and `--effort` are on every `claude --bg` Deskbar issues
-for a task.
+**Changing it.** `deskbar claude-model [<model>]` reads or sets the setting. `deskbar task start <id> [--folder <path>]
+[--model <model>]` names the model of one session. Both go through `ClaudeStart.Model`, which takes an alias or a full
+model name and refuses anything `claude` could read as another argument. Both are in `ControlUsage`.
 
-**Overrule.** `deskbar task start <id> [--folder <path>] [--model <m>] [--effort <e>]`: a named model skips the
-sizing. `deskbar task model <id> sonnet|opus|fable|auto` stores a standing choice on the task (`TaskItem.Model`,
-`auto` clears it) that every later start of that task uses; the task's menu gets the same four entries under "Model".
-Both are listed in `ControlUsage`. The manager's briefing learns the `--model` argument once its branch is on main.
+**The briefing.** `SessionBriefing` gains two lines for every task session: keep your own conversation short by giving
+test runs, builds, broad searches and rebases to a subagent on a cheaper model; and before opening a pull request have
+a subagent on the strongest model you can use review the diff, and the plan before the code when there was one.
 
-**Where it shows.** `TaskSession` gains the model, effort and reason it was started with (old sessions have none).
-They are in the task's JSON on the pipe, and the session's line in the task's thread and window reads, for example,
-"Sonnet, medium: a one-file text change". No thread comment is written for it.
+## To watch after it ships
 
-**Briefing.** `SessionBriefing` gains one line for every task session: give test runs, searches, rebases and other
-mechanical work to a subagent on a cheaper model (the Agent tool's `model`), and keep design and review for itself.
-
-## Left to the builder
-
-- The exact wording of the sizing prompt and of the briefing line. Try the prompt against a dozen real tasks from
-  the board (small fixes and the known hard ones) before settling it, and put the cases in the tests.
-- Where the session line is drawn in the panel, the task window and the bar's tooltip.
-- Whether a subtask's sizing should also see its parent's description (the family briefing already has it).
-- Docs: the README's tasks section and `docs/superpowers/notes/manual-test-script.md` get the new steps.
-
-## Follow-up (own task)
-
-A session that finds the work harder than sized asks Deskbar to move it up: Deskbar stops it, starts the copy with
-`--bg --resume <id> --model fable`, joins the copy to the task and moves the terminal window to it.
+- Whether the review line earns its place: on the first few pull requests, does the review find anything real?
+- Rerun the usage measurement after a week and compare the share of cache reads and the size of the large sessions.
+- On a plan without Opus the start fails with Claude's own message in the thread, and `claude-model` fixes it. If
+  that turns out to be common among users, the default needs another look.

@@ -362,6 +362,25 @@ public class RemoteControlClaudeHookTests
         Assert.Contains(ControlUsage.All, c => c.Verb == "claude-resume");
     }
 
+    // Task e52e33cb: the model task sessions start on. Opus until set, any alias or full name after, and never a
+    // value that would hand the choice back to Claude Code's own settings.
+    [Fact]
+    public void Claude_model_reads_and_sets_the_model_task_sessions_start_on()
+    {
+        var manager = Started();
+        Assert.Equal("opus", manager.State.ClaudeTaskModelInEffect);
+        Assert.Contains("opus", Run(manager, "claude-model").Output);
+
+        Assert.Equal(ControlReply.Ok, Run(manager, "claude-model", "sonnet").ExitCode);
+        Assert.Equal("sonnet", manager.State.ClaudeTaskModelInEffect);
+        Assert.Contains("sonnet", Run(manager, "claude-model").Output);
+
+        Assert.Equal(ControlReply.Failed, Run(manager, "claude-model", "--bare").ExitCode);
+        Assert.Equal("sonnet", manager.State.ClaudeTaskModelInEffect);
+
+        Assert.Contains(ControlUsage.All, c => c.Verb == "claude-model");
+    }
+
     // --- sessions join or create a task (plan Task 8) --------------------------------------------
     //
     // The hooks with a real TaskService behind them, and the session-facing `task` forms the briefing tells a session

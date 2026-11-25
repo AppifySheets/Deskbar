@@ -27,7 +27,7 @@ public class RemoteControlSubtaskTests
     const string Repo = @"C:\repos\TaskSpaces";
 
     // The app's transcript lookup, stood in for: every session's transcript is "T:<id>".
-    static readonly TaskSessionCommands Sessions = new(_ => Result.Success(), _ => [], (_, _) => Result.Success(), (_, _) => Result.Success())
+    static readonly TaskSessionCommands Sessions = new(_ => Result.Success(), _ => [], (_, _, _) => Result.Success(), (_, _) => Result.Success())
     {
         Transcript = s => $"T:{s.Id}",
     };

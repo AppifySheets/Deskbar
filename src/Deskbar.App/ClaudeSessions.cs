@@ -265,8 +265,13 @@ public sealed class ClaudeSessions : IDisposable
     /// `claude --bg` exit 1 with the reason on stderr (measured), and that reason is what Petre needs to see. Called on
     /// the UI thread; the returned task completes there.
     /// </summary>
-    public Task<Result<string>> Start(TaskItem task, string folder) =>
-        OffThread(() => cli.Run(["--bg", ClaudeStart.FirstMessage(task)], folder, LaunchTimeout))
+    //
+    // The start always names a model (ClaudeStart.Arguments): the one given for this session (`task start --model`),
+    // otherwise the setting (AppState.ClaudeTaskModelInEffect, read here on the UI thread), never Claude Code's own
+    // default. The resumes below pass none, because a session wakes with the model it was started on (measured).
+    public Task<Result<string>> Start(TaskItem task, string folder, Maybe<string> model = default) =>
+        Observable.Return(ClaudeStart.Arguments(task, model.GetValueOrDefault(manager.State.ClaudeTaskModelInEffect)))
+            .SelectMany(arguments => OffThread(() => cli.Run(arguments, folder, LaunchTimeout)))
             .SelectMany(launched => Launched(task, folder, launched))
             .TakeUntil(stopping)
             .DefaultIfEmpty(Result.Failure<string>("Deskbar closed before the session was found."))

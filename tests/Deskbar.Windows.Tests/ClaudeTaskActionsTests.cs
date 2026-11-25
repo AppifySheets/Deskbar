@@ -40,6 +40,9 @@ public class ClaudeTaskActionsTests
         public List<WindowHandle> BroughtForward { get; } = [];
         public List<(Guid Task, string Session)> Resumes { get; } = [];
         public List<(string Title, string Folder)> Starts { get; } = [];
+
+        // The model each start was given (task e52e33cb): none unless the caller named one.
+        public List<Maybe<string>> Models { get; } = [];
         public List<string> Asked { get; } = [];
         public List<string> Told { get; } = [];
         public List<string> Forgotten { get; } = [];
@@ -63,9 +66,10 @@ public class ClaudeTaskActionsTests
 
         public Rig() =>
             Actions = new ClaudeTaskActions(Tasks, Harness.Manager, Live, new ClaudeTaskSeams(
-                Start: (task, folder) =>
+                Start: (task, folder, model) =>
                 {
                     Starts.Add((task.Title, folder));
+                    Models.Add(model);
                     return System.Threading.Tasks.Task.FromResult(StartAnswer(folder));
                 },
                 Resume: (task, session) =>

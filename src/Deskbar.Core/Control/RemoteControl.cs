@@ -191,6 +191,8 @@ public sealed partial class RemoteControl(WorkspaceManager manager, Func<bool, R
         ("claude-skill", [var onOff]) => ClaudeSkill(onOff),
         ("claude-tasks", [var onOff]) => ClaudeTasks(onOff),
         ("claude-resume", [var onOff]) => ClaudeResume(onOff),
+        ("claude-model", []) => ClaudeModel(Maybe<string>.None),
+        ("claude-model", [var model]) => ClaudeModel(model),
         ("focus-ring", [var onOff]) => FocusRing(onOff),
         ("see-through", [var onOff]) => SeeThrough(onOff),
         ("previous-workspace", [var onOff]) => PreviousWorkspace(onOff),

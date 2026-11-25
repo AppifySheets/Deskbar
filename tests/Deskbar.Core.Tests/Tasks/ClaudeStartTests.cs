@@ -14,6 +14,33 @@ public class ClaudeStartTests
     static readonly Guid ws = Guid.Parse("11111111-1111-1111-1111-111111111111");
     static readonly Guid otherWs = Guid.Parse("22222222-2222-2222-2222-222222222222");
 
+    // Task e52e33cb: a start always names its model, in front of the first message.
+    [Fact]
+    public void The_start_arguments_name_the_model_before_the_first_message()
+    {
+        var task = Task(taskId, "Fix the bar", Maybe<Guid>.None);
+
+        Assert.Equal(["--bg", "--model", "sonnet", ClaudeStart.FirstMessage(task)], ClaudeStart.Arguments(task, "sonnet"));
+        Assert.Equal("opus", ClaudeStart.DefaultModel);
+    }
+
+    [Theory]
+    [InlineData("opus", "opus")]
+    [InlineData("  fable ", "fable")]
+    [InlineData("claude-opus-5-5", "claude-opus-5-5")]
+    [InlineData("claude-sonnet-5-5[1m]", "claude-sonnet-5-5[1m]")]
+    public void A_model_name_is_an_alias_or_a_full_name(string given, string expected) =>
+        Assert.Equal(expected, ClaudeStart.Model(given).Value);
+
+    // What `claude` could read as another argument never reaches its command line.
+    [Theory]
+    [InlineData("")]
+    [InlineData("--dangerously-skip-permissions")]
+    [InlineData("opus --resume x")]
+    [InlineData("opus\"")]
+    public void Anything_else_is_not_a_model_name(string given) =>
+        Assert.True(ClaudeStart.Model(given).IsFailure);
+
     static TaskSession Session(string id, string folder, int minutes) =>
         new(id, folder, t0.AddMinutes(minutes), Maybe<DateTimeOffset>.None);
 

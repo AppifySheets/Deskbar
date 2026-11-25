@@ -29,7 +29,7 @@ namespace Deskbar.Core.Control;
 //   task wake <id>                    (its "Wake now")
 //   task go <id>
 //   task open <id>                    (task dca4ebeb: the task in a window of its own, the menus' "Open in window")
-//   task start <id> [--folder <path>]
+//   task start <id> [--folder <path>] [--model <model>]
 //   task open-session <id> <session>
 //
 // `go`, `start` and `open-session` (Task 9 of docs/superpowers/specs/2026-11-23-tasks-open-claude-sessions-design.md,
@@ -152,8 +152,11 @@ public sealed partial class RemoteControl
             // The task in a window of its own (task dca4ebeb), as "Open in window" on a line's menu does. The task is found
             // first, so an unknown id refuses before any window opens; the reply is the task.
             ["open", var id] => TaskChange(service, id, task => openTaskWindow is { } open ? open(task) : Result.Failure(TaskWindowUnavailable)),
-            ["start", var id] => WithSessions(c => TaskStart(service, c, id, Maybe<string>.None)),
-            ["start", var id, "--folder", var folder] => WithSessions(c => TaskStart(service, c, id, Folder(folder) ?? folder)),
+            ["start", var id] => WithSessions(c => TaskStart(service, c, id, Maybe<string>.None, Maybe<string>.None)),
+            ["start", var id, "--folder", var folder] => WithSessions(c => TaskStart(service, c, id, Folder(folder) ?? folder, Maybe<string>.None)),
+            ["start", var id, "--model", var model] => WithSessions(c => TaskStart(service, c, id, Maybe<string>.None, model)),
+            ["start", var id, "--folder", var folder, "--model", var model] => WithSessions(c => TaskStart(service, c, id, Folder(folder) ?? folder, model)),
+            ["start", var id, "--model", var model, "--folder", var folder] => WithSessions(c => TaskStart(service, c, id, Folder(folder) ?? folder, model)),
             ["open-session", var id, var sessionId] => WithSessions(c => TaskOpenSession(service, c, id, sessionId)),
             _ => ControlReply.Fail($"Wrong arguments for task.\n{TaskUsage()}"),
         };
@@ -451,12 +454,17 @@ public sealed partial class RemoteControl
     // Several or none refuse before anything starts, naming what --folder could be.
     // A closed task is refused before anything else (final review, item 12): a session started on it could not even join
     // it (a closed task takes none of a session's changes), so `claude --bg` would run for nothing.
-    ControlReply TaskStart(TaskService service, TaskSessionCommands commands, string id, Maybe<string> given) =>
+    //
+    // --model names the model of this one session (design docs/superpowers/specs/2026-11-25-session-model-pick-design.md):
+    // a name `claude` could misread is refused before anything starts, and without it the session runs on the model
+    // `claude-model` holds. Either way the start names a model.
+    ControlReply TaskStart(TaskService service, TaskSessionCommands commands, string id, Maybe<string> given, Maybe<string> model) =>
         service.Board.Find(id)
             .Ensure(task => task.IsOpen, ClosedTaskRefusal)
-            .Bind(task => given.Or(() => commands.Folders(task) is [var only] ? only : Maybe<string>.None)
-                .ToResult(FolderRefusal(commands.Folders(task)))
-                .Bind(folder => commands.Start(task, folder))
+            .Bind(task => model.Match(name => ClaudeStart.Model(name).Map(Maybe.From), () => Maybe<string>.None)
+                .Bind(named => given.Or(() => commands.Folders(task) is [var only] ? only : Maybe<string>.None)
+                    .ToResult(FolderRefusal(commands.Folders(task)))
+                    .Bind(folder => commands.Start(task, folder, named)))
                 .Map(() => service.Board.Tasks.First(t => t.Id == task.Id)))
             .Match(task => Success(Describe(task)), ControlReply.Fail);
 
@@ -493,7 +501,7 @@ public sealed partial class RemoteControl
 public sealed record TaskSessionCommands(
     Func<TaskItem, Result> Go,
     Func<TaskItem, IReadOnlyList<string>> Folders,
-    Func<TaskItem, string, Result> Start,
+    Func<TaskItem, string, Maybe<string>, Result> Start,
     Func<TaskItem, string, Result> OpenSession)
 {
     /// <summary>
