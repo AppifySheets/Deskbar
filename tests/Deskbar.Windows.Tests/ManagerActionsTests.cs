@@ -130,7 +130,7 @@ public class ManagerActionsTests
             Sessions = new ClaudeSessions(Tasks, Harness.Manager, Cli, Clock, _ => Maybe<Guid>.None, Home,
                 background: Scheduler.Immediate, managerFolder: Folder);
             Actions = new ClaudeTaskActions(Tasks, Harness.Manager, Sessions.Live, new ClaudeTaskSeams(
-                Start: (_, _) => Task.FromResult(Result.Failure<string>("no task starts here")),
+                Start: (_, _, _) => Task.FromResult(Result.Failure<string>("no task starts here")),
                 Resume: (_, _) => Task.FromResult(Result.Failure<ClaudeAgent>("no task resumes here")),
                 Launch: launch =>
                 {

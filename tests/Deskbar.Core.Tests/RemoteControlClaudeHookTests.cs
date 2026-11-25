@@ -1141,7 +1141,7 @@ public class RemoteControlClaudeHookTests
     // A hook run from the manager's own folder, against a control that knows where that is.
     string ManagerHook(WorkspaceManager manager, string hookEvent, string session = "mgr", string source = "startup") =>
         new RemoteControl(manager, tasks: tasks, longPath: LongPath,
-                taskSessions: new TaskSessionCommands(_ => Result.Success(), _ => [], (_, _) => Result.Success(), (_, _) => Result.Success())
+                taskSessions: new TaskSessionCommands(_ => Result.Success(), _ => [], (_, _, _) => Result.Success(), (_, _) => Result.Success())
                 {
                     ManagerFolder = ManagerDir,
                 })
@@ -1185,7 +1185,7 @@ public class RemoteControlClaudeHookTests
         try
         {
             var reply = new RemoteControl(Started(), tasks: tasks, longPath: LongPath, inbox: new CommentInbox(InboxFolder, () => DateTimeOffset.UtcNow),
-                    taskSessions: new TaskSessionCommands(_ => Result.Success(), _ => [], (_, _) => Result.Success(), (_, _) => Result.Success())
+                    taskSessions: new TaskSessionCommands(_ => Result.Success(), _ => [], (_, _, _) => Result.Success(), (_, _) => Result.Success())
                     {
                         ManagerFolder = ManagerDir,
                     })

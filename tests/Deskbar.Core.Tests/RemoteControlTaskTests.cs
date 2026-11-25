@@ -268,7 +268,7 @@ public class RemoteControlTaskTests
 
     // A control that knows the manager's folder, called from `from` (the manager's own by default).
     ControlReply RunFrom(WorkspaceManager manager, string managerFolder, string from, params string[] args) =>
-        new RemoteControl(manager, tasks: tasks, goals: goals, taskSessions: new TaskSessionCommands(_ => Result.Success(), _ => [], (_, _) => Result.Success(), (_, _) => Result.Success())
+        new RemoteControl(manager, tasks: tasks, goals: goals, taskSessions: new TaskSessionCommands(_ => Result.Success(), _ => [], (_, _, _) => Result.Success(), (_, _) => Result.Success())
         {
             ManagerFolder = managerFolder,
         }).Execute([.. args, "--from", from]);
