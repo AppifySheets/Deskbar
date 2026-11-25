@@ -24,8 +24,12 @@
   - Its heap is capped (-HeapKB). Every desktop has its own desktop heap, the memory its windows, menus and
     window classes live in, and CreateDesktop without a size gives it the size the visible desktop gets: the
     middle number of SharedSection in HKLM\...\Session Manager\SubSystems\Windows, 40 MB on Petre's machine
-    since that night. All of a session's desktop heaps come out of one shared address range, so a test desktop
-    the size of the real one takes that much from the range everything else in the session draws on.
+    since that night. The cap is cheap insurance, not the cure it was first taken for: the session's desktop
+    heaps share one range of address space, but on this 64-bit machine that range is not the 48 MB that
+    SessionViewSize says (it is set to 48 in the registry). Measured 2026-11-25 (Deskbar task 4888c75e): with
+    Default's 40 MB heap in place, CreateDesktopEx gave a single new desktop every heap asked of it up to 3,900 MB.
+    So an 8 MB test desktop does not crowd Default out. When window tests refuse windows "at random", with error 8
+    from Dispatcher..ctor or HwndWrapper, look at the session's USER atom table first (the check below).
   - Each run gets a desktop of its own, named after this script's process. The old fixed name made a second
     session's run join the first one's desktop, and the two runs then shared, and filled, one heap.
   - Nothing outlives the run on its desktop. A desktop lives as long as any process on it holds it, and a
