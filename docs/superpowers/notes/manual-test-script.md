@@ -671,6 +671,14 @@ S16. The Subtasks checkbox (task 173ef268). Give a note three subtasks and ask a
     parent's with a subtask there: that subtask still shows. Close and reopen the panel, then restart Deskbar: the box
     is still unticked. Switch to the Matrix: subtasks whose parent is in a cell are gone. On the bar, the parent's two plain
     subtasks are gone too and the asking one is still there. Tick it: everything is back, in the panel and on the bar.
+S17. A subtask's way to its parent (task 54b39c4c). Give a note three subtasks. In the tasks panel open the last
+    subtask's thread: it starts with "↑ Subtask of <the note>". Click it: the note is picked, its thread opens and the
+    list scrolls to it. Right-click a subtask's line in the panel: **Open parent** follows **Add subtask…** and does the
+    same; a plain note's menu has no **Open parent**. Filter the panel to another workspace with a subtask moved there,
+    open it and click "Subtask of": the filter goes back to all and the parent shows. On the bar, right-click a
+    subtask's line: **Open parent** shows the parent in the tasks panel. Open a subtask in its own window: the side
+    column has a Parent section above Subtasks, and its button opens the parent's window; Details no longer lists
+    "Subtask of".
 
 ## Goals
 

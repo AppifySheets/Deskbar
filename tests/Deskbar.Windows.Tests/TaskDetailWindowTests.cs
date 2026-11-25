@@ -226,6 +226,26 @@ public class TaskDetailWindowTests
         Assert.NotSame(window, t.Board.WindowOf(child));
     });
 
+    // Task 54b39c4c (Petre: "subtask should show its parent and have a way to open the parent easily"): a subtask's side
+    // column has a Parent section, a button that opens the parent in a window of its own. A task with no parent has none.
+    [Fact]
+    public void A_subtasks_parent_opens_in_its_own_window() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var parent = t.Tasks.AddNote("Parent", Maybe<Guid>.None).Value.Id;
+        var child = t.Tasks.AddNote("Child", Maybe<Guid>.None, parent: parent).Value.Id;
+        Assert.True(t.Board.OpenWindow(child).IsSuccess);
+        var window = t.Board.WindowOf(child)!;
+
+        var entry = Inside(window).OfType<Button>().Single(b => AutomationProperties.GetName(b) == "Parent Parent");
+        entry.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+
+        Assert.True(t.Board.HasWindow(parent));
+        Assert.NotSame(window, t.Board.WindowOf(parent));
+        Assert.DoesNotContain(Inside(t.Board.WindowOf(parent)!).OfType<Button>(),
+            b => AutomationProperties.GetName(b)?.StartsWith("Parent ") == true);
+    });
+
     // "Open in window" sits right after Edit on the panel's line menu.
     [Fact]
     public void The_panels_line_menu_offers_open_in_window() => StaThread.Run(() =>

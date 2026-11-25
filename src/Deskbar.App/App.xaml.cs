@@ -2043,6 +2043,9 @@ public partial class App : Application
                 // A line menu's "Open in window" (task dca4ebeb): the task in a window of its own (TasksBoard.OpenWindow).
                 // Read through the field: the board is built later, with quick find.
                 OpenTaskWindow = id => tasksBoard?.OpenWindow(id),
+                // A subtask line menu's "Open parent" (task 54b39c4c): the parent shown in the tasks panel, past any
+                // filter that would hide it (TasksBoard.OpenParent). Read through the field, as above.
+                OpenParentTask = id => tasksBoard?.OpenParent(id),
                 // A Claude line's icon: the VS Code window whose title names the session's folder, by the rule the
                 // control pipe's `open` and `attention` use to find a caller's window (RemoteControl.CallerOf,
                 // EditorFolder.Best), each window offering its current title and the one it had before a rename. Two

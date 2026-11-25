@@ -52,6 +52,12 @@ public partial class FloatingBar
     /// <summary>"Open in window" (task dca4ebeb): the App's TasksBoard.OpenWindow. Unset, the item is not shown.</summary>
     internal Action<Guid>? OpenTaskWindow { get; init; }
 
+    /// <summary>
+    /// "Open parent" on a subtask's line (task 54b39c4c): the App's TasksBoard.OpenParent, given the parent's id, which
+    /// shows the parent in the tasks panel. Unset, the item is not shown.
+    /// </summary>
+    internal Action<Guid>? OpenParentTask { get; init; }
+
     // The title, or on the line being edited, the editor in its place.
     UIElement TitleOrEditor(TaskLine line) => editingTask == line.Id && !line.Closing ? TaskEditBox(line) : TextOf(line);
 
@@ -100,6 +106,12 @@ public partial class FloatingBar
         // as the parent, a sibling on a subtask's line. Run once this menu has closed, so the box can take the keyboard.
         menu.Items.Add(TaskMenuItem(AddSubtaskText, () => Dispatcher.BeginInvoke(() => BeginSubtaskAdd(id),
             System.Windows.Threading.DispatcherPriority.Input)));
+        // OPEN PARENT (task 54b39c4c; Petre: "subtask should show its parent and have a way to open the parent easily"):
+        // a subtask's line on the bar shows only "↳", so this item reaches the parent, shown in the tasks panel with its
+        // thread open, as the panel's own "Open parent" does. Run once this menu has closed, as the items above are.
+        if (line.ParentId is { } parentId && OpenParentTask is { } openParent)
+            menu.Items.Add(TaskMenuItem(TasksWindow.OpenParentText, () => Dispatcher.BeginInvoke(() => openParent(parentId),
+                System.Windows.Threading.DispatcherPriority.Input)));
         menu.Items.Add(new Separator());
         menu.Items.Add(TaskMenuItem("Important", () => taskService?.SetFlag(id, TaskFlag.Important, !line.Important), line.Important));
         menu.Items.Add(TaskMenuItem("Urgent", () => taskService?.SetFlag(id, TaskFlag.Urgent, !line.Urgent), line.Urgent));

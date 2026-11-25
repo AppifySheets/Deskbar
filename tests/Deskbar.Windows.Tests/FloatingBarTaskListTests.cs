@@ -109,7 +109,8 @@ public class FloatingBarTaskListTests
         List<nint>? handedBack = null, bool editorAlive = true, Func<DateTime>? clickClock = null, Func<nint>? front = null,
         Func<nint, bool>? onCurrentDesktop = null, Func<DateTimeOffset>? taskNow = null, Action<Guid>? openTask = null,
         Func<TaskItem, Maybe<string>>? goalTitle = null, IObservable<System.Reactive.Unit>? goalChanges = null,
-        Func<Guid, ContextMenu?>? startClaude = null, IObservable<bool>? panelShown = null, string? stateDir = null)
+        Func<Guid, ContextMenu?>? startClaude = null, IObservable<bool>? panelShown = null, string? stateDir = null,
+        Action<Guid>? openParent = null)
     {
         var harness = Harness.Build();
         var minutes = 0;
@@ -143,6 +144,7 @@ public class FloatingBarTaskListTests
             GoalTitle = goalTitle ?? (_ => Maybe<string>.None),
             GoalChanges = goalChanges,
             StartClaude = startClaude,
+            OpenParentTask = openParent,
             // Pictures pasted into the add box are written here, never into the real profile.
             TaskStateDir = stateDir ?? Path.GetTempPath(),
         };
@@ -3269,6 +3271,31 @@ public class FloatingBarTaskListTests
         // Without Claude, right after Edit.
         using var plain = Build();
         Assert.Equal(["Edit", "Add subtask…"], Firsts(plain, plain.Tasks.AddNote("Parent", plain.Gepha).Value.Id).Take(2));
+    });
+
+    // Task 54b39c4c (Petre: "subtask should show its parent and have a way to open the parent easily"): a subtask's line,
+    // which shows only "↳" on the bar, has "Open parent" right after "Add subtask…". It hands the PARENT's id to the App
+    // (TasksBoard.OpenParent) once the menu has closed. A plain task's line has no such item.
+    [Fact]
+    public void A_subtasks_menu_offers_open_parent() => StaThread.Run(() =>
+    {
+        var opened = new List<Guid>();
+        using var t = Build(openParent: opened.Add);
+        var parent = t.Tasks.AddNote("Ship the release", t.Gepha).Value.Id;
+        var child = t.Tasks.AddNote("Write the notes", t.Gepha, parent: parent).Value.Id;
+
+        var menu = t.Bar.OpenTaskLineMenu(child)!;
+        var items = menu.Items.OfType<MenuItem>().ToList();
+        Assert.Equal(["Edit", "Add subtask…", "Open parent"], items.Take(3).Select(i => ((TextBlock)i.Header).Text));
+        items[2].RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+        menu.IsOpen = false;
+        // Run once the menu has closed (an Input-priority dispatch): a lower priority runs after it.
+        t.Bar.Dispatcher.Invoke(() => { }, System.Windows.Threading.DispatcherPriority.ApplicationIdle);
+        Assert.Equal([parent], opened);
+
+        var parentMenu = t.Bar.OpenTaskLineMenu(parent)!;
+        Assert.DoesNotContain(parentMenu.Items.OfType<MenuItem>(), i => i.Header is TextBlock { Text: "Open parent" });
+        parentMenu.IsOpen = false;
     });
 
     [Fact]
