@@ -764,6 +764,37 @@ public class TasksBoardTests
         Assert.Equal("Claude working 0", t.Window.ClaudeWorkingLabel);
     });
 
+    // Search by id (task 6e4dc116, Petre: "searching for tasks by their id, like 173ef268 should give me that task, from all
+    // sections, including closed"). The first eight characters of a closed task's id find it under the Open filter, a
+    // workspace filter on another workspace and Claude working on, in its Closed group, and in the List even under the
+    // Matrix setting, since the Matrix has no Closed cell.
+    [Fact]
+    public void An_id_finds_its_task_in_every_section_past_every_filter() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var closed = t.Tasks.AddNote("Old store chore", t.Gepha).Value.Id;
+        t.Tasks.Close(closed);
+        var open = t.Tasks.Create("Live work", t.Sparrow, Session("s1")).Value.Id;
+        t.Controller.Show();
+        Click(ButtonNamed(t.Window, "Matrix"));
+        t.Controller.FilterWorkspace(TaskWorkspaceFilter.On(t.Sparrow));
+        t.Controller.FilterClaudeWorking(true);
+        Assert.Equal([open], t.Window.Keys);
+
+        t.Controller.Search(closed.ToString()[..8]);
+
+        Assert.Equal([closed], t.Window.Keys);
+        Assert.Equal(["Closed"], t.Window.Headers);
+        Assert.False(t.Window.MatrixShown);
+
+        // The whole id, dashes and all, finds it too; the Matrix comes back once the text is no id.
+        t.Controller.Search(closed.ToString());
+        Assert.Equal([closed], t.Window.Keys);
+        t.Controller.Search("live");
+        Assert.Equal([open], t.Window.Keys);
+        Assert.True(t.Window.MatrixShown);
+    });
+
     // A fresh show starts with no search, the box empty, like every other filter, but keeps Claude working (task 93fa0b9b:
     // Petre wants it kept "just like with current workspace").
     [Fact]
@@ -2743,6 +2774,41 @@ public class TasksBoardTests
         Click(ButtonNamed(t.Window, "Subtasks"));
         Assert.True(t.Window.SubtasksOn);
         Assert.Equal([parent, child], t.Window.Keys);
+    });
+
+    // An id typed on the Stats view (task 6e4dc116) leaves it for the task found; a word search stays on Stats.
+    [Fact]
+    public void An_id_typed_on_the_stats_view_shows_its_task() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var closed = t.Tasks.AddNote("Old chore", t.Gepha).Value.Id;
+        t.Tasks.Close(closed);
+        t.Tasks.AddNote("Live chore", t.Gepha);
+        t.Controller.Show();
+        Click(ButtonNamed(t.Window, "Stats"));
+
+        t.Controller.Search("chore");
+        Assert.True(t.Window.StatsShown);
+
+        t.Controller.Search(closed.ToString()[..8]);
+        Assert.False(t.Window.StatsShown);
+        Assert.Equal([closed], t.Window.Keys);
+    });
+
+    // A subtask found by its id (task 6e4dc116) shows with the Subtasks checkbox unticked: a lookup never folds.
+    [Fact]
+    public void A_subtask_found_by_its_id_shows_with_subtasks_folded() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var parent = t.Tasks.AddNote("Parent", t.Gepha).Value.Id;
+        var child = t.Tasks.AddNote("Child", t.Gepha, Quadrant.IV, parent).Value.Id;
+        t.Controller.Show();
+        Click(ButtonNamed(t.Window, "Subtasks"));
+        Assert.Equal([parent], t.Window.Keys);
+
+        t.Controller.Search(child.ToString()[..8]);
+
+        Assert.Equal([child], t.Window.Keys);
     });
 
     // The screencast shoot on v2.5.189: the toolbar's dropdowns did not open by mouse, keyboard or UI Automation. UIA's

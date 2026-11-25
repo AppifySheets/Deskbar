@@ -60,6 +60,70 @@ public class TaskSearchTests
         Assert.Equal(["Dishwasher tablets"], new TaskSearch("dishwasher").Narrow(plusNote).Tasks.Select(t => t.Title));
     }
 
+    // --- search by id (task 6e4dc116) -------------------------------------------------------------------------------
+
+    static readonly Guid storeId = Guid.Parse("173ef268-1111-4222-8333-444455556666");
+    static readonly Guid noteId = Guid.Parse("9e85caee-aaaa-4bbb-8ccc-ddddeeeeffff");
+
+    // A closed note, a snoozed note and an open note: one of every section the open view leaves out, and one in it.
+    static TaskBoard ThreeSections()
+    {
+        var store = TaskBoard.Empty.AddNote("Store submission", Maybe<Guid>.None, clock, storeId).Value.Board;
+        var closed = store.Close(storeId, clock).Value;
+        var snoozed = closed.AddNote("Dishwasher tablets", Maybe<Guid>.None, clock, noteId).Value.Board.Snooze(noteId, clock.AddDays(1), clock).Value;
+        return snoozed.AddNote("Decade review", Maybe<Guid>.None, clock, Guid.NewGuid()).Value.Board;
+    }
+
+    [Theory]
+    [InlineData("173ef268", "173ef268")]
+    [InlineData("  173EF268 ", "173ef268")]
+    [InlineData("173ef268-1111", "173ef2681111")]
+    [InlineData("{173EF268-1111-4222-8333-444455556666}", "173ef268111142228333444455556666")]
+    [InlineData("173e", "173e")]
+    public void Hex_text_reads_as_the_start_of_an_id(string text, string prefix) =>
+        Assert.Equal(prefix, new TaskSearch(text).IdPrefix.Value);
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("add")]
+    [InlineData("store tier")]
+    [InlineData("173ef268 store")]
+    [InlineData("173g")]
+    [InlineData("173ef268111142228333444455556666a")]
+    public void Anything_else_is_no_id(string text) => Assert.True(new TaskSearch(text).IdPrefix.HasNoValue);
+
+    [Fact]
+    public void An_id_prefix_finds_its_task_whatever_its_section()
+    {
+        var board = ThreeSections();
+
+        Assert.Equal([storeId], new TaskSearch("173ef268").Found(board).Value.Tasks.Select(t => t.Id));
+        Assert.Equal([noteId], new TaskSearch("9E85CAEE-AAAA").Found(board).Value.Tasks.Select(t => t.Id));
+        Assert.True(new TaskSearch("173ef268").Admits(board.Tasks.Single(t => t.Id == storeId)));
+    }
+
+    // Hex text no id starts with is an ordinary word search: "decade" is all hex digits and still finds the title.
+    [Fact]
+    public void Hex_text_no_id_starts_with_searches_the_words()
+    {
+        var board = ThreeSections();
+        var decade = new TaskSearch("decade");
+
+        Assert.True(decade.Found(board).HasNoValue);
+        Assert.Equal(["Decade review"], decade.Narrow(board).Tasks.Select(t => t.Title));
+    }
+
+    // Everywhere groups every task in its own section, the closed and snoozed ones included, with no filter.
+    [Fact]
+    public void Everywhere_shows_every_section()
+    {
+        var groups = TaskViews.Everywhere(ThreeSections());
+
+        Assert.Equal([TaskGroupKind.IV, TaskGroupKind.Snoozed, TaskGroupKind.Closed], groups.Select(g => g.Kind));
+        Assert.Equal([noteId], groups.Single(g => g.Kind == TaskGroupKind.Snoozed).Tasks.Select(t => t.Id));
+        Assert.Equal([storeId], groups.Single(g => g.Kind == TaskGroupKind.Closed).Tasks.Select(t => t.Id));
+    }
+
     [Fact]
     public void Claude_working_keeps_only_tasks_with_a_live_session()
     {

@@ -85,6 +85,8 @@ namespace Deskbar.App;
 // apply), so it too says how many it would show. The search is not saved and starts over on a fresh open. Claude working
 // is KEPT across opens and restarts, as the "Current workspace" checkbox is (task 93fa0b9b, 2026-11-25, Petre: "i also
 // want a filter on claude working on tasks at the top, just like with current workspace"; AppState.TasksPanel.ClaudeWorking).
+// Text that starts a task's id (task 6e4dc116, TaskSearch.Found) is a lookup instead: that task in whatever section it
+// is in, closed included, past every filter, and in the List even when the Matrix is on.
 //
 // THE PANEL'S WIDTH (spec "Lines at panel width" and "The Matrix"; plan 2026-11-23-tasks-panel, Task 8). The view says
 // whether lines are slim (below 710 DIP) and whether the Matrix is allowed (from 780), both from the width the panel
@@ -593,6 +595,9 @@ public sealed class TasksBoard : IDisposable
     {
         if (search.Text == text) return;
         search = new TaskSearch(text);
+        // A search by id that finds a task (task 6e4dc116) leaves the Stats view: the box stays on screen there, and Stats
+        // counts the whole board, so the task asked for would otherwise never appear. A word search leaves it alone.
+        if (statsShown && search.Found(tasks.Board).HasValue) statsShown = false;
         Refresh();
     }
 
@@ -934,8 +939,13 @@ public sealed class TasksBoard : IDisposable
         // The search and Claude working come right after it (Task 7, see the header), for the same reason. `searched` is the
         // board before Claude working: the chip's own count is taken on it, so the chip says how many it would show
         // under every other filter, whether it is on or off.
-        var searched = search.Narrow(goalFilter.Narrow(WithPendingCloses(tasks.Board), goalBoard));
+        var whole = WithPendingCloses(tasks.Board);
+        var searched = search.Narrow(goalFilter.Narrow(whole, goalBoard));
         var board = ClaudeWorking.Narrow(searched, claudeWorking);
+        // SEARCH BY ID (task 6e4dc116; TaskSearch has the rule): text that starts a task's id finds that task in whatever
+        // section it is in, closed and snoozed included, past every filter, so the lookup is taken on the whole board
+        // and grouped by TaskViews.Everywhere, not by the status filter. The chips keep their counts from `board`.
+        var foundById = search.Found(whole);
         // The workspace filter as it applies now: "Current workspace" becomes the workspace in front (task ed1a01fc, see
         // TaskWorkspaceFilter.Current), so the groups, the Matrix, every chip's count and the add box all follow a
         // desktop switch, which redraws through ShownStateKey (it holds CurrentWorkspaceId).
@@ -943,10 +953,11 @@ public sealed class TasksBoard : IDisposable
         var claudeWorkingCount = TaskViews.Count(ClaudeWorking.Narrow(searched, true), filter, shown, assigneeFilter);
         // Follow-up to the subtasks spec: a subtask is drawn right under its parent, in the parent's group (TaskViews.UnderParents);
         // such a line is Nested, so it shows the arrow without the parent's name.
-        var (underParents, nested) = TaskViews.UnderParents(TaskViews.Grouped(board, filter, shown, assigneeFilter));
+        var (underParents, nested) = TaskViews.UnderParents(foundById.Match(TaskViews.Everywhere, () => TaskViews.Grouped(board, filter, shown, assigneeFilter)));
         // The "Subtasks" checkbox unticked (task 173ef268): the lines drawn under a parent are left out, and the parent's
         // own "· N subtasks" says they are there. Read from the saved state, as OpenFresh reads CurrentWorkspace.
-        var showsSubtasks = !PanelState.HideSubtasks;
+        // A search by id never folds (task 6e4dc116): the subtask asked for by its id would vanish under its parent.
+        var showsSubtasks = !PanelState.HideSubtasks || foundById.HasValue;
         var listed = showsSubtasks ? underParents : TaskViews.FoldSubtasks(underParents, nested);
         var groups = listed
             .Select(g => new TaskGroupView(g.Kind, TaskViews.GroupName(g.Kind), g.Tasks.Select(t => Row(t) with { Nested = nested.Contains(t.Id) }).ToArray()))
@@ -981,7 +992,9 @@ public sealed class TasksBoard : IDisposable
         {
             // The setting is Petre's and the width never changes it: a panel too narrow for the Matrix shows the List and
             // leaves AppState.TasksMatrix as it is, so widening it again brings the Matrix back.
-            Matrix = manager.State.TasksMatrix && matrixAllowed,
+            // A search by id shows the List even under the Matrix setting: the Matrix has no Closed or Snoozed cell, and
+            // the task asked for could be either (task 6e4dc116).
+            Matrix = manager.State.TasksMatrix && matrixAllowed && foundById.HasNoValue,
             MatrixAllowed = matrixAllowed,
             Slim = TasksPanelLayout.Slim(width),
             Cells = cells,
