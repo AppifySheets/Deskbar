@@ -384,12 +384,10 @@ public class ClaudeSessionsTests
         Assert.Equal(["--bg", "--resume", done.SessionId], byId[done.SessionId].Arguments);
         Assert.Equal(@"E:\repos\Done", byId[done.SessionId].Folder);
 
-        var cutAt = byId[cut.SessionId].At.ToLocalTime().ToString("HH:mm");
-        var doneAt = byId[done.SessionId].At.ToLocalTime().ToString("HH:mm");
         Assert.Contains(rig.Task(cut.TaskId).Comments, c => c.ByDeskbar
-            && c.Markdown == $"Resumed by Deskbar at {cutAt}, its last turn was cut off, so it was told to continue.");
+            && c.Markdown == "Resumed. Its last turn was cut off, so it was told to continue.");
         Assert.Contains(rig.Task(done.TaskId).Comments, c => c.ByDeskbar
-            && c.Markdown == $"Resumed by Deskbar at {doneAt}.");
+            && c.Markdown == "Resumed.");
     }
 
     // Task 87f899ad (2026-11-24): a session that joined from the repo and then entered a worktree has its transcript
@@ -708,7 +706,7 @@ public class ClaudeSessionsTests
         Assert.Equal(sessionId, Assert.Single(rig.Cli.Resumes).Arguments[2]);
         Assert.Equal(sessionId, (await first).Value.SessionId);
         Assert.Equal(sessionId, (await second).Value.SessionId);
-        Assert.Contains(rig.Task(taskId).Comments, c => c.Markdown.StartsWith("Resumed by Deskbar", StringComparison.Ordinal));
+        Assert.Contains(rig.Task(taskId).Comments, c => c.Markdown.StartsWith("Resumed", StringComparison.Ordinal));
 
         // Listed now: a third click hands it back without resuming.
         var third = rig.Sessions.ResumeNow(taskId, session);
@@ -944,7 +942,7 @@ public class ClaudeSessionsTests
         var stop = Assert.Single(rig.Cli.Stops);
         Assert.Equal(["stop", sessionId[..8]], stop.Arguments);
         Assert.Equal(SessionKeeper.StopAfter, rig.Since(stop));
-        Assert.Contains(rig.Task(taskId).Comments, c => c.Markdown.StartsWith("Stopped by Deskbar at"));
+        Assert.Contains(rig.Task(taskId).Comments, c => c.Markdown.StartsWith("Stopped, since the task is finished"));
 
         // Gone from the list, and the task is Done: nothing resumes it, nothing stops it again.
         rig.RunTo(TimeSpan.FromMinutes(10));
@@ -1024,7 +1022,7 @@ public class ClaudeSessionsTests
         rig.RunTo(TimeSpan.FromMinutes(10));
         Assert.Single(rig.Cli.Stops);
         Assert.Contains(rig.Traces, t => t.Contains("failed"));
-        Assert.DoesNotContain(rig.Task(taskId).Comments, c => c.Markdown.StartsWith("Stopped by Deskbar"));
+        Assert.DoesNotContain(rig.Task(taskId).Comments, c => c.Markdown.StartsWith("Stopped, since the task is finished"));
 
         rig.RunTo(TimeSpan.FromMinutes(11) + Seconds(15));
         Assert.Equal(2, rig.Cli.Stops.Count);

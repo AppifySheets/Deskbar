@@ -126,9 +126,9 @@ public sealed class AskedPullRequestsTests
         var links = AskedPullRequests.In($"{Url504} {Url505}");
         var facts = new Dictionary<string, PullRequestFacts> { [Key504] = Merged(Asked), [Key505] = ClosedAt(Asked) };
 
-        var note = AskedPullRequests.Note(links, facts, Asked);
+        var note = AskedPullRequests.Note(links, facts);
 
-        Assert.Equal($"Deskbar settled the question at {Asked.ToLocalTime():HH:mm}: [Deskbar #504]({Url504}) was merged and "
+        Assert.Equal($"Question settled: [Deskbar #504]({Url504}) was merged and "
             + $"[Deskbar #505]({Url505}) was closed without merging.", note);
     }
 

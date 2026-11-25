@@ -74,18 +74,19 @@ public static class AskedPullRequests
     public static IReadOnlyList<Settlement> Settlements(TaskBoard board, IReadOnlyDictionary<string, PullRequestFacts> facts, DateTimeOffset now) =>
         Watched(board)
             .Where(x => Settles(x.Links, facts, x.Task.WaitingSince.GetValueOrDefault(x.Task.Raised)))
-            .Select(x => new Settlement(x.Task.Id, x.Task.Question.Value, Note(x.Links, facts, now)))
+            .Select(x => new Settlement(x.Task.Id, x.Task.Question.Value, Note(x.Links, facts)))
             .ToArray();
 
     /// <summary>
-    /// Deskbar's line in the thread when it settles a question: "Deskbar settled the question at 10:05: [Deskbar #504](...)
-    /// was merged." Several links are joined with commas and "and", each with what happened to it.
+    /// Deskbar's line in the thread when it settles a question: "Question settled: [Deskbar #504](...) was merged."
+    /// Several links are joined with commas and "and", each with what happened to it. No author or time in the text: the
+    /// thread's header shows both (task aa42794f, "too much bla bla").
     /// </summary>
-    public static string Note(IReadOnlyList<PullRequestLink> links, IReadOnlyDictionary<string, PullRequestFacts> facts, DateTimeOffset at)
+    public static string Note(IReadOnlyList<PullRequestLink> links, IReadOnlyDictionary<string, PullRequestFacts> facts)
     {
         var parts = links.Select(link => $"[{link.Label}]({link.Url}) was {(facts[link.Key].State == PullRequestState.Merged ? "merged" : "closed without merging")}").ToArray();
         var joined = parts.Length == 1 ? parts[0] : string.Join(", ", parts[..^1]) + " and " + parts[^1];
-        return $"Deskbar settled the question at {at.ToLocalTime():HH:mm}: {joined}.";
+        return $"Question settled: {joined}.";
     }
 
     /// <summary>

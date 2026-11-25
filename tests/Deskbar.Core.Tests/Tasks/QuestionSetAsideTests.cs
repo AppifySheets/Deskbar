@@ -454,4 +454,60 @@ public sealed class QuestionSetAsideTests : IDisposable
         Assert.Equal(TaskStatus.WaitingOnYou, Get(service.Board, id).Status);
         Assert.Equal(saves, store.Saves);
     }
+
+    // --- task aa42794f: Deskbar's set-aside line is short, and folds once it says nothing new -------------------------
+
+    // Guards the exact wording: no author, no time (the thread header has both), the question quoted line by line.
+    [Fact]
+    public void The_set_aside_note_is_short_and_quotes_every_line_of_the_question() =>
+        Assert.Equal("Set aside while Claude works on your reply:\n\n> Merge it?\n> Or wait for CI?", RepliedTasks.Note("Merge it?\r\nOr wait for CI?"));
+
+    // Guards that a restored question does not leave its "set aside" line open in the thread.
+    [Fact]
+    public void Restoring_the_question_folds_the_set_aside_note()
+    {
+        var (waiting, id) = Waiting();
+        var board = waiting.SetQuestionAside(id, Question, RepliedTasks.Note(Question), At(20), Guid.NewGuid());
+
+        var restored = Get(board.RestoreQuestion(id, At(30)), id);
+
+        Assert.Equal(At(30), restored.Comments.Single(c => c.IsSetAsideNote).Settled.Value);
+    }
+
+    // Guards that the session's own `task answered` folds the set-aside line too.
+    [Fact]
+    public void Answering_folds_the_set_aside_note()
+    {
+        var (waiting, id) = Waiting();
+        var board = waiting.SetQuestionAside(id, Question, RepliedTasks.Note(Question), At(20), Guid.NewGuid());
+
+        var answered = Get(board.Answered("s1", At(30)), id);
+
+        Assert.Equal(At(30), answered.Comments.Single(c => c.IsSetAsideNote).Settled.Value);
+    }
+
+    // Guards the order in SettleQuestion: the old set-aside line folds, the new "Question settled" line stays open.
+    [Fact]
+    public void Settling_a_question_folds_an_earlier_set_aside_note_but_not_its_own_line()
+    {
+        var (waiting, id) = Waiting();
+        var board = waiting.SetQuestionAside(id, Question, RepliedTasks.Note(Question), At(20), Guid.NewGuid()).RestoreQuestion(id, At(25));
+
+        var settled = Get(board.SettleQuestion(id, Question, "Question settled: x was merged.", At(30), Guid.NewGuid()), id);
+
+        var aside = settled.Comments.Single(c => c.IsSetAsideNote);
+        var own = settled.Comments.Single(c => c.Markdown.StartsWith("Question settled", StringComparison.Ordinal));
+        Assert.True(aside.Settled.HasValue);
+        Assert.True(own.Settled.HasNoValue);
+    }
+
+    // Guards that lines already in tasks.json (the longer wording) fold too, and that only Deskbar's own lines count.
+    [Fact]
+    public void An_old_wording_Deskbar_note_is_a_set_aside_note_and_the_same_text_from_the_user_is_not()
+    {
+        const string old = "Deskbar set the question aside at 10:05: Claude is working on the task again after your reply.";
+
+        Assert.True(new TaskComment(Guid.NewGuid(), TaskComment.DeskbarAuthor, T0, old).IsSetAsideNote);
+        Assert.False(new TaskComment(Guid.NewGuid(), Maybe<string>.None, T0, old).IsSetAsideNote);
+    }
 }

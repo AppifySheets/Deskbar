@@ -372,7 +372,7 @@ public sealed class ClaudeSessions : IDisposable
                 // From this answer on, the session is left alone for Grace, as after the queue's own resume (Settled).
                 var now = scheduler.Now;
                 answered = answered.Where(pair => pair.Value + SessionKeeper.Grace > now).ToImmutableDictionary().SetItem(session.Id, now);
-                Answered(taskId, session.Id, answer.CutOff, answer.Result, at);
+                Answered(taskId, session.Id, answer.CutOff, answer.Result);
                 return answer.Result.IsSuccess
                     // A comment's resume (ResumeWith) is done once the command ran: the comment went with it, and waiting for
                     // the list would call a late listing a failure (final review, I4).
@@ -547,7 +547,7 @@ public sealed class ClaudeSessions : IDisposable
             .TakeUntil(stopping)
             .Subscribe(
                 result => result
-                    .Tap(() => Say(stop.TaskId, $"Stopped by Deskbar at {Clock(at)}, since the task is finished. Open the task to resume it."))
+                    .Tap(() => Say(stop.TaskId, "Stopped, since the task is finished. Open the task to resume it."))
                     .TapError(e => trace?.Invoke($"claude sessions: stop of {sessionId} failed: {e}")),
                 error => trace?.Invoke($"claude sessions: stop of {sessionId} threw: {error.Message}"));
     }
@@ -662,7 +662,7 @@ public sealed class ClaudeSessions : IDisposable
                 {
                     // The queue is freed BEFORE the answer is acted on, so nothing Answered does can leave it stuck.
                     Settled(session.Id);
-                    Answered(resume.TaskId, session.Id, answer.CutOff, answer.Result, at);
+                    Answered(resume.TaskId, session.Id, answer.CutOff, answer.Result);
                     Drain();
                 },
                 error =>
@@ -711,20 +711,20 @@ public sealed class ClaudeSessions : IDisposable
             .GetValueOrDefault(false)
         && lastLive.All(agent => agent.SessionId != resume.Session.Id);
 
-    void Answered(Guid taskId, string sessionId, bool cutOff, Result<string> result, DateTimeOffset at)
+    void Answered(Guid taskId, string sessionId, bool cutOff, Result<string> result)
     {
         if (result.IsSuccess)
         {
-            Say(taskId, cutOff
-                ? $"Resumed by Deskbar at {Clock(at)}, its last turn was cut off, so it was told to continue."
-                : $"Resumed by Deskbar at {Clock(at)}.");
+            // The thread's header already names Deskbar and the time (task aa42794f, "too much bla bla"), so the line
+            // says only what happened.
+            Say(taskId, cutOff ? "Resumed. Its last turn was cut off, so it was told to continue." : "Resumed.");
             return;
         }
 
         // Review Focus 4, Ruling 10: an untrusted folder or a missing `claude`. Claude's own words go to the thread, and
         // the task waits on Petre with the sticky ResumeFailed question, so the keeper tries nothing more until he acts;
         // remembered as given up, so the ledger forgets the session once he has (ForgetAnswered).
-        Say(taskId, $"Deskbar could not resume this session at {Clock(at)}:\n\n{result.Error}");
+        Say(taskId, $"Could not resume this session:\n\n{result.Error}");
         tasks.Ask(taskId, SessionKeeper.ResumeFailed)
             .Tap(() => givenUp = givenUp.Add(sessionId))
             .TapError(e => trace?.Invoke($"claude sessions: failed resume not asked on {taskId}: {e}"));
@@ -734,7 +734,6 @@ public sealed class ClaudeSessions : IDisposable
         tasks.Note(taskId, markdown)
             .TapError(e => trace?.Invoke($"claude sessions: no comment on {taskId}: {e}"));
 
-    static string Clock(DateTimeOffset at) => at.ToLocalTime().ToString("HH:mm");
 
     static IReadOnlyList<string> ResumeArguments(string sessionId, bool cutOff) =>
         cutOff ? ["--bg", "--resume", sessionId, ContinueMessage] : ["--bg", "--resume", sessionId];

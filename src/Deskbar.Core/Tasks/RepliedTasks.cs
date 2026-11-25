@@ -81,10 +81,24 @@ public static class RepliedTasks
         || task.Sessions.Any(s => s.IsLive && prompted.TryGetValue(s.Id, out var at) && at > since);
 
     /// <summary>
-    /// Deskbar's line in the thread when it sets a question aside: when, why, and the question itself as a quote, so the
-    /// thread still says what was asked once the line under the title no longer does.
+    /// How Deskbar's set-aside line opens. TaskComment.IsSetAsideNote finds the line by it, so TaskBoard can fold it once
+    /// the question it reports on is settled or back on the line.
     /// </summary>
-    public static string Note(string question, DateTimeOffset at) =>
-        $"Deskbar set the question aside at {at.ToLocalTime():HH:mm}: Claude is working on the task again after your reply. The question was:\n\n"
-        + string.Join("\n", question.Split('\n').Select(line => $"> {line.TrimEnd('\r')}"));
+    public const string NoteOpening = "Set aside while Claude works on your reply:";
+
+    /// <summary>
+    /// The opening of the same line before task aa42794f shortened it ("too much bla bla"), so the lines already in
+    /// tasks.json fold too.
+    /// </summary>
+    public const string OldNoteOpening = "Deskbar set the question aside at ";
+
+    /// <summary>
+    /// Deskbar's line in the thread when it sets a question aside: why, and the question itself as a quote, so the thread
+    /// still says what was asked once the line under the title no longer does. Short on purpose (task aa42794f, Petre:
+    /// "too much bla bla"): the thread's header already says Deskbar wrote it and at what time, so the line repeats
+    /// neither. TaskBoard folds it once it no longer matters (FoldSetAsideNotes).
+    /// </summary>
+    public static string Note(string question) =>
+        $"{NoteOpening}\n\n"
+        +string.Join("\n", question.Split('\n').Select(line => $"> {line.TrimEnd('\r')}"));
 }

@@ -435,7 +435,7 @@ public sealed class ClaudeTaskActions : IDisposable
             OfferInstall(taskId, folder, error);
             return;
         }
-        Say(taskId, $"Deskbar could not start a Claude session in {folder}:\n\n{error}");
+        Say(taskId, $"Could not start a Claude session in {folder}:\n\n{error}");
         if (!error.Contains("not trusted", StringComparison.OrdinalIgnoreCase))
         {
             seams.Tell($"Deskbar could not start a Claude session in {folder}:\n\n{error}");
@@ -482,7 +482,7 @@ public sealed class ClaudeTaskActions : IDisposable
     {
         if (!seams.OfferInstall($"Claude Code is not installed on this computer, so Deskbar could not start a session in {folder}.\n\n{InstallQuestion}"))
         {
-            Say(taskId, $"Deskbar could not start a Claude session in {folder}:\n\n{error}");
+            Say(taskId, $"Could not start a Claude session in {folder}:\n\n{error}");
             return;
         }
         Current(taskId).Tap(task => Launch(task.WorkspaceId, ClaudeStart.InstallWindow(folder), ClaudeStart.InstallConsole(folder))

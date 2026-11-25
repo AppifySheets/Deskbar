@@ -314,7 +314,7 @@ public sealed class TaskService(ITaskStore store, Func<DateTimeOffset> now, Func
         RepliedTasks.SetAside(Board, working, prompted).ToList().ForEach(found =>
         {
             var at = now();
-            var next = Board.SetQuestionAside(found.TaskId, found.Question, RepliedTasks.Note(found.Question, at), at, makeId());
+            var next = Board.SetQuestionAside(found.TaskId, found.Question, RepliedTasks.Note(found.Question), at, makeId());
             if (ReferenceEquals(next, Board)) return;
             trace?.Invoke($"tasks: set the question of {Line(next, found.TaskId)} aside, its session works on it again after a reply");
             Commit(next);

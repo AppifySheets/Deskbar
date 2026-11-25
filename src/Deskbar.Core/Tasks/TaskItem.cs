@@ -97,6 +97,15 @@ public sealed record TaskComment(Guid Id, Maybe<string> SessionId, DateTimeOffse
     /// <summary>The manager session wrote it: not the user's (no Edit), not a task session's (it settles no question).</summary>
     public bool ByManager => SessionId.HasValue && SessionId.Value == ManagerAuthor;
 
+    /// <summary>
+    /// Deskbar's line saying it set a question aside (RepliedTasks.Note), in today's wording or the longer one before
+    /// task aa42794f. TaskBoard folds these once the question is settled or back on the line, when they say nothing new.
+    /// </summary>
+    public bool IsSetAsideNote =>
+        ByDeskbar
+        && (Markdown.StartsWith(RepliedTasks.NoteOpening, StringComparison.Ordinal)
+            || Markdown.StartsWith(RepliedTasks.OldNoteOpening, StringComparison.Ordinal));
+
     /// <summary>A task's Claude session wrote it (not Deskbar, not the manager).</summary>
     public bool BySession => SessionId.HasValue && !ByDeskbar && !ByManager;
 
