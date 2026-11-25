@@ -182,6 +182,19 @@ public static class HiddenDesktop
 $root = Split-Path -Parent $PSScriptRoot
 $log = Join-Path ([IO.Path]::GetTempPath()) "deskbar-test-hidden-$PID.log"
 
+# Stop at once if the session's USER atom table is full. Every window class name in the session comes from that one
+# table, on every desktop, so a hidden desktop does not escape it, and when it is full RegisterClassEx fails with
+# error 8, "Not enough memory resources", inside WPF's HwndWrapper. On 2026-11-25 that made every run fail 197 of
+# 219 tests with a message that pointed at the desktop heap, and an hour went into measuring the wrong thing
+# (Deskbar task 4d419051, docs/superpowers/notes/2026-11-25-user-atom-table-full.md). The check registers 100
+# classes for a moment and releases them; only a full table stops the run.
+$atoms = & (Join-Path $PSScriptRoot 'user-atoms.ps1') -Probe 100 -Top 0
+if ($atoms -match '^FULL') {
+    $atoms | Select-Object -First 4 | ForEach-Object { Write-Host $_ }
+    Write-Host 'Not running the tests: they would fail creating windows. Sign out or reboot, then run again.'
+    exit 1
+}
+
 # Build on the visible desktop first, so the compiler server and MSBuild nodes start here and not on the hidden
 # desktop (see the description). `dotnet build` opens no windows. It gets what it shares with `dotnet test` out
 # of $Arguments: the project or solution (the first word that is not an option) and the configuration (-c or
