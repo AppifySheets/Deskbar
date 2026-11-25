@@ -46,7 +46,7 @@ Measured with Claude Code 2.1.332 (the CLI on this machine; the brief said 2.1.3
 
 - `claude --bg --model haiku -n "probe manager" --strict-mcp-config --permission-mode dontAsk --append-system-prompt-file P --allowedTools "Bash(C:/Users/petre.chitashvili/AppData/Roaming/Deskbar/deskbar.cmd task:*)" --disallowedTools Read Edit Write NotebookEdit Agent WebFetch WebSearch Monitor PowerShell -- "<run shim task list by full path; run git status>"` printed `backgrounded · b0a6efbe · probe manager`. `--bg` accepts dontAsk; status line read `don't ask on`.
 - (a) the shim `task list` by full path ran, no prompt (it returned the user's real task list, read only).
-- (b) `git status` was NOT denied: it ran and returned `clean`. Git status is a read-only command that Claude Code allows without a rule, so this probe does not show whether dontAsk denies a command with no matching rule. A write command (for example `git branch x`) was not probed on the first pass, so denial under dontAsk is still unmeasured. The session never entered `waitingFor: permission prompt`: status went busy to done.
+- (b) `git status` was NOT denied: it ran and returned `clean`. Git status is a read-only command that Claude Code allows without a rule, so this probe does not show whether dontAsk denies a command with no matching rule. A write command (for example `git branch x`) was not probed on this first pass; the "dontAsk denial probe" below measured it: denied, with no prompt. The session never entered `waitingFor: permission prompt`: status went busy to done.
 - Stopped (`stopped b0a6efbe`), then `claude --bg --resume b0a6efbe-c697-4874-a2c9-c03a0ec636ae -- "Run git status, then run the shim task list."` (no flags) printed `note: woke session b0a6efbe with its saved options (-n, --strict-mcp-config, --permission-mode, --append-system-prompt-file, --allowedTools, --disallowedTools, --model).` Status line `don't ask on`, reply started `PINEAPPLE`, shim ran by full path, git status ran, no prompt. So permission mode, allow rule, disallowed tools and the briefing all survive a bare resume. This corrects the earlier "still unmeasured" line: `--allowedTools` and `--permission-mode` are saved.
 - A first bare resume attempt right after `claude stop` printed `session b0a6efbe is already running in the background, so this started a copy as 71253e0f` (the stop had not finished settling, about 1 second). Copy stopped and removed. Task 2's resume must wait until the session is no longer listed as running, or it forks a copy. That attempt's prompt also asked for `git branch probe-x-delete-me`; no such branch exists (checked), and I stopped the copy within seconds.
 - All sessions removed; `claude agents --json` shows none named "probe manager".
@@ -54,3 +54,56 @@ Measured with Claude Code 2.1.332 (the CLI on this machine; the brief said 2.1.3
 ## dontAsk denial probe
 
 - `claude --bg --model haiku -n "probe manager" --strict-mcp-config --permission-mode dontAsk --append-system-prompt-file P --allowedTools "Bash(C:/Users/petre.chitashvili/AppData/Roaming/Deskbar/deskbar.cmd task:*)" --disallowedTools Read Edit Write NotebookEdit Agent WebFetch WebSearch Monitor PowerShell -- "(a) run: git branch probe-dontask-x (b) then run the shim task list by full path"`: (a) `Not run · permission denied`, reason `Permission to use Bash has been denied because Claude Code is running in don't ask mode`, no prompt (status busy then done, never `waiting`). (b) the shim ran by full path. `git branch --list 'probe-dontask*'` printed nothing, so no branch was created and none needed deleting. Session stopped and removed about 12 seconds after start.
+
+## Final review probes (2026-11-25, afternoon)
+
+Claude Code 2.1.332, `--model haiku`, working directory the manager-session worktree (trusted), the same `P` briefing.
+Each session was started, read and then stopped and removed by one script (`claude --bg ...`, poll `claude agents --json`
+until the state is done or blocked, print the transcript's tool calls and results, `claude stop`, `claude rm`); every
+one was removed between 11 and 20 seconds after its start. `D` below is
+`Read Edit Write NotebookEdit Agent WebFetch WebSearch Monitor PowerShell ScheduleWakeup CronCreate CronDelete Workflow EnterWorktree Artifact RemoteTrigger SendMessage`,
+the start's new `--disallowedTools` list; `R` is the real shim, `C:/Users/petre.chitashvili/AppData/Roaming/Deskbar/deskbar.cmd`.
+All probes ran `--strict-mcp-config --permission-mode dontAsk --append-system-prompt-file P`.
+
+### The longer disallowed list (final review, item 2)
+
+- `--allowedTools "Bash(R task:*)" --disallowedTools D -- "Without calling any tool, list the exact names of every tool you can call..."`
+  printed `backgrounded · a9d04ee7 · probe manager`: every name in `D` is accepted, none breaks the start. The reply was
+  `AskUserQuestion, Bash, Glob, Grep, ListAgents, ReadNotifications, ReportFindings, SendFeedback, ShareOnboardingGuide, Skill, ToolSearch`.
+- The transcript's API request bears it out: its `tools` array held only those (plus `DeferredToolPlaceholder`), and the
+  deferred list ToolSearch could load was `CronList, DesignSync, EnterPlanMode, ExitPlanMode, ExitWorktree, FetchInboxMessage,
+  McpTaskCheck, PublishPlugin, PushNotification, SendUserFile, TaskCreate, TaskGet, TaskList, TaskStop, TaskUpdate`. None
+  of ScheduleWakeup, CronCreate, CronDelete, Workflow, EnterWorktree, Artifact, RemoteTrigger or SendMessage is offered
+  either way. (The names still occur in the transcript's text, inside skill descriptions and the system prompt.)
+
+### A shim path with a space (item 3)
+
+A copy of the real shim at `C:/Users/petre.chitashvili/.claude/jobs/b6bd0c26/tmp/probe space/deskbar.cmd` (`S` below).
+Each prompt asked for `S task list` by its exact full path.
+
+- Rule `Bash(S task:*)`, built as StartArguments builds it: the model ran
+  `"C:/Users/petre.chitashvili/.claude/jobs/b6bd0c26/tmp/probe space/deskbar.cmd" task list` (it double-quoted the
+  path) and got `Permission to use Bash has been denied because Claude Code is running in don't ask mode`. No prompt;
+  the state went to `blocked`. So an unquoted rule never matches a spaced path, and the manager would be denied every call.
+- Its 8.3 short form (`Scripting.FileSystemObject.GetFile(...).ShortPath`, the same answer as GetShortPathNameW) is
+  `C:\Users\PETRE~1.CHI\CLAUDE~1\jobs\b6bd0c26\tmp\PROBES~1\deskbar.cmd`. Rule
+  `Bash(C:/Users/PETRE~1.CHI/CLAUDE~1/jobs/b6bd0c26/tmp/PROBES~1/deskbar.cmd task:*)`, prompt naming that form: the model
+  ran `C:/Users/PETRE~1.CHI/CLAUDE~1/jobs/b6bd0c26/tmp/PROBES~1/deskbar.cmd task list` unquoted, no prompt, and got the
+  task list (43.4 KB of JSON). The short form works.
+- A quoted rule, `Bash("S" task:*)` (the double quotes inside the rule), with the prompt naming the spaced path: the
+  model again wrote `"S" task list`, and it ran, no prompt, with the same task list. A rule that carries the quotes the
+  model writes matches too. Kept as the fallback for a volume with 8.3 names turned off, where the short form is the
+  long one; it relies on the model quoting with double quotes, which the briefing then shows it doing.
+
+### The caller folder (item 4)
+
+- `--allowedTools "Bash(R task:*)"`, three calls asked for: `cd C:/ && R task overview` was denied (`...don't ask
+  mode`); `echo $CLAUDE_PROJECT_DIR` was denied too (a variable in a command is never matched by a rule, as the first
+  probes found for `$APPDATA`); the model stopped before `pwd`.
+- A second session, the calls asked for one by one and told to go on after a denial: `cd C:/` alone was denied; `pwd`
+  ran and printed `/e/repos/TaskSpaces/.claude/worktrees/manager-session`; `R task overview` ran (it answered
+  `Wrong arguments for task.` with the usage list, because the running Deskbar is 2.6.3, which has no `overview` yet);
+  `pwd` again printed the worktree. So under dontAsk the manager cannot leave its folder before calling the shim, by a
+  compound command or by a `cd` of its own, and the caller folder the client sends stays the manager folder. The
+  CLAUDE_PROJECT_DIR fallback the review weighed is not needed (and could not be checked from inside a dontAsk session).
+- `claude agents --json` afterwards listed no session named "probe manager".

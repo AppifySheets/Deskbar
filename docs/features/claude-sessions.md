@@ -117,6 +117,12 @@ The first time Deskbar changes `settings.json` it keeps the original as `setting
 
 Untick **Teach Claude Code about Deskbar**, or run `deskbar.cmd claude-skill off`, and the skill and all of Deskbar's own hooks are removed. Your other hooks stay as they are.
 
+## The manager session
+
+The **Manager** button, at the end of the row under the bar's task box, opens a background Claude session that looks after the whole board rather than one task. Ask it what needs you or what is stuck, or tell it what to pass on. It reads the board with `task overview` and `task show`, and it acts only through `deskbar.cmd task` commands. A comment it leaves on a task wakes that task's idle session. When it passes on your answer to a session waiting on you, it quotes you after "The user says:", and only those words count as yours. It cannot close, delete or finish a task, or edit or settle a comment: those are yours, and it says so and asks you. It runs on Fable, has no file, web or timer tools, and does nothing until you write to it.
+
+There is one manager a day. A click opens a window on it, on the workspace you are on, and brings that window forward when it is already open. When it has ended, the click resumes it. The next day a click stops yesterday's (unless it is still in the middle of a reply) and starts a new one. It runs in a folder of its own, `%APPDATA%\Deskbar\manager`, so it never counts as a task's session and is never adopted as one. The first start on a machine finds that folder untrusted, and Deskbar offers a terminal there for you to accept Claude Code's trust prompt; click **Manager** again once you have. Like **Start Claude on this**, it needs **Claude Code sessions keep their tasks in the task list**.
+
 ## From a script
 
 A session that has just set up a git worktree can give it a workspace and move the editor there:
@@ -146,6 +152,14 @@ The double-click, "Start Claude on this" and a thread's Open have script forms t
 & $ts task go <id>
 & $ts task start <id> --folder C:\src\login
 & $ts task open-session <id> <session id or short id>
+```
+
+The [manager session](#the-manager-session) has a script form too, and so does its view of the board:
+
+```powershell
+& $ts task manager          # what the Manager button does
+& $ts task overview         # one line per open task
+& $ts task show <id>        # one task in full, thread included
 ```
 
 A session's own task forms carry `--session` with the session's id, which the start-of-session message gives it. Every form but `join`, `new` and `later` acts only on that session's own task.
