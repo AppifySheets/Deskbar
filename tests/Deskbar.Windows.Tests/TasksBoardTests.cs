@@ -4733,6 +4733,52 @@ public class TasksBoardTests
         Assert.True(HasButtonNamed(t.Window, "Subtask Write the notes"));
     });
 
+    // Task b0526e18 (Petre: "i can't interact with the subtask. i should be able to"): with "Subtasks" unticked the
+    // subtask is folded into its parent, so the thread's subtask link used to pick a line that was not drawn and nothing
+    // happened. Now the picked subtask is drawn under its parent with its own thread open, and folds again once
+    // another task is picked.
+    [Fact]
+    public void A_folded_subtask_opened_from_its_parents_thread_is_drawn() => StaThread.Run(() =>
+    {
+        var selection = new TaskSelection();
+        using var t = Build(selection: selection);
+        var parent = t.Tasks.AddNote("Ship the release", t.Gepha).Value.Id;
+        var child = t.Tasks.AddNote("Write the notes", t.Gepha, Quadrant.IV, parent).Value.Id;
+        t.Controller.Show();
+        Click(ButtonNamed(t.Window, "Subtasks"));
+        Assert.Equal([parent], t.Window.Keys);
+        t.Controller.ToggleThread(parent);
+
+        Click(ButtonNamed(t.Window, "Subtask Write the notes"));
+
+        Assert.Equal(child, selection.Current.Value);
+        Assert.Equal([parent, child], t.Window.Keys);
+        // The subtask's own thread is open: it names its parent.
+        Assert.True(HasButtonNamed(t.Window, "Parent Ship the release"));
+
+        t.Controller.Pick(parent);
+        Assert.Equal([parent], t.Window.Keys);
+    });
+
+    // A closed subtask is listed in its parent's thread too, and the Open filter hides it: the link lets it past the
+    // filter, as "Subtask of" does for a parent (TasksBoard.ShowTaskPastFilters), so its line shows with its thread open.
+    [Fact]
+    public void A_closed_subtask_opened_from_its_parents_thread_is_let_past_the_filter() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var parent = t.Tasks.AddNote("Ship the release", t.Gepha).Value.Id;
+        var child = t.Tasks.AddNote("Write the notes", t.Gepha, Quadrant.IV, parent).Value.Id;
+        t.Tasks.Close(child);
+        t.Controller.Show();
+        t.Controller.ToggleThread(parent);
+        Assert.DoesNotContain(child, t.Window.Keys);
+
+        Click(ButtonNamed(t.Window, "Subtask Write the notes"));
+
+        Assert.Contains(child, t.Window.Keys);
+        Assert.True(HasButtonNamed(t.Window, "Parent Ship the release"));
+    });
+
     [Fact]
     public void A_plain_tasks_thread_names_no_parent() => StaThread.Run(() =>
     {
