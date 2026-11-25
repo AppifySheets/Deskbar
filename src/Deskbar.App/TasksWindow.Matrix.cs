@@ -38,9 +38,10 @@ public partial class TasksWindow
     const string StrongTag = "matrix-strong";
 
     // The compact columns of a Matrix line: tick, title, flags, (no status chip, no sessions, no assignee, no age), chip, comments, (no action), "…".
-    // 178 DIP of fixed columns, so a line in a cell keeps a title of 100 DIP or more at 780 DIP (TasksPanelLayout.MatrixFrom).
+    // 180 DIP of fixed columns, so a line in a cell keeps a title of 100 DIP or more at 780 DIP (TasksPanelLayout.MatrixFrom).
+    // The flags column is two toggles' width with their borders (CompactFlagsColumn, task 735abbf5; it was 34, 2 short).
     static readonly IReadOnlyList<GridLength> CompactColumns =
-        [new(22), new(1, GridUnitType.Star), new(34), new(0), new(0), new(0), new(0), new(64), new(34), new(0), new(24)];
+        [new(22), new(1, GridUnitType.Star), new(CompactFlagsColumn), new(0), new(0), new(0), new(0), new(64), new(34), new(0), new(24)];
 
     // THE WINDOW USED TO GROW FOR THE MATRIX HERE (FitWidthToView, GrowForMatrix, GiveBackListWidth, listNormal,
     // grownNormal, ListMinWidth and MatrixMinWidth as the window's MinWidth): two cells side by side need about 780 DIP,
