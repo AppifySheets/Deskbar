@@ -258,6 +258,30 @@ public class SubtaskOrderTests
         Assert.Equal(new[] { child.Id, grandchild.Id }.ToHashSet(), family.ToHashSet());
     }
 
+    // Task 4c01747c, Petre's second screenshot: "↳ test" stayed on the bar under a parent assigned to Claude. The bar
+    // folds every open subtask whose parent is open, awake or snoozed, whoever it is assigned to; one under a closed
+    // parent (even one whose own parent is open: a hand-edited file), or a missing one, is left out (nothing would show
+    // it otherwise).
+    [Fact]
+    public void The_bar_folds_every_open_subtask_under_an_open_parent()
+    {
+        var claudes = Task("Claude's parent") with { Assignee = Assignee.Claude };
+        var test = Task("test", claudes.Id);
+        var snoozed = Task("Snoozed") with { SnoozedUntil = At.AddDays(1) };
+        var deep = Task("Deep", test.Id);
+        var underSnoozed = Task("Under snoozed", snoozed.Id);
+        var closed = Task("Closed", status: TaskStatus.Closed);
+        var underClosed = Task("Under closed", closed.Id);
+        var closedMiddle = Task("Closed middle", claudes.Id, TaskStatus.Closed);
+        var underClosedMiddle = Task("Under closed middle", closedMiddle.Id);
+        var orphan = Task("Orphan", Guid.NewGuid());
+
+        var folded = TaskViews.UnderOpenParent(new TaskBoard(
+            [claudes, test, snoozed, deep, underSnoozed, closed, underClosed, closedMiddle, underClosedMiddle, orphan]));
+
+        Assert.Equal(new[] { test.Id, deep.Id, underSnoozed.Id }.ToHashSet(), folded.ToHashSet());
+    }
+
     // A loop in the parent ids (a hand-edited tasks.json) ends the walk instead of hanging.
     [Fact]
     public void A_loop_in_the_parents_ends_the_walk()
