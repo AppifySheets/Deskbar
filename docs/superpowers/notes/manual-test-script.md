@@ -517,7 +517,9 @@ throwaway folder Claude Code trusts, and tracing on for the `claude actions:` an
 
 90. Right-click a note on a workspace whose tasks have sessions in the throwaway folder: the menu reads Edit, then
     "Start Claude on this". The tasks panel's "⋯" menu has it in the same place, and an open thread has a
-    "Start Claude on this" button above the comments. A closed task has neither.
+    "Start Claude on this" button above the comments. A closed task has neither. A task that already has a session
+    has "Open Claude" in that place on both menus and no "Start Claude on this" there (task b6f068b1: one Claude item
+    per menu); its open thread still has the button.
 91. Pick "Start Claude on this" on a note whose workspace knows exactly one folder: no question, no list. Within a few
     seconds a Windows Terminal window titled "<the note's title> · Claude" opens on the note's workspace, in the Deskbar
     Claude look, attached to a session that is already working on the note (its first message names the task). The
@@ -526,8 +528,8 @@ throwaway folder Claude Code trusts, and tracing on for the `claude actions:` an
 92. On a note whose workspace knows two folders (tasks with sessions in two repos, or a VS Code window on a second
     repo that some session also used): a short list of the folders opens at the pointer, ending with
     "Choose a folder…". "Choose a folder…" opens Windows' folder picker; cancelling it starts nothing.
-93. "Start Claude on this" on a task whose session is still running asks "This task already has a Claude session
-    running. Start another one?". No starts nothing.
+93. The thread's "Start Claude on this" button on a task whose session is still running asks "This task already has
+    a Claude session running. Start another one?". No starts nothing.
 94. Close the terminal window from 91 (its X). `claude agents` still lists the session, and the task still shows it.
     Double-click the task's line: you go to its workspace and a new terminal window attaches to the same session.
     Double-click again while it is open: that same window comes to the front, and no second window opens (a second

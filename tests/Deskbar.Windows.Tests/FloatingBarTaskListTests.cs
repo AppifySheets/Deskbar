@@ -3216,6 +3216,8 @@ public class FloatingBarTaskListTests
     // Task 7f61af2e (Petre: "make it possible to open claude without opening the task first"): a Claude line's menu has
     // "Open Claude" right after Edit. It goes where the double-click goes (GoToTask), once the menu has closed, and the
     // tasks panel never opens on the way: no single click on the line was made. A note's menu has no such item.
+    // Task b6f068b1 (Petre: "open claude and start claude , no need for both"): the menu has ONE Claude item, so a Claude
+    // task's has no "Start Claude on this" and a note's has no "Open Claude".
     [Fact]
     public void Open_Claude_on_the_bar_menu_goes_without_opening_the_task() => StaThread.Run(() =>
     {
@@ -3232,7 +3234,7 @@ public class FloatingBarTaskListTests
 
         var menu = t.Bar.OpenTaskLineMenu(id)!;
         var items = menu.Items.OfType<MenuItem>().ToList();
-        Assert.Equal(["Edit", "Open Claude", "Start Claude on this"], items.Take(3).Select(i => ((TextBlock)i.Header).Text));
+        Assert.Equal(["Edit", "Open Claude", "Add subtask…"], items.Take(3).Select(i => ((TextBlock)i.Header).Text));
         items[1].RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
         menu.IsOpen = false;
         // Run once the menu has closed (an Input-priority dispatch): a lower priority runs after it.
@@ -3242,6 +3244,7 @@ public class FloatingBarTaskListTests
 
         var noteMenu = t.Bar.OpenTaskLineMenu(note)!;
         Assert.DoesNotContain(noteMenu.Items.OfType<MenuItem>(), i => i.Header is TextBlock { Text: "Open Claude" });
+        Assert.Contains(noteMenu.Items.OfType<MenuItem>(), i => i.Header is TextBlock { Text: "Start Claude on this" });
         noteMenu.IsOpen = false;
     });
 
