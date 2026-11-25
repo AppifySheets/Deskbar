@@ -1540,6 +1540,12 @@ public partial class TasksWindow : Window
     /// <summary>The words of the menu item and the thread's button (Task 9).</summary>
     internal const string StartClaudeText = "Start Claude on this";
 
+    /// <summary>
+    /// A Claude task's menu item, on the bar and in this window, that goes to its session without opening the task first
+    /// (task 7f61af2e): what a double-click on the line does, minus the click that opens it.
+    /// </summary>
+    internal const string OpenClaudeText = "Open Claude";
+
     // One subtask in its parent's thread: "↳ title · status · status line", dim when it is done or closed. The whole line
     // is a button that shows the subtask (TasksBoard.ShowTask).
     UIElement SubtaskEntry(SubtaskView sub)
@@ -2041,6 +2047,13 @@ public partial class TasksWindow : Window
         if (row.Status != TaskStatus.Closed && !row.Closing)
         {
             menu.Items.Add(Item("Edit", () => BeginRename(id)));
+            // OPEN CLAUDE (task 7f61af2e; Petre: "make it possible to open claude without opening the task first"): the
+            // double-click's go (Actions.Go: the task's workspace, then its session's window) without the single click
+            // that picks the task and opens its thread first (Ruling 54). Only on a Claude task, which has a session to
+            // open; a note's go is a workspace switch. Run once this menu has closed, as the items below are, so the
+            // window it brings forward does not come up under an open menu.
+            if (row.Claudes)
+                menu.Items.Add(Item(OpenClaudeText, () => Dispatcher.BeginInvoke(() => Actions?.Go(id), System.Windows.Threading.DispatcherPriority.Input)));
             // Task 9: handing the task to Claude, right after Edit (the spec, "Where the clicks are"). Run once this menu
             // has closed: it may ask a question or open a pick list of folders at the pointer.
             if (Actions?.StartClaude is { } start)

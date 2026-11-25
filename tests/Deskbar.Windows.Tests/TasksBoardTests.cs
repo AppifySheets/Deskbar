@@ -3366,6 +3366,32 @@ public class TasksBoardTests
 
     // --- Task 9: a task's Claude sessions --------------------------------------------------------------------------
 
+    // Task 7f61af2e (Petre: "make it possible to open claude without opening the task first"): a Claude task's menu has
+    // "Open Claude" right after Edit, going where the double-click goes (goTo) once the menu has closed, without picking
+    // the task or opening its thread. A note's menu has no such item.
+    [Fact]
+    public void Open_Claude_on_the_window_menu_goes_without_opening_the_thread() => StaThread.Run(() =>
+    {
+        using var t = Build(startClaude: _ => { });
+        var id = t.Tasks.Create("Tasks redesign", Maybe<Guid>.None, Session("s1")).Value.Id;
+        var note = t.Tasks.AddNote("Dishwasher tablets", t.Gepha).Value.Id;
+        t.Controller.Show();
+
+        var menu = t.Window.OpenMenuFor(id, atPointer: true);
+        var items = menu.Items.OfType<MenuItem>().ToList();
+        Assert.Equal(["Edit", "Open Claude", "Start Claude on this"], items.Take(3).Select(i => ((TextBlock)i.Header).Text));
+        items[1].RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+        menu.IsOpen = false;
+        // Run once the menu has closed (an Input-priority dispatch): a lower priority runs after it.
+        t.Window.Dispatcher.Invoke(() => { }, System.Windows.Threading.DispatcherPriority.ApplicationIdle);
+        Assert.Equal([id], t.WentTo);
+        Assert.False(t.Window.ThreadShown(id));
+
+        var noteMenu = t.Window.OpenMenuFor(note);
+        Assert.DoesNotContain(noteMenu.Items.OfType<MenuItem>(), i => i.Header is TextBlock { Text: "Open Claude" });
+        noteMenu.IsOpen = false;
+    });
+
     // Spec, "Where the clicks are": "Start Claude on this" on the line's menu right after Edit, and as a button in the
     // task's thread. Both reach the App's ClaudeTaskActions.Offer through `startClaude`, the menu's once the menu closed.
     [Fact]

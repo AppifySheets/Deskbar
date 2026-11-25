@@ -3081,6 +3081,38 @@ public class FloatingBarTaskListTests
         plainMenu.IsOpen = false;
     });
 
+    // Task 7f61af2e (Petre: "make it possible to open claude without opening the task first"): a Claude line's menu has
+    // "Open Claude" right after Edit. It goes where the double-click goes (GoToTask), once the menu has closed, and the
+    // tasks panel never opens on the way: no single click on the line was made. A note's menu has no such item.
+    [Fact]
+    public void Open_Claude_on_the_bar_menu_goes_without_opening_the_task() => StaThread.Run(() =>
+    {
+        var went = new List<Guid>();
+        var opened = new List<Guid>();
+        using var t = Build(goTo: id =>
+        {
+            went.Add(id);
+            return Result.Success();
+        }, openTask: opened.Add, startClaude: _ => null);
+        var id = t.Tasks.Create("Tasks redesign", t.Gepha, Session("s1")).Value.Id;
+        t.Tasks.MarkDone(id); // Done: a Claude task shows on the bar while it needs him (Ruling 48)
+        var note = t.Tasks.AddNote("Dishwasher tablets", t.Gepha).Value.Id;
+
+        var menu = t.Bar.OpenTaskLineMenu(id)!;
+        var items = menu.Items.OfType<MenuItem>().ToList();
+        Assert.Equal(["Edit", "Open Claude", "Start Claude on this"], items.Take(3).Select(i => ((TextBlock)i.Header).Text));
+        items[1].RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+        menu.IsOpen = false;
+        // Run once the menu has closed (an Input-priority dispatch): a lower priority runs after it.
+        t.Bar.Dispatcher.Invoke(() => { }, System.Windows.Threading.DispatcherPriority.ApplicationIdle);
+        Assert.Equal([id], went);
+        Assert.Empty(opened);
+
+        var noteMenu = t.Bar.OpenTaskLineMenu(note)!;
+        Assert.DoesNotContain(noteMenu.Items.OfType<MenuItem>(), i => i.Header is TextBlock { Text: "Open Claude" });
+        noteMenu.IsOpen = false;
+    });
+
     // --- subtasks (docs/superpowers/specs/2026-11-24-subtasks-design.md, "Making subtasks", Petre's pick A) ----------
 
     // The parent chip in the add box, found by its tag; collapsed while the box adds a plain note.
