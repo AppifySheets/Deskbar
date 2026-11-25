@@ -1114,6 +1114,10 @@ TW7. Move and resize the window, close it, open another task's window: it opens 
 TW8. With one task window open, open a second task: the second opens a little down and to the right of the first.
 TW9. A subtask in the side column opens in a window of its own. "Delete for good" from the window's "⋯" menu closes
      the window with the task.
+TW10. (Task e91f8aa5.) Have a session ask a question of ten lines or more, on a task whose description is long too. Open
+     its line in the panel: the question and the description each stop after four lines, cut between two lines, and
+     "Show all in window" sits under them. Click it: the task's window opens with both in full. A link inside the four
+     lines of the question still opens in the browser. A task with a one-line question has no "Show all in window".
 
 ## The narrow panel's titles
 

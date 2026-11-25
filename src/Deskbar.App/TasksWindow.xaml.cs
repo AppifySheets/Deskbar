@@ -1380,6 +1380,8 @@ public partial class TasksWindow : Window
     {
         var panel = new StackPanel { Margin = new Thickness(2, 0, 8, 0), VerticalAlignment = VerticalAlignment.Center };
         var below = new StackPanel { Margin = new Thickness(2, 0, 4, 0) };
+        // The caps around an open line's description and question (Capped), for the "Show all in window" link under them.
+        var caps = new List<HeightCap>();
         if (renaming == row.Id)
         {
             renameBox = RenameBox(row);
@@ -1465,16 +1467,80 @@ public partial class TasksWindow : Window
             if (row.Description.Length > 0 && row.Expanded)
             {
                 var parts = TaskImages.Split(row.Description);
-                if (parts.Text.Length > 0) below.Children.Add(DescriptionBlock(row));
+                if (parts.Text.Length > 0) below.Children.Add(Capped(DescriptionBlock(row), caps));
                 if (TaskImageRow.Of(StateDir, parts.Images, OpenImage) is { } pictures) below.Children.Add(pictures);
             }
         }
         // THE DETAIL: the question while the task waits on Petre, else its status line. Cut to one line on a closed line,
-        // IN FULL ON AN OPEN ONE, as the description is: a session's question was readable nowhere in full (Petre,
+        // wrapped on an open one, as the description is: a session's question was readable nowhere in full (Petre,
         // 2026-11-24, of a question cut at "Add an "O…" with its thread open: "where's the question?"). Tagged for tests.
-        if (row.Detail.Length > 0) below.Children.Add(DetailText(row));
+        if (row.Detail.Length > 0) below.Children.Add(row.Expanded ? Capped(DetailText(row), caps) : DetailText(row));
+        // "Show all in window" under what was cut (task e91f8aa5). Only while something is: a short question and
+        // description show whole, as before, and need no link.
+        if (caps.Count > 0 && Actions?.OpenWindow is { } openWindow) below.Children.Add(ShowAllLink(row.Id, caps, openWindow));
         return (panel, below.Children.Count > 0 ? below : null);
     }
+
+    // AN OPEN LINE'S TEXT STOPS AT A FEW LINES (task e91f8aa5; Petre, of a waiting task whose nine-line Georgian question
+    // filled the panel: "limit how much can fit here. expanding should open a detailview"). The open line showed its
+    // question and its description in full since #466, because nothing else showed them; the task window (task dca4ebeb)
+    // now does, so the line keeps to OpenLineShown lines of each and "Show all in window" opens the window for the rest.
+    // Without a window to open (no Actions.OpenWindow) nothing is capped, or the rest could be read nowhere.
+    UIElement Capped(FrameworkElement text, List<HeightCap> caps)
+    {
+        if (Actions?.OpenWindow is null) return text;
+        // Lines of the text's own size in the window's font (the text inherits it, but only once it is in the tree), so
+        // the cut falls between two lines rather than through one. Both texts are 11 DIP today.
+        var size = text is TextBlock block ? block.FontSize : 11.0;
+        // A TextBlock's lines are all one height (measured, Georgian and emoji included), so lines times that height is a
+        // line's edge. The description's paragraphs are spaced, so its cut moves up to the top of the line it would split.
+        var cap = new HeightCap
+        {
+            Cap = Math.Ceiling(OpenLineShown * FontFamily.LineSpacing * size), Child = text, Tag = CappedTag,
+            EdgeOf = text is RichTextBox ? LineEdgeAbove : null,
+        };
+        caps.Add(cap);
+        return cap;
+    }
+
+    // The top of the description's line that a cut at `cap` would go through, or the cap when it falls between lines (in
+    // a paragraph's spacing, or past the text). The point is 1 DIP in from the left, where every line starts.
+    static double LineEdgeAbove(UIElement child, double cap)
+    {
+        if (child is not RichTextBox box) return cap;
+        var at = box.GetPositionFromPoint(new Point(1, cap), snapToText: true);
+        if (at is null) return cap;
+        var line = at.GetCharacterRect(LogicalDirection.Forward);
+        return line.Top < cap - 0.5 && line.Bottom > cap + 0.5 ? Math.Floor(line.Top) : cap;
+    }
+
+    // How many lines of an open line's question, and of its description, show before "Show all in window".
+    internal const int OpenLineShown = 4;
+
+    // The cap around an open line's question or description, so a test can find it and ask whether it cut anything.
+    internal const string CappedTag = "task-capped";
+
+    // The link under a cut question or description: dim, small, like a comment's "Show more", and it opens the task's
+    // window (TasksBoard.OpenWindow) rather than unfolding in place, since unfolding in place is what filled the panel.
+    // Collapsed until a layout pass finds a cap that cut something: the width, and so the wrapping, is known only then.
+    Button ShowAllLink(Guid id, IReadOnlyList<HeightCap> caps, Action<Guid> openWindow)
+    {
+        var link = Small(new TextBlock { Text = ShowAllText, Foreground = HeaderInk, FontSize = 10.5 }, ShowAllText,
+            () => openWindow(id), "Read the whole task in a window of its own");
+        link.Tag = ShowAllTag;
+        link.HorizontalAlignment = HorizontalAlignment.Left;
+        link.Margin = new Thickness(0, 1, 0, 0);
+        link.Visibility = Visibility.Collapsed;
+        link.LayoutUpdated += (_, _) =>
+        {
+            var wanted = caps.Any(cap => cap.Overflowing) ? Visibility.Visible : Visibility.Collapsed;
+            if (link.Visibility != wanted) link.Visibility = wanted;
+        };
+        return link;
+    }
+
+    internal const string ShowAllText = "Show all in window";
+    internal const string ShowAllTag = "task-show-all";
 
     // THE DETAIL'S TEXT, its links clickable (task 08cdb052, Petre: "when asking for action, prs should have links, or
     // artifacts; make that clickable"). A session asking for a merge names the pull request as a markdown link,
