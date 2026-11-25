@@ -66,13 +66,16 @@ the record, and Petre asked for lean tasks.
 
 ## The tasks panel
 
-- The thread of an open task lists "Duplicate of", "Duplicates" and "Related" lines above the comments, each title
-  clickable (selects that task, switching to the closed view when it is closed), each with a cross that removes the
-  link (on "Duplicate of" the cross reopens the task, since a duplicate is a close).
-- A closed duplicate's line says "Duplicate" where a closed task says "Closed".
-- The line menu gets "Duplicate of…" and "Related to…", opening the picker: a text box over a short list of tasks
-  matching the typed words (open first, then closed, the task itself and those already linked left out). Enter or a
-  click picks; Escape closes.
+- The thread of an open task lists "Duplicate of", "Duplicate" and "Related" lines above the comments, each title
+  clickable (shows that task, switching to the Closed filter when it is closed). Only a related line has a cross that
+  removes the link: a duplicate link goes by reopening the duplicate, which is that task's own Reopen.
+- A closed duplicate's line says "Duplicate of <title>" ahead of its detail and in its tooltip.
+- The line menu gets "Duplicate of…" (not on a task already a duplicate) and "Related to…", opening the picker in the
+  task's thread: a text box over the first eight tasks matching every typed word (open first, then closed; the task
+  itself, and duplicates or already related tasks, left out). Enter picks the first, a click any; Escape closes. A
+  refused pick keeps the picker open and the problem line says why. The picker is drawn inside the thread rather than
+  as a popup, because the panel never activates itself, and a box inside it takes the keyboard the way the comment box
+  does.
 
 ## Left out
 

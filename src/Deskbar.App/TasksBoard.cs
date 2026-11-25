@@ -271,6 +271,12 @@ public sealed class TasksBoard : IDisposable
             // "Subtask of" in a subtask's thread and "Open parent" in its line's menu (task 54b39c4c).
             OpenParent = OpenParent,
             ResizeColumns = ResizeColumns,
+            // Task links: the picker's candidates, and what a pick, a cross or the menu does.
+            LinkCandidates = (id, typed, duplicate) => tasks.Board.LinkCandidates(id, typed, duplicate).Take(LinkChoicesShown)
+                .Select(t => LinkView(t, duplicate ? TaskLinkKind.DuplicateOf : TaskLinkKind.Related)).ToArray(),
+            MarkDuplicate = (id, of) => Report(tasks.MarkDuplicate(id, of)).IsSuccess,
+            Relate = (id, other) => Report(tasks.Relate(id, other)).IsSuccess,
+            Unrelate = (id, other) => Report(tasks.Unrelate(id, other)),
         };
 
         // Taken before the subscriptions below exist, so the first StateChanged pulse is compared with this state
@@ -309,6 +315,10 @@ public sealed class TasksBoard : IDisposable
                 Refresh();
             }));
     }
+
+    // How many tasks the link picker lists under its box (task links): enough to find one by a word or two, few enough
+    // to stay inside the thread.
+    const int LinkChoicesShown = 8;
 
     // The width the panel last docked at, DIPs; None before its first dock (View falls back to the saved width then).
     Maybe<double> dockedWidth = Maybe<double>.None;
@@ -724,6 +734,10 @@ public sealed class TasksBoard : IDisposable
 
     public void ShowTask(Guid id)
     {
+        // A linked task in a thread can be closed (task links): show it under the Closed filter, and an open one away
+        // from it, or the click picks a task the panel does not draw.
+        tasks.Board.Tasks.TryFirst(t => t.Id == id).Tap(t =>
+            filter = !t.IsOpen ? TaskFilter.Closed : filter == TaskFilter.Closed ? TaskFilter.Open : filter);
         selection.Select(id);
         RevealPastSearch(id);
         Show();
@@ -1157,9 +1171,13 @@ public sealed class TasksBoard : IDisposable
         task.Id,
         task.Title,
         // A snoozed line (only the Snoozed filter shows one) says when it comes back, ahead of its usual detail.
+        // A closed duplicate (task links) says what it duplicates ahead of its usual detail, so the closed view tells it
+        // apart from a plain close at a glance.
         task.SnoozedUntil.Match(
             until => string.Join(" · ", new[] { $"Snoozed {TaskSnooze.UntilText(until.ToLocalTime(), now().ToLocalTime())}", FloatingBar.DetailOf(task) }.Where(part => part.Length > 0)),
-            () => FloatingBar.DetailOf(task)),
+            () => tasks.Board.DuplicateTarget(task).Match(
+                original => string.Join(" · ", new[] { $"{TaskViews.DuplicateName} of {FloatingBar.FirstLine(original.Title)}", FloatingBar.DetailOf(task) }.Where(part => part.Length > 0)),
+                () => FloatingBar.DetailOf(task))),
         task.Status,
         task.IsClaudes,
         SessionsText(task),
@@ -1197,7 +1215,25 @@ public sealed class TasksBoard : IDisposable
             ? tasks.Board.Family(task.Id).Map(f => f.Subtasks.Select(c => new SubtaskView(c.Id, FloatingBar.FirstLine(c.Title), c.Status, c.StatusLine)).ToArray())
                 .GetValueOrDefault([])
             : [],
+        // TASK LINKS (docs/superpowers/specs/2026-11-25-task-links-design.md): the original a closed duplicate names, for
+        // its status words, and while the thread is open the links it lists: what it duplicates, its duplicates and its
+        // related tasks.
+        DuplicateOfTitle = tasks.Board.DuplicateTarget(task).Map(o => (string?)FloatingBar.FirstLine(o.Title)).GetValueOrDefault(),
+        Links = expanded.Contains(task.Id) ? LinksOf(task) : [],
     };
+
+    // A task's links as its open thread lists them: the task it duplicates first, then its duplicates, then related tasks.
+    IReadOnlyList<TaskLinkView> LinksOf(TaskItem task) =>
+        tasks.Board.Links(task.Id).Match(links =>
+            links.DuplicateOf.ToList().Select(o => LinkView(o, TaskLinkKind.DuplicateOf))
+                .Concat(links.Duplicates.Select(d => LinkView(d, TaskLinkKind.Duplicate)))
+                .Concat(links.Related.Select(r => LinkView(r, TaskLinkKind.Related)))
+                .ToArray(),
+            () => Array.Empty<TaskLinkView>());
+
+    static TaskLinkView LinkView(TaskItem task, TaskLinkKind kind) =>
+        new(task.Id, FloatingBar.FirstLine(task.Title), task.IsDuplicate ? TaskViews.DuplicateName : TaskViews.StatusName(task.Status),
+            !task.IsOpen || task.Status == TaskStatus.Done, kind);
 
     // The mockup's sessions column: how many, and whether any is still live. Empty for a note.
     internal static string SessionsText(TaskItem task)
@@ -1375,7 +1411,22 @@ internal sealed record TaskRowView(Guid Id, string Title, string Detail, TaskSta
 
     /// <summary>The task's subtasks while its thread is open, for the thread's list; empty while closed.</summary>
     public IReadOnlyList<SubtaskView> Subtasks { get; init; } = [];
+
+    /// <summary>The first line of the task a closed duplicate names (task links), or null: its status reads "Duplicate".</summary>
+    public string? DuplicateOfTitle { get; init; }
+
+    /// <summary>The task's links while its thread is open (task links), for the thread's list; empty while closed.</summary>
+    public IReadOnlyList<TaskLinkView> Links { get; init; } = [];
 }
+
+/// <summary>How a linked task stands to the task whose thread lists it (task links).</summary>
+internal enum TaskLinkKind { DuplicateOf, Duplicate, Related }
+
+/// <summary>
+/// A linked task as a thread or the link picker lists it (task links): id, first line of its title, its status in words
+/// ("Duplicate" for a closed duplicate), whether it is finished (done or closed, drawn dim) and how it is linked.
+/// </summary>
+internal sealed record TaskLinkView(Guid Id, string Title, string Status, bool Finished, TaskLinkKind Kind);
 
 /// <summary>
 /// A goal as the "Goal" menu and the goal filter list it: its id (none for "None"), its title and its period's kind in
@@ -1559,6 +1610,21 @@ internal sealed record TasksWindowActions(
     /// dividers still resize the lines on show but nothing is kept.
     /// </summary>
     public Action<TaskColumnWidths>? ResizeColumns { get; init; }
+
+    /// <summary>
+    /// Task links: the tasks the picker offers for a task and the typed words, for a duplicate (true) or a related link
+    /// (TaskBoard.LinkCandidates, the first few). None, the menu has no "Duplicate of…" or "Related to…".
+    /// </summary>
+    public Func<Guid, string, bool, IReadOnlyList<TaskLinkView>>? LinkCandidates { get; init; }
+
+    /// <summary>Closes the first task as a duplicate of the second (TaskService.MarkDuplicate); whether it worked.</summary>
+    public Func<Guid, Guid, bool>? MarkDuplicate { get; init; }
+
+    /// <summary>Links two tasks as related (TaskService.Relate); whether it worked.</summary>
+    public Func<Guid, Guid, bool>? Relate { get; init; }
+
+    /// <summary>Removes the related link between two tasks, a related line's cross.</summary>
+    public Action<Guid, Guid>? Unrelate { get; init; }
 }
 
 /// <summary>

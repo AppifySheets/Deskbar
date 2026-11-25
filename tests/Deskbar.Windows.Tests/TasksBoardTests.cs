@@ -5175,4 +5175,120 @@ public class TasksBoardTests
         Assert.Equal(20, grid.ColumnDefinitions[comments].Width.Value);
         Assert.Equal(0, grid.ColumnDefinitions[comments + 1].Width.Value);
     });
+
+    // --- task links (docs/superpowers/specs/2026-11-25-task-links-design.md, "The tasks panel") ----------------------
+
+    [Fact]
+    public void The_menu_offers_duplicate_of_and_related_to_after_move_to() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var id = t.Tasks.AddNote("A note", t.Gepha).Value.Id;
+        t.Controller.Show();
+
+        var menu = t.Window.OpenMenuFor(id);
+        var words = MenuWords(menu).ToList();
+        Assert.Equal(words.IndexOf("Move to…") + 1, words.IndexOf(TasksWindow.DuplicateOfText));
+        Assert.Equal(words.IndexOf("Move to…") + 2, words.IndexOf(TasksWindow.RelatedToText));
+        menu.IsOpen = false;
+    });
+
+    [Fact]
+    public void Related_to_opens_the_picker_in_the_thread_and_a_pick_links_both_ways() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var mine = t.Tasks.AddNote("Task links", t.Gepha).Value;
+        var other = t.Tasks.AddNote("Open Claude button", t.Gepha).Value;
+        t.Tasks.AddNote("Unrelated chores", t.Gepha);
+        t.Controller.Show();
+
+        t.Window.BeginLink(mine.Id, duplicate: false);
+        var box = t.Window.LinkBox!;
+        box.Text = "claude";
+
+        // Only the matching task is offered; a click picks it, the picker closes and the thread lists the link.
+        var choice = ButtonNamed(t.Window, "Link to Open Claude button");
+        Assert.DoesNotContain(Inside(t.Window).OfType<Button>(), b => AutomationProperties.GetName(b) == "Link to Unrelated chores");
+        Click(choice);
+
+        Assert.Null(t.Window.LinkBox);
+        Assert.Equal([other.Id], t.Tasks.Board.RelatedOf(mine.Id).Select(x => x.Id));
+        Assert.Equal("Related: Open Claude button · Backlog",
+            string.Concat(Inside(ButtonNamed(t.Window, "Related Open Claude button")).OfType<TextBlock>().Select(RunsOf)));
+
+        // The cross removes it.
+        Click(ButtonNamed(t.Window, "Remove the link to Open Claude button"));
+        Assert.Empty(t.Tasks.Board.RelatedOf(mine.Id));
+    });
+
+    [Fact]
+    public void Duplicate_of_closes_the_task_and_its_line_says_duplicate() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var original = t.Tasks.AddNote("Open Claude button", t.Gepha).Value;
+        var copy = t.Tasks.AddNote("Open claude without the task", t.Gepha).Value;
+        t.Controller.Show();
+
+        t.Window.BeginLink(copy.Id, duplicate: true);
+        t.Window.LinkBox!.Text = "button";
+        // Enter picks the first match.
+        t.Window.LinkBox!.RaiseEvent(new KeyEventArgs(Keyboard.PrimaryDevice, PresentationSource.FromVisual(t.Window)!, 0, Key.Enter) { RoutedEvent = Keyboard.PreviewKeyDownEvent });
+
+        Assert.True(t.Tasks.Board.Tasks.Single(x => x.Id == copy.Id).IsDuplicate);
+        // The closed view tells it apart from a plain close.
+        t.Controller.Filter(TaskFilter.Closed);
+        Assert.Contains("Duplicate of Open Claude button", (string)LineOf(t.Window, copy.Id).ToolTip);
+        // Its menu offers no second "Duplicate of…": reopening is how a duplicate is undone.
+        var menu = t.Window.OpenMenuFor(copy.Id);
+        Assert.DoesNotContain(TasksWindow.DuplicateOfText, MenuWords(menu));
+        menu.IsOpen = false;
+    });
+
+    [Fact]
+    public void A_refused_duplicate_keeps_the_picker_open() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var parent = t.Tasks.AddNote("Parent", t.Gepha).Value;
+        t.Tasks.AddNote("Child", t.Gepha, parent: parent.Id);
+        var original = t.Tasks.AddNote("Original", t.Gepha).Value;
+        t.Controller.Show();
+
+        t.Window.BeginLink(parent.Id, duplicate: true);
+        t.Window.PickLink(parent.Id, duplicate: true, original.Id);
+
+        Assert.NotNull(t.Window.LinkBox);
+        Assert.True(t.Tasks.Board.Tasks.Single(x => x.Id == parent.Id).IsOpen);
+    });
+
+    [Fact]
+    public void An_original_lists_its_duplicate_and_a_click_shows_it_under_closed() => StaThread.Run(() =>
+    {
+        var selection = new TaskSelection();
+        using var t = Build(selection: selection);
+        var original = t.Tasks.AddNote("Open Claude button", t.Gepha).Value;
+        var copy = t.Tasks.AddNote("Open claude without the task", t.Gepha).Value;
+        Assert.True(t.Tasks.MarkDuplicate(copy.Id, original.Id).IsSuccess);
+        t.Controller.Show();
+        t.Controller.ToggleThread(original.Id);
+
+        Click(ButtonNamed(t.Window, "Duplicate Open claude without the task"));
+
+        // The panel switched to the Closed filter, where the duplicate is drawn (a closed task is never kept selected,
+        // TaskSelection.KeepOnly), and its line says what it duplicates.
+        Assert.Contains("Duplicate of Open Claude button", (string)LineOf(t.Window, copy.Id).ToolTip);
+        Assert.DoesNotContain(Inside(t.Window).OfType<Button>(), b => b.Tag is Guid tag && tag == original.Id);
+    });
+
+    [Fact]
+    public void Esc_in_the_picker_closes_it() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var mine = t.Tasks.AddNote("Mine", t.Gepha).Value;
+        t.Controller.Show();
+        t.Window.BeginLink(mine.Id, duplicate: false);
+        var box = t.Window.LinkBox!;
+
+        box.RaiseEvent(new KeyEventArgs(Keyboard.PrimaryDevice, PresentationSource.FromVisual(t.Window)!, 0, Key.Escape) { RoutedEvent = Keyboard.PreviewKeyDownEvent });
+
+        Assert.Null(t.Window.LinkBox);
+    });
 }

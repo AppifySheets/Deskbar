@@ -108,6 +108,13 @@ A task can have subtasks, one level deep: a subtask cannot have subtasks of its 
 - Closing a parent leaves its subtasks as they are. Deleting a parent makes its subtasks plain tasks.
 - What a subtask is for: a Claude session that takes one up is told about the family, so the title can be all you write. See [With Claude sessions](#with-claude-sessions).
 
+## Duplicates and related tasks
+
+- Pick **Duplicate of…** on a line's menu in the tasks panel, type part of the other task's title and pick it from the short list under the box (Enter picks the first one, Esc closes the box). The task closes as a duplicate: it leaves the open lists like any closed task, and under **Closed** it says "Duplicate of <title>". A duplicate of a duplicate points at the original. The rules of closing hold: a parent with open subtasks, or a task Claude is still working on, is refused with the same reason its tick gives. Reopen it and it is a plain task again.
+- Pick **Related to…** the same way to link two tasks. The link shows in both tasks' threads.
+- Open a task in the tasks panel and its thread lists its links above the comments: "Duplicate of", "Duplicate" (a task closed as a duplicate of this one) and "Related", each with its status. Click one to go to it; a closed one is shown under **Closed**. A related link has a cross that removes it.
+- What links are for: a Claude session on a task reads the linked tasks and their sessions' conversations before it starts, and looks for duplicates itself. See [With Claude sessions](#with-claude-sessions).
+
 ## Tasks from older versions
 
 Earlier versions had a stopwatch that parked a workspace for a few minutes. That is gone. Tasks from those versions come back as notes, with their timers dropped, and the old file is kept beside the new one as `tasks.json.v1`. That copy appears the first time the tasks change (you add, tick or close one, or a script does), not at start. Until then `tasks.json` is still the old file.
@@ -163,7 +170,8 @@ The full set:
 - `task goal <id> <goal-id>|none`, the **Goal** menu's twin; `task list` gives each task's `goal` (see [Goals](goals.md))
 - `task add <title> --parent <id>` adds a subtask; without `--workspace` it goes on the parent's workspace
 - `task parent <id> <parent-id>|none` puts a task under another, or makes it a plain task again; a second level is refused
-- `task family <id>` prints what a Claude session on the task reads about its family (plain text); `task list` gives each task's `parent` (`{id, title}` or null) and `subtasks` (ids)
+- `task family <id>` prints what a Claude session on the task reads about its family and its linked tasks (plain text); `task list` gives each task's `parent` (`{id, title}` or null) and `subtasks` (ids)
+- `task duplicate <id> <of-id>` closes a task as a duplicate of another, **Duplicate of…**'s twin; `task relate <id> <other-id>` and `task unrelate <id> <other-id>` add and remove a related link; `task list` gives each task's `duplicateOf` (`{id, title}` or null; its `status` stays `closed`), `duplicates` (ids) and `related` (ids, both ways)
 
 A Claude Code session's own forms, each with `--session <id>` (see [Claude Code sessions](claude-sessions.md)):
 
@@ -171,7 +179,8 @@ A Claude Code session's own forms, each with `--session <id>` (see [Claude Code 
 - `task status-line <text>`, `task ask <question>`, `task comment <markdown>`, `task answered` (its question is settled: back to in progress, the blink stops; nothing happens when the task is not waiting) and `task done`, on the session's own task
 - `task later <title>`, a note for later on the session's workspace
 - `task subtask <title>`, a subtask of the session's own task (a sibling when that is a subtask), assigned to Claude so the next session is offered it
-- `task family`, its own task's family, as its `task join` reply gave it
+- `task family`, its own task's family and linked tasks, as its `task join` reply gave them
+- `task relate <id>` and `task unrelate <id>`, a related link from its own task; `task duplicate-of <id>`, its own task closes as a duplicate of another (the one way a session closes a task)
 
 Every form that takes text, `task add <title>` and `task comment <id> <markdown>` included, takes `-` in the text's place and reads the text from stdin. Use it for any text with quotes or `& | < >` in it: `deskbar.cmd` hands its command line to cmd, which could run part of such a text as a command.
 
@@ -182,6 +191,8 @@ Every Claude Code session keeps a task in this list. When it starts, it is offer
 When a session needs a decision from you, its task moves to the top as **Waiting on you**, with the question on the line, and the workspace blinks. Your message alone does not answer it: the session settles the question itself with `task answered`, once your reply settles it, and the task goes back to in progress. **The bar lists only the tasks assigned to you.** Every task has an assignee, you or Claude. A task you create is yours. A session's task is Claude's while it works, becomes yours when the session asks you something or marks it done, and goes back to Claude when the session settles the question with `task answered` or takes up more work on it after it was done. So a Claude task is on the bar because it is assigned to you, which follows from the session (and from the status you set by hand: Waiting on you and Done assign it to you, and reopening a task works its assignee out again), and once the session has settled the question it leaves the bar (it stays in the tasks panel, which shows every task), and it comes back at the top when the session asks again. Nothing else takes it off: going to its workspace, switching to the session's window, or clicking or double-clicking the line leaves it there. You can also hand any task over yourself in the tasks panel, with **Assign to** in its menu: a note you give to Claude leaves the bar, and is offered to a new session starting on its workspace; a task you give back to yourself stays on the bar. You assign only in the tasks panel, never on the bar. A task that is waiting on you and that you hand to Claude leaves the bar and its "+N waiting" count, but stays Waiting on you in the tasks panel with its question, and its workspace keeps blinking until you visit it or the session answers. "+N more" counts only what the bar lists. A session marks its task done when it has finished; the line keeps its place and has the same tick box as any other, because only you close a task. A message to a session whose task is done leaves it done (it may only ask about the finished work); when the message gives the session more work on it, the session puts it back in progress itself with `task join`. A session whose task you closed is told so on its next message: if the message carries on with that work, the session reopens the task with `task join`, and only other work gets a new task. Resuming a session whose task you closed reopens the task straight away, in progress and back at the top of its quadrant, so you can carry on with it.
 
 A session that joins a subtask is told about its family in the reply to `task join`: the parent's line, your description and its last comments, and the other subtasks, each with its Claude sessions, their folders and the file each session's conversation is kept in. It is asked to read the end of the parent session's conversation before it starts, and to stay clear of what the other subtasks are doing. A session on a parent is told about its subtasks the same way. The family comes again when a session resumes, and `task family` prints it on demand.
+
+Before a session starts on a task, it looks through the open and closed tasks for the same or related work and reads what their sessions did. It links a related task with `task relate`, and when its task is work already done or under way elsewhere, it closes its task as a duplicate with `task duplicate-of` instead of doing the work again; reopen it if it got that wrong. The reply to `task join` lists the linked tasks (as `linked`) with their sessions and the files their conversations are kept in, the same way the family is listed.
 
 A task whose sessions have all ended stays open and says so. Sessions nobody is sitting at (`claude -p`, Agent SDK runs) make no tasks. The setting is **Claude Code sessions keep their tasks in the task list** in Manage; see [Claude Code sessions](claude-sessions.md).
 
