@@ -71,18 +71,22 @@ public static class SessionBriefing
     /// are listed whole with it (Detail). Left null they are listed as stored.
     /// <paramref name="family"/> is the <see cref="Family"/> block of the session's own task, "" when it has no parent
     /// and no subtasks; it follows the line naming the task (subtasks spec).
+    /// <paramref name="reopened"/> says the resume itself reopened the session's closed task (task 327e3cd0,
+    /// RemoteControl.SessionStarted), so the session hears that the user had closed it and that it is open again.
     /// </remarks>
     public static string Start(ClaudeHookEvent e, Maybe<TaskItem> own, IReadOnlyList<TaskItem> offered, Func<string, string>? expand = null,
-        string family = "") =>
+        string family = "", bool reopened = false) =>
         string.Join("\n", Intro(e.SessionId)
-            .Concat(own.HasValue ? [$"Your task is {Describe(own.Value, expand ?? Same)}. Keep working on it."] : Choice(e.SessionId, offered))
+            .Concat(own.HasValue
+                ? [$"{(reopened ? "The user had closed your task; resuming this session reopened it. " : "")}Your task is {Describe(own.Value, expand ?? Same)}. Keep working on it."]
+                : Choice(e.SessionId, offered))
             .Concat(family.Length > 0 ? [family] : Array.Empty<string>())
             .Append("")
             .Concat(Commands(e.SessionId))) + "\n";
 
     /// <summary>
-    /// The one line a session reads with each prompt: its task, or that the user closed it and new work needs a new
-    /// task, or that it has none yet.
+    /// The one line a session reads with each prompt: its task, or that the user closed it (join it to reopen it, or
+    /// make a new task for other work), or that it has none yet.
     /// </summary>
     public static string Prompt(string sessionId, Maybe<TaskItem> own, Maybe<TaskItem> closed, Func<string, string>? expand = null) =>
         // Ruling 49: a prompt never settles a question (a /loop or scheduled check-in is not the user answering), so while
@@ -95,8 +99,12 @@ public static class SessionBriefing
             ? $"Deskbar: your task is {Describe(done, expand ?? Same)}. If this message gives you more work on it, run {Shim} task join {done.Id.ToString()[..8]} --session {sessionId} to put it back in progress; if it only asks about the finished work, leave it done.\n"
         : own.HasValue
             ? $"Deskbar: your task is {Describe(own.Value, expand ?? Same)}. Keep its status line current: {Shim} task status-line - --session {sessionId}, the line on stdin (a heredoc).{SubtaskHint(own.Value, sessionId)}\n"
+        // The user closed the task while the session was still live on it (task 327e3cd0). As for a Done task, the session
+        // tells a message that carries on with the work from one about something else: `task join` reopens its own closed
+        // task (TaskBoard.Join), and only other work needs a new task. It used to say every prompt needed a new task, and
+        // the session made a duplicate of the task it was still working on.
         : closed.HasValue
-            ? $"Deskbar: the user closed your task \"{Cut(closed.Value.Title)}\". Work on this prompt needs a new task: {Shim} task new - --session {sessionId}, the title on stdin (a heredoc).\n"
+            ? $"Deskbar: the user closed your task {closed.Value.Id.ToString()[..8]} \"{Cut(closed.Value.Title)}\". If this message carries on with that work, run {Shim} task join {closed.Value.Id.ToString()[..8]} --session {sessionId} to reopen it; if it is about something else, run {Shim} task new - --session {sessionId} with the title on stdin (a heredoc).\n"
         : $"Deskbar: this session has no task yet. Once you know what you are working on, run {Shim} task join <id> --session {sessionId} with an id from {Shim} task list, or {Shim} task new - --session {sessionId} with the title on stdin (a heredoc).\n";
 
     static string Same(string markdown) => markdown;

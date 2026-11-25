@@ -10,8 +10,10 @@ namespace Deskbar.Core.Tasks;
 // The rules that shape this file, each from the spec:
 //   * Only Petre closes. A session joins, keeps a status line, asks and marks Done; Close is Petre's, so it is the
 //     one way to Closed (SetStatus refuses Closed and points at Close).
-//   * A closed task takes none of a session's changes (join, status line, ask, done): Petre has closed it and new
-//     work needs a new task. Renaming, moving, commenting and setting a status by hand stay open to Petre.
+//   * A closed task takes none of a session's changes (join, status line, ask, done): Petre has closed it. One
+//     exception (task 327e3cd0): the session that worked on it may join it again, which reopens it, so resuming a
+//     session to carry on with a closed task does not make a duplicate. Renaming, moving, commenting and setting a
+//     status by hand stay open to Petre.
 //   * The order (Task 12, Rulings 24, 25 and 28; TaskOrder.cs): Waiting on you is pinned on top, latest ask first, by
 //     Raised. Below it come Covey's quadrants I to IV, which the two flags name, each in Petre's manual order, the
 //     tasks' Rank. A new task goes to the top of its quadrant, a Done task keeps its place, a closed one leaves and a
@@ -93,16 +95,34 @@ public sealed record TaskBoard(IReadOnlyList<TaskItem> Tasks)
     /// waiting, because the question is still unanswered. A session with that id already on the task (a resumed
     /// conversation keeps its id) is replaced, live again, rather than listed twice. The session leaves whatever other
     /// task it was live on (see the header); a refused join (a closed task) leaves it where it was.
+    ///
+    /// A CLOSED TASK THE SESSION ITSELF WORKED ON is reopened first (task 327e3cd0, <see cref="ReopenedForItsSession"/>),
+    /// then joined as any other: the session carries on with the work the user closed, instead of making a duplicate.
     /// </summary>
     public Result<TaskBoard> Join(Guid id, TaskSession session, DateTimeOffset now) =>
-        ChangeOpen(id, t => t with
+        ReopenedForItsSession(id, session.Id, now).Bind(board => board.ChangeOpen(id, t => t with
         {
             Sessions = WithSession(t.Sessions, session),
             Status = t.Status == TaskStatus.WaitingOnYou ? t.Status : TaskStatus.InProgress,
             // Ruling 57: the session works on it now, so it is Claude's; a task still waiting on Petre stays his.
             Assignee = t.Status == TaskStatus.WaitingOnYou ? t.Assignee : Assignee.Claude,
             UpdatedAt = now,
-        }).Map(joined => joined.WithoutSessionElsewhere(session.Id, id, now));
+        })).Map(joined => joined.WithoutSessionElsewhere(session.Id, id, now));
+
+    // RESUMING A SESSION ON A CLOSED TASK REOPENS IT (task 327e3cd0). Petre closed a task, then resumed its session to keep
+    // talking about the same subject; the hooks told the session its task was closed and new work needed a new task, so it
+    // made a duplicate, and `task join` on the closed one answered "The task is closed.". Now a session that was on the
+    // task (an entry under its id that /clear did not replace: a replaced session handed the task on, Ruling 19) gets the
+    // closed task back through Reopen, which also brings back a closed parent and puts it at the top of its quadrant
+    // (Ruling 25); Join then makes it In progress and Claude's. Any other session, and any task that is not closed, is left
+    // to the join's usual rules, so a stranger joining a closed task is still refused.
+    Result<TaskBoard> ReopenedForItsSession(Guid id, string sessionId, DateTimeOffset now) =>
+        Tasks.FirstOrDefault(t => t.Id == id) is { Status: TaskStatus.Closed } task && WasItsSession(task, sessionId)
+            ? Reopen(id, now)
+            : this;
+
+    static bool WasItsSession(TaskItem task, string sessionId) =>
+        task.Sessions.Any(s => s.Id == sessionId && !s.Replaced);
 
     /// <summary>
     /// A session coming back to its OWN task (a resumed conversation keeps its id; RemoteControl's SessionStart finds
@@ -748,9 +768,24 @@ public sealed record TaskBoard(IReadOnlyList<TaskItem> Tasks)
                 .Bind(workspace => workspace);
 
     /// <summary>
+    /// The task a session was on last, live or ended, when the user has closed it: what a RESUMED session's SessionStart
+    /// reopens and joins (task 327e3cd0, RemoteControl.SessionStarted). None when the session's latest entry is on an open
+    /// task (it joined another since, which LastTaskOf rejoins), and an entry /clear replaced does not count (Ruling 19).
+    /// </summary>
+    public Maybe<TaskItem> ClosedLastTaskOf(string sessionId) =>
+        Tasks.SelectMany(t => t.Sessions.Where(s => s.Id == sessionId && !s.Replaced).Select(s => (Task: t, s.Joined)))
+            .OrderByDescending(x => x.Joined)
+            // Two joins in the same instant: the open task wins, since reopening is only for a session with nothing open.
+            .ThenByDescending(x => x.Task.IsOpen)
+            .Select(x => x.Task)
+            .TryFirst()
+            .Where(t => t.Status == TaskStatus.Closed);
+
+    /// <summary>
     /// The closed task a session is still live on: Petre closed the task under it (closing ends no session). Its next
-    /// prompt is told so, and that new work needs a new task, until it joins or creates one; that ends its live entries
-    /// on open tasks only, so this keeps answering, and TaskOf answers first once the session has an open task.
+    /// prompt is told so, and that it can reopen it with `task join` if the prompt continues that work (task 327e3cd0) or
+    /// start a new task for anything else; joining or creating ends its live entries on open tasks only, so this keeps
+    /// answering, and TaskOf answers first once the session has an open task.
     /// </summary>
     public Maybe<TaskItem> ClosedTaskOf(string sessionId) =>
         Tasks.Where(t => t.Status == TaskStatus.Closed)
