@@ -2598,6 +2598,36 @@ public class TasksBoardTests
         Assert.Equal([there], t.Window.Keys);
     });
 
+    // "Subtasks" (task 173ef268; Petre: "checkbox at the top to show nested tasks or not"). Ticked by default, as every
+    // build before it drew subtasks. Unticked, the subtasks drawn under a parent fold into its line, which keeps counting
+    // them, and the choice is saved, so a fresh open keeps it. Ticked again, they are back under the parent.
+    [Fact]
+    public void The_subtasks_checkbox_folds_subtasks_into_their_parent() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var parent = t.Tasks.AddNote("Parent", t.Gepha).Value.Id;
+        var child = t.Tasks.AddNote("Child", t.Gepha, Quadrant.IV, parent).Value.Id;
+        t.Controller.Show();
+        Assert.True(t.Window.SubtasksOn);
+        Assert.Equal([parent, child], t.Window.Keys);
+
+        Click(ButtonNamed(t.Window, "Subtasks"));
+        Assert.False(t.Window.SubtasksOn);
+        Assert.Equal([parent], t.Window.Keys);
+        Assert.Equal("unchecked", AutomationProperties.GetItemStatus(ButtonNamed(t.Window, "Subtasks")));
+        Assert.Contains("1 subtask", RunsOf(TitleOf(t.Window, parent)));
+        Assert.True(t.Harness.Manager.State.TasksPanel?.HideSubtasks);
+
+        t.Controller.Hide();
+        t.Controller.Show();
+        Assert.False(t.Window.SubtasksOn);
+        Assert.Equal([parent], t.Window.Keys);
+
+        Click(ButtonNamed(t.Window, "Subtasks"));
+        Assert.True(t.Window.SubtasksOn);
+        Assert.Equal([parent, child], t.Window.Keys);
+    });
+
     // The screencast shoot on v2.5.189: the toolbar's dropdowns did not open by mouse, keyboard or UI Automation. UIA's
     // Invoke on a dropdown goes through the button's own Click as a mouse click does, so it opens the menu too: what a
     // screen reader or a keyboard-driven tool does reaches the same press.

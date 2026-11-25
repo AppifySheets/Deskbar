@@ -225,6 +225,7 @@ public sealed class TasksBoard : IDisposable
             NestTargets = id => tasks.Board.ParentCandidates(id).Select(t => t.Id).ToHashSet(),
             Snooze = (id, choice) => Snooze(id, choice),
             Wake = id => Wake(id),
+            ShowSubtasks = ShowSubtasks,
         };
 
         subscriptions = new CompositeDisposable(
@@ -498,6 +499,18 @@ public sealed class TasksBoard : IDisposable
     public void FilterClaudeWorking(bool on)
     {
         claudeWorking = on;
+        Refresh();
+    }
+
+    /// <summary>
+    /// The toolbar's "Subtasks" checkbox (task 173ef268): ticked, subtasks are drawn under their parent; unticked, they
+    /// fold into the parent's line, which counts them (TaskViews.FoldSubtasks has the rule). Saved at once and kept
+    /// across opens and restarts (AppState.TasksPanel.HideSubtasks), so the redraw reads it back from the state.
+    /// </summary>
+    public void ShowSubtasks(bool on)
+    {
+        // A no-op write when it is already so (SaveTasksPanel compares); the redraw below then still runs, harmlessly.
+        _ = manager.SaveTasksPanel(PanelState with { HideSubtasks = !on });
         Refresh();
     }
 
@@ -780,7 +793,11 @@ public sealed class TasksBoard : IDisposable
         var claudeWorkingCount = TaskViews.Count(ClaudeWorking.Narrow(searched, true), filter, shown, assigneeFilter);
         // Follow-up to the subtasks spec: a subtask is drawn right under its parent, in the parent's group (TaskViews.UnderParents);
         // such a line is Nested, so it shows the arrow without the parent's name.
-        var (listed, nested) = TaskViews.UnderParents(TaskViews.Grouped(board, filter, shown, assigneeFilter));
+        var (underParents, nested) = TaskViews.UnderParents(TaskViews.Grouped(board, filter, shown, assigneeFilter));
+        // The "Subtasks" checkbox unticked (task 173ef268): the lines drawn under a parent are left out, and the parent's
+        // own "· N subtasks" says they are there. Read from the saved state, as OpenFresh reads CurrentWorkspace.
+        var showsSubtasks = !PanelState.HideSubtasks;
+        var listed = showsSubtasks ? underParents : TaskViews.FoldSubtasks(underParents, nested);
         var groups = listed
             .Select(g => new TaskGroupView(g.Kind, TaskViews.GroupName(g.Kind), g.Tasks.Select(t => Row(t) with { Nested = nested.Contains(t.Id) }).ToArray()))
             .ToArray();
@@ -796,7 +813,8 @@ public sealed class TasksBoard : IDisposable
         var places = WorkspaceChipMenu.Entries(manager.State, withNone: true);
         var addTarget = shown.Any ? PlaceOf(manager.CurrentWorkspaceId) : PlaceOf(shown.Workspace);
         // The Matrix's four cells (Ruling 28), drawn instead of the groups while the switch says so (AppState.TasksMatrix).
-        var cells = TaskViews.Matrix(board, filter, shown, assigneeFilter)
+        var matrix = TaskViews.Matrix(board, filter, shown, assigneeFilter);
+        var cells = (showsSubtasks ? matrix : TaskViews.FoldSubtasks(matrix))
             .Select(c => new TaskCellView(c.Quadrant, TaskViews.GroupName(TaskViews.KindOf(c.Quadrant)), c.Tasks.Select(Row).ToArray()))
             .ToArray();
         var (menuGoals, filterGoals) = showsGoals ? GoalChoices(goalBoard) : NoGoalChoices;
@@ -827,6 +845,7 @@ public sealed class TasksBoard : IDisposable
             Search = search.Text,
             ClaudeWorking = claudeWorking,
             ClaudeWorkingCount = claudeWorkingCount,
+            ShowsSubtasks = showsSubtasks,
         };
     }
 
@@ -1151,6 +1170,9 @@ internal sealed record TasksView(IReadOnlyList<TaskFilterChip> Filters, string W
     public bool ClaudeWorking { get; init; }
 
     public int ClaudeWorkingCount { get; init; }
+
+    /// <summary>Whether the "Subtasks" checkbox is ticked (task 173ef268): subtasks drawn under their parent, not folded.</summary>
+    public bool ShowsSubtasks { get; init; } = true;
 }
 
 /// <summary>
@@ -1229,6 +1251,9 @@ internal sealed record TasksWindowActions(
 
     /// <summary>"Wake now" on a snoozed task.</summary>
     public Action<Guid>? Wake { get; init; }
+
+    /// <summary>The "Subtasks" checkbox (task 173ef268): true draws subtasks under their parent, false folds them. None, no checkbox.</summary>
+    public Action<bool>? ShowSubtasks { get; init; }
 }
 
 /// <summary>A subtask as its parent's open thread lists it: id, title (first line), status and status line.</summary>

@@ -284,6 +284,37 @@ public static class TaskViews
             .Where(g => g.Tasks.Count > 0).ToArray(), moved);
     }
 
+    // --- subtasks folded into their parent (task 173ef268, the tasks panel's "Subtasks" checkbox) ----------------------
+    //
+    // Petre's screenshot: a parent with eight subtasks under it filled the panel. Unticked, the checkbox folds subtasks
+    // into the parent's line, which already counts them ("· 8 subtasks", SubtaskCountText) and lists them in its thread.
+    // Only a subtask whose parent is ON THE LIST folds, so nothing becomes unreachable: a parent filtered out (another
+    // workspace, another status) leaves its subtasks on show. A subtask waiting on Petre never folds either, because a
+    // question must stay findable, and that is what the pinned block is for.
+
+    /// <summary>
+    /// The List's groups with every subtask drawn under its parent (<paramref name="nested"/>, from
+    /// <see cref="UnderParents"/>) left out. UnderParents never nests a subtask waiting on Petre or a closed one, so those
+    /// stay. A group the folding empties is left out, as UnderParents leaves out one its move empties.
+    /// </summary>
+    public static IReadOnlyList<TaskGroup> FoldSubtasks(IReadOnlyList<TaskGroup> groups, IReadOnlySet<Guid> nested) =>
+        groups.Select(g => g with { Tasks = g.Tasks.Where(t => !nested.Contains(t.Id)).ToArray() })
+            .Where(g => g.Tasks.Count > 0)
+            .ToArray();
+
+    /// <summary>
+    /// The Matrix's cells with every open subtask left out whose parent is in some cell, unless it waits on Petre. The
+    /// Matrix draws no subtask under its parent (each stays in its own quadrant), so the rule is the List's in its own
+    /// terms: folded where the parent is on screen to count it. Every cell stays, empty or not (the Matrix is always four).
+    /// </summary>
+    public static IReadOnlyList<TaskCell> FoldSubtasks(IReadOnlyList<TaskCell> cells)
+    {
+        var shown = cells.SelectMany(c => c.Tasks).Select(t => t.Id).ToHashSet();
+        bool Folds(TaskItem t) =>
+            t.IsOpen && t.Status != TaskStatus.WaitingOnYou && t.ParentId is { HasValue: true } p && p.Value != t.Id && shown.Contains(p.Value);
+        return cells.Select(c => c with { Tasks = c.Tasks.Where(t => !Folds(t)).ToArray() }).ToArray();
+    }
+
     // --- subtasks on a line (docs/superpowers/specs/2026-11-24-subtasks-design.md, Petre's pick A) ----------------------
 
     // How much of a parent's title the breadcrumb keeps, so the subtask's own title keeps most of the line.
