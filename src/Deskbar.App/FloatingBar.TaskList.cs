@@ -725,9 +725,31 @@ public partial class FloatingBar
         // The Manager button sits after "All tasks" in a third Auto column, styled like it (dim ink, same padding and margin),
         // and is collapsed when the App wired no OpenManager. It takes the same click guard as "All tasks", since the list
         // can slide under the pointer too. ApplyMoreText counts its width, so "All tasks" shortens rather than clipping.
+        // The dot before "Manager" (event wakes, docs/superpowers/specs/2026-11-25-manager-event-wakes-design.md): Deskbar
+        // woke the manager and the user has not opened it since (ManagerRecord.Unread, PaintManagerDot). Orange like "+N
+        // waiting", with a dark rim like the attention dot, so it reads on any bar colour. Collapsed, it takes no width.
+        taskManagerDot = new System.Windows.Shapes.Ellipse
+        {
+            Width = 6,
+            Height = 6,
+            Fill = TaskOrange,
+            Stroke = ManagerDotRim,
+            StrokeThickness = 0.75,
+            Margin = new Thickness(0, 0, 4, 0),
+            VerticalAlignment = VerticalAlignment.Center,
+            Visibility = Visibility.Collapsed,
+        };
         taskManagerButton = TaskButton("Manager",
-            new TextBlock { Text = "Manager", Foreground = TaskDimInk, VerticalAlignment = VerticalAlignment.Center },
-            () => OpenManager?.Invoke(), "Open the manager: one Claude session that coordinates your tasks", TaskClickIgnored);
+            new StackPanel
+            {
+                Orientation = System.Windows.Controls.Orientation.Horizontal,
+                Children =
+                {
+                    taskManagerDot,
+                    new TextBlock { Text = "Manager", Foreground = TaskDimInk, VerticalAlignment = VerticalAlignment.Center },
+                },
+            },
+            () => OpenManager?.Invoke(), ManagerTip, TaskClickIgnored);
         taskManagerButton.HorizontalAlignment = HorizontalAlignment.Right;
         taskManagerButton.VerticalAlignment = VerticalAlignment.Top;
         taskManagerButton.Padding = new Thickness(6, 1, 6, 1);
@@ -1151,6 +1173,7 @@ public partial class FloatingBar
         // The Manager button follows the wiring on every paint: the list is built in the constructor, before the init
         // property is set, so its visibility cannot be decided at build time.
         if (taskManagerButton is not null) taskManagerButton.Visibility = OpenManager is null ? Visibility.Collapsed : Visibility.Visible;
+        PaintManagerDot();
         taskMoreButton.Visibility = hidden.Length > 0 || taskListExpanded || ToggleTasksPanel is not null ? Visibility.Visible : Visibility.Collapsed;
         taskMoreFull = MoreText(hidden.Length, waiting, taskListExpanded);
         taskMoreShort = taskListExpanded ? "Less" : hidden.Length == 0 ? "All" : $"+{hidden.Length}";
@@ -1166,6 +1189,29 @@ public partial class FloatingBar
     // What PaintTaskMore worked out that the "on" look also needs: whether the words are orange (something hidden waits
     // on Petre) and the tooltip while the panel is not shown.
     bool taskMoreWaiting;
+
+    // The Manager button's unread dot (event wakes): built with the button, painted by PaintManagerDot.
+    System.Windows.Shapes.Ellipse? taskManagerDot;
+
+    const string ManagerTip = "Open the manager: one Claude session that coordinates your tasks";
+
+    // The dot's rim: frozen, as every static brush must be (a brush with thread affinity throws on another thread).
+    static readonly Brush ManagerDotRim = Frozen(0xB0, 0x20, 0x20, 0x20);
+
+    /// <summary>
+    /// Whether Deskbar woke the manager since the user last opened it (ManagerRecord.Unread), read on every paint and on
+    /// every state change (the wake and the click that clears it both save the state). Null shows no dot.
+    /// </summary>
+    internal Func<bool>? ManagerUnread { get; init; }
+
+    // The dot shown while the manager has something unread, and the tooltip saying so.
+    internal void PaintManagerDot()
+    {
+        if (taskManagerDot is null || taskManagerButton is null) return;
+        var unread = ManagerUnread?.Invoke() == true;
+        taskManagerDot.Visibility = unread ? Visibility.Visible : Visibility.Collapsed;
+        taskManagerButton.ToolTip = unread ? "The manager has news since you last opened it. " + ManagerTip : ManagerTip;
+    }
     string taskMoreTip = "";
 
     // THE "ON" LOOK of "All tasks" while the tasks panel is shown (TasksPanelShown): the picked line's light fill

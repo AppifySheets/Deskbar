@@ -39,7 +39,15 @@ public abstract record WakePlan
 public static class CommentWake
 {
     public static WakePlan Plan(TaskItem task, IReadOnlyList<ClaudeAgent> listed, Func<TaskSession, bool> hasTranscript, Func<string, bool> waiterLapsed) =>
-        task.Sessions.Where(s => !s.Replaced && hasTranscript(s))
+        PlanFor(task.Sessions, listed, hasTranscript, waiterLapsed);
+
+    /// <summary>
+    /// The same roads for sessions that belong to no task: the manager's one session, which Deskbar's event wakes reach
+    /// this way (ManagerActions.Tick; docs/superpowers/specs/2026-11-25-manager-event-wakes-design.md).
+    /// </summary>
+    public static WakePlan PlanFor(IReadOnlyList<TaskSession> sessions, IReadOnlyList<ClaudeAgent> listed, Func<TaskSession, bool> hasTranscript,
+        Func<string, bool> waiterLapsed) =>
+        sessions.Where(s => !s.Replaced && hasTranscript(s))
                 .OrderByDescending(s => s.IsLive).ThenByDescending(s => s.Joined).TryFirst() is not { HasValue: true } chosen
             ? new WakePlan.Nothing("No session of this task can be resumed, so the comment was not sent to Claude.")
             : listed.TryFirst(agent => agent.SessionId == chosen.Value.Id) is not { HasValue: true } running

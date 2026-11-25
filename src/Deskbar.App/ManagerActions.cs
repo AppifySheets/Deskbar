@@ -50,7 +50,22 @@ namespace Deskbar.App;
 // THREADS. Open runs on the UI thread (`scheduler` in the app); ClaudeSessions runs `claude` off it and every answer is
 // brought back onto `scheduler`, the only thread that touches the state or `pending`. So nothing here locks.
 //
-// Nothing here runs on a timer (Global Constraints): the manager is started, resumed or stopped only by a click.
+// Step 1 ran nothing on a timer: the manager was started, resumed or stopped only by a click. Step 2 adds the EVENT
+// WAKES (design docs/superpowers/specs/2026-11-25-manager-event-wakes-design.md, plan
+// docs/superpowers/plans/2026-11-25-manager-event-wakes.md), and still no timer of its own: Tick runs on every emission
+// of the sessions poll (ClaudeSessions.Live, every 15 seconds), the App wires it.
+//
+//   * ManagerWakes.Plan (Core, pure) decides from the stored record, the board, the list and the time whether to wake the
+//     manager and with what message: a hand-back or a question two hours old, at most once per 30 minutes, only today's
+//     manager and never while it is busy.
+//   * The message goes by the roads a comment takes to a task's session (CommentWake.PlanFor): into the manager's inbox
+//     when it runs (its waiter wakes it), a BARE resume with the message when it does not run, stop then resume when its
+//     waiter lapsed. A resume that fails leaves the message in the inbox, where its next waiter finds it.
+//   * The record after the wake is stored (Since moved, Unread set, the day's hand-backs), but only onto the SAME session:
+//     a click that started a new manager meanwhile is not overwritten.
+//   * A wake and a click share `pending`, because both may resume the manager and two resumes fork a copy (probe notes).
+//     A click during a wake is not dropped: it runs once the wake is done (openAfterWake).
+//   * A click clears Unread, which takes the dot off the Manager button.
 public sealed class ManagerActions : IDisposable
 {
     /// <summary>The manager's window title, by which an open window is found again (ClaudeTaskActions.AttachTo).</summary>
@@ -64,6 +79,12 @@ public sealed class ManagerActions : IDisposable
     readonly Action<string>? trace;
     readonly Func<string, string> longPath;
     readonly SerialDisposable opening = new();
+    readonly SerialDisposable wakingUp = new();
+    readonly SerialDisposable ticks = new();
+
+    // The event wakes' inputs (Tick): the board and the inbox. Null in a rig that tests only the click: Tick then does nothing.
+    readonly TaskService? tasks;
+    readonly CommentInbox? inbox;
 
     // The manager's folder (ManagerSession.FolderIn the state dir), and the shim's full path with forward slashes: the
     // allow rule and the briefing must name exactly what the manager runs, and Git Bash wants forward slashes (probes).
@@ -71,8 +92,13 @@ public sealed class ManagerActions : IDisposable
     readonly string folder;
     readonly string shim;
 
-    // From a click until its window is attached or its failure told (see the header). Touched only on `scheduler`.
+    // From a click until its window is attached or its failure told (see the header), and from a wake until it is
+    // delivered. Touched only on `scheduler`.
     bool pending;
+
+    // A wake holds `pending`; a click that came meanwhile is run when the wake is done, never dropped.
+    bool waking;
+    bool openAfterWake;
 
     /// <param name="stateDir">Deskbar's state folder (AppPaths.NewStateDir), so DESKBAR_APPDATA moves the manager too.</param>
     /// <param name="shimPath">The `deskbar.cmd` ControlCommandLine.WriteShim writes in the state folder.</param>
@@ -82,8 +108,15 @@ public sealed class ManagerActions : IDisposable
     /// <param name="shortPath">The 8.3 short form of a path (ShortPath.Of), for a shim path with a space (ShimCommand).</param>
     public ManagerActions(WorkspaceManager manager, ClaudeSessions sessions, ClaudeTaskActions actions, string stateDir, string shimPath,
         IScheduler scheduler, Func<DateOnly>? today = null, Action<string>? trace = null, Func<string, string>? longPath = null,
-        Func<string, string>? shortPath = null)
+        Func<string, string>? shortPath = null, TaskService? tasks = null, CommentInbox? inbox = null)
     {
+        this.tasks = tasks;
+        this.inbox = inbox;
+        // The event wakes' tick: every emission of the sessions poll, brought onto `scheduler` (Tick touches the state).
+        // Only with the board and the inbox; without them there is nothing to wake for or with.
+        if (tasks is not null && inbox is not null)
+            ticks.Disposable = sessions.Live.ObserveOn(scheduler).Subscribe(Tick,
+                error => trace?.Invoke($"manager: wakes stopped by {error.Message}"));
         this.longPath = longPath ?? Deskbar.Windows.Control.LongPath.Of;
         this.manager = manager;
         this.sessions = sessions;
@@ -117,8 +150,15 @@ public sealed class ManagerActions : IDisposable
     public Result Open()
     {
         if (!manager.State.ClaudeTasksInEffect) return Result.Failure(ClaudeTaskActions.FeatureOff);
-        if (pending) return Result.Success();
+        if (pending)
+        {
+            // A wake is being delivered: the click runs right after it, so it never resumes the manager alongside it.
+            if (waking) openAfterWake = true;
+            return Result.Success();
+        }
         pending = true;
+        // The click is the user looking: whatever a wake brought is read from here on (the dot goes).
+        if (manager.State.Manager is { Unread: true } unread) manager.SetManagerSession(unread with { Unread = false });
         // The day is read once, at the click, so a click just before midnight stores the day it was decided on.
         var day = today();
         opening.Disposable = OnScheduler(sessions.ListNow)
@@ -147,7 +187,7 @@ public sealed class ManagerActions : IDisposable
         ManagerStep.Attach attach => Observable.Return(Result.Success(attach.Agent)),
         // A manager in the folder whose id was never stored (its start was not listed in time): today's from now on.
         ManagerStep.Claim claim => Observable.Return(Result.Success(claim.Agent))
-            .Do(_ => manager.SetManagerSession(new ManagerRecord(claim.Agent.SessionId, day))),
+            .Do(_ => manager.SetManagerSession(new ManagerRecord(claim.Agent.SessionId, day, scheduler.Now))),
         ManagerStep.Resume resume => Briefed(_ => OnScheduler(() =>
             sessions.RunAndFind(ManagerSession.ResumeArguments(resume.SessionId), folder, resume.SessionId))),
         ManagerStep.StartNew start => StopFirst(start.StopFirst).SelectMany(_ => Started(day)),
@@ -158,7 +198,8 @@ public sealed class ManagerActions : IDisposable
     // with the day of the click, so the next click that day attaches or resumes it rather than starting another.
     IObservable<Result<ClaudeAgent>> Started(DateOnly day) =>
         Briefed(briefing => OnScheduler(() => sessions.RunAndFind(ManagerSession.StartArguments(briefing, shim), folder))
-            .Select(found => found.Tap(agent => manager.SetManagerSession(new ManagerRecord(agent.SessionId, day)))));
+            // Since = now: the manager's first turn reads the board, so events are counted from its start (ManagerWakes).
+            .Select(found => found.Tap(agent => manager.SetManagerSession(new ManagerRecord(agent.SessionId, day, scheduler.Now)))));
 
     // Yesterday's idle manager is stopped before today's starts, so two managers never run side by side. `claude stop`
     // returns once the process is gone (measured). A stop that fails (the session ended in the second since the list was
@@ -192,6 +233,75 @@ public sealed class ManagerActions : IDisposable
         }
     }
 
+    /// <summary>
+    /// One tick of the sessions poll (see the header): a wake when ManagerWakes.Plan says so, or the record kept current
+    /// (Since filled in for a record saved before step 2). Nothing while a click or a wake is under way, while Claude
+    /// sessions are off, or with no manager stored. Called on `scheduler`.
+    /// </summary>
+    public void Tick(IReadOnlyCollection<ClaudeAgent> listed)
+    {
+        if (pending || tasks is null || inbox is null || !manager.State.ClaudeTasksInEffect || manager.State.Manager is not { } record) return;
+        switch (ManagerWakes.Plan(record, tasks.Board, listed, today(), scheduler.Now))
+        {
+            case ManagerWake.Nothing(var kept) when kept != record:
+                manager.SetManagerSession(kept);
+                break;
+            case ManagerWake.Wake(var message, var after):
+                Wake(record, message, after, listed);
+                break;
+        }
+    }
+
+    // The wake delivered by the comment roads (CommentWake.PlanFor over the manager's one session), then the record stored.
+    void Wake(ManagerRecord record, string message, ManagerRecord after, IReadOnlyCollection<ClaudeAgent> listed)
+    {
+        pending = waking = true;
+        var session = new TaskSession(record.SessionId, folder, DateTimeOffset.MinValue, Maybe<DateTimeOffset>.None);
+        var road = CommentWake.PlanFor([session], listed.ToList(), sessions.TranscriptExists, inbox!.Lapsed);
+        trace?.Invoke($"manager: waking {record.SessionId} by {road.GetType().Name}");
+        wakingUp.Disposable = (road switch
+            {
+                WakePlan.Inbox => Observable.Return(inbox.Deliver(record.SessionId, message)),
+                WakePlan.Resume => ResumedWith(record.SessionId, message),
+                WakePlan.StopThenResume => StopFirst(listed.TryFirst(a => a.SessionId == record.SessionId))
+                    .SelectMany(_ => ResumedWith(record.SessionId, message)),
+                WakePlan.Nothing nothing => Observable.Return(Result.Failure(nothing.Why)),
+                _ => Observable.Return(Result.Failure($"Unknown wake road {road}")),
+            })
+            .Catch((Exception e) => Observable.Return(Result.Failure(e.Message)))
+            .Subscribe(sent => Woken(record, after, sent));
+    }
+
+    // A bare resume with the message (the one form that keeps the manager's saved options, step 1 probes). The briefing is
+    // written again first, as before any resume. A resume that did not happen leaves the message in the inbox instead.
+    IObservable<Result> ResumedWith(string sessionId, string message) =>
+        Observable.Defer(() =>
+            {
+                WriteBriefing().TapError(e => trace?.Invoke($"manager: {e}"));
+                return OnScheduler(() => sessions.RunAndFind([.. ManagerSession.ResumeArguments(sessionId), "--", message], folder, sessionId));
+            })
+            .Select(found => found.IsSuccess
+                ? Result.Success()
+                : inbox!.Deliver(sessionId, message).Tap(() => trace?.Invoke($"manager: not resumed ({found.Error}), the wake waits in its inbox")));
+
+    // After a wake: the record stored onto the same session only (a click may have started another meanwhile). A wake
+    // that could not be delivered still moves Since, or every tick would try again; it just sets no dot.
+    void Woken(ManagerRecord record, ManagerRecord after, Result sent)
+    {
+        pending = waking = false;
+        sent.TapError(e => trace?.Invoke($"manager: wake not delivered: {e}"));
+        if (manager.State.Manager is { } current && current.SessionId == record.SessionId && current.Day == record.Day)
+            manager.SetManagerSession(current with
+            {
+                Since = after.Since,
+                Unread = current.Unread || (sent.IsSuccess && after.Unread),
+                HandedBack = after.HandedBack,
+            });
+        if (!openAfterWake) return;
+        openAfterWake = false;
+        Open();
+    }
+
     // An untrusted folder gets the trust offer (ClaudeTaskActions.OfferTrust); anything else is told as it is.
     void Failed(string error)
     {
@@ -212,5 +322,10 @@ public sealed class ManagerActions : IDisposable
     // so the answer is handed on as the task completes rather than from a thread-pool continuation.
     IObservable<T> OnScheduler<T>(Func<Task<T>> call) => Observable.Defer(() => call().ToObservable(scheduler));
 
-    public void Dispose() => opening.Dispose();
+    public void Dispose()
+    {
+        ticks.Dispose();
+        opening.Dispose();
+        wakingUp.Dispose();
+    }
 }

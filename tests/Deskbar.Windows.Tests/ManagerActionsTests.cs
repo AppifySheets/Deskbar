@@ -21,9 +21,10 @@ public class ManagerActionsTests
 
     const string Untrusted = "claude exited with code 1.\nWorkspace not trusted. Run `claude` in the folder once and accept the trust prompt, then retry.";
 
-    sealed class MemoryStore : ITaskStore
+    // The board the service loads: empty, or the tasks a wake test starts from.
+    sealed class MemoryStore(TaskBoard? board = null) : ITaskStore
     {
-        public Result<TaskBoard> Load() => TaskBoard.Empty;
+        public Result<TaskBoard> Load() => board ?? TaskBoard.Empty;
 
         public Result Save(TaskBoard board) => Result.Success();
     }
@@ -64,6 +65,8 @@ public class ManagerActionsTests
             {
                 ["agents", "--json"] => Result.Success(Json()),
                 ["--bg", "--resume", var id] => Woken(id, workingDirectory),
+                // A wake's resume: bare, then the message after `--` (ManagerActions.ResumedWith).
+                ["--bg", "--resume", var id, "--", _] => Woken(id, workingDirectory),
                 ["--bg", "--model", ..] => Start?.Invoke() ?? Started(workingDirectory),
                 ["stop", var shortId] => Stop?.Invoke() ?? Stopped(shortId),
                 _ => Result.Failure<string>($"unexpected claude call: {string.Join(" ", arguments)}"),
@@ -123,10 +126,18 @@ public class ManagerActionsTests
         public ClaudeTaskActions Actions { get; }
         public ManagerActions Manager { get; }
 
-        public Rig()
+        // The comment inbox the event wakes deliver into (only a rig built with `wakes`).
+        public CommentInbox Inbox { get; }
+        public string InboxFolder => Path.Combine(Root, "inbox");
+
+        /// <param name="wakes">Wire the event wakes (the board and the inbox), as the App does.</param>
+        /// <param name="board">The tasks the board starts with.</param>
+        public Rig(bool wakes = false, TaskBoard? board = null)
         {
             Clock.AdvanceTo(Origin.UtcTicks);
-            Tasks = new TaskService(new MemoryStore(), () => Clock.Now);
+            Tasks = new TaskService(new MemoryStore(board), () => Clock.Now);
+            Tasks.Load();
+            Inbox = new CommentInbox(InboxFolder, () => Clock.Now);
             Sessions = new ClaudeSessions(Tasks, Harness.Manager, Cli, Clock, _ => Maybe<Guid>.None, Home,
                 background: Scheduler.Immediate, managerFolder: Folder);
             Actions = new ClaudeTaskActions(Tasks, Harness.Manager, Sessions.Live, new ClaudeTaskSeams(
@@ -149,7 +160,9 @@ public class ManagerActionsTests
                 },
                 Tell = Told.Add,
             }, Clock);
-            Manager = new ManagerActions(Harness.Manager, Sessions, Actions, StateDir, Shim, Clock, () => Today);
+            Manager = wakes
+                ? new ManagerActions(Harness.Manager, Sessions, Actions, StateDir, Shim, Clock, () => Today, tasks: Tasks, inbox: Inbox)
+                : new ManagerActions(Harness.Manager, Sessions, Actions, StateDir, Shim, Clock, () => Today);
         }
 
         public Guid Gepha => Harness.Manager.State.Workspaces.Single(w => w.Name == "GEPHA").Id;
@@ -177,6 +190,142 @@ public class ManagerActionsTests
     }
 
     const string Earlier = "0a1d0a1d-aaaa-4bbb-8ccc-dddddddddddd";
+
+    // A started or claimed manager is stored with today and a Since (event wakes count from its start).
+    static void AssertStoredToday(Rig rig, string sessionId)
+    {
+        var stored = rig.Harness.Manager.State.Manager;
+        Assert.NotNull(stored);
+        Assert.Equal(sessionId, stored.SessionId);
+        Assert.Equal(Today, stored.Day);
+        Assert.NotNull(stored.Since);
+        Assert.False(stored.Unread);
+    }
+
+    // EVENT WAKES (docs/superpowers/specs/2026-11-25-manager-event-wakes-design.md). The manager started 31 minutes before
+    // the clock's Origin and a Claude task was handed back to the user 11 minutes after that, so a tick at Origin wakes it.
+    // The clock is NOT advanced before a test's own Tick: the sessions poll first reads at Origin, during the test's
+    // Settle, by which time the test's Tick (or the poll's, in The_sessions_poll_ticks_the_wakes) has decided.
+    static readonly Guid Stalled = Guid.Parse("51a11ed0-0000-0000-0000-000000000001");
+    static readonly DateTimeOffset ManagerStart = Origin.AddMinutes(-31);
+
+    static TaskBoard HandedBackBoard() => new(
+    [
+        new TaskItem(Stalled, "Tasks redesign", Maybe<Guid>.None, Deskbar.Core.Tasks.TaskStatus.InProgress, "PR 512 green, ready to merge",
+            Maybe<string>.None, Origin.AddDays(-1), Origin, Origin.AddDays(-1), [], [])
+        {
+            HandedBack = ManagerStart.AddMinutes(11),
+        },
+    ]);
+
+    static Rig WakeRig(bool unread = false, bool handedBack = true)
+    {
+        var rig = new Rig(wakes: true, board: handedBack ? HandedBackBoard() : null);
+        rig.Harness.Manager.SetManagerSession(new ManagerRecord(Earlier, Today, ManagerStart, unread));
+        return rig;
+    }
+
+    static ClaudeAgent ListedManager(Rig rig, bool busy = false) => new(Earlier, Earlier[..8], rig.Folder, true, busy, ManagerSession.Name);
+
+    // A running, idle manager with a live waiter: the wake goes into its inbox, where the waiter wakes it; nothing is
+    // started or resumed, and the record moves Since and sets the dot.
+    [Fact]
+    public void A_hand_back_wakes_a_running_manager_through_its_inbox()
+    {
+        using var rig = WakeRig();
+        Assert.True(rig.Inbox.Register(Earlier).IsSuccess);
+        rig.Cli.Listed.Add(new Row(Earlier, rig.Folder, Busy: false));
+        // A running session has its transcript; the comment roads skip one without (it could not be resumed either).
+        rig.WriteTranscript(Earlier);
+
+        rig.Manager.Tick([ListedManager(rig)]);
+        rig.Settle();
+
+        var message = File.ReadAllText(Path.Combine(rig.InboxFolder, Earlier + ".md"));
+        Assert.StartsWith("Deskbar wake.", message);
+        Assert.Contains("51a11ed0 \"Tasks redesign\"", message);
+        Assert.Empty(rig.Cli.Acts);
+        var stored = rig.Harness.Manager.State.Manager!;
+        Assert.True(stored.Unread);
+        Assert.Equal(Origin, stored.Since);
+        Assert.Equal([Stalled], stored.HandedBack);
+    }
+
+    // A manager that is not running (ended, or Deskbar rebooted with it) is woken by a BARE resume with the message after
+    // `--`, in its folder: flags would fork a copy.
+    [Fact]
+    public void A_hand_back_resumes_a_manager_that_is_not_running()
+    {
+        using var rig = WakeRig();
+        rig.WriteTranscript(Earlier);
+
+        rig.Manager.Tick([]);
+        rig.Settle();
+
+        var resume = Assert.Single(rig.Cli.Acts);
+        Assert.Equal(["--bg", "--resume", Earlier, "--"], resume.Arguments.Take(4));
+        Assert.StartsWith("Deskbar wake.", resume.Arguments[4]);
+        Assert.Equal(rig.Folder, resume.Folder);
+        Assert.True(rig.Harness.Manager.State.Manager!.Unread);
+    }
+
+    // A busy manager is not woken: the batch waits, and nothing about the record changes.
+    [Fact]
+    public void A_busy_manager_is_not_woken()
+    {
+        using var rig = WakeRig();
+        Assert.True(rig.Inbox.Register(Earlier).IsSuccess);
+        rig.Cli.Listed.Add(new Row(Earlier, rig.Folder, Busy: true));
+
+        rig.Manager.Tick([ListedManager(rig, busy: true)]);
+        rig.Settle();
+
+        Assert.False(File.Exists(Path.Combine(rig.InboxFolder, Earlier + ".md")));
+        Assert.Equal(new ManagerRecord(Earlier, Today, ManagerStart), rig.Harness.Manager.State.Manager);
+    }
+
+    // The sessions poll drives it: no Tick by hand, only the poll's own first read on the clock.
+    [Fact]
+    public void The_sessions_poll_ticks_the_wakes()
+    {
+        using var rig = WakeRig();
+        rig.WriteTranscript(Earlier);
+
+        rig.Settle();
+
+        Assert.Contains(rig.Cli.Acts, call => call.Arguments is ["--bg", "--resume", Earlier, "--", _]);
+    }
+
+    // Opening the manager is the user reading what the wake brought: the dot goes.
+    [Fact]
+    public void Opening_the_manager_clears_the_dot()
+    {
+        using var rig = WakeRig(unread: true, handedBack: false);
+        rig.Cli.Listed.Add(new Row(Earlier, rig.Folder, Busy: false));
+
+        Assert.True(rig.Manager.Open().IsSuccess);
+        rig.Settle();
+
+        Assert.False(rig.Harness.Manager.State.Manager!.Unread);
+        Assert.Single(rig.Launches);
+    }
+
+    // A click while a wake's resume is under way is not dropped and does not resume alongside it (two resumes fork a
+    // copy): it runs once the wake is done, and finds the manager listed, so it attaches.
+    [Fact]
+    public void A_click_during_a_wake_runs_after_it()
+    {
+        using var rig = WakeRig();
+        rig.WriteTranscript(Earlier);
+
+        rig.Manager.Tick([]);
+        Assert.True(rig.Manager.Open().IsSuccess);
+        rig.Settle();
+
+        Assert.Single(rig.Cli.Acts.Where(c => c.Arguments is ["--bg", "--resume", ..]));
+        AssertAttachedOnTheWorkspaceInFront(rig, Earlier);
+        Assert.False(rig.Harness.Manager.State.Manager!.Unread);
+    }
 
     static void AssertAttachedOnTheWorkspaceInFront(Rig rig, string sessionId)
     {
@@ -207,7 +356,7 @@ public class ManagerActionsTests
         Assert.Equal(rig.Folder, start.Folder);
         Assert.True(Directory.Exists(rig.Folder));
         Assert.Equal(ManagerSession.Briefing(rig.ShimForward), File.ReadAllText(rig.BriefingPath));
-        Assert.Equal(new ManagerRecord(rig.Cli.NextId, Today), rig.Harness.Manager.State.Manager);
+        AssertStoredToday(rig, rig.Cli.NextId);
         AssertAttachedOnTheWorkspaceInFront(rig, rig.Cli.NextId);
         Assert.Empty(rig.Told);
     }
@@ -263,7 +412,7 @@ public class ManagerActionsTests
         Assert.Equal(2, rig.Cli.Acts.Count);
         Assert.Equal(["stop", Earlier[..8]], rig.Cli.Acts[0].Arguments);
         Assert.Equal(ManagerSession.StartArguments(rig.BriefingPath, rig.ShimForward), rig.Cli.Acts[1].Arguments);
-        Assert.Equal(new ManagerRecord(rig.Cli.NextId, Today), rig.Harness.Manager.State.Manager);
+        AssertStoredToday(rig, rig.Cli.NextId);
         AssertAttachedOnTheWorkspaceInFront(rig, rig.Cli.NextId);
     }
 
@@ -316,7 +465,7 @@ public class ManagerActionsTests
         // The daemon lists it; the first click's search finds it at its next read and attaches.
         rig.Cli.NotListedYet.Clear();
         rig.Clock.AdvanceBy(TimeSpan.FromSeconds(3).Ticks);
-        Assert.Equal(new ManagerRecord(rig.Cli.NextId, Today), rig.Harness.Manager.State.Manager);
+        AssertStoredToday(rig, rig.Cli.NextId);
         Assert.Single(rig.Launches);
 
         Assert.True(rig.Manager.Open().IsSuccess);
@@ -369,7 +518,7 @@ public class ManagerActionsTests
         rig.Settle();
 
         Assert.Single(rig.Cli.Acts);
-        Assert.Equal(new ManagerRecord(rig.Cli.NextId, Today), rig.Harness.Manager.State.Manager);
+        AssertStoredToday(rig, rig.Cli.NextId);
         AssertAttachedOnTheWorkspaceInFront(rig, rig.Cli.NextId);
     }
 
@@ -393,7 +542,7 @@ public class ManagerActionsTests
         rig.Settle();
 
         Assert.Equal(2, rig.Cli.Acts.Count);
-        Assert.Equal(new ManagerRecord(rig.Cli.NextId, Today), rig.Harness.Manager.State.Manager);
+        AssertStoredToday(rig, rig.Cli.NextId);
         AssertAttachedOnTheWorkspaceInFront(rig, rig.Cli.NextId);
     }
 
@@ -415,7 +564,7 @@ public class ManagerActionsTests
 
         Assert.Equal(["stop", Earlier[..8]], rig.Cli.Acts[0].Arguments);
         Assert.Equal(ManagerSession.StartArguments(rig.BriefingPath, rig.ShimForward), rig.Cli.Acts[1].Arguments);
-        Assert.Equal(new ManagerRecord(rig.Cli.NextId, Today), rig.Harness.Manager.State.Manager);
+        AssertStoredToday(rig, rig.Cli.NextId);
         Assert.Single(rig.Launches);
         Assert.Empty(rig.Told);
     }

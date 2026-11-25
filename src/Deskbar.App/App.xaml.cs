@@ -1875,10 +1875,12 @@ public partial class App : Application
         // <state dir>\manager. It runs through the same ClaudeSessions and opens its window through the same
         // ClaudeTaskActions as a task's session. The shim it names is the deskbar.cmd written above (the Store copy writes
         // one too, pointing at its alias), by its full path, which is what the manager's allow rule matches.
+        // With the board and the comment inbox it also wakes the manager on events (ManagerActions.Tick, on the sessions
+        // poll; docs/superpowers/specs/2026-11-25-manager-event-wakes-design.md): a hand-back or a question two hours old.
         managerActions = new ManagerActions(manager, claudeSessions, claudeActions, AppPaths.NewStateDir,
             Path.Combine(AppPaths.NewStateDir, ControlCommandLine.ShimName),
             new System.Reactive.Concurrency.SynchronizationContextScheduler(new System.Windows.Threading.DispatcherSynchronizationContext(Dispatcher)),
-            trace: ClickTrace.On ? ClickTrace.Write : null);
+            trace: ClickTrace.On ? ClickTrace.Write : null, tasks: tasks, inbox: commentInbox);
 
         // Windows' "Show flashing on taskbar apps", held off while this copy runs when Manage's box says so, and by
         // default whenever the taskbar auto-hides (AppState.QuietTaskbarChoice, TaskbarFlashing.Wanted;
@@ -2071,6 +2073,8 @@ public partial class App : Application
                 // is said at once in a message box, as the Start Claude menu says its own; a failure later is told by Open itself.
                 OpenManager = () => (managerActions?.Open() ?? Result.Failure(ClaudeActionsNotReady))
                     .TapError(error => MessageBox.Show(error, "Deskbar", MessageBoxButton.OK, MessageBoxImage.Information)),
+                // Its dot: Deskbar woke the manager and the user has not opened it since (ManagerRecord.Unread, event wakes).
+                ManagerUnread = () => manager.State.Manager is { Unread: true },
                 // ...and whether the panel is shown, for that line's "on" look: the relay the panel feeds once it exists.
                 TasksPanelShown = tasksPanelShown,
                 // A line's single click (Ruling 54): the panel on that task, picked and expanded. A double-click goes.

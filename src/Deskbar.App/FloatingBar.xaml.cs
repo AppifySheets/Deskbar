@@ -175,6 +175,8 @@ public partial class FloatingBar : Window
             // The stats line goes while the stats are detached into their own window, and comes back with them
             // (FloatingBar.Stats.cs). Here so it happens on the pulse, not at the next sample.
             ApplyStatsVisibility();
+            // The Manager button's unread dot: a wake sets it and opening the manager clears it, both by saving the state.
+            PaintManagerDot();
             // RebuildWanted, not IsVisible: with the window list on the screens a hidden bar still fills the strips
             // (FloatingBar.Strips.cs).
             if (RebuildWanted) Rebuild();
