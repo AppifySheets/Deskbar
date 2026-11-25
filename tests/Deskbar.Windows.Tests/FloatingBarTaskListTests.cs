@@ -830,6 +830,45 @@ public class FloatingBarTaskListTests
         Assert.Equal(t.Gepha, t.Bar.TaskAddTarget.Value);
     });
 
+    // A note of several lines (task 98420dbc, Petre: "multiline should be allowed; longer text should increase the size
+    // of the box"). The box wraps and takes line breaks, grows with its text, and Enter still adds: the first line is
+    // the title and the rest the description.
+    [Fact]
+    public void A_note_of_several_lines_grows_the_box_and_is_a_title_and_a_description() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        Assert.True(t.Box.AcceptsReturn);
+        Assert.Equal(TextWrapping.Wrap, t.Box.TextWrapping);
+        ClickBox(t);
+        // The box's height for a text. One line is the theme's minimum height (32 DIP, measured), so growth is read
+        // against more lines, not against a multiple of it.
+        double HeightFor(string text)
+        {
+            t.Box.Text = text;
+            t.Bar.UpdateLayout();
+            return t.Box.ActualHeight;
+        }
+        var lines = Enumerable.Range(1, 12).Select(n => $"line {n}").ToArray();
+        var three = HeightFor(string.Join("\n", lines.Take(3)));
+        var four = HeightFor(string.Join("\n", lines.Take(4)));
+        var six = HeightFor(string.Join("\n", lines.Take(6)));
+        var twelve = HeightFor(string.Join("\n", lines));
+        Assert.True(three > HeightFor("one line"), $"three lines {three}");
+        Assert.True(four > three, $"three lines {three}, four {four}");
+        // Past six lines it stops growing and scrolls inside, so a long paste cannot push the task lines off the bar.
+        Assert.Equal(six, twelve, 1);
+        // A long line wraps rather than running out of sight, so it grows the box too.
+        Assert.True(HeightFor(string.Join(" ", Enumerable.Repeat("a long title that keeps going", 20))) > HeightFor("short"));
+
+        t.Box.Text = "Fix the strip\nit overlaps the taskbar\non the second screen";
+        Press(t.Bar, t.Box, Key.Enter);
+
+        var task = Assert.Single(t.Tasks.Board.Tasks);
+        Assert.Equal("Fix the strip", task.Title);
+        Assert.Equal("it overlaps the taskbar\non the second screen", task.Description);
+        Assert.Equal("", t.Box.Text);
+    });
+
     // Text left in the box keeps the chips on show, so after clicking away a chip can be the first thing pressed. That
     // press takes the keyboard as a click in the box does: the bar holds full strength, and Esc hands the keyboard back
     // to the window Petre was typing in.

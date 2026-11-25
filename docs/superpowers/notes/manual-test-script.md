@@ -914,6 +914,12 @@ TI14. The bar's own box ("Add to Deskbar…"): click it, Win+Shift+S a region, C
      a title: the task has that title. Paste two, click one x, Esc: the box and the row are empty.
 TI15. Drop a PNG from Explorer on the bar's idle box: the thumbnail appears and the box has the
      keyboard; Enter adds the task.
+ML1. The bar's box: type a title, Shift+Enter, two more lines. The box grows a line at a time and a
+     docked bar's task lines make room. Enter: the task has the first line as its title and the other
+     two as its description. Paste ten lines: the box stops at six and scrolls inside.
+ML2. A long title with no line break wraps in the bar's box instead of scrolling sideways out of sight.
+ML3. The tasks panel, + Add: Shift+Enter starts a new line, the box grows, Enter adds title and
+     description the same way. With a picture pasted too, the description holds the text, then the picture.
 
 ## Comments wake their session
 

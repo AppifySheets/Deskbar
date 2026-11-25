@@ -4255,6 +4255,47 @@ public class TasksBoardTests
         Assert.Equal("", Assert.Single(t.Tasks.Board.Tasks).Description);
     });
 
+    // A note of several lines (task 98420dbc). The box wraps and takes line breaks; Shift+Enter is left to it, so it adds
+    // nothing, while Enter adds the first line as the title and the rest as the description.
+    [Fact]
+    public void A_note_of_several_lines_is_a_title_and_a_description() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        t.Controller.Show();
+        Click(ButtonNamed(t.Window, "Add"));
+
+        Assert.False(t.Window.TypeNote("Fix the strip", Key.Enter, ModifierKeys.Shift));
+        Assert.Empty(t.Tasks.Board.Tasks);
+        Assert.True(t.Window.TypeNote("Fix the strip\nit overlaps the taskbar\non the second screen", Key.Enter));
+
+        var task = Assert.Single(t.Tasks.Board.Tasks);
+        Assert.Equal("Fix the strip", task.Title);
+        Assert.Equal("it overlaps the taskbar\non the second screen", task.Description);
+    });
+
+    // Lines after the title and pasted pictures together: the text comes first in the description, then the pictures.
+    [Fact]
+    public void A_note_of_several_lines_keeps_its_pictures_after_the_text() => StaThread.Run(() =>
+    {
+        var root = ScratchRoot();
+        try
+        {
+            using var t = Build(stateDir: root);
+            t.Controller.Show();
+            Click(ButtonNamed(t.Window, "Add"));
+
+            t.Window.PasteIntoAdd(BitmapData());
+            Assert.True(t.Window.TypeNote("Bar looks wrong\nsee the gap on the left", Key.Enter));
+
+            var task = Assert.Single(t.Tasks.Board.Tasks);
+            Assert.Equal("Bar looks wrong", task.Title);
+            var parts = TaskImages.Split(task.Description);
+            Assert.Equal("see the gap on the left", parts.Text);
+            Assert.Single(parts.Images);
+        }
+        finally { Directory.Delete(root, true); }
+    });
+
     // Esc closes the box and the waiting pictures go with it: the next + Add starts empty, and no file was written.
     [Fact]
     public void Esc_drops_the_add_boxs_pictures() => StaThread.Run(() =>

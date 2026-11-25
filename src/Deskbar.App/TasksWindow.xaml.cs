@@ -172,7 +172,7 @@ public partial class TasksWindow : Window
         // handler sees handled events too, and runs once the button under it has raised its Click), draws what waited.
         AddHandler(MouseLeftButtonUpEvent, new MouseButtonEventHandler((_, _) => Flush()), handledEventsToo: true);
         AddBox.TextChanged += (_, _) => AddPlaceholder.Visibility = AddBox.Text.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
-        AddBox.PreviewKeyDown += (_, e) => e.Handled = PressInAdd(e.Key) != KeyOutcome.Ignored;
+        AddBox.PreviewKeyDown += (_, e) => e.Handled = PressInAdd(e.Key, Keyboard.Modifiers) != KeyOutcome.Ignored;
         // Ctrl+V and drops of pictures on the add box (TasksWindow.Images.cs, "the add box").
         TakeAddPictures();
         // The search box: every keystroke goes to the controller at once, which narrows and redraws (no debounce, see
@@ -2472,14 +2472,16 @@ public partial class TasksWindow : Window
         AddEnd.Children.Add(chip);
     }
 
-    KeyOutcome PressInAdd(Key key)
+    KeyOutcome PressInAdd(Key key, ModifierKeys modifiers)
     {
-        if (key is not (Key.Enter or Key.Return)) return KeyOutcome.Ignored;
+        // Shift+Enter is a line break, which the box makes itself (AcceptsReturn), as in the comment boxes.
+        if (key is not (Key.Enter or Key.Return) || modifiers.HasFlag(ModifierKeys.Shift)) return KeyOutcome.Ignored;
         var target = addChosen ?? latest?.AddTarget;
-        // Pasted pictures (TasksWindow.Images.cs, "the add box"): they become the description, and with no words typed the
-        // task is called "Picture".
-        var title = TaskImages.TitleFor(AddBox.Text, AddBoxImages.Count);
-        var describe = AddDescription();
+        // The first line is the title and the lines after it the description (TaskNote.Split, task 98420dbc). Pasted
+        // pictures (TasksWindow.Images.cs, "the add box") follow that text in the description, and with no words typed
+        // the task is called "Picture".
+        var (title, body) = TaskNote.Split(AddBox.Text, AddBoxImages.Count);
+        var describe = AddDescription(body);
         var added = addParent is { } parent
             ? Actions?.AddSubtask is { } addSubtask && target is not null && addSubtask(title, target.Workspace, AddQuadrant, parent.Id, describe)
             : Actions is not null && target is not null && Actions.AddNote(title, target.Workspace, AddQuadrant, describe);
@@ -2489,10 +2491,10 @@ public partial class TasksWindow : Window
     }
 
     // For the tests: types into the add box and presses a key.
-    internal bool TypeNote(string text, Key key)
+    internal bool TypeNote(string text, Key key, ModifierKeys modifiers = ModifierKeys.None)
     {
         AddBox.Text = text;
-        return PressInAdd(key) == KeyOutcome.Posted;
+        return PressInAdd(key, modifiers) == KeyOutcome.Posted;
     }
 
     /// <summary>

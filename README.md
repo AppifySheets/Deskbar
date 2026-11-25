@@ -442,7 +442,8 @@ More in [Quick find](docs/features/quick-find.md).
 ## Tasks
 
 The bottom of the bar carries a short task list, for the things you want to remember while you work.
-Type a note into the box at its top and press Enter, and it lands on the workspace you are on (or on
+Type a note into the box at its top and press Enter (Shift+Enter starts a new line, which goes into
+the note's description), and it lands on the workspace you are on (or on
 none, or another one, by the chip under the box). The new note is selected and glows blue for a moment,
 so you can see where it landed; the tasks panel's own add box does the same. Tick a note to close it,
 with six seconds to undo.

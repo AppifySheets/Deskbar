@@ -13,7 +13,8 @@ namespace Deskbar.App;
 //   - Ctrl+V or a drop of pictures on the box (PicturePaste) adds them as PENDING pictures, held in memory, shown as
 //     small thumbnails in a row between the box and its chips, each with an x that takes it out again. Ctrl+V of text
 //     alone pastes the text as before.
-//   - Enter adds the task: the typed words are its title, the pictures its description, written under the new task's
+//   - Enter adds the task: the typed words are its title (only the first line; later lines open the description, see
+//     TaskNote), the pictures its description after any such lines, written under the new task's
 //     id inside the same save (TaskService.AddNote's `describe`). Nothing typed: the task is "Picture" (TaskImages.TitleFor).
 //   - Esc, or an add, empties the box and drops the pictures (EndTyping with clear). A click elsewhere keeps them, as it
 //     keeps the text: the box is the draft (Ruling 9).
@@ -84,13 +85,15 @@ public partial class FloatingBar
         PaintTaskAddPictures();
     }
 
-    // What the add hands TaskService.AddNote: none without pictures (a plain note, as before), else the writer of the new
-    // task's description, the pictures saved under its id. A copy, so a paste landing mid-add cannot change what is written.
-    Func<Guid, Result<string>>? TaskAddDescription()
+    // What the add hands TaskService.AddNote: none for a one-line note without pictures (a plain note, as before), else
+    // the writer of the new task's description: the lines typed after the title (`body`, TaskNote.Split), then the
+    // pictures saved under the new task's id. A copy, so a paste landing mid-add cannot change what is written.
+    Func<Guid, Result<string>>? TaskAddDescription(string body)
     {
-        if (taskAddImages.Count == 0) return null;
+        if (taskAddImages.Count == 0 && body.Length == 0) return null;
+        if (taskAddImages.Count == 0) return _ => Result.Success(body);
         var pictures = taskAddImages.ToArray();
-        return id => TaskImageFiles.Save(TaskStateDir, id, pictures, TaskNow()).Map(saved => TaskImages.Join("", saved));
+        return id => TaskImageFiles.Save(TaskStateDir, id, pictures, TaskNow()).Map(saved => TaskImages.Join(body, saved));
     }
 
     // One pending picture: its thumbnail with a small x over the top right corner. The x is a task button, so it never

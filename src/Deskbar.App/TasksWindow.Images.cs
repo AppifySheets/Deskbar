@@ -205,14 +205,16 @@ public partial class TasksWindow
         RefreshAddPictures();
     }
 
-    // What the add hands TaskService.AddNote: none without pictures (a plain note, as before), else the writer of the
-    // new task's description, the pending pictures saved under its id and nothing else in it (the words are the title).
-    // A copy of the list, so a paste landing mid-add cannot change what is written.
-    Func<Guid, Result<string>>? AddDescription()
+    // What the add hands TaskService.AddNote: none for a one-line note without pictures (a plain note, as before), else
+    // the writer of the new task's description: the lines typed after the title (`body`, TaskNote.Split), then the
+    // pending pictures saved under the new task's id. A copy of the list, so a paste landing mid-add cannot change what
+    // is written.
+    Func<Guid, Result<string>>? AddDescription(string body)
     {
-        if (addImages.Count == 0) return null;
+        if (addImages.Count == 0 && body.Length == 0) return null;
+        if (addImages.Count == 0) return _ => Result.Success(body);
         var pictures = addImages.ToArray();
-        return id => TaskImageFiles.Save(StateDir, id, pictures, Now()).Map(saved => TaskImages.Join("", saved));
+        return id => TaskImageFiles.Save(StateDir, id, pictures, Now()).Map(saved => TaskImages.Join(body, saved));
     }
 
     // --- shared --------------------------------------------------------------------------------------------------------
