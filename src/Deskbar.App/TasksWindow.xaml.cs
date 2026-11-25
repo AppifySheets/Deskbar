@@ -178,9 +178,12 @@ public partial class TasksWindow : Window
         // The search box: every keystroke goes to the controller at once, which narrows and redraws (no debounce, see
         // TasksBoard.Search for why). The box is never written by a redraw, only read, so typing keeps its text, caret
         // and keyboard through every redraw ("the search box" below).
+        BuildSearchClear();
         SearchBox.TextChanged += (_, _) =>
         {
+            // The placeholder while empty, the clear button (×) while not: one or the other, never both.
             SearchPlaceholder.Visibility = SearchBox.Text.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
+            SearchClear.Visibility = SearchBox.Text.Length == 0 ? Visibility.Collapsed : Visibility.Visible;
             Actions?.Search(SearchBox.Text);
         };
         WireDrag();
@@ -2516,6 +2519,32 @@ public partial class TasksWindow : Window
     /// clicked on the bar is hidden by the search (TasksBoard.RevealPastSearch). Its TextChanged tells the controller.
     /// </summary>
     internal void ClearSearch() => SearchBox.Text = "";
+
+    /// <summary>
+    /// The clear button (×) at the right end of the search box, shown only while the box has text (its TextChanged above).
+    /// Internal so the tests can click it.
+    /// </summary>
+    internal Button SearchClear { get; private set; } = null!;
+
+    // The search box's clear button, the toolbar's × in small (same flat button, transparent until hovered). A click
+    // empties the box, whose TextChanged tells the controller and hides the button again, and leaves the keyboard IN the
+    // box, as a browser's search field does: the usual reason to clear a search is to type another. Esc stays the way to
+    // clear and hand the keyboard back to the board (EndSearch). Not Focusable (Flat), so the press itself never takes
+    // the keyboard out of the box.
+    void BuildSearchClear()
+    {
+        SearchClear = Flat(new TextBlock { Text = "×", Foreground = Ink, FontSize = 13 }, "Clear the search", () =>
+        {
+            ClearSearch();
+            SearchBox.Focus();
+        }, new Thickness(5, 0, 5, 1));
+        SearchClear.Background = Brushes.Transparent;
+        SearchClear.Margin = new Thickness(4, -2, -3, -2);
+        SearchClear.ToolTip = "Clear the search";
+        SearchClear.Visibility = Visibility.Collapsed;
+        Grid.SetColumn(SearchClear, 1);
+        SearchField.Children.Add(SearchClear);
+    }
 
     // --- small parts -------------------------------------------------------------------------------------------------
 

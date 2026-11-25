@@ -343,7 +343,8 @@ written for the floating window and now describe the panel; 64a to 64n cover wha
     screen: the panel is back on top, and nothing was left behind.
 64i. Search. Press Ctrl+F in the panel: the search box has the keyboard. Type two words from different parts of a
     task (its title and its status line): the task stays; a word that matches nothing hides it. Esc clears the
-    box. Close and reopen the panel: the search is empty.
+    box. Type again: a × shows at the box's right end (none while it is empty); click it: the box is empty, every
+    task is back, the × is gone and the keyboard is still in the box. Close and reopen the panel: the search is empty.
 64j. Claude working. With one task that has a live Claude session, one with an ended session and one note, click
     the "Claude working N" chip: only the live one stays, N is 1, and its session square glows while Claude is
     working. Click the chip again: all tasks are back. Reopen the panel: the filter is cleared.
