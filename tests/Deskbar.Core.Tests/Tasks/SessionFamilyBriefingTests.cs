@@ -188,4 +188,16 @@ public sealed class SessionFamilyBriefingTests
 
         Assert.DoesNotContain("subtask", text);
     }
+
+    // Task aa42794f: a Deskbar-authored comment on the parent reads as "Deskbar", not as a session.
+    [Fact]
+    public void A_deskbar_comment_on_the_parent_is_labelled_deskbar()
+    {
+        var parent = Parent with { Comments = [new TaskComment(Guid.NewGuid(), TaskComment.DeskbarAuthor, At, "Resumed.")] };
+
+        var text = SessionBriefing.Family(new TaskFamily(Child, parent, [], []), TranscriptOf);
+
+        Assert.Contains("  Deskbar: \"Resumed.\"", text);
+        Assert.DoesNotContain("a session: \"Resumed.\"", text);
+    }
 }

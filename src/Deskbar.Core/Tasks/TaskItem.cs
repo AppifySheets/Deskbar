@@ -74,7 +74,7 @@ public sealed record StatusChange(DateTimeOffset At, TaskStatus From, TaskStatus
 public sealed record TaskComment(Guid Id, Maybe<string> SessionId, DateTimeOffset At, string Markdown)
 {
     /// <summary>
-    /// The author id of Deskbar's own thread lines ("Resumed by Deskbar at 10:05."). They used to be written with no
+    /// The author id of Deskbar's own thread lines ("Resumed."). They used to be written with no
     /// author, which is Petre's, so the thread showed them as "you" with an Edit button (Petre's screenshot,
     /// 2026-11-24). A reserved value in the session id's place keeps the file format as it is: an old Deskbar reads
     /// such a line as a session's, which is closer to the truth than Petre's. Not a session id Claude Code can make:
@@ -250,6 +250,20 @@ public sealed record TaskItem(
     /// (TaskBoard.Change), and so does Petre assigning the task (TaskBoard.Assign). A stored optional field, read tolerantly.
     /// </summary>
     public Maybe<string> QuestionSetAside { get; init; }
+
+    /// <summary>
+    /// This task with Deskbar's set-aside lines (TaskComment.IsSetAsideNote) folded, the way a settled comment is (Ruling
+    /// 62: kept, behind one line), unless the task still holds a set-aside question. Petre, task aa42794f: "too much bla
+    /// bla", over a thread with two set-aside lines and the merged line under them. A set-aside line matters only while
+    /// its question is out of sight; once the question is back, answered, settled by a merge or dropped by done or a
+    /// close, it is old news. TaskBoard applies this to every change and JsonTaskStore to every task it loads, so the
+    /// lines already in tasks.json fold too. The fold time is UpdatedAt (the change's "now"; on load, the last change,
+    /// which keeps a load repeatable). A task with nothing to fold comes back as this same instance.
+    /// </summary>
+    public TaskItem WithSetAsideNotesFolded() =>
+        QuestionSetAside.HasNoValue && Comments.Any(c => c.IsSetAsideNote && c.Settled.HasNoValue)
+            ? this with { Comments = Comments.Select(c => c.IsSetAsideNote && c.Settled.HasNoValue ? c with { Settled = UpdatedAt } : c).ToArray() }
+            : this;
 
     /// <summary>
     /// Deskbar made this task for a live session no task knew (TaskBoard.AdoptSession; design

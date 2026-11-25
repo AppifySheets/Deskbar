@@ -183,19 +183,7 @@ public sealed record TaskBoard(IReadOnlyList<TaskItem> Tasks)
         {
             Status = TaskStatus.WaitingOnYou, Question = task.QuestionSetAside, QuestionSetAside = Maybe<string>.None,
             Assignee = Assignee.Me, Raised = now, UpdatedAt = now,
-            // The question is back on the line, so the thread line saying it was set aside is old news.
-            Comments = FoldSetAsideNotes(task.Comments, now),
         };
-
-    /// <summary>
-    /// Deskbar's set-aside lines (TaskComment.IsSetAsideNote) folded, the way a settled comment is (Ruling 62: kept, one
-    /// line in the thread). Petre, task aa42794f: "too much bla bla", over a thread with two set-aside lines and the
-    /// merged line under them. A set-aside line matters only while its question is out of sight; once the question is back
-    /// (Restored), answered (Answered) or settled by a merge (SettleQuestion), the line is folded. Lines already folded
-    /// keep their time.
-    /// </summary>
-    static IReadOnlyList<TaskComment> FoldSetAsideNotes(IEnumerable<TaskComment> comments, DateTimeOffset now) =>
-        comments.Select(c => c.IsSetAsideNote && c.Settled.HasNoValue ? c with { Settled = now } : c).ToArray();
 
     /// <summary>
     /// Restores a set-aside question once no session of the task is busy any more (RepliedTasks.Restore): the session
@@ -226,7 +214,7 @@ public sealed record TaskBoard(IReadOnlyList<TaskItem> Tasks)
             {
                 Status = TaskStatus.InProgress, Question = Maybe<string>.None, QuestionSetAside = Maybe<string>.None,
                 UpdatedAt = now, Assignee = Assignee.Claude,
-                Comments = FoldSetAsideNotes(t.Status == TaskStatus.Done ? t.Comments : SettledSinceAsk(t, sessionId, now), now),
+                Comments = t.Status == TaskStatus.Done ? t.Comments : SettledSinceAsk(t, sessionId, now),
             }))
             .GetValueOrDefault(this);
 
@@ -267,8 +255,8 @@ public sealed record TaskBoard(IReadOnlyList<TaskItem> Tasks)
             ? Replaced(task with
             {
                 Status = TaskStatus.InProgress, Question = Maybe<string>.None, UpdatedAt = now, Assignee = Assignee.Claude,
-                Comments = FoldSetAsideNotes(task.Comments
-                    .Select(c => c.BySession && c.At >= task.WaitingSince.GetValueOrDefault(task.Raised) && c.Settled.HasNoValue ? c with { Settled = now } : c), now)
+                Comments = task.Comments
+                    .Select(c => c.BySession && c.At >= task.WaitingSince.GetValueOrDefault(task.Raised) && c.Settled.HasNoValue ? c with { Settled = now } : c)
                     .Append(new TaskComment(noteId, TaskComment.DeskbarAuthor, now, note))
                     .ToArray(),
             })
@@ -1285,11 +1273,14 @@ public sealed record TaskBoard(IReadOnlyList<TaskItem> Tasks)
 
     (TaskBoard Board, TaskItem Task) WithAppended(TaskItem task) => (new TaskBoard(Tasks.Append(task).ToArray()), task);
 
-    TaskBoard Replaced(TaskItem updated) => new(Tasks.Select(t => t.Id == updated.Id ? Woken(t, updated) : t).ToArray());
+    // Both ways a task changes end in TaskItem.WithSetAsideNotesFolded (task aa42794f): a "Set aside while Claude works
+    // on your reply" line folds the moment its task no longer holds a set-aside question, whichever change cleared it
+    // (Restored, Answered, SettleQuestion, an ask of a different question, done, a close, an assign).
+    TaskBoard Replaced(TaskItem updated) => new(Tasks.Select(t => t.Id == updated.Id ? Woken(t, updated.WithSetAsideNotesFolded()) : t).ToArray());
 
     Result<TaskBoard> Change(Guid id, Func<TaskItem, TaskItem> change) =>
         Tasks.Any(t => t.Id == id)
-            ? new TaskBoard(Tasks.Select(t => t.Id == id ? Woken(t, Unmarked(t, change(t))) : t).ToArray())
+            ? new TaskBoard(Tasks.Select(t => t.Id == id ? Woken(t, Unmarked(t, change(t)).WithSetAsideNotesFolded()) : t).ToArray())
             : Result.Failure<TaskBoard>(NoTask(id.ToString()));
 
     // The handed-back mark (StalledTasks) means "Deskbar gave this to Petre because it went quiet". Once anything else

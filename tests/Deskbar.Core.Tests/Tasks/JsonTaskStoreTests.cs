@@ -627,4 +627,36 @@ public sealed class JsonTaskStoreTests : IDisposable
         Assert.Equal("s1", comments[5].SessionId.Value);
         Assert.Equal([false, false, false, false, false, true], comments.Select(c => c.BySession));
     }
+
+    // A task holding an unsettled old-wording Deskbar set-aside note, saved straight through the store (TaskBoard's
+    // constructor does not fold), so the file carries the note unsettled. Task aa42794f.
+    static TaskItem WithOldSetAsideNote(Maybe<string> setAside) =>
+        new TaskItem(Guid.NewGuid(), "Tasks panel", Maybe<Guid>.None, TaskStatus.InProgress, "", Maybe<string>.None,
+            T0, T0.AddMinutes(30), T0, [], [new TaskComment(Guid.NewGuid(), TaskComment.DeskbarAuthor, T0.AddMinutes(5),
+                "Deskbar set the question aside at 10:05: Claude is working on the task again after your reply.")])
+        { QuestionSetAside = setAside };
+
+    [Fact]
+    public void An_unsettled_set_aside_note_without_a_set_aside_question_loads_folded_at_the_tasks_update_time()
+    {
+        var store = new JsonTaskStore(dir);
+        var task = WithOldSetAsideNote(Maybe<string>.None);
+        Assert.True(store.Save(new TaskBoard([task])).IsSuccess);
+
+        var loaded = store.Load().Value.Tasks.Single();
+
+        Assert.Equal(task.UpdatedAt, loaded.Comments.Single().Settled.Value);
+    }
+
+    [Fact]
+    public void An_unsettled_set_aside_note_with_a_set_aside_question_loads_unsettled()
+    {
+        var store = new JsonTaskStore(dir);
+        Assert.True(store.Save(new TaskBoard([WithOldSetAsideNote("Merge it?")])).IsSuccess);
+
+        var loaded = store.Load().Value.Tasks.Single();
+
+        Assert.True(loaded.QuestionSetAside.HasValue);
+        Assert.True(loaded.Comments.Single().Settled.HasNoValue);
+    }
 }

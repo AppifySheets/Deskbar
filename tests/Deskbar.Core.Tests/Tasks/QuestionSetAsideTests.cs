@@ -486,19 +486,99 @@ public sealed class QuestionSetAsideTests : IDisposable
         Assert.Equal(At(30), answered.Comments.Single(c => c.IsSetAsideNote).Settled.Value);
     }
 
-    // Guards the order in SettleQuestion: the old set-aside line folds, the new "Question settled" line stays open.
+    // Guards the realistic flow (task aa42794f): set aside, restored (folds at the restore time), then settled; the new
+    // "Question settled" line is Deskbar's newest word and stays open.
     [Fact]
-    public void Settling_a_question_folds_an_earlier_set_aside_note_but_not_its_own_line()
+    public void Set_aside_then_restored_then_settled_leaves_the_note_folded_at_the_restore_and_the_settled_line_open()
     {
         var (waiting, id) = Waiting();
         var board = waiting.SetQuestionAside(id, Question, RepliedTasks.Note(Question), At(20), Guid.NewGuid()).RestoreQuestion(id, At(25));
 
         var settled = Get(board.SettleQuestion(id, Question, "Question settled: x was merged.", At(30), Guid.NewGuid()), id);
 
-        var aside = settled.Comments.Single(c => c.IsSetAsideNote);
-        var own = settled.Comments.Single(c => c.Markdown.StartsWith("Question settled", StringComparison.Ordinal));
-        Assert.True(aside.Settled.HasValue);
-        Assert.True(own.Settled.HasNoValue);
+        Assert.Equal(At(25), settled.Comments.Single(c => c.IsSetAsideNote).Settled.Value);
+        Assert.True(settled.Comments.Single(c => c.Markdown.StartsWith("Question settled", StringComparison.Ordinal)).Settled.HasNoValue);
+    }
+
+    // Guards that the note stays open while its question is out of sight (task aa42794f).
+    [Fact]
+    public void The_note_stays_unsettled_while_the_question_is_set_aside_and_through_an_unrelated_change()
+    {
+        var (board, id) = AsideWithNote();
+        Assert.True(Get(board, id).Comments.Single(c => c.IsSetAsideNote).Settled.HasNoValue);
+
+        var changed = board.SetStatusLine(id, "still working", At(21)).Value;
+
+        Assert.True(Get(changed, id).QuestionSetAside.HasValue);
+        Assert.True(Get(changed, id).Comments.Single(c => c.IsSetAsideNote).Settled.HasNoValue);
+    }
+
+    // A set-aside board whose note has the real wording, for the cases here (task aa42794f).
+    static (TaskBoard Board, Guid Id) AsideWithNote()
+    {
+        var (waiting, id) = Waiting();
+        return (waiting.SetQuestionAside(id, Question, RepliedTasks.Note(Question), At(20), Guid.NewGuid()), id);
+    }
+
+    // Guards that asking the same question again restores it, and the restore folds the note (task aa42794f).
+    [Fact]
+    public void Asking_the_same_question_again_folds_the_note()
+    {
+        var (board, id) = AsideWithNote();
+
+        var asked = Get(board.Ask(id, Question, At(30)).Value, id);
+
+        Assert.Equal(At(30), asked.Comments.Single(c => c.IsSetAsideNote).Settled.Value);
+    }
+
+    // Guards that a different question drops the set-aside one and folds the note (task aa42794f).
+    [Fact]
+    public void Asking_a_different_question_folds_the_note()
+    {
+        var (board, id) = AsideWithNote();
+
+        var asked = Get(board.Ask(id, "Something else entirely?", At(30)).Value, id);
+
+        Assert.True(asked.QuestionSetAside.HasNoValue);
+        Assert.Equal(At(30), asked.Comments.Single(c => c.IsSetAsideNote).Settled.Value);
+    }
+
+    // Guards that `task done` without answering folds the note (task aa42794f).
+    [Fact]
+    public void Marking_done_without_answering_folds_the_note()
+    {
+        var (board, id) = AsideWithNote();
+
+        var done = Get(board.MarkDone(id, At(30)).Value, id);
+
+        Assert.Equal(At(30), done.Comments.Single(c => c.IsSetAsideNote).Settled.Value);
+    }
+
+    // Guards that a folded note keeps its first fold time through later changes (task aa42794f).
+    [Fact]
+    public void A_folded_note_keeps_its_original_time_through_later_changes()
+    {
+        var (board, id) = AsideWithNote();
+        board = board.RestoreQuestion(id, At(25));
+
+        var later = Get(board.SetStatusLine(id, "waiting again", At(40)).Value, id);
+
+        Assert.Equal(At(25), later.Comments.Single(c => c.IsSetAsideNote).Settled.Value);
+    }
+
+    // Guards that the rule folds only the set-aside lines, never Deskbar's other ones (task aa42794f).
+    [Fact]
+    public void Other_Deskbar_lines_are_never_folded_by_the_rule()
+    {
+        var (waiting, id) = Waiting();
+        var board = waiting.Comment(id, TaskComment.DeskbarAuthor, "Resumed.", At(12), Guid.NewGuid()).Value
+            .SetQuestionAside(id, Question, RepliedTasks.Note(Question), At(20), Guid.NewGuid())
+            .RestoreQuestion(id, At(25));
+
+        var comments = Get(board, id).Comments;
+
+        Assert.True(comments.Single(c => c.Markdown == "Resumed.").Settled.HasNoValue);
+        Assert.True(comments.Single(c => c.IsSetAsideNote).Settled.HasValue);
     }
 
     // Guards that lines already in tasks.json (the longer wording) fold too, and that only Deskbar's own lines count.

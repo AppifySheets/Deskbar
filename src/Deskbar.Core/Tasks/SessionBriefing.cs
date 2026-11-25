@@ -238,7 +238,7 @@ public static class SessionBriefing
     // The parent's last unsettled comments, oldest of them first, each cut: what the user or a session last said on it.
     static IEnumerable<string> RecentComments(TaskItem parent) =>
         parent.Comments.Where(c => c.Settled.HasNoValue).OrderBy(c => c.At).TakeLast(CommentsShown).ToArray() is { Length: > 0 } recent
-            ? recent.Select(c => $"  {(c.ByManager ? "the manager" : c.SessionId.HasValue ? "a session" : "the user")}: \"{Cut(c.Markdown, DescriptionLength)}\"").Prepend("Recent comments on the parent:")
+            ? recent.Select(c => $"  {(c.ByManager ? "the manager" : c.ByDeskbar ? "Deskbar" : c.SessionId.HasValue ? "a session" : "the user")}: \"{Cut(c.Markdown, DescriptionLength)}\"").Prepend("Recent comments on the parent:")
             : [];
 
     // At most SessionsShown sessions, live ones first, then the latest joined: the ones worth reading.

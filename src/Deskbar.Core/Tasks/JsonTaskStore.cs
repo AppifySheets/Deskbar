@@ -193,7 +193,9 @@ public sealed class JsonTaskStore(string baseDirectory, Action<string>? trace = 
     static Parsed Parse(string text) =>
         (JsonSerializer.Deserialize<VersionProbe>(text, Options) ?? throw new JsonException("tasks.json deserialized to null")).Version is null or 1
             ? new Parsed(new TaskBoard((JsonSerializer.Deserialize<Version1FileDto>(text, Options)?.Tasks ?? []).Select(FromVersion1).ToArray()), true)
-            : new Parsed(new TaskBoard((JsonSerializer.Deserialize<FileDto>(text, Options)?.Tasks ?? []).Select(FromDto).ToArray()), false);
+            : new Parsed(new TaskBoard((JsonSerializer.Deserialize<FileDto>(text, Options)?.Tasks ?? []).Select(FromDto)
+                // Set-aside lines whose question is long gone fold on load too (task aa42794f), not only at the next change.
+                .Select(t => t.WithSetAsideNotesFolded()).ToArray()), false);
 
     // Which file the migrated board came from. DurableFile.Read parses tasks.json when it can; when it cannot, it
     // moves tasks.json aside and parses tasks.json.previous. So a tasks.json still in place is the one that was read.
