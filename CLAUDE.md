@@ -378,6 +378,15 @@ event), so the log stays readable with tracing on all day. Leave them in; this i
   package on this machine therefore runs against the real profile, performs the autostart
   takeover (deletes the direct build's Run value and Start shortcut), and its startup task
   fires at the next sign-in. Test the package elsewhere: a VM, Windows Sandbox or a CI runner.
+- **"Not enough memory resources" from `HwndWrapper..ctor` is window class names, not memory.**
+  WPF registers a class per window, the session has 16,320 class name slots, and Windows keeps
+  the free ones in a list per processor. After the table has been full once, some processors
+  refuse every name while others have thousands, so it fails at random and a probe from one
+  thread proves whatever you hoped (it was read as a leak first, then as needing a reboot; both
+  wrong, measured 2026-11-25). `pwsh scripts/user-atoms.ps1` measures per processor and
+  `-Repair` fixes it in under a second; a running Deskbar does the same every 30 seconds
+  (`ClassNameSlots`). Never fill the table to see how much room it has: filling it is what
+  breaks it. `docs/superpowers/notes/2026-11-25-user-atom-table-full.md` has the rest.
 
 ## Open threads
 

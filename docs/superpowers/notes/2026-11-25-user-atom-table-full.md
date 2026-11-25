@@ -1,69 +1,93 @@
-# The USER atom table filled up, and it looked like desktop heap (2026-11-25)
+# Window class names ran out on some processors, and it looked like memory (2026-11-25)
 
-Deskbar task 4d419051. From about 12:20 every `scripts/test-hidden.ps1` run failed: a few tests passed, then the
-rest threw `Win32Exception (8): Not enough memory resources are available to process this command` from
-`MS.Win32.HwndWrapper..ctor`, at 8 MB, 32 MB, any heap. One test alone failed too. Two testhosts died on the same
-exception at 12:41 and 12:42, and Snipping Tool crashed twice at 12:50, so it was not only the tests.
+Deskbar tasks 4d419051 (first reading) and c5e9b17f (this one, which corrects it). On 2026-11-25 everything that
+made a WPF window failed at random with `Win32Exception (8): Not enough memory resources are available to process
+this command` from `MS.Win32.HwndWrapper..ctor`: test runs from about 12:20, Snipping Tool at 12:50, and Deskbar
+itself, which could not start nine times between 13:11 and 13:21.
 
-## What it was not (each measured)
+## The short version
 
-- **The hidden desktop's heap.** A thread bound to a fresh 8 MB hidden desktop created 9,995 plain windows before
-  the per-process handle quota (error 1158) stopped it. A process started on such a desktop, the way the test run
-  starts, made 9,996.
-- **Memory, the window count, USER or GDI objects.** Commit 69 of 206 GB, 30 GB available; about 3,200 USER and
-  2,900 GDI objects in the whole session, steady.
-- **Desktop heap in general.** Plain `CreateWindowEx` never failed, about 8,000 calls, in the same seconds where
-  class registration failed up to 15% of the time.
+- The failing call is `RegisterClassEx`. WPF registers a window class with a name of its own for every window, and
+  each name needs a slot in the session's table of class names, window messages and clipboard formats (the "USER
+  atom table"): 16,320 slots for every program on every desktop of the session.
+- The table was **not full and nothing leaked**. About 840 names were in use. Windows keeps the free slots in one
+  list per processor, and thirteen of this machine's 32 processors could register nothing while four could
+  register 300 or more. A thread fails or succeeds by the processor it happens to run on.
+- That state begins the one time the table really does fill. What filled it: the window tests. A test host kept
+  every class of every test until it exited, 4,014 names for one run of `Deskbar.Windows.Tests`, so four runs at
+  once fill the table, and several sessions run that suite at the same time.
+- It can be repaired without signing out: a slot goes back to the list of the processor that releases it, so slots
+  taken on a processor with plenty and released on one with none make that one work again.
 
-## What it was
+What was done: `tests/Deskbar.Windows.Tests/StaThread.cs` shuts each test's dispatcher down, so a run no longer
+hoards names; Deskbar balances the slots before its first window, every 30 seconds and after any refused window
+(`src/Deskbar.Windows/Recovery/ClassNameSlots.cs`); `scripts/user-atoms.ps1` measures per processor and repairs
+with `-Repair`, and `scripts/test-hidden.ps1` runs it first.
 
-`RegisterClassEx` itself, and only for string class names:
+## What was measured
 
-- 1.3 million register-and-unregister cycles under an INTEGER class name (`MAKEINTATOM`, which never touches the
-  atom table) failed 0 times. The same under a string name failed in bursts.
-- Holding classes until the table refused, and then walking every slot 0xC000 to 0xFFFF with
-  `GetClipboardFormatName`: 175 to 351 slots were mine, about 843 had someone else's name, and about 15,200 answered
-  `ERROR_INVALID_HANDLE`. The table has 16,384 slots, so roughly 15,000 were taken by atoms with no name.
+All on Petre's machine (i9-14900K, 32 logical processors, Windows 10.0.26100), same boot, no sign-out in between.
 
-Window class names, registered window messages and clipboard format names share this one table per session
-([Raymond Chen, 2017](https://devblogs.microsoft.com/oldnewthing/20171006-00/?p=97147)), on every desktop and window
-station of the session. A hidden test desktop does not escape it. WPF makes a class with a unique name for every
-`Dispatcher` (`HwndWrapper[app;;{guid}]`), so every WPF window anywhere in the session needs a free slot.
-
-## How the slots leak
-
-A small child process registered 60 classes with unique names, made one window of each and exited without cleaning
-up (as a test host does). Then the table was filled to see whether the child's 60 slots were handed out again:
-
-| Child ran on | Slots back after it exited |
+| Measurement | Result |
 | --- | --- |
-| a hidden desktop, cleaning up (control) | 56 of 60 |
-| a hidden desktop, not cleaning up | 60 of 60 |
-| the visible desktop, not cleaning up | 0 of 60, and 0 of 20 twice more |
-| the visible desktop, classes but no windows | 60 of 60 |
+| A thread pinned to each processor in turn registers up to 300 uniquely named classes, three rounds | 300 on processors 0, 3, 10, 27; 0 on 4-7, 15, 16, 20-23, 25, 29, 31; between 1 and 294 on the rest. Identical in every round. |
+| The first few slot numbers each processor hands out, taken and put back in reverse, twice | The same numbers in the same order per processor: a last-in-first-out list each. |
+| 40 classes registered on processor 0, unregistered on processor 4 | Processor 4 went from 0 to 40. |
+| 3,000 more attempts on a processor at 0 | 0 succeeded. |
+| Every slot sorted into named, free on some processor's list (each list drained and restored), or neither | 843 named, 5,860 free and reachable, 9,681 neither, spread evenly over all 64 pages. |
+| Kernel pool tag `AtmA` (one allocation per atom, all atom tables of the machine) | 1,646 live. So the 9,681 are not in use by anyone. |
+| A child registers 20 classes, makes a window of each (top-level, message-only, or none) and exits without cleaning up | All 20 slots free again every time, on whichever processor ran the exit. |
+| Names held by a test host over one run of `Deskbar.Windows.Tests`, 1,609 tests, before the fix | Rose steadily to 4,014 and fell to 0 when the host exited. |
+| The same run after the fix (1,620 tests, all passed), sampled every quarter second | At most 9. |
+| The same run before the fix on the broken session, not pinned | 866 of 1,609 failed once the host had taken 1,164 names. |
+| Repair: every processor under 64 topped up to 128 | 20 processors short, 2,368 slots moved in 66 ms, all 32 able to register again. |
 
-The leaked atoms have no name afterwards and their windows are gone (`IsWindow` false). The session's USER handle
-table, read through `user32!gSharedInfo`, held one destroyed window in all, so the windows are not pinned as
-zombies. What holds the slot is the class atom. That only happens when the class had a window on the visible
-desktop, so something there takes hold of the class of a window it sees, and the slot outlives the process.
+## Why Windows behaves like this
 
-A hidden desktop with an out-of-context WinEvent hook that only pumped messages leaked nothing (20 of 20 back, three
-times). With `GetClassName` called in the hook's callback it leaked 20, 14 and 20 of 20. Calling `GetClassName`
-only on create or only on destroy events gave mixed results. This was measured while the table was already full,
-where other programs take freed slots between the child exiting and the check, so treat it as a lead, not a finding.
+Read from `ntoskrnl.exe` 10.0.26100.9457 with public symbols (`RtlpInsertStringAtom`, `ExCreateHandleEx`,
+`ExDestroyHandle`, `ExpAllocateHandleTableEntrySlow`, `ExpInsertLowLevelTableIntoFreeList`):
 
-Not found yet: which program on the visible desktop does it. Deskbar restarted at 13:05 and the leak went on, so
-its own hook thread is not what holds the slots.
+- The atom table sits on a kernel handle table. A name's number is 0xC000 plus its handle's index, so only
+  indexes below 0x4000 can be names: 64 pages of 255 entries.
+- The handle table keeps free entries in one last-in-first-out list per processor. `ExCreateHandleEx` takes from
+  the calling processor's list, and goes on to the next processor's only when a list is empty. `ExDestroyHandle`
+  puts an entry on top of the list of the processor that frees it.
+- Only when every list is empty does the table grow, by a page appended to the caller's list.
+- `RtlpInsertStringAtom` takes a handle, and if its index is 0x4000 or more it destroys the handle again and
+  fails with "no memory".
 
-## Recovering, and finding the culprit
+So the first time 16,320 names are in use at once, the table grows a 65th page, and its 255 entries can never be
+names. They stay in the free lists for the rest of the session. A processor with one of them on top of its list
+takes it, is refused and puts it back, every time, and because its list is not empty it never looks at the other
+lists. Whatever lies under such an entry in a list cannot be reached (the 9,681). A failed attempt that is
+preempted, or moved to another processor, between taking the entry and putting it back drops it on top of usable
+slots, which is how more of them get buried the longer the session fails.
 
-Nothing frees the table but ending the session: sign out or reboot. To find the culprit, start from a fresh session:
+Nothing in user mode can remove those entries. What can be done is to keep usable slots on top of every list,
+which is all a thread ever sees.
 
-1. `pwsh scripts/user-atoms.ps1` right after signing in, and again every hour. Headroom going down while the named
-   count stays flat is the leak.
-2. Close candidates one at a time (the session had 231 WinEvent hooks: PowerToys, RustDesk, Teams, Beeper, Docker
-   Desktop, Everything, the NVIDIA container, Windows Terminal, Deskbar) and repeat the leak test above. The first
-   one whose closing stops the leak is the one.
+## What the first reading got wrong
 
-`scripts/test-hidden.ps1` now runs `scripts/user-atoms.ps1` first and stops with this explanation instead of
-failing a few hundred tests.
+The first note said the table was full of leaked class atoms with no name, leaked whenever a process exited with
+windows of its own classes on the visible desktop, and that only signing out empties it. Each step was a
+measurement from one thread that did not know the lists are per processor:
+
+- "15,200 slots answer invalid-handle while registration is refused" was read as 15,200 atoms without a name.
+  They were free slots the measuring thread's processor could not reach.
+- "A child's slots are never handed out again" was a check from one processor for slots that had been released on
+  another. With all 32 lists checked, every slot comes back.
+- "Headroom: 200 of 200" one second and "refused" the next was the scheduler moving the probe.
+
+The old `scripts/user-atoms.ps1` therefore reported FULL at random and stopped test runs that would have passed.
+
+## Using the script
+
+```
+pwsh scripts/user-atoms.ps1            # names in use, what each processor can register, a verdict
+pwsh scripts/user-atoms.ps1 -Repair    # tops up the processors that are short
+pwsh scripts/user-atoms.ps1 -Top 20    # who holds the names, by shape
+```
+
+`SHORT` means some processors cannot register 64 classes; `-Repair` fixes that in well under a second. `FULL`
+means the table is nearly full for real: find the program holding thousands of names and end it before the table
+fills, because that is the event that breaks the session. A running Deskbar does the repair by itself.
