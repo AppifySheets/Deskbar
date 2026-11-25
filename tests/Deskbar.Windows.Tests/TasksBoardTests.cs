@@ -4637,6 +4637,70 @@ public class TasksBoardTests
         Assert.False(t.Window.AddBoxShown);
     });
 
+    // Task f212d886 ("adding a subtask is impossible", Petre's screenshot): the toggles, the parent chip (up to 220 DIP)
+    // and the workspace chip sat to the right of the box on one line, and on a narrow panel they took the whole width,
+    // so the text box was squeezed to nothing and there was nowhere to type. The box must keep room to type at any width
+    // the panel is used at; when the chips do not fit beside it they go on a line of their own under it.
+    [Theory]
+    [InlineData(420)]
+    [InlineData(560)]
+    [InlineData(TasksPanelLayout.SlimBelow)]
+    public void A_subtask_box_keeps_room_to_type_beside_a_long_parent(double width) => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var parent = t.Tasks.AddNote("there was a task about a new image endpoint the portal should call instead", t.Sparrow).Value;
+        t.Controller.Show();
+        t.Window.Width = width;
+        t.Window.BeginSubtaskAdd(parent.Id);
+        t.Window.UpdateLayout();
+
+        Assert.True(t.Window.AddBox.ActualWidth >= 150, $"at {width} DIP the box has {t.Window.AddBox.ActualWidth} DIP to type in");
+        var chip = ButtonNamed(t.Window, "Subtask of");
+        Assert.True(chip.ActualWidth > 0, "the parent chip is still shown");
+    });
+
+    // Review of the fix: the chips' width was first measured with the margin the last fit had left (-4 DIP under the
+    // box), so in a 4 DIP band of widths every redraw moved them between beside and under. Swept a DIP at a time across
+    // the switch-over, a second paint at the same width must leave them where the first one put them.
+    [Fact]
+    public void A_redraw_at_the_same_width_never_moves_the_add_chips() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var parent = t.Tasks.AddNote("there was a task about a new image endpoint the portal should call instead", t.Sparrow).Value;
+        t.Controller.Show();
+        t.Window.BeginSubtaskAdd(parent.Id);
+        var docks = Enumerable.Range(400, 400).Select(width =>
+        {
+            t.Window.Width = width;
+            t.Window.UpdateLayout();
+            var first = DockPanel.GetDock(t.Window.AddEnd);
+            t.Window.BeginSubtaskAdd(parent.Id);
+            t.Window.UpdateLayout();
+            var second = DockPanel.GetDock(t.Window.AddEnd);
+            Assert.True(first == second, $"at {width} DIP a redraw moved the chips from {first} to {second}");
+            return first;
+        }).Distinct().ToList();
+        Assert.Equal([Dock.Bottom, Dock.Right], docks);
+    });
+
+    // The other side of the same rule: on a wide panel the chips stay beside the box, on its line, as before.
+    [Fact]
+    public void A_subtask_box_on_a_wide_panel_keeps_its_chips_beside_it() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var parent = t.Tasks.AddNote("Ship the release", t.Sparrow).Value;
+        t.Controller.Show();
+        t.Window.Width = 1000;
+        t.Window.BeginSubtaskAdd(parent.Id);
+        t.Window.UpdateLayout();
+
+        var chip = ButtonNamed(t.Window, "Subtask of");
+        var box = t.Window.AddBox.TransformToAncestor(t.Window).TransformBounds(new Rect(t.Window.AddBox.RenderSize));
+        var chipAt = chip.TransformToAncestor(t.Window).TransformBounds(new Rect(chip.RenderSize));
+        Assert.True(chipAt.Left >= box.Right, $"the chip starts at {chipAt.Left}, right of the box ending at {box.Right}");
+        Assert.True(chipAt.Top < box.Bottom, $"the chip at {chipAt.Top} is on the box's line (ends at {box.Bottom})");
+    });
+
     [Fact]
     public void Esc_in_a_subtask_box_drops_the_parent_first() => StaThread.Run(() =>
     {

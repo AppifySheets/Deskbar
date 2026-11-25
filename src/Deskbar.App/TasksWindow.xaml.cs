@@ -173,6 +173,9 @@ public partial class TasksWindow : Window
         AddHandler(MouseLeftButtonUpEvent, new MouseButtonEventHandler((_, _) => Flush()), handledEventsToo: true);
         AddBox.TextChanged += (_, _) => AddPlaceholder.Visibility = AddBox.Text.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
         AddBox.PreviewKeyDown += (_, e) => e.Handled = PressInAdd(e.Key, Keyboard.Modifiers) != KeyOutcome.Ignored;
+        // The panel resized (or the add row laid out for the first time): the chips go beside the box or under it
+        // again, whichever leaves room to type (FitAddEnd, task f212d886). Only a width change can change that answer.
+        AddLine.SizeChanged += (_, e) => { if (e.WidthChanged) FitAddEnd(); };
         // Ctrl+V and drops of pictures on the add box (TasksWindow.Images.cs, "the add box").
         TakeAddPictures();
         // The search box: every keystroke goes to the controller at once, which narrows and redraws (no debounce, see
@@ -2559,9 +2562,45 @@ public partial class TasksWindow : Window
         AddBox.Focus();
     }
 
+    // The toggles and chips, then where they go: beside the box or under it (FitAddEnd).
+    void PaintAddPlace()
+    {
+        PaintAddChips();
+        FitAddEnd();
+    }
+
+    // ROOM TO TYPE (task f212d886, "adding a subtask is impossible", Petre's screenshot). The toggles, the parent chip
+    // (up to 220 DIP of title) and the workspace chip used to be docked right of the box on one line, always. The box
+    // is the DockPanel's fill, so it got only what they left, and on a narrow panel that was nothing: measured 0 DIP
+    // at a 420 DIP panel and 125 DIP at 560, with a long parent title. The caret had nowhere to go, so a subtask could
+    // not be typed at all. Now the chips stay on the box's line only while the box keeps MinAddBoxWidth beside them;
+    // otherwise they take a line of their own under the box, left-aligned with it, and wrap there if even that line is
+    // too narrow. The decision reads the chips' one-line width (measured unconstrained) against the line's width, and
+    // neither changes with where the chips are docked, so it cannot flip back and forth.
+    const double MinAddBoxWidth = 200;
+
+    void FitAddEnd()
+    {
+        var room = AddLine.ActualWidth;
+        // Not laid out yet (the row was just shown for the first time): AddLine's SizeChanged calls this again once it
+        // has a width.
+        if (room <= 0) return;
+        AddEnd.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+        // DesiredSize includes AddEnd's margin, which the previous call set (-4 DIP under the box, 0 beside it). Left in,
+        // it made the answer depend on the last answer, and in a 4 DIP band of widths the chips flipped between beside
+        // and under on every redraw (review of this fix). The chips' own width is the margin taken back out.
+        var chips = AddEnd.DesiredSize.Width - AddEnd.Margin.Left - AddEnd.Margin.Right;
+        var below = room - chips < MinAddBoxWidth;
+        DockPanel.SetDock(AddEnd, below ? Dock.Bottom : Dock.Right);
+        AddEnd.HorizontalAlignment = below ? HorizontalAlignment.Left : HorizontalAlignment.Stretch;
+        // Under the box: a little air above, and the first toggle's 4 DIP left margin taken back so the line starts
+        // at the box's left edge.
+        AddEnd.Margin = below ? new Thickness(-4, 6, 0, 0) : new Thickness(0);
+    }
+
     // The chip saying where the note goes: the one picked from its menu, else the view's (the filtered workspace, or
     // the workspace in front).
-    void PaintAddPlace()
+    void PaintAddChips()
     {
         AddEnd.Children.Clear();
         AddPlaceholder.Text = addParent is null ? NotePlaceholder : FloatingBar.SubtaskPlaceholder;

@@ -164,8 +164,12 @@
             <Border x:Name="AddRow" DockPanel.Dock="Top" Visibility="Collapsed" Padding="10,6,10,6"
                     BorderBrush="#FF33353C" BorderThickness="0,0,0,1">
               <StackPanel>
-                <DockPanel>
-                    <StackPanel x:Name="AddEnd" DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center"/>
+                <!-- AddEnd holds the toggles and chips. It sits right of the box while they fit beside a box still
+                     wide enough to type in, and on a line of its own under the box when they do not (FitAddEnd in
+                     TasksWindow.xaml.cs, task f212d886). A WrapPanel, so on a very narrow panel that line wraps
+                     instead of clipping the workspace chip. -->
+                <DockPanel x:Name="AddLine">
+                    <WrapPanel x:Name="AddEnd" DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center"/>
                     <Border CornerRadius="4" Background="#FF15161A" BorderBrush="#FF4F8CFF" BorderThickness="1" Padding="6,3">
                         <Grid>
                             <!-- A note of several lines (task 98420dbc, TaskNote): long text wraps and the box grows up to
