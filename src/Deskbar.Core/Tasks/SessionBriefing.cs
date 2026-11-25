@@ -92,6 +92,14 @@ public static class SessionBriefing
             .Concat(Commands(e.SessionId))) + "\n";
 
     /// <summary>
+    /// What Deskbar's manager session reads when it starts: two short lines. Its real briefing is the system prompt
+    /// appended when it was started (ManagerSession.Briefing), so this only says it must not be put on a task, which keeps
+    /// the context small (the manager runs all day).
+    /// </summary>
+    public static string Manager(string sessionId) =>
+        $"This is Deskbar's manager session (id {sessionId}). It does not join or create a task for itself; its rules are in its system prompt.\n";
+
+    /// <summary>
     /// The one line a session reads with each prompt: its task, or that the user closed it (join it to reopen it, or
     /// make a new task for other work), or that it has none yet.
     /// </summary>

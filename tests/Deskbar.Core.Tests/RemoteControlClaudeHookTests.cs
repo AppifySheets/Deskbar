@@ -1134,6 +1134,72 @@ public class RemoteControlClaudeHookTests
         Assert.False(tasks.WasAttended("ender"));
     }
 
+    // --- the manager session is left out of tasks (manager session design, Task 6) ---
+
+    const string ManagerDir = @"C:\State\manager";
+
+    // A hook run from the manager's own folder, against a control that knows where that is.
+    string ManagerHook(WorkspaceManager manager, string hookEvent, string session = "mgr", string source = "startup") =>
+        new RemoteControl(manager, tasks: tasks, longPath: LongPath,
+                taskSessions: new TaskSessionCommands(_ => Result.Success(), _ => [], (_, _) => Result.Success(), (_, _) => Result.Success())
+                {
+                    ManagerFolder = ManagerDir,
+                })
+            .Execute(["claude-hook", "--entry", "claude-vscode", "--attended", "1", "--from", ManagerDir,
+                "--json", HookOf(hookEvent, session, source)]).Output;
+
+    [Fact]
+    public void Manager_session_start_gets_the_manager_line_not_the_join_offer()
+    {
+        var manager = Started();
+        tasks.AddNote("Fix the strip", IdOf(manager, "Deskbar"));
+
+        var briefing = ManagerHook(manager, "SessionStart");
+
+        Assert.Contains("manager session", briefing);
+        Assert.Contains("mgr", briefing);
+        Assert.DoesNotContain("has no task yet", briefing);
+        Assert.DoesNotContain("task join", briefing);
+        Assert.DoesNotContain("Fix the strip", briefing);
+    }
+
+    [Fact]
+    public void Manager_prompt_gets_nothing() =>
+        Assert.Equal("", ManagerHook(Started(), "UserPromptSubmit"));
+
+    [Fact]
+    public void Manager_session_is_not_marked_attended()
+    {
+        var manager = Started();
+
+        ManagerHook(manager, "SessionStart");
+        ManagerHook(manager, "UserPromptSubmit");
+
+        Assert.False(tasks.WasAttended("mgr"));
+    }
+
+    // The waiting Stop hook registers no waiter for the manager: it has no task, so no comment is ever for it.
+    [Fact]
+    public void Manager_gets_no_comment_waiter()
+    {
+        try
+        {
+            var reply = new RemoteControl(Started(), tasks: tasks, longPath: LongPath, inbox: new CommentInbox(InboxFolder, () => DateTimeOffset.UtcNow),
+                    taskSessions: new TaskSessionCommands(_ => Result.Success(), _ => [], (_, _) => Result.Success(), (_, _) => Result.Success())
+                    {
+                        ManagerFolder = ManagerDir,
+                    })
+                .Execute(["claude-wait", "--entry", "claude-vscode", "--attended", "1", "--from", ManagerDir, "--json", HookOf("Stop", "mgr", null)]);
+
+            Assert.Equal("", reply.Output);
+            Assert.False(File.Exists(Path.Combine(InboxFolder, "mgr.gen")));
+        }
+        finally
+        {
+            if (Directory.Exists(InboxFolder)) Directory.Delete(InboxFolder, true);
+        }
+    }
+
     // Final review, item 14: the hook scripts are rewritten by whichever Deskbar starts last, so a newer script can pass
     // an option an older running copy does not know. It is skipped with its value, and the hook still works.
     [Fact]

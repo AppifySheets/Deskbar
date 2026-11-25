@@ -69,10 +69,12 @@ public sealed partial class RemoteControl
     // without an inbox: the script then exits 0 and the session simply has no waiter this turn.
     ControlReply ClaudeWait(IReadOnlyList<string> rest) =>
         ControlArguments.ParseClaudeHook(rest)
-            .Bind(request => ClaudeHookEvent.Parse(request.Json!, request.Entrypoint, request.Attended, request.Job))
-            .Match(hook => inbox is { } box && !hook.Headless && manager.State.ClaudeTasksInEffect
-                    ? box.Register(hook.SessionId).Match(
-                        waiter => Said($"{hook.SessionId} {waiter.Generation}\r\n"),
+            .Bind(request => ClaudeHookEvent.Parse(request.Json!, request.Entrypoint, request.Attended, request.Job).Map(hook => (request, hook)))
+            // The manager has no task, so no comment is ever addressed to it: it gets no waiter either (Task 6).
+            .Match(found => inbox is { } box && !found.hook.Headless && manager.State.ClaudeTasksInEffect
+                    && !IsManagerFolder(Folder(found.request.From) ?? Folder(found.hook.Folder))
+                    ? box.Register(found.hook.SessionId).Match(
+                        waiter => Said($"{found.hook.SessionId} {waiter.Generation}\r\n"),
                         _ => Quiet)
                     : Quiet,
                 ControlReply.Fail);
@@ -94,8 +96,15 @@ public sealed partial class RemoteControl
 
     // SessionStart and UserPromptSubmit reach here only when the hook is not headless, so they also tell the task
     // service a person is at the session (Ruling 17, TaskService.HeardAttended): only such sessions are adopted.
+    //
+    // THE MANAGER SESSION IS LEFT OUT OF TASKS (manager session design, Task 6): a hook from the manager's own folder is
+    // answered before Attended runs, so the keeper never adopts it (HeardAttended is never called), SessionStart gets the
+    // two-line SessionBriefing.Manager instead of the offer to join or create a task, and a prompt gets nothing at all, so
+    // it costs no tokens per message. SessionEnd stays as for any session (it marks nothing for a session with no task).
     ControlReply TaskEvent(TaskService service, ClaudeHookEvent hook, string? folder) => hook.Event switch
     {
+        "SessionStart" when IsManagerFolder(folder) => Said(SessionBriefing.Manager(hook.SessionId)),
+        "UserPromptSubmit" when IsManagerFolder(folder) => Quiet,
         "SessionStart" => Said(SessionStarted(Attended(service, hook), hook, folder)),
         "UserPromptSubmit" => Said(Prompted(Attended(service, hook), hook.SessionId)),
         "SessionEnd" => Ended(service, hook),
@@ -116,6 +125,9 @@ public sealed partial class RemoteControl
                 .Tap(task => links.ToList().ForEach(link => service.AddPullRequest(task.Id, link)));
         return Quiet;
     }
+
+    // The folder is already normalised (Folder), the same way the task forms read it (RemoteControl.Tasks).
+    bool IsManagerFolder(string? folder) => ManagerSession.IsManager(folder, taskSessions?.ManagerFolder ?? "", LongPath);
 
     static TaskService Attended(TaskService service, ClaudeHookEvent hook)
     {
