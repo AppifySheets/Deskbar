@@ -4571,6 +4571,14 @@ public sealed class WorkspaceManager(
     public Result PinWindow(WindowHandle window) =>
         desktops.Pin(window).Tap(() => RememberPlacement(window, pinned: true));
 
+    // Pins a window to every desktop WITHOUT remembering it by identity (PinWindow does, and for Windows Terminal the
+    // identity is every terminal window's), and says so on WindowMoved, so the tiler takes it off a workspace's board it
+    // may have joined as it appeared ("no longer living here: leave and retile", Tiler.OnWindowMoved). For the manager's
+    // window (task f171bca6, App.PinManagerWindows): a pin raises no window event of its own, so without this the tiler
+    // kept the pinned window as a tile and its neighbour at half size.
+    public Result PinWithoutMemory(WindowHandle window) =>
+        desktops.Pin(window).Tap(() => windowMoved.OnNext(window));
+
     public Result UnpinWindow(WindowHandle window) =>
         desktops.Unpin(window).Tap(() => ForgetPlacement(window));
 

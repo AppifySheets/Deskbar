@@ -36,7 +36,8 @@ namespace Deskbar.App;
 //      Deskbar rebuilt with a new briefing reaches the manager at its next resume, not only at the next day's start.
 //   4. The window is ClaudeTaskActions.AttachTo, the one a task's session gets, titled
 //      ClaudeStart.AttachTitle(ManagerSession.Name) and opened on the workspace in front (the manager has none of its
-//      own). An open one is brought forward.
+//      own). An open one is brought forward. Once it appears, the App pins it to every desktop (App.PinManagerWindows,
+//      task f171bca6), and the bar draws it with a violet icon and ring (ManagerSession.IsWindow says which window).
 //
 // A PENDING CLICK. From the click until the window is attached (or the open failed) a second click does nothing: the
 // first start is still finding its session, and a second would start another manager.
@@ -69,7 +70,7 @@ namespace Deskbar.App;
 public sealed class ManagerActions : IDisposable
 {
     /// <summary>The manager's window title, by which an open window is found again (ClaudeTaskActions.AttachTo).</summary>
-    public static string Title => ClaudeStart.AttachTitle(ManagerSession.Name);
+    public static string Title => ManagerSession.WindowTitle;
 
     readonly WorkspaceManager manager;
     readonly ClaudeSessions sessions;

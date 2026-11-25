@@ -63,6 +63,29 @@ public static class ManagerSession
     public const string Name = "Deskbar manager";
     public const string BriefingFile = "manager-briefing.md";
 
+    /// <summary>The manager's window title, `Deskbar manager · Claude`, by which its window is found and told apart.</summary>
+    public static string WindowTitle => ClaudeStart.AttachTitle(Name);
+
+    /// <summary>
+    /// Whether a window is the manager's: a Claude session window (<see cref="ClaudeStart.IsSessionWindow"/>, a Windows
+    /// Terminal window Deskbar opened) titled <see cref="WindowTitle"/>.
+    /// </summary>
+    //
+    // THE MANAGER'S WINDOW SET APART (task f171bca6, Petre: "manager terminal window should have a special icon and ring
+    // and everything and should be pinned to the deskbar, like tasks", then from the choices offered: pinned to every
+    // desktop, a violet icon, a violet ring, and a glow while it asks). Everything that treats this window differently
+    // asks here, so the icon (IconCache), the ring (FocusRings.WithManager), the glow (FloatingBar.Glows) and the pin
+    // (App.PinManagerWindow) cannot disagree about which window it is.
+    //
+    // By the title, for the reason IsSessionWindow gives: Windows Terminal draws every window from one process, so the
+    // title is all that tells this window from a task's. The "Deskbar Claude" profile keeps it fixed. A second tab opened
+    // in the window takes the title with it, and the window then stops being the manager's, which is right: it shows
+    // that tab. A task cannot take the title: AttachTitle cuts a task's title to its first line plus " · Claude", so
+    // only a task titled exactly "Deskbar manager" would, and its window would then be drawn and pinned as the manager's.
+    // Rare enough to leave: renaming the task gives the window back its task look the next time it opens.
+    public static bool IsWindow(string? processPath, string? title) =>
+        ClaudeStart.IsSessionWindow(processPath, title) && title == WindowTitle;
+
     // A verbatim quote of the user in a manager comment starts with this marker, so a reader can tell the user's own
     // words from the manager's summary. The spec's "Petre says:" written for every user, since the text ships to them.
     public const string QuoteMarker = "The user says:";

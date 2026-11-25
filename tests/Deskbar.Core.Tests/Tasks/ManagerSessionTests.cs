@@ -236,4 +236,25 @@ public class ManagerSessionTests
         Assert.Contains("oldest and most blocking first, each with your suggested answer", text);
         Assert.DoesNotContain("Nothing runs on a timer", text);
     }
+
+    // Task f171bca6: the manager's own window (violet icon and ring, glow, pinned to every desktop) is the Windows Terminal
+    // window titled "Deskbar manager · Claude", and no task session's window is.
+    const string Terminal = @"C:\Program Files\WindowsApps\Microsoft.WindowsTerminal_1.25.3131.0_x64__8wekyb3d8bbwe\WindowsTerminal.exe";
+
+    [Fact]
+    public void The_terminal_window_titled_for_the_manager_is_the_manager_window()
+    {
+        Assert.Equal("Deskbar manager · Claude", ManagerSession.WindowTitle);
+        Assert.True(ManagerSession.IsWindow(Terminal, ManagerSession.WindowTitle));
+    }
+
+    [Theory]
+    [InlineData(Terminal, "fix the bar · Claude")]                                            // a task's session window
+    [InlineData(Terminal, "Deskbar manager")]                                                 // no suffix: not a session window
+    [InlineData(Terminal, "Deskbar manager · Claude · old")]
+    [InlineData(@"C:\Program Files\Microsoft VS Code\Code.exe", "Deskbar manager · Claude")]  // another app with the title
+    [InlineData(null, "Deskbar manager · Claude")]
+    [InlineData(Terminal, null)]
+    public void Any_other_window_is_not_the_manager_window(string? processPath, string? title) =>
+        Assert.False(ManagerSession.IsWindow(processPath, title));
 }

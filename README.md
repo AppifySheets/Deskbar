@@ -538,6 +538,10 @@ first, with a suggested answer for each. A dot on the Manager button says it has
 When the manager needs a decision from you, its question shows as a violet line at the top of the bar's task list and
 of the tasks panel, above every task's question. Click it to open the manager; your reply clears it.
 
+The manager's window is pinned to every desktop, so it is there whichever workspace you are on, and the bar shows it
+in the pinned row. It carries Claude's icon in violet instead of the plain one every task session has, a violet ring
+while it has focus, and its icon glows while the manager's question waits on you.
+
 The tasks screencast shows the old floating window and needs filming again for the panel.
 
 More in [Tasks](docs/features/tasks.md).
