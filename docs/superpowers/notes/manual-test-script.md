@@ -362,6 +362,12 @@ written for the floating window and now describe the panel; 64a to 64n cover wha
     `$ts bar minimize`, then `$ts bar restore`, while the video still plays: the panel comes back behind the video,
     never over it, not even for a second. Leave full screen: within a second the panel is on top again. Do the same
     with the panel closed, opening it with `$ts tasks-window show` while the video plays.
+64o. Windows under the panel. Close the panel. Restore (un-maximize) a terminal and drag its right edge out to the
+    bar, so it spans most of the screen; put a small Notepad half under where the panel will be. Open the panel: the
+    terminal now ends at the panel's edge, its left edge where it was, and Notepad moved beside the panel, same size.
+    Neither came to the front. Drag Notepad back under the panel: it stays there (the panel clears its strip once,
+    when it takes it). Widen the panel with its grip: Notepad is moved again, by the new width. In a tiled workspace
+    the tiles are left to the tiler. With tracing on, each move is a "tasks panel: moved ... off the strip" line.
 
 ## Claude sessions and their tasks
 

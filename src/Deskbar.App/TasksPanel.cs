@@ -101,6 +101,19 @@ internal sealed class TasksPanel : IDisposable
     // ReclaimTopmost. Faked in the tests.
     internal Func<nint, nint> CoveringWindow { get; init; } = hwnd => TopLevelWindows.CoveringWindow(hwnd) ?? 0;
 
+    // THE WINDOWS THAT MAY BE UNDER THE STRIP, each with where it is now (physical pixels), for ClearUnder (task cafaae24,
+    // "tasks should reclaim space from other windows"). Only restored windows: the shell resizes maximized ones to the new
+    // work area by itself, a snapped one is the shell's to size, a minimized one's rectangle is the -32000 nonsense, and
+    // one in a tile is the Tiler's (it re-lays its grid when the work area changes). Deskbar's own windows are left out.
+    // The App answers with the bar's known windows filtered that way (ScreenStrips.ClearUnder has the same list and its
+    // reasons); empty by default, so a panel nobody wires never moves anything. Faked in the tests.
+    internal Func<IReadOnlyList<(WindowHandle Window, WindowRect Rect)>> RestoredWindows { get; init; } = () => [];
+
+    // Puts one of those windows somewhere else WITHOUT raising it or taking the focus: IScreenLayout.Nudge in the app, for
+    // the reason ScreenStrips.ClearUnder gives (a window moved for nobody's asking must not jump in front of the one being
+    // worked in). Faked in the tests.
+    internal Func<WindowHandle, WindowRect, Result> Nudge { get; init; } = (_, _) => Result.Success();
+
     // Whether tracing is on, asked BEFORE a line is built, and where the lines go: ClickTrace in the app (the one switch,
     // %APPDATA%\Deskbar\trace.on, and the log %TEMP%\deskbar-trace.log, CLAUDE.md "Instrumentation"), a list in the tests.
     internal Func<bool> Tracing { get; init; } = () => ClickTrace.On;
@@ -155,6 +168,10 @@ internal sealed class TasksPanel : IDisposable
 
     // What the shell granted at the last dock, physical pixels; null while nothing is granted.
     WindowRect? granted;
+
+    // The strip the windows under it were last moved out of (ClearUnder), physical pixels; null while the panel holds
+    // nothing, so the next dock that takes a strip clears it again.
+    WindowRect? clearedFor;
 
     // The guard's two clocks, the docked bar's (FloatingBar.SettleFor, RetryEvery), and how often it has repaired.
     DateTime lastDocked = DateTime.MinValue;
@@ -345,6 +362,7 @@ internal sealed class TasksPanel : IDisposable
         Undock();
         docked = false;
         granted = null;
+        clearedFor = null;
         awaitingBar = false;
         if (!windowClosed && window.IsVisible) window.Hide();
         if (held) Say(() => "tasks panel: strip given back (shutdown)");
@@ -462,6 +480,7 @@ internal sealed class TasksPanel : IDisposable
 
             Say(() => $"tasks panel: docked ({reason}), {at.Edge} edge, {thickness} px{(fresh ? ", registered afresh" : "")}");
             TraceGeometry();
+            ClearUnder(at, got, scale);
             return Result.Success();
         }
         finally
@@ -511,6 +530,7 @@ internal sealed class TasksPanel : IDisposable
     Result Refuse(string why)
     {
         granted = null;
+        clearedFor = null;
         if (window.IsVisible) window.Hide();
         Say(() => $"tasks panel: dock refused: {why}");
         TraceGeometry();
@@ -524,6 +544,7 @@ internal sealed class TasksPanel : IDisposable
         Undock();
         docked = false;
         granted = null;
+        clearedFor = null;
         awaitingBar = false;
         // Forgotten with the registration the shell said it to; the next show looks again (ShowOnTop).
         fullScreenOpen = false;
@@ -532,6 +553,39 @@ internal sealed class TasksPanel : IDisposable
         Say(() => $"tasks panel: strip given back ({why})");
         TraceGeometry();
     }
+
+    // Windows' invisible resize border, in DIPs: a restored window flush against the panel reaches this far under it
+    // without anything of it being covered (7 px at 100% on Windows 11), so TasksPanelClear leaves such a window alone.
+    const double InvisibleBorderDips = 8;
+
+    // THE WINDOWS UNDER A STRIP THE PANEL HAS JUST TAKEN (task cafaae24, "tasks should reclaim space from other windows").
+    // The shell resizes maximized windows to the new work area, but a restored window stays where it was with its edge
+    // under the panel: Petre's screenshot showed a terminal's lines cut off by it. So each such window is moved off the
+    // strip, sideways and size kept where there is room, narrowed where there is not (TasksPanelClear has the rule).
+    //
+    // ONCE PER STRIP TAKEN, like ScreenStrips.ClearUnder: when the panel comes on screen, moves to another screen or edge,
+    // or grows. A re-dock onto a strip no bigger than the one last cleared (the bar's guard, the shell's re-ask, a
+    // narrower width) moves nothing, because a window under the panel by then was put there by hand, and moving it back
+    // every time would fight the person dragging it. Each move, and each window that would not move (an elevated
+    // process, a handle that died), is traced, so "why did my window jump" has its answer in the log.
+    void ClearUnder(PanelPlacement at, WindowRect strip, double scale)
+    {
+        if (clearedFor is { } last && Contains(last, strip)) return;
+        clearedFor = strip;
+        var work = WorkAreaOf(at.Screen);
+        var tolerance = (int)Math.Ceiling(InvisibleBorderDips * scale);
+        RestoredWindows()
+            .SelectMany(w => TasksPanelClear.Clear(w.Rect, at.Edge, at.Screen, strip, work, tolerance) is { } to
+                ? [(w.Window, From: w.Rect, To: to)]
+                : Array.Empty<(WindowHandle Window, WindowRect From, WindowRect To)>())
+            .ToList()
+            .ForEach(move => Nudge(move.Window, move.To)
+                .Tap(() => Say(() => $"tasks panel: moved {move.Window.Value:X} from {Format(move.From)} to {Format(move.To)}, off the strip"))
+                .TapError(error => Say(() => $"tasks panel: could not move {move.Window.Value:X} off the strip: {error}")));
+    }
+
+    static bool Contains(WindowRect outer, WindowRect inner) =>
+        inner.Left >= outer.Left && inner.Right <= outer.Right && inner.Top >= outer.Top && inner.Bottom <= outer.Bottom;
 
     void SetWanted(bool value)
     {
