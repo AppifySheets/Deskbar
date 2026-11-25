@@ -613,7 +613,7 @@ with `claude -p` or the Agent SDK are left out. `deskbar.cmd claude-tasks off` t
 
 While it is on, Deskbar also reads Claude Code's own list of running sessions (`claude agents --json`)
 every 15 seconds. A session no task knows, still running after two minutes, gets a task of its own, on the
-workspace of the VS Code window showing its folder, once its hooks have said someone is at it (so `claude -p`
+workspace of the VS Code window showing its folder (or, with no such window, where the latest task in its repo went), once its hooks have said someone is at it (so `claude -p`
 runs stay off the board); if it later joins a task of its own, the one Deskbar made
 goes away again unless you have changed it (renamed, moved, flagged, linked to a goal, set its status,
 assigned it, described it or commented on it). When the session of an open task is no longer running, after a reboot, a crash or a

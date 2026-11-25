@@ -224,8 +224,8 @@ public sealed partial class RemoteControl
     // --- the session's own `task` forms ------------------------------------------------------------
     //
     //   task join <id> --session <sid>          take up an offered task (one of the user's notes becomes Claude's work)
-    //   task new <title> --session <sid>        create the session's task, on the workspace of the VS Code window that
-    //                                           shows the session's folder, or on none when no window does
+    //   task new <title> --session <sid>        create the session's task, on the workspace SessionWorkspace finds (the
+    //                                           VS Code window showing the folder, else the repo's latest task's), or none
     //   task status-line <text> --session <sid> the short line under the title ("waiting for CI on #398")
     //   task ask <question> --session <sid>     waiting on the user with the question, and asks for them as `attention`
     //   task answered --session <sid>           the session's question is settled: back to In progress, the blink stops
@@ -244,7 +244,7 @@ public sealed partial class RemoteControl
         var folder = Folder(from);
         Result<TaskItem> Own() => service.Board.TaskOf(session)
             .ToResult($"Session {session} has no open task. Join one (task join <id> --session {session}) or create one (task new \"<title>\" --session {session}).");
-        Maybe<Guid> Here() => CallerOf(folder).Workspace is { } w ? w.Id : Maybe<Guid>.None;
+        Maybe<Guid> Here() => SessionWorkspace(service, folder, session);
         ControlReply Changed(Result<TaskItem> task) =>
             task.Map(t => service.Board.Tasks.First(x => x.Id == t.Id)).Match(t => Success(Describe(t)), ControlReply.Fail);
 
@@ -276,6 +276,22 @@ public sealed partial class RemoteControl
             _ => ControlReply.Fail($"Wrong arguments for a session's task form.\n{TaskUsage()}"),
         };
     }
+
+    // The workspace a session's `task new` and `task later` go on (task f905b1a7: "tasks added to the deskbar by claude
+    // sessions should be given proper workspaces, not none"). The first of these that answers wins:
+    //   1. the workspace of the VS Code window that shows the session's folder (CallerOf), as before;
+    //   2. the workspace of the session's own open task: a follow-up note belongs with the work it follows up;
+    //   3. the workspace of the latest task worked on in the session's repo (RepoWorkspace.Latest).
+    // Only when none answers does the task go on no workspace. The window used to be the only source, and since sessions
+    // run in the Windows Terminal windows Deskbar opens there is often no VS Code window at all, so every task a
+    // session made was on none.
+    Maybe<Guid> SessionWorkspace(TaskService service, string? folder, Maybe<string> session) =>
+        CallerOf(folder).Workspace is { } w
+            ? w.Id
+            : session.Bind(service.Board.TaskOf).Bind(t => t.WorkspaceId).Where(WorkspaceExists)
+                .Or(() => folder is null ? Maybe<Guid>.None : RepoWorkspace.Latest(service.Board, folder, WorkspaceExists));
+
+    bool WorkspaceExists(Guid id) => manager.State.Workspaces.Any(w => w.Id == id);
 
     // `task answered`: only a WAITING task is touched (Answered would also resume a Done one, which is not a question).
     void Resolve(TaskService service, TaskItem task, string session)

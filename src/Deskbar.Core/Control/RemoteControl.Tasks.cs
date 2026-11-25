@@ -62,7 +62,8 @@ namespace Deskbar.Core.Control;
 //
 // `task` is in ControlArguments.AboutTheCaller, so the client appends `--from <folder>` to every call. It is
 // stripped first. Only `add` uses it: without --workspace the note goes on the workspace of the caller's editor
-// window (CallerOf, shared with `open` and `attention`). A caller with no workspace and no --workspace is refused,
+// window (CallerOf, shared with `open` and `attention`), else on the workspace of the latest task worked on in the
+// caller's repo (SessionWorkspace, task f905b1a7). A caller with neither and no --workspace is refused,
 // because a note on the wrong workspace is worse than one that was not written.
 //
 // Every failure is one line and changes nothing: parsing and lookups finish before the first service call.
@@ -117,7 +118,7 @@ public sealed partial class RemoteControl
             ["status", var id, var status] => ParseStatus(status)
                 .Match(s => TaskChange(service, id, t => service.SetStatus(t.Id, s)), ControlReply.Fail),
             ["rename", var id, var title] => TaskChange(service, id, t => service.Rename(t.Id, title)),
-            ["move", var id, var workspace] => ResolveWorkspace(workspace, null)
+            ["move", var id, var workspace] => ResolveWorkspace(service, workspace, null)
                 .Match(w => TaskChange(service, id, t => service.MoveTo(t.Id, w)), ControlReply.Fail),
             ["comment", var id, var markdown] => TaskChange(service, id, t => service.Comment(t.Id, Maybe<string>.None, markdown)),
             // The same command from inside a Claude session (ControlArguments.WithCaller): stored as usual, wakes no one.
@@ -387,16 +388,18 @@ public sealed partial class RemoteControl
         // review, finding 4), so the parent's workspace is looked up here rather than defaulted by the board.
         var parent = o.Parent is { } p ? service.Board.Find(p).Map(Maybe.From) : Result.Success(Maybe<TaskItem>.None);
         return parent
-            .Bind(up => (up.HasValue && o.Workspace is null ? Result.Success(up.Value.WorkspaceId) : ResolveWorkspace(o.Workspace, from))
+            .Bind(up => (up.HasValue && o.Workspace is null ? Result.Success(up.Value.WorkspaceId) : ResolveWorkspace(service, o.Workspace, from))
                 .Bind(workspace => service.AddNote(o.Title!, workspace, QuadrantOf.Flags(o.Important, o.Urgent), up.Map(t => t.Id))))
             .Match(task => Success(Describe(task)), ControlReply.Fail);
     }
 
     // `none` is a free task, a name is looked up like every other command's, and no name asks the caller (only
-    // `add` has a caller to ask; `move` always names its workspace).
-    Result<Maybe<Guid>> ResolveWorkspace(string? workspace, string? from) =>
+    // `add` has a caller to ask; `move` always names its workspace). The caller is asked the way a session's own forms
+    // ask (SessionWorkspace): its VS Code window, else where the latest task in its repo went (task f905b1a7). `add`
+    // carries no session, so there is no own task to ask. Refused only when neither answers.
+    Result<Maybe<Guid>> ResolveWorkspace(TaskService service, string? workspace, string? from) =>
         workspace is null
-            ? CallerOf(from).Workspace is { } caller ? Maybe.From(caller.Id) : Result.Failure<Maybe<Guid>>(NoWorkspaceForTask)
+            ? SessionWorkspace(service, Folder(from), Maybe<string>.None).ToResult(NoWorkspaceForTask).Map(Maybe.From)
             : workspace.Trim().Equals("none", StringComparison.OrdinalIgnoreCase) ? Maybe<Guid>.None
             : WorkspaceNamed(workspace).Map(w => Maybe.From(w.Id));
 
