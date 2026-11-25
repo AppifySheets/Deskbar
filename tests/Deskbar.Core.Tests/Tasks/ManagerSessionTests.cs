@@ -211,6 +211,18 @@ public class ManagerSessionTests
         Assert.True(text.Split('\n').Length < 40);
     }
 
+    // Task 61e4d143: the manager's own question. The briefing names both verbs, and keeps the manager from relaying a
+    // task's question, which already reaches the user (the 40 line cap is asserted above).
+    [Fact]
+    public void Briefing_names_the_managers_own_ask_and_answered()
+    {
+        var text = ManagerSession.Briefing(Shim);
+
+        Assert.Contains($"{Shim} task ask -", text);
+        Assert.Contains($"{Shim} task answered", text);
+        Assert.Contains("Never relay a task's own question", text);
+    }
+
     // Step 2 (docs/superpowers/specs/2026-11-25-manager-event-wakes-design.md): the briefing says what to do with a wake,
     // whose message ManagerWakes starts with "Deskbar wake." and marks a repeat hand-back AGAIN.
     [Fact]

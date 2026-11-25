@@ -110,7 +110,7 @@ public class FloatingBarTaskListTests
         Func<nint, bool>? onCurrentDesktop = null, Func<DateTimeOffset>? taskNow = null, Action<Guid>? openTask = null,
         Func<TaskItem, Maybe<string>>? goalTitle = null, IObservable<System.Reactive.Unit>? goalChanges = null,
         Func<Guid, ContextMenu?>? startClaude = null, IObservable<bool>? panelShown = null, string? stateDir = null,
-        Action<Guid>? openParent = null, Action? openManager = null)
+        Action<Guid>? openParent = null, Action? openManager = null, Func<ManagerAsk?>? managerAsks = null)
     {
         var harness = Harness.Build();
         var minutes = 0;
@@ -130,6 +130,7 @@ public class FloatingBarTaskListTests
             GoToTask = goTo ?? (_ => Result.Success()),
             ToggleTasksPanel = openWindow,
             OpenManager = openManager,
+            ManagerAsks = managerAsks,
             TasksPanelShown = panelShown,
             // A line's single click opens its task in the window (Ruling 54); a test that hands in a goTo probe sees that click
             // too, which is what the click-guard tests watch for. A double-click goes through goTo itself.
@@ -2879,6 +2880,41 @@ public class FloatingBarTaskListTests
 
         Click(button);
         Assert.Equal(1, opened);
+    });
+
+    // The manager line (task 61e4d143): the manager's open question above the task lines, a click on it opens the manager,
+    // and no line while it asks nothing or while there is no manager to open.
+    [Fact]
+    public void Manager_line_shows_the_question_and_a_click_opens_the_manager() => StaThread.Run(() =>
+    {
+        var opened = 0;
+        using var t = Build(openManager: () => opened++, managerAsks: () => new ManagerAsk("Which comes first?", Start));
+        t.Tasks.AddNote("A note", t.Gepha);
+
+        var line = Inside(t.Bar).OfType<Border>().Single(b => Equals(b.Tag, "manager-line"));
+        var text = Inside(line).OfType<TextBlock>().Single(b => Equals(b.Tag, "manager-line-text"));
+        Assert.Contains("Which comes first?", string.Concat(text.Inlines.OfType<Run>().Select(r => r.Text)));
+
+        Click(ButtonNamed(t.Bar, "Manager asks: Which comes first?"));
+        Assert.Equal(1, opened);
+    });
+
+    [Fact]
+    public void No_manager_line_when_the_manager_asks_nothing() => StaThread.Run(() =>
+    {
+        using var t = Build(openManager: () => { }, managerAsks: () => null);
+        t.Tasks.AddNote("A note", t.Gepha);
+
+        Assert.DoesNotContain(Inside(t.Bar).OfType<Border>(), b => Equals(b.Tag, "manager-line"));
+    });
+
+    [Fact]
+    public void No_manager_line_without_the_open_action() => StaThread.Run(() =>
+    {
+        using var t = Build(managerAsks: () => new ManagerAsk("Which comes first?", Start));
+        t.Tasks.AddNote("A note", t.Gepha);
+
+        Assert.DoesNotContain(Inside(t.Bar).OfType<Border>(), b => Equals(b.Tag, "manager-line"));
     });
 
     [Fact]

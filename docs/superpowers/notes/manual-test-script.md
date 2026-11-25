@@ -1186,6 +1186,19 @@ MW3. Leave a question unanswered for two hours on a day the manager is open: the
 MW4. On a day the manager was never opened, nothing wakes it and no dot appears, whatever is handed back.
 MW5. While you are typing to the manager (a turn in progress), no wake lands in the middle; it comes after the turn.
 
+The manager's question line (task 61e4d143, docs/superpowers/specs/2026-11-25-manager-question-line-design.md):
+
+MQ1. Open the manager and tell it: "Ask me with task ask whether to tidy the board tonight." A violet line starting
+     "Manager" appears at the top of the bar's task list, and a violet "Manager asks" tile at the top of the tasks
+     panel, above every task waiting on you, with the whole question and its age.
+MQ2. Scroll the bar's task list and the panel: the manager line stays in sight above the lines.
+MQ3. Close the manager's window and click the line on the bar, then on the panel: each opens the manager's window, and
+     the line stays.
+MQ4. Answer the manager in its window: the line goes from both places at once.
+MQ5. Have it ask twice in a row: only the second question shows.
+MQ6. Open the panel's Stats view: no manager line over it. Back to the list: the line is there again.
+MQ7. The next day, click Manager: the new manager starts without yesterday's question, and the line is gone.
+
 ## Results (2026-08-01)
 
 Status: **pending human execution.** An agent cannot observe the desktop, Task View,

@@ -158,6 +158,12 @@ public sealed class TasksBoard : IDisposable
     /// </summary>
     internal Action<nint>? BringTaskWindowForward { get; init; }
 
+    /// <summary>
+    /// Opens the manager session (the bar's Manager button, ManagerActions.Open): the manager line's click (task 61e4d143).
+    /// None (the tests, a copy without Claude sessions): the panel draws no manager line, as there is nothing to open.
+    /// </summary>
+    internal Func<Result>? OpenManager { get; init; }
+
     // What Undo gives back (Ruling 31): the status, the question of a task that waited on Petre, and the selection.
     sealed record PendingClose(TaskStatus Was, IDisposable Timer)
     {
@@ -250,6 +256,9 @@ public sealed class TasksBoard : IDisposable
             FilterClaudeWorking: FilterClaudeWorking)
         {
             StartClaude = startClaude,
+            // The manager line's click (task 61e4d143): the Manager button's own click, read when it happens, since the
+            // App sets OpenManager after this constructor. A refusal shows on the problem line like any other.
+            OpenManager = () => Report(OpenManager?.Invoke() ?? Result.Failure("The manager is not available.")),
             StopClaudeAndClose = id => Close(id, stopClaude: true),
             OpenSession = openSession is null ? null : (id, session) => OpenSession(id, session),
             SubtaskParent = id => tasks.Board.SubtaskParentFor(id)
@@ -1097,6 +1106,9 @@ public sealed class TasksBoard : IDisposable
         // The view carries the CHOICE (where), not the resolved filter, so the toolbar can tick its "Current workspace" checkbox.
         return new TasksView(filters, WorkspaceFilterLabel(shown), where, places, groups, EmptyText(), addTarget)
         {
+            // The manager's open question (task 61e4d143, ManagerQuestion), whatever the filters: it is not a task, and it
+            // has priority. Only while there is a manager to open; the Stats view leaves it out (TasksWindow draws it).
+            ManagerAsks = OpenManager is null ? null : App.ManagerAskOf(manager.State.Manager),
             // The setting is Petre's and the width never changes it: a panel too narrow for the Matrix shows the List and
             // leaves AppState.TasksMatrix as it is, so widening it again brings the Matrix back.
             // A search by id shows the List even under the Matrix setting: the Matrix has no Closed or Snoozed cell, and
@@ -1514,6 +1526,9 @@ internal sealed record TasksView(IReadOnlyList<TaskFilterChip> Filters, string W
 
     /// <summary>Whether the "Subtasks" checkbox is ticked (task 173ef268): subtasks drawn under their parent, not folded.</summary>
     public bool ShowsSubtasks { get; init; } = true;
+
+    /// <summary>The manager's open question (task 61e4d143), drawn as the violet line above the list; null for none.</summary>
+    public ManagerAsk? ManagerAsks { get; init; }
     /// <summary>
     /// The Stats view's numbers while it shows in place of the List or the Matrix (task 521d2b07, TasksWindow.Stats.cs),
     /// null otherwise.
@@ -1566,6 +1581,9 @@ internal sealed record TasksWindowActions(
 {
     /// <summary>"Start Claude on this" (Task 9): the line menu's item and the thread's button. None, neither shows.</summary>
     public Action<Guid>? StartClaude { get; init; }
+
+    /// <summary>The manager line's click (task 61e4d143): opens the manager session.</summary>
+    public Action? OpenManager { get; init; }
 
     /// <summary>The stop menu's "Stop Claude and close" (task 37cd7081): TasksBoard.Close with stopClaude.</summary>
     public Func<Guid, Result>? StopClaudeAndClose { get; init; }

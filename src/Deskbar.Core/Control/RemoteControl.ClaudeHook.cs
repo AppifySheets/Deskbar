@@ -107,10 +107,12 @@ public sealed partial class RemoteControl
     // answered before Attended runs, so the keeper never adopts it (HeardAttended is never called), SessionStart gets the
     // two-line SessionBriefing.Manager instead of the offer to join or create a task, and a prompt gets nothing at all, so
     // it costs no tokens per message. SessionEnd stays as for any session (it marks nothing for a session with no task).
+    // A prompt there is still read for one thing (task 61e4d143, ManagerQuestion.AfterPrompt): the user's reply to the
+    // manager clears the manager's open question, so its line leaves "Waiting on you". Still silent.
     ControlReply TaskEvent(TaskService service, ClaudeHookEvent hook, string? folder) => hook.Event switch
     {
         "SessionStart" when IsManagerFolder(folder) => Said(SessionBriefing.Manager(hook.SessionId)),
-        "UserPromptSubmit" when IsManagerFolder(folder) => Quiet,
+        "UserPromptSubmit" when IsManagerFolder(folder) => ManagerPrompted(hook),
         "SessionStart" => Said(SessionStarted(Attended(service, hook), hook, folder)),
         "UserPromptSubmit" => Said(Prompted(Attended(service, hook), hook)),
         "SessionEnd" => Ended(service, hook),
@@ -165,6 +167,15 @@ public sealed partial class RemoteControl
         if (links.Count > 0)
             service.Board.TaskOf(hook.SessionId).Or(() => service.Board.LastTaskOf(hook.SessionId))
                 .Tap(task => links.ToList().ForEach(link => service.AddPullRequest(task.Id, link)));
+        return Quiet;
+    }
+
+    // A prompt reached the manager (see TaskEvent): when it is the user's reply to the stored manager while its question is
+    // open, the question is cleared; a Deskbar wake, another session in the folder or no question changes nothing.
+    ControlReply ManagerPrompted(ClaudeHookEvent hook)
+    {
+        ManagerQuestion.AfterPrompt(Maybe.From(manager.State.Manager), hook.SessionId, hook.Prompt)
+            .Tap(manager.SetManagerSession);
         return Quiet;
     }
 

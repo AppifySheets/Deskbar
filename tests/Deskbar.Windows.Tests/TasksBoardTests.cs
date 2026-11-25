@@ -93,7 +93,7 @@ public class TasksBoardTests
         Func<TaskItem, IReadOnlyList<SessionView>>? sessionsOf = null, Action<Guid>? startClaude = null,
         Func<TaskItem, string, Result>? openSession = null, IObservable<System.Reactive.Unit>? sessionsChanged = null,
         string edge = "right", double width = Wide, Func<TaskItem, int>? workingOf = null, double? screenDips = null,
-        string? stateDir = null, Action<string>? openImage = null)
+        string? stateDir = null, Action<string>? openImage = null, Func<Result>? openManager = null)
     {
         var harness = Harness.Build();
         var minutes = 0;
@@ -124,7 +124,11 @@ public class TasksBoardTests
             return activates?.Invoke() ?? true;
         }, undoTimer: timers.Start, now: () => Start.AddHours(1), selection: selection,
             sessionsOf: sessionsOf, startClaude: startClaude, openSession: openSession, sessionsChanged: sessionsChanged,
-            workingOf: workingOf);
+            workingOf: workingOf)
+        {
+            // The manager line's click (task 61e4d143); none by default, so no manager line is drawn.
+            OpenManager = openManager,
+        };
         return new Board { Harness = harness, Window = window, Controller = controller, Panel = panel, Tasks = tasks, Timers = timers, WentTo = went };
     }
 
@@ -181,6 +185,39 @@ public class TasksBoardTests
         t.Controller.Filter(TaskFilter.Closed);
         Assert.Equal(["Closed"], t.Window.Headers);
         Assert.Equal([closed], t.Window.Keys);
+    });
+
+    // The manager's open question (task 61e4d143): one tile above the list, shown only while the App wired OpenManager,
+    // and a click on it opens the manager.
+    [Fact]
+    public void The_manager_line_shows_its_question_and_opens_the_manager() => StaThread.Run(() =>
+    {
+        var opened = 0;
+        using var t = Build(openManager: () =>
+        {
+            opened++;
+            return Result.Success();
+        });
+        t.Harness.Manager.SetManagerSession(new ManagerRecord("mgr", new DateOnly(2026, 11, 22), Question: "Which comes first?", AskedAt: Start));
+        t.Controller.Show();
+
+        var host = (Border)LogicalTreeHelper.FindLogicalNode(t.Window, "ManagerLineHost");
+        Assert.Equal(Visibility.Visible, host.Visibility);
+        Assert.Equal("Which comes first?", Inside(host).OfType<TextBlock>().Single(b => Equals(b.Tag, "manager-question")).Text);
+
+        Click(Inside(host).OfType<Button>().Single());
+        Assert.Equal(1, opened);
+    });
+
+    [Fact]
+    public void The_manager_line_stays_hidden_without_the_open_action() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        t.Harness.Manager.SetManagerSession(new ManagerRecord("mgr", new DateOnly(2026, 11, 22), Question: "Which comes first?", AskedAt: Start));
+        t.Controller.Show();
+
+        var host = (Border)LogicalTreeHelper.FindLogicalNode(t.Window, "ManagerLineHost");
+        Assert.Equal(Visibility.Collapsed, host.Visibility);
     });
 
     [Fact]

@@ -1139,14 +1139,14 @@ public class RemoteControlClaudeHookTests
     const string ManagerDir = @"C:\State\manager";
 
     // A hook run from the manager's own folder, against a control that knows where that is.
-    string ManagerHook(WorkspaceManager manager, string hookEvent, string session = "mgr", string source = "startup") =>
+    string ManagerHook(WorkspaceManager manager, string hookEvent, string session = "mgr", string source = "startup", string extra = "") =>
         new RemoteControl(manager, tasks: tasks, longPath: LongPath,
                 taskSessions: new TaskSessionCommands(_ => Result.Success(), _ => [], (_, _, _) => Result.Success(), (_, _) => Result.Success())
                 {
                     ManagerFolder = ManagerDir,
                 })
             .Execute(["claude-hook", "--entry", "claude-vscode", "--attended", "1", "--from", ManagerDir,
-                "--json", HookOf(hookEvent, session, source)]).Output;
+                "--json", HookOf(hookEvent, session, source, extra)]).Output;
 
     [Fact]
     public void Manager_session_start_gets_the_manager_line_not_the_join_offer()
@@ -1166,6 +1166,46 @@ public class RemoteControlClaudeHookTests
     [Fact]
     public void Manager_prompt_gets_nothing() =>
         Assert.Equal("", ManagerHook(Started(), "UserPromptSubmit"));
+
+    // The user's reply to the manager clears its open question (task 61e4d143, ManagerQuestion.AfterPrompt); the hook
+    // still answers nothing, so a prompt costs no tokens.
+    static WorkspaceManager WithOpenQuestion(WorkspaceManager manager)
+    {
+        manager.SetManagerSession(new ManagerRecord("mgr", new DateOnly(2026, 11, 25), Question: "Which first?", AskedAt: DateTimeOffset.UnixEpoch));
+        return manager;
+    }
+
+    [Fact]
+    public void Manager_prompt_from_the_user_clears_its_question_and_answers_nothing()
+    {
+        var manager = WithOpenQuestion(Started());
+
+        var answer = ManagerHook(manager, "UserPromptSubmit", extra: ",\"prompt\":\"yes, close it\"");
+
+        Assert.Equal("", answer);
+        Assert.Null(manager.State.Manager!.Question);
+        Assert.Null(manager.State.Manager.AskedAt);
+    }
+
+    [Fact]
+    public void Manager_prompt_that_is_a_deskbar_wake_leaves_the_question()
+    {
+        var manager = WithOpenQuestion(Started());
+
+        ManagerHook(manager, "UserPromptSubmit", extra: ",\"prompt\":\"Deskbar wake. Since your last look:\"");
+
+        Assert.Equal("Which first?", manager.State.Manager!.Question);
+    }
+
+    [Fact]
+    public void Prompt_from_another_session_in_the_manager_folder_leaves_the_question()
+    {
+        var manager = WithOpenQuestion(Started());
+
+        ManagerHook(manager, "UserPromptSubmit", session: "someone-else", extra: ",\"prompt\":\"yes\"");
+
+        Assert.Equal("Which first?", manager.State.Manager!.Question);
+    }
 
     [Fact]
     public void Manager_session_is_not_marked_attended()

@@ -53,6 +53,14 @@ public sealed class ManagerWakesTests
         Assert.Equal(new ManagerWake.Nothing(record with { Since = At(60) }), plan);
     }
 
+    // ManagerQuestion.AfterPrompt tells a wake from the user's reply by this prefix, so every wake must start with it.
+    [Fact]
+    public void A_wakes_message_starts_with_the_prefix()
+    {
+        var plan = Assert.IsType<ManagerWake.Wake>(Plan(Record(), Board(HandedBack(id1, At(10))), At(30)));
+        Assert.StartsWith(ManagerWakes.Prefix, plan.Message);
+    }
+
     [Fact]
     public void A_hand_back_after_since_wakes_with_its_status_line()
     {

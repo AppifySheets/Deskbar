@@ -534,6 +534,9 @@ questions come along with those but never wake it alone, and it is woken at most
 middle of a turn. On a wake it nudges each stopped session once with a comment, then lists what waits on you, oldest
 first, with a suggested answer for each. A dot on the Manager button says it has news; opening the manager clears it.
 
+When the manager needs a decision from you, its question shows as a violet line at the top of the bar's task list and
+of the tasks panel, above every task's question. Click it to open the manager; your reply clears it.
+
 The tasks screencast shows the old floating window and needs filming again for the panel.
 
 More in [Tasks](docs/features/tasks.md).
