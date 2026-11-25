@@ -3241,6 +3241,26 @@ public class FloatingBarTaskListTests
         Assert.Contains("Subtask of Ship the release", (string)line.ToolTip);
     });
 
+    // Task 9e85caee: the done tick went in front of the "↳", which pushed a done subtask's arrow right of its siblings'
+    // and read as deeper nesting. The arrow comes first and the tick right after it.
+    [Fact]
+    public void A_done_subtasks_tick_comes_after_its_arrow() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var parent = t.Tasks.AddNote("Ship the release", t.Gepha).Value;
+        var child = t.Tasks.AddNote("Research it", t.Gepha, parent: parent.Id).Value;
+        Assert.True(t.Tasks.MarkDone(child.Id).IsSuccess);
+        t.Bar.UpdateLayout();
+
+        var line = t.Lines.Single(l => ((TaskLine)l.Tag).Id == child.Id);
+        var text = Inside(line).OfType<TextBlock>().Single(b => Equals(b.Tag, "task-text"));
+        var inlines = text.Inlines.ToArray();
+
+        Assert.StartsWith("↳", Assert.IsType<Run>(inlines[0]).Text, StringComparison.Ordinal);
+        var tick = Assert.IsType<InlineUIContainer>(inlines[1]);
+        Assert.Equal(TaskStatusMarks.DoneTickTag, ((FrameworkElement)tick.Child).Tag);
+    });
+
     [Fact]
     public void A_parent_line_counts_its_open_subtasks() => StaThread.Run(() =>
     {

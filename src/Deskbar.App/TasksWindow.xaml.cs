@@ -1278,7 +1278,22 @@ public partial class TasksWindow : Window
             // A DONE TASK'S TICK in front of its title, the bar's own (TaskStatusMarks.DoneTick; Petre, 2026-11-23, "build
             // both"). Docked left of the title so the title still wraps in what is left; at the first line's height (top).
             // Not on a line in its undo window, which is closed.
-            if (row.Status == TaskStatus.Done && !row.Closing)
+            //
+            // A SUBTASK'S TICK GOES AFTER ITS ARROW (task 9e85caee, Petre: "what's up with research being nested further
+            // than the other tasks?"). Docked left, the tick sat in front of the "↳" the title starts with, so a done
+            // subtask's arrow stood a tick's width right of its siblings' and read as one more level of nesting. On a
+            // subtask the tick is an inline right after the breadcrumb run instead ("↳ ✓ title", or "↳ Parent › ✓ title"
+            // on a full line), the way the bar draws it, so every sibling's arrow starts at the same x.
+            var doneTick = row.Status == TaskStatus.Done && !row.Closing;
+            if (doneTick && row.ParentTitle is not null)
+            {
+                var tick = TaskStatusMarks.DoneTick(12);
+                tick.Margin = new Thickness(0, 0, 5, 0);
+                // Inlines[0] is the breadcrumb run (the subtask branch above always adds it first), so the tick is second.
+                title.Inlines.InsertAfter(title.Inlines.FirstInline, new InlineUIContainer(tick) { BaselineAlignment = BaselineAlignment.Center });
+                panel.Children.Add(title);
+            }
+            else if (doneTick)
             {
                 var tick = TaskStatusMarks.DoneTick(12);
                 tick.Margin = new Thickness(0, 2, 5, 0);
