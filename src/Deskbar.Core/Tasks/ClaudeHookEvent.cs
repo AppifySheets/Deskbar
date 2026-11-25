@@ -86,6 +86,15 @@ public sealed record ClaudeHookEvent(string Event, string SessionId, string Fold
     /// </summary>
     public string ToolOutput { get; init; } = "";
 
+    /// <summary>A PreToolUse or PostToolUse hook's tool_name (Bash, PowerShell, AskUserQuestion, ...), or none.</summary>
+    public Maybe<string> ToolName { get; init; }
+
+    /// <summary>
+    /// An AskUserQuestion hook's questions as the task's question text (DialogQuestion, task 493b7ba9), or none for any
+    /// other tool or a tool_input with no question in it.
+    /// </summary>
+    public Maybe<string> DialogQuestion { get; init; }
+
     public static Result<ClaudeHookEvent> Parse(string json, string? entrypoint, string? attended, string? job = null)
     {
         try
@@ -110,6 +119,10 @@ public sealed record ClaudeHookEvent(string Event, string SessionId, string Fold
                     ? Text(input, "command")
                     : Maybe<string>.None,
                 ToolOutput = root.TryGetProperty("tool_response", out var response) ? string.Join("\n", Strings(response)) : "",
+                ToolName = Text(root, "tool_name"),
+                DialogQuestion = Text(root, "tool_name") == Tasks.DialogQuestion.Tool && root.TryGetProperty("tool_input", out var asked)
+                    ? Tasks.DialogQuestion.From(asked)
+                    : Maybe<string>.None,
             };
         }
         catch (JsonException e)

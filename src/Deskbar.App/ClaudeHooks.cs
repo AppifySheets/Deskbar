@@ -7,7 +7,8 @@ namespace Deskbar.App;
 
 // Deskbar's entries in Claude Code's ~/.claude/settings.json (see ClaudeSkill for why they exist): two that ask for the
 // user (Notification, Stop) while "Teach Claude Code about Deskbar" is on, and four more (SessionStart,
-// UserPromptSubmit, SessionEnd, and PostToolUse for `gh pr create` only, see PullRequestTools) while Claude Code sessions also keep their tasks (AppState.ClaudeTasksInEffect; design
+// UserPromptSubmit, SessionEnd, PostToolUse for `gh pr create` only, see PullRequestTools, and PreToolUse plus PostToolUse
+// for the AskUserQuestion dialog, see DialogEntry) while Claude Code sessions also keep their tasks (AppState.ClaudeTasksInEffect; design
 // docs/superpowers/specs/2026-11-22-tasks-board-design.md, "Who gets it"). Each runs a script that hands the event's
 // JSON to `claude-hook`; the event's name is in the JSON.
 //
@@ -125,8 +126,20 @@ static class ClaudeHooks
         ("Notification", on ? [Entry(askCommand)] : []),
         ("Stop", on ? [Entry(askCommand), .. tasks && waitCommand is not null ? [WaitEntry(waitCommand)] : Array.Empty<JsonObject>()] : []),
         .. TaskEvents.Select(name => (name, (IReadOnlyList<JsonObject>)(on && tasks ? [Entry(taskCommand)] : []))),
-        ("PostToolUse", on && tasks ? PullRequestTools.Select(tool => ToolEntry(tool, taskCommand)).ToArray() : []),
+        ("PreToolUse", on && tasks ? [DialogEntry(taskCommand)] : []),
+        ("PostToolUse", on && tasks ? [.. PullRequestTools.Select(tool => ToolEntry(tool, taskCommand)), DialogEntry(taskCommand)] : []),
     ];
+
+    // A QUESTION IN CLAUDE CODE'S DIALOG IS THE TASK'S QUESTION (task 493b7ba9, Core's DialogQuestion). One entry on
+    // PreToolUse and one on PostToolUse, matched to the AskUserQuestion tool only, on the task script: before the dialog
+    // opens its questions go on the session's task as Waiting on you, and once it returns the question is settled. The
+    // matcher alone keeps every other tool call from starting a process (the docs list AskUserQuestion as a matcher).
+    static JsonObject DialogEntry(string command) =>
+        new()
+        {
+            ["matcher"] = Core.Tasks.DialogQuestion.Tool,
+            ["hooks"] = new JsonArray(new JsonObject { ["type"] = "command", ["command"] = command }),
+        };
 
     // A PULL REQUEST GOES ON ITS TASK (task e7aa49b1, Core's TaskPullRequests). One PostToolUse entry per shell tool,
     // on the same terms and the same script as the task events, each with Claude Code's `if` filter so it runs only for a
