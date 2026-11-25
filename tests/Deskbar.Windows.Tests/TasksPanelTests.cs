@@ -72,6 +72,10 @@ public class TasksPanelTests
         public nint Cover;
         // The bar's own window (FloatingBar.Hwnd), or 0 for no bar.
         public nint BarHwnd;
+        // The restored windows the panel is told about (TasksPanel.RestoredWindows), and every Nudge it made, in order.
+        // A nudge that works moves the window in this list too, as the real one would.
+        public List<(WindowHandle Window, WindowRect Rect)> Restored = [];
+        public readonly List<(WindowHandle Window, WindowRect To)> Nudged = [];
         public readonly Window Window = new()
         {
             WindowStyle = WindowStyle.None,
@@ -100,6 +104,13 @@ public class TasksPanelTests
                 OverflowInFront = () => Overflow,
                 CoveringWindow = _ => Cover,
                 BarWindow = () => BarHwnd,
+                RestoredWindows = () => Restored,
+                Nudge = (window, to) =>
+                {
+                    Nudged.Add((window, to));
+                    Restored = Restored.Select(w => w.Window == window ? (w.Window, to) : w).ToList();
+                    return Result.Success();
+                },
             };
 
         // Runs whatever the panel queued on its dispatcher (see the top of this file).
@@ -151,6 +162,75 @@ public class TasksPanelTests
         Assert.True(IsTopmost(rig.Window));
         var rect = RectOf(rig.Window);
         Assert.Equal((Screen.Right - 690, Screen.Top, Screen.Right, Screen.Bottom), (rect.Left, rect.Top, rect.Right, rect.Bottom));
+        rig.Close();
+    });
+
+    // TAKING THE STRIP BACK FROM THE WINDOWS UNDER IT (task cafaae24). A restored window reaching under the panel's strip
+    // is moved off it when the panel comes on screen: 690 px strip on the right, a 600 px window reaching 290 px under it
+    // moves 290 px left, size kept (TasksPanelClear has the rule). A window clear of the strip is not touched.
+    static readonly WindowHandle Under = new(0x1001);
+    static readonly WindowHandle Clear = new(0x1002);
+    static readonly WindowRect UnderRect = new(Screen.Right - 690 - 310, Screen.Top + 100, Screen.Right - 400, Screen.Top + 400);
+    static readonly WindowRect ClearRect = new(Screen.Left + 100, Screen.Top + 100, Screen.Left + 700, Screen.Top + 400);
+    static readonly WindowRect MovedRect = UnderRect with { Left = UnderRect.Left - 290, Right = Screen.Right - 690 };
+
+    [Fact]
+    public void Showing_moves_a_restored_window_off_the_strip_and_leaves_the_rest() => StaThread.Run(() =>
+    {
+        var rig = new Rig { Restored = [(Under, UnderRect), (Clear, ClearRect)] };
+        rig.Bar.OnNext(Docked("right"));
+        rig.Pump();
+
+        rig.Panel.Show(TasksPanelLayout.DefaultWidth);
+
+        Assert.Equal([(Under, MovedRect)], rig.Nudged);
+        Assert.Contains(rig.Lines, line => line.Contains("moved 1001") && line.Contains("off the strip"));
+        rig.Close();
+    });
+
+    // Once per strip taken: the bar registering again, the shell's re-ask and a narrower width all re-dock onto a strip
+    // no bigger than the one cleared, and a window under the panel by then was put there by hand, so nothing moves.
+    [Fact]
+    public void A_re_dock_onto_the_same_or_a_smaller_strip_moves_nothing() => StaThread.Run(() =>
+    {
+        var rig = new Rig().Open();
+        rig.Restored = [(Under, UnderRect)];
+
+        rig.Bar.OnNext(Docked("right"));
+        rig.Pump();
+        rig.Panel.OnShellMoved();
+        rig.Pump();
+        rig.Panel.SetWidth(400);
+
+        Assert.Empty(rig.Nudged);
+        rig.Close();
+    });
+
+    // A wider panel takes ground it did not hold, so the windows under the new strip move again.
+    [Fact]
+    public void A_wider_panel_clears_its_new_strip() => StaThread.Run(() =>
+    {
+        var rig = new Rig().Open();
+        var reach = UnderRect with { Right = Screen.Right - 690 };
+        rig.Restored = [(Under, reach)];
+
+        rig.Panel.SetWidth(500);
+
+        Assert.Equal([(Under, reach with { Left = reach.Left - 60, Right = Screen.Right - 750 })], rig.Nudged);
+        rig.Close();
+    });
+
+    // Closed and opened again, the panel takes its strip afresh, so it clears it again.
+    [Fact]
+    public void Opening_again_after_a_close_clears_again() => StaThread.Run(() =>
+    {
+        var rig = new Rig().Open();
+        rig.Panel.Hide();
+        rig.Restored = [(Under, UnderRect)];
+
+        rig.Panel.Show(TasksPanelLayout.DefaultWidth);
+
+        Assert.Equal([(Under, MovedRect)], rig.Nudged);
         rig.Close();
     });
 

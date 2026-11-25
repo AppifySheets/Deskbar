@@ -452,7 +452,9 @@ or down to reorder it. When there are more tasks than fit, the list scrolls with
 "+N more" (or "All tasks") opens the tasks panel,
 with every task, its comments, and a Matrix view of the four quadrants side by side.
 The panel is a full-height strip docked just inside the bar, on every virtual desktop, and it pushes
-maximized windows aside as the bar does. Click the same button, or the x in the panel's toolbar, to close
+maximized windows aside as the bar does. A window that is not maximized but reaches under the panel when
+it opens or grows is moved out from under it, keeping its size where there is room and narrowed where
+there is not. Click the same button, or the x in the panel's toolbar, to close
 it. Drag its inner edge to change the width (460 to start, 360 at the least, half the screen at the most);
 Deskbar remembers the width and whether the panel was open. A search box (Ctrl+F, Esc clears it) finds
 tasks by every word you type, in titles, status lines and questions. The "Claude working" chip shows only the

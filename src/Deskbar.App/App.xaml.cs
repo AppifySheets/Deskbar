@@ -2323,10 +2323,28 @@ public partial class App : Application
             // foreground and settles this value, so the panel sees the answer of the same tick.
             // The bar's handle too: the panel's place in the topmost band is directly behind the bar, so a floating bar
             // parked on the edge the panel docks on stays over its own panel (TasksPanel.BehindTheBar).
+            // The windows it moves off a strip it has just taken (TasksPanel.ClearUnder, task cafaae24): the bar's known
+            // windows minus Deskbar's own, as the screen strips take them, and of those only the restored ones the snapshot
+            // lists: not minimized, not maximized or snapped (the shell sizes those, ScreenLayout.IsShellArranged), and not
+            // in a tile on the desktop in view (the Tiler re-lays its grid itself when the work area changes, and a move of
+            // ours would read to it as a drag). Nudge keeps each one's z-order and focus.
+            var panelLayout = new ScreenLayout();
             tasksPanel = new TasksPanel(tasksWindow, bar.Strip)
             {
                 OverflowInFront = () => bar.OverflowInFront,
                 BarWindow = () => bar.Hwnd,
+                RestoredWindows = () =>
+                {
+                    var facts = panelLayout.Snapshot();
+                    return manager.KnownWindows
+                        .Where(w => w.ProcessId != Environment.ProcessId)
+                        .Select(w => w.Handle)
+                        .Where(w => facts.ZOrder.ContainsKey(w) && !facts.Minimized.Contains(w) && !ScreenLayout.IsShellArranged(w)
+                                    && !(tiler?.Board.ScreenOf(w).HasValue ?? false))
+                        .SelectMany(w => panelLayout.RectOf(w).Map(rect => (Window: w, Rect: rect)).ToList())
+                        .ToList();
+                },
+                Nudge = panelLayout.Nudge,
             };
             tasksPanel.Shown.Subscribe(tasksPanelShown);
             // PINNED TO EVERY DESKTOP once, after its first show, like the bar and the detached stats window (see
