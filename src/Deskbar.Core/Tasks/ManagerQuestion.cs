@@ -48,12 +48,14 @@ public static class ManagerQuestion
     /// <summary>
     /// The record after a prompt reached a session in the manager's folder: the question cleared when the prompt is the
     /// user's reply to TODAY'S stored manager, otherwise nothing to store. A Deskbar wake arrives as a prompt too (a bare
-    /// resume with the wake's text), and it is not the user's reply, so it leaves the question open.
+    /// resume with the wake's text), and it is not the user's reply, so it leaves the question open. The prefix is looked
+    /// for ANYWHERE in the prompt, not only at its start: the other road a wake takes, the inbox read by the waiting Stop
+    /// hook (asyncRewake), was not measured, and if Claude Code ever reports that as a prompt it may wrap the text.
     /// </summary>
     public static Maybe<ManagerRecord> AfterPrompt(Maybe<ManagerRecord> stored, string sessionId, Maybe<string> prompt) =>
         stored.Where(record => record.Question is not null
                                && record.SessionId == sessionId
-                               && !prompt.GetValueOrDefault("").TrimStart().StartsWith(ManagerWakes.Prefix, StringComparison.Ordinal))
+                               && !prompt.GetValueOrDefault("").Contains(ManagerWakes.Prefix, StringComparison.Ordinal))
             .Map(Cleared);
 
     static ManagerRecord Cleared(ManagerRecord record) => record with { Question = null, AskedAt = null };

@@ -364,7 +364,10 @@ public sealed class TasksBoard : IDisposable
     string ShownStateKey() =>
         string.Join('|', manager.State.Workspaces.Select(w => $"{w}"))
         + "|" + string.Join('|', manager.State.Groups.Select(g => $"{g}"))
-        + $"|{manager.CurrentWorkspaceId}|{manager.State.TasksMatrix}";
+        + $"|{manager.CurrentWorkspaceId}|{manager.State.TasksMatrix}"
+        // The manager's question (task 61e4d143): `task ask`, `task answered` and the user's reply change only
+        // AppState.Manager, so without this the open panel would drop their pulse and show the line late.
+        + $"|{manager.State.Manager?.Question}|{manager.State.Manager?.AskedAt}";
 
     /// <summary>
     /// The window's handle, created if it is not yet: what the App pins to every desktop, opts out of the window list

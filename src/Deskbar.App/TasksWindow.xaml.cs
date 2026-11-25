@@ -566,9 +566,9 @@ public partial class TasksWindow : Window
             // The "Subtasks" checkbox (task 173ef268): a tick on a list with no subtasks changes no line, and the box must
             // still redraw ticked.
             $"{view.ShowsSubtasks}",
-            // The manager's question (task 61e4d143): asked, replaced or cleared redraws its line. Its age is not here; it
-            // is rewritten in place once a minute (RefreshAges).
-            $"{view.ManagerAsks?.Question}",
+            // The manager's question (task 61e4d143): asked, replaced or cleared redraws its line. Its time too, so the same
+            // text asked again counts its age from the new ask; the age itself is rewritten once a minute (RefreshAges).
+            $"{view.ManagerAsks?.Question}{view.ManagerAsks?.AskedAt}",
             string.Join('|', view.Places.Select(p => $"{p.IsGroup}{p.Workspace}{p.Name}{(p.Colour as SolidColorBrush)?.Color}")),
             view.EmptyText,
             $"{renaming}{editingComment}{linking}{string.Join(",", settledOpen.Order())}|{string.Join(",", earlierOpen.Order())}|{string.Join(",", longOpen.Order())}",

@@ -84,6 +84,8 @@ public class ManagerQuestionTests
     [Theory]
     [InlineData("Deskbar wake. Since your last look:")]
     [InlineData("  \n Deskbar wake. Since your last look:")]
+    // A wake wrapped in other text (the inbox road through the Stop hook was not measured; pre-PR review, finding 4).
+    [InlineData("Stop hook feedback:\nDeskbar wake. Since your last look:")]
     public void A_deskbar_wake_leaves_the_question_open(string prompt) =>
         Assert.True(ManagerQuestion.AfterPrompt(Stored("open"), Id, prompt).HasNoValue);
 

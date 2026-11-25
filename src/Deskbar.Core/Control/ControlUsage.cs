@@ -124,6 +124,10 @@ public static class ControlUsage
             new("task", "answered --session <session>",
                 "the session's question is settled: its task goes back to in progress and the blink stops. A prompt\n"
                 + "      never settles it; the session runs this"),
+            new("task", "ask <question>|-   (the manager session, from its folder)",
+                "the manager's own question: one violet line above every task's question; a new one replaces it"),
+            new("task", "answered   (the manager session, from its folder)",
+                "the manager's question is settled and its line goes; the user's reply to the manager clears it too"),
             new("task", "done --session <session>", "a session marks its own task done; only you close it"),
             new("task", "comment <markdown>|- --session <session>", "a comment on the session's own task, signed by the session"),
             new("task", "later <title>|- --session <session>",
