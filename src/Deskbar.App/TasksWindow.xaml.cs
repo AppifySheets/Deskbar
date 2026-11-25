@@ -466,13 +466,17 @@ public partial class TasksWindow : Window
         // Which comments a thread shows, and what is unfolded in it, are part of where things sit (review of the assignee batch,
         // M4): an earlier-comments line unfolding or a long comment opening moves every line below, so it starts the half second
         // too.
-        var placesKey = string.Join('|', shownRows.Select(r => $"{r.Id}{r.Expanded}{r.Closing}{ThreadLayoutKey(r)}").Prepend($"{view.Matrix}"));
+        // The manager line (task 61e4d143) showing or going moves every line under it, so it is part of the key too.
+        var managerShown = view.Stats is null && view.ManagerAsks is not null;
+        var placesKey = string.Join('|', shownRows.Select(r => $"{r.Id}{r.Expanded}{r.Closing}{ThreadLayoutKey(r)}").Prepend($"{view.Matrix}{managerShown}"));
         if (placesKey != linesPlaces)
         {
             linesPlaces = placesKey;
             linesChangedAt = ClickClock();
         }
         DrawFilters(view);
+        // The manager's question above the List and the Matrix, never over the Stats view (TasksWindow.Manager.cs).
+        DrawManagerLine(managerShown ? view.ManagerAsks : null);
         Rows.Children.Clear();
         menuButtons.Clear();
         dragLines.Clear();
@@ -562,6 +566,9 @@ public partial class TasksWindow : Window
             // The "Subtasks" checkbox (task 173ef268): a tick on a list with no subtasks changes no line, and the box must
             // still redraw ticked.
             $"{view.ShowsSubtasks}",
+            // The manager's question (task 61e4d143): asked, replaced or cleared redraws its line. Its age is not here; it
+            // is rewritten in place once a minute (RefreshAges).
+            $"{view.ManagerAsks?.Question}",
             string.Join('|', view.Places.Select(p => $"{p.IsGroup}{p.Workspace}{p.Name}{(p.Colour as SolidColorBrush)?.Color}")),
             view.EmptyText,
             $"{renaming}{editingComment}{linking}{string.Join(",", settledOpen.Order())}|{string.Join(",", earlierOpen.Order())}|{string.Join(",", longOpen.Order())}",
@@ -1215,6 +1222,7 @@ public partial class TasksWindow : Window
         });
         // A slim line's age is in its tooltip (Task 8).
         slimTips.Values.ToList().ForEach(tip => WriteSlimTip(tip, now));
+        RefreshManagerAge(now);
     }
 
     internal string AgeText(Guid id) => ages.TryGetValue(id, out var age) ? age.Text.Text : "";

@@ -190,6 +190,9 @@
             <!-- Why the last action failed, until the next one works (TasksWindow.ShowProblem). -->
             <TextBlock x:Name="ProblemText" DockPanel.Dock="Top" Foreground="#FFFFA726" FontSize="12" TextWrapping="Wrap"
                        Margin="12,6,12,0" Visibility="Collapsed"/>
+            <!-- The manager's question to Petre (task 61e4d143, TasksWindow.Manager.cs): one violet tile above the list and
+                 the Matrix alike, outside their scrolling, so it is always first and always in sight. -->
+            <Border x:Name="ManagerLineHost" DockPanel.Dock="Top" Visibility="Collapsed"/>
             <TextBlock x:Name="EmptyText" DockPanel.Dock="Top" Foreground="#FF8B8F99" FontSize="12" Margin="12,10,12,0"
                        Visibility="Collapsed"/>
             <!-- The column header over the List's full lines (task 3df2d28f, TasksWindow.Columns.cs): "Task", "Status",

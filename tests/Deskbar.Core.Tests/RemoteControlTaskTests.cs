@@ -286,6 +286,76 @@ public class RemoteControlTaskTests
         Assert.True(Only.Comments.Single().ByManager);
     }
 
+    // --- the manager's own question (task 61e4d143, ManagerQuestion) ---
+
+    // A manager on record, as ManagerActions stores one when it starts the day's session.
+    static WorkspaceManager WithManagerRecord(WorkspaceManager manager)
+    {
+        manager.SetManagerSession(new ManagerRecord("mgr", new DateOnly(2026, 11, 22)));
+        return manager;
+    }
+
+    [Fact]
+    public void Manager_ask_stores_the_question_on_its_record()
+    {
+        var manager = WithManagerRecord(Started());
+
+        var reply = RunAsManager(manager, "task", "ask", "Which comes first?");
+
+        Assert.Equal(ControlReply.Ok, reply.ExitCode);
+        Assert.Equal("Which comes first?", manager.State.Manager!.Question);
+        Assert.Equal(clock, manager.State.Manager.AskedAt);
+        Assert.Equal("mgr", manager.State.Manager.SessionId);
+    }
+
+    [Fact]
+    public void A_second_manager_ask_replaces_the_first()
+    {
+        var manager = WithManagerRecord(Started());
+        RunAsManager(manager, "task", "ask", "first");
+
+        Assert.Equal(ControlReply.Ok, RunAsManager(manager, "task", "ask", "second").ExitCode);
+
+        Assert.Equal("second", manager.State.Manager!.Question);
+    }
+
+    [Fact]
+    public void Manager_answered_clears_the_question()
+    {
+        var manager = WithManagerRecord(Started());
+        RunAsManager(manager, "task", "ask", "open");
+
+        Assert.Equal(ControlReply.Ok, RunAsManager(manager, "task", "answered").ExitCode);
+
+        Assert.Null(manager.State.Manager!.Question);
+        Assert.Null(manager.State.Manager.AskedAt);
+    }
+
+    [Fact]
+    public void Manager_ask_with_no_record_stored_fails_and_changes_nothing()
+    {
+        var manager = Started();
+        var before = tasks.Board;
+
+        var reply = RunAsManager(manager, "task", "ask", "anyone there?");
+
+        AssertRefusedAndUnchanged(reply, before);
+        Assert.Equal(ManagerQuestion.NoManager, reply.Output.Trim());
+        Assert.Null(manager.State.Manager);
+    }
+
+    [Fact]
+    public void A_non_manager_ask_without_its_session_is_still_refused()
+    {
+        var manager = WithManagerRecord(Started());
+
+        var reply = Run(manager, "task", "ask", "x");
+
+        Assert.Equal(ControlReply.Failed, reply.ExitCode);
+        Assert.Contains("task ask is a session's form and needs --session <id>", reply.Output);
+        Assert.Null(manager.State.Manager!.Question);
+    }
+
     [Fact]
     public void Manager_may_not_finish_a_task_through_a_session_form()
     {

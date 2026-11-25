@@ -801,7 +801,10 @@ public partial class FloatingBar
         // first paint measures them before any width is known: once laid out, the viewer's height is taken again from
         // the lines as they really are.
         taskLinesPanel.SizeChanged += (_, _) => RecapTaskLinesFromLayout();
-        var host = new TakesNoWidth(VisibleWidthOf) { Child = new StackPanel { Children = { taskProblemHost, addRow, taskLinesScroller } } };
+        // The manager's question (task 61e4d143, FloatingBar.ManagerLine.cs) sits between the add row and the lines, outside
+        // the scrolling viewer, so it is always the first line in sight and never scrolls away: its priority.
+        taskManagerHost = new Border { Tag = "manager-line-host", Visibility = Visibility.Collapsed };
+        var host = new TakesNoWidth(VisibleWidthOf) { Child = new StackPanel { Children = { taskProblemHost, addRow, taskManagerHost, taskLinesScroller } } };
         TaskListLine.Child = host;
         // A RIGHT-CLICK IN THE LIST NEVER OPENS THE BAR'S MENU (Petre's screenshot: right-clicking a task line opened New
         // workspace, Window list, Arrange, Dock, Manage, Exit). The bar's menu is the Root's ContextMenu, and a
@@ -995,8 +998,10 @@ public partial class FloatingBar
         var all = WithGroupStarts(FoldSubtasks(WithPendingCloses(flat, pendingCloses), Subtasks, snoozedFamily));
         allTaskLines = all;
         var problem = taskService.LoadProblem;
+        // The manager's question is part of the shape (task 61e4d143), so asking, replacing or clearing it repaints.
+        var managerAsk = ManagerAsks?.Invoke();
         var shape = string.Join("\n", all.Select(ShapeOf).Prepend(
-            $"{taskListExpanded}|{ToggleTasksPanel is null}|{TextOffset}|{problem.GetValueOrDefault("")}|{slots}|{editingTask}"));
+            $"{taskListExpanded}|{ToggleTasksPanel is null}|{TextOffset}|{problem.GetValueOrDefault("")}|{slots}|{editingTask}|{managerAsk}"));
         if (shape == lastTaskListShape) return;
         lastTaskListShape = shape;
 
@@ -1010,13 +1015,15 @@ public partial class FloatingBar
             taskProblemHost.Child = problem.HasValue ? LoadProblemRow(problem.Value) : null;
             taskProblemHost.Visibility = problem.HasValue ? Visibility.Visible : Visibility.Collapsed;
         }
+        PaintManagerLine(managerAsk);
         shownTaskLines.ToList().ForEach(line => taskLinesPanel.Children.Add(TaskLineButton(line)));
         // When the lines on show changed places (which tasks, in which order, which are closing), the click guard
         // distrusts a click for the next half second (TaskClickIgnored). A paint that only rewrote what lines say (a
         // session's status line) moved nothing and does not start it, or frequent status pulses would eat clicks. The
         // text size and the failed-load line move every line too (a bigger font, a line above them), so they are part
         // of the key (review minor 3 of 187cf4a).
-        var placesKey = string.Join('|', shownTaskLines.Select(l => $"{l.Id}{l.Closing}").Prepend($"{TextOffset}|{problem.HasValue}"));
+        // The manager line showing or going moves every task line down or up, so it is part of the key too.
+        var placesKey = string.Join('|', shownTaskLines.Select(l => $"{l.Id}{l.Closing}").Prepend($"{TextOffset}|{problem.HasValue}|{managerAsk is not null}"));
         if (placesKey != taskLinePlaces)
         {
             taskLinePlaces = placesKey;

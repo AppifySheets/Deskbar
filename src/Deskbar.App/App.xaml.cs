@@ -966,6 +966,11 @@ public partial class App : Application
     // Before ClaudeTaskActions exists (a pipe command in the first moments of a start) there is nothing to start with.
     const string ClaudeActionsNotReady = "Claude sessions are not ready yet; try again in a moment.";
 
+    // The manager's open question as the bar and the panel draw it (task 61e4d143), or null while it has none. A question
+    // saved without its time (it cannot be, but the field is optional) counts as asked now.
+    internal static ManagerAsk? ManagerAskOf(Core.Tasks.ManagerRecord? record) =>
+        record is { Question: { } question } ? new ManagerAsk(question, record.AskedAt ?? DateTimeOffset.Now) : null;
+
     // The VS Code window a Claude session works in, from the session's folder, by the rule the control pipe's `open`
     // and `attention` use to find a caller's window (RemoteControl.CallerOf, EditorFolder.Best), each window offering its
     // current title and the one it had before a rename. Two windows on the same folder are both VS Code, so the first
@@ -2075,6 +2080,8 @@ public partial class App : Application
                     .TapError(error => MessageBox.Show(error, "Deskbar", MessageBoxButton.OK, MessageBoxImage.Information)),
                 // Its dot: Deskbar woke the manager and the user has not opened it since (ManagerRecord.Unread, event wakes).
                 ManagerUnread = () => manager.State.Manager is { Unread: true },
+                // ...and the manager's own question (task 61e4d143, ManagerQuestion): the violet line above every task line.
+                ManagerAsks = () => ManagerAskOf(manager.State.Manager),
                 // ...and whether the panel is shown, for that line's "on" look: the relay the panel feeds once it exists.
                 TasksPanelShown = tasksPanelShown,
                 // A line's single click (Ruling 54): the panel on that task, picked and expanded. A double-click goes.
@@ -2473,6 +2480,9 @@ public partial class App : Application
                 // raised and activated through the activator, as the panel is (a `task open` typed in a terminal carries
                 // no foreground right). Each window is an ordinary window, not pinned, so it stays where Petre puts it.
                 BringTaskWindowForward = BringTaskWindowHere,
+                // The manager line's click (task 61e4d143): the Manager button's own ManagerActions.Open; a refusal shows
+                // on the panel's problem line.
+                OpenManager = () => managerActions?.Open() ?? Result.Failure(ClaudeActionsNotReady),
             };
 
             // A panel left open at the last exit (AppState.TasksPanel, saved open by TasksBoard.Shutdown) opens again,

@@ -113,6 +113,12 @@ public sealed partial class RemoteControl
                 : SessionTask(service, args, session.Trim(), from);
         return args switch
         {
+            // The manager's own question (task 61e4d143, ManagerQuestion): `task ask -` from its folder, with no --session
+            // because it has no task, stores one question on the manager's record for the manager line at the top of
+            // "Waiting on you"; `task answered` clears it. Checked before the session-form refusal below, which every
+            // other caller without --session still gets.
+            ["ask", var question] when byManager => ManagerAsked(ManagerQuestion.Ask(Maybe.From(manager.State.Manager), question, service.Now)),
+            ["answered"] when byManager => ManagerAsked(ManagerQuestion.Answered(Maybe.From(manager.State.Manager))),
             // A session's form typed without its --session: it cannot know whose task is meant.
             ["done"] or ["answered"] or ["join", _] or ["new", _] or ["status-line", _] or ["ask", _] or ["later", _] or ["subtask", _] or ["pr", _]
                 or ["duplicate-of", _] or ["relate", _] or ["unrelate", _] =>
@@ -203,6 +209,17 @@ public sealed partial class RemoteControl
             _ => ControlReply.Fail($"Wrong arguments for task.\n{TaskUsage()}"),
         };
     }
+
+    // The manager's `task ask` and `task answered` (ManagerQuestion): the record ManagerQuestion worked out is stored, and
+    // the reply is the question now open (null once answered), so the manager sees what the user sees. Storing the
+    // record raises the state's change, which repaints the manager line on the bar and in the panel.
+    ControlReply ManagerAsked(Result<ManagerRecord> record) => record.Match(
+        kept =>
+        {
+            manager.SetManagerSession(kept);
+            return Success(new { managerQuestion = kept.Question, askedAt = kept.AskedAt });
+        },
+        ControlReply.Fail);
 
     // `task stats [--days <n>]` (TaskStats): what the panel's Stats view draws, as JSON. Each task is its id, title and
     // status, so a caller can `task show` or `task go` any of them; the median is in hours, rounded to a tenth.

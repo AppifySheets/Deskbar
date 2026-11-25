@@ -41,6 +41,12 @@ public static class ManagerWakes
     /// <summary>How long a question waits on the user before it wakes the manager.</summary>
     public static readonly TimeSpan QuestionAge = TimeSpan.FromHours(2);
 
+    /// <summary>
+    /// How every wake's text starts. The briefing names it, and ManagerQuestion.AfterPrompt reads it to tell a wake from
+    /// the user's reply (both arrive at the manager as a prompt).
+    /// </summary>
+    public const string Prefix = "Deskbar wake.";
+
     public static ManagerWake Plan(ManagerRecord record, TaskBoard board, IReadOnlyCollection<ClaudeAgent> listed,
         DateOnly today, DateTimeOffset now)
     {
@@ -84,7 +90,7 @@ public static class ManagerWakes
         IReadOnlyList<Guid> nudgedBefore) =>
         string.Join("\n", new[]
             {
-                new[] { "Deskbar wake. Since your last look:" },
+                new[] { $"{Prefix} Since your last look:" },
                 Section("Handed back to the user (the session stopped without task ask or task done):",
                     handedBack.Select(t => nudgedBefore.Contains(t.Id)
                         ? $"{Name(t)}: handed back AGAIN today. Do not nudge; list it for the user."

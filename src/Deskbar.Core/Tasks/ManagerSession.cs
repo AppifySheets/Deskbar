@@ -17,17 +17,25 @@ namespace Deskbar.Core.Tasks;
 /// <item><paramref name="Unread"/>: a wake was delivered and the user has not opened the manager since (the button's dot).</item>
 /// <item><paramref name="HandedBack"/>: the tasks already reported as handed back today, so a second one is not nudged.</item>
 /// </list>
+/// And the manager's own question to the user (task 61e4d143, ManagerQuestion), optional for the same reason:
+/// <list type="bullet">
+/// <item><paramref name="Question"/>: what the manager asked with `task ask`, shown as the manager line at the top of
+/// "Waiting on you"; null while it has nothing open.</item>
+/// <item><paramref name="AskedAt"/>: when it asked, for the line's age.</item>
+/// </list>
+/// A new manager (StartNew, Claim) is a new record, so a new day's manager starts without yesterday's question.
 /// </summary>
 public sealed record ManagerRecord(string SessionId, DateOnly Day, DateTimeOffset? Since = null, bool Unread = false,
-    IReadOnlyList<Guid>? HandedBack = null)
+    IReadOnlyList<Guid>? HandedBack = null, string? Question = null, DateTimeOffset? AskedAt = null)
 {
     // A record compares by its list's CONTENTS, not the list's reference, so a record loaded from state.json equals the
     // one saved, and ManagerWaker can tell a changed record from the same one to skip a needless save.
     public bool Equals(ManagerRecord? other) =>
         other is not null && SessionId == other.SessionId && Day == other.Day && Since == other.Since
-        && Unread == other.Unread && (HandedBack ?? []).SequenceEqual(other.HandedBack ?? []);
+        && Unread == other.Unread && (HandedBack ?? []).SequenceEqual(other.HandedBack ?? [])
+        && Question == other.Question && AskedAt == other.AskedAt;
 
-    public override int GetHashCode() => HashCode.Combine(SessionId, Day, Since, Unread, (HandedBack ?? []).Count);
+    public override int GetHashCode() => HashCode.Combine(SessionId, Day, Since, Unread, (HandedBack ?? []).Count, Question, AskedAt);
 }
 
 /// <summary>What a click on the manager button should do.</summary>
@@ -145,6 +153,12 @@ public static class ManagerSession
         $"- {shim} task overview : the whole board, once per question.",
         $"- {shim} task show <id> : one task in full.",
         $"- {shim} task comment <id> - : post a comment; the text goes on stdin.",
+        // Task 61e4d143 (ManagerQuestion): the manager's one road to the user that does not wait for them to open it.
+        $"- {shim} task ask - : your own question to the user, on stdin. It shows above every task's question; a new one replaces the last.",
+        $"- {shim} task answered : clear your question once it is settled.",
+        "Ask rarely: only a call no task's session can make (two tasks that look like one job, which waiting thing comes first,",
+        "  a hand-back nudging did not fix). Never relay a task's own question: it already reaches the user.",
+        "The user's message to you clears your question. If it leaves the question open, ask again.",
         $"The other task verbs are allowed too (start, flag, order, move, assign, add, rename, describe, and a subtask by add --parent); {shim} task prints them.",
         "Free text always goes on stdin with - in its place, never quoted on the command line.",
         "Refused: close, delete, and setting a task to done or closed. The shim answers:",
