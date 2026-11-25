@@ -3286,6 +3286,31 @@ public class FloatingBarTaskListTests
         Assert.Equal(Visibility.Collapsed, ParentChip(t).Visibility);
     });
 
+    // The tasks panel's "Subtasks" checkbox applies to the bar too (task 173ef268, Petre: "same checkbox"). Unticked,
+    // the plain subtask drawn under its parent goes and the parent still counts it; the subtask asking a question stays
+    // in view. Ticked again, both are back under the parent.
+    [Fact]
+    public void The_subtasks_checkbox_folds_subtasks_on_the_bar_too() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var parent = t.Tasks.Create("Parent", t.Gepha, Session("p")).Value.Id;
+        t.Tasks.Ask(parent, "Parent question?");
+        var plain = t.Tasks.AddNote("Plain", t.Gepha, Quadrant.IV, parent).Value.Id;
+        var asking = t.Tasks.Create("Asking", t.Gepha, Session("a")).Value.Id;
+        Assert.True(t.Tasks.SetParent(asking, parent).IsSuccess);
+        t.Tasks.Ask(asking, "Child question?");
+        Assert.Contains(plain, t.Bar.TaskListLines.Select(l => l.Id));
+
+        Assert.True(t.Harness.Manager.SaveTasksPanel(Deskbar.Core.Persistence.TasksPanelState.Default with { HideSubtasks = true }).IsSuccess);
+        var ids = t.Bar.TaskListLines.Select(l => l.Id).ToArray();
+        Assert.DoesNotContain(plain, ids);
+        Assert.Contains(asking, ids);
+        Assert.Equal(2, t.Bar.TaskListLines.Single(l => l.Id == parent).SubtaskCount);
+
+        Assert.True(t.Harness.Manager.SaveTasksPanel(Deskbar.Core.Persistence.TasksPanelState.Default).IsSuccess);
+        Assert.Contains(plain, t.Bar.TaskListLines.Select(l => l.Id));
+    });
+
     [Fact]
     public void Esc_drops_the_parent_and_keeps_the_text() => StaThread.Run(() =>
     {

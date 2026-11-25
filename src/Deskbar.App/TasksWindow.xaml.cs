@@ -624,8 +624,8 @@ public partial class TasksWindow : Window
             subtasks.BorderBrush = on ? PickedEdge : Brushes.Transparent;
             subtasks.Margin = new Thickness(0, 0, 6, ChipRowGap);
             subtasks.ToolTip = on
-                ? "Subtasks are drawn under their parent. Untick to fold them into the parent's line, which counts them"
-                : "Subtasks are folded into their parent's line, which counts them. Tick to draw them under it";
+                ? "Subtasks are drawn under their parent, here and on the bar. Untick to fold them into the parent's line, which counts them"
+                : "Subtasks are folded into their parent's line, here and on the bar, which counts them. Tick to draw them under it";
             AutomationProperties.SetItemStatus(subtasks, on ? "checked" : "unchecked");
             Filters.Children.Add(subtasks);
         }
