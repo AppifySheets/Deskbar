@@ -3142,13 +3142,13 @@ public class TasksBoardTests
 
     // Task 08cdb052 ("when asking for action, prs should have links, or artifacts; make that clickable"): a question's
     // markdown link and a bare address are links in the line's detail, on a closed line and an open one, and the text
-    // reads as the words, never the markdown written out. Only web addresses become links.
+    // reads as the words, never the markdown written out. A file on a share is not a link (FileLink).
     [Fact]
     public void A_questions_links_are_clickable_in_the_line() => StaThread.Run(() =>
     {
         using var t = Build();
         var id = t.Tasks.Create("Snooze", t.Gepha, Session("s1")).Value.Id;
-        t.Tasks.Ask(id, "Merge [Deskbar #490](https://github.com/AppifySheets/Deskbar/pull/490), see https://claude.ai/code/artifact/abc. Not [this](file:///C:/x.exe).");
+        t.Tasks.Ask(id, "Merge [Deskbar #490](https://github.com/AppifySheets/Deskbar/pull/490), see https://claude.ai/code/artifact/abc. Not [this](file://server/share/x.html).");
         t.Controller.Show();
 
         TextBlock Detail() => Inside(LineOf(t.Window, id)).OfType<TextBlock>().Single(b => Equals(b.Tag, TasksWindow.DetailTag));
@@ -3157,7 +3157,7 @@ public class TasksBoardTests
         Assert.Equal(
             ["https://github.com/AppifySheets/Deskbar/pull/490", "https://claude.ai/code/artifact/abc"],
             Links().Select(l => l.NavigateUri.AbsoluteUri));
-        Assert.Equal("Merge Deskbar #490, see https://claude.ai/code/artifact/abc. Not [this](file:///C:/x.exe).",
+        Assert.Equal("Merge Deskbar #490, see https://claude.ai/code/artifact/abc. Not [this](file://server/share/x.html).",
             new TextRange(Detail().ContentStart, Detail().ContentEnd).Text);
 
         t.Controller.ToggleThread(id);
