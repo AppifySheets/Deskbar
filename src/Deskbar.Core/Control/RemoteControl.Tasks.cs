@@ -27,6 +27,7 @@ namespace Deskbar.Core.Control;
 //   task snooze <id> 1h|3h|tomorrow|monday|<n>m|<n>h|<n>d   (task 6da8d7eb: the tasks panel's snooze menu, TaskSnooze)
 //   task wake <id>                    (its "Wake now")
 //   task go <id>
+//   task open <id>                    (task dca4ebeb: the task in a window of its own, the menus' "Open in window")
 //   task start <id> [--folder <path>]
 //   task open-session <id> <session>
 //
@@ -136,6 +137,9 @@ public sealed partial class RemoteControl
             ["parent", var id, var parent] => TaskParent(service, id, parent),
             ["family", var id] => service.Board.Find(id).Match(t => Said(FamilyOf(service, t).GetValueOrDefault(NoFamily)), ControlReply.Fail),
             ["go", var id] => WithSessions(c => TaskChange(service, id, c.Go)),
+            // The task in a window of its own (task dca4ebeb), as "Open in window" on a line's menu does. The task is found
+            // first, so an unknown id refuses before any window opens; the reply is the task.
+            ["open", var id] => TaskChange(service, id, task => openTaskWindow is { } open ? open(task) : Result.Failure(TaskWindowUnavailable)),
             ["start", var id] => WithSessions(c => TaskStart(service, c, id, Maybe<string>.None)),
             ["start", var id, "--folder", var folder] => WithSessions(c => TaskStart(service, c, id, Folder(folder) ?? folder)),
             ["open-session", var id, var sessionId] => WithSessions(c => TaskOpenSession(service, c, id, sessionId)),
@@ -412,6 +416,9 @@ public sealed partial class RemoteControl
                 .Bind(folder => commands.Start(task, folder))
                 .Map(() => service.Board.Tasks.First(t => t.Id == task.Id)))
             .Match(task => Success(Describe(task)), ControlReply.Fail);
+
+    /// <summary>Why `task open` refuses in a copy of Deskbar with no task windows (no openTaskWindow handed in).</summary>
+    public const string TaskWindowUnavailable = "Task windows are not available in this copy of Deskbar";
 
     /// <summary>Why Claude is not started on a closed task, said by `task start` and by the menu (ClaudeTaskActions).</summary>
     public const string ClosedTaskRefusal = "The task is closed. Reopen it to start Claude on it.";

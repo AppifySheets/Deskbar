@@ -760,7 +760,8 @@ public class RemoteControlTaskTests
              "status <id> <backlog|in-progress|waiting|done>", "rename <id> <title>|-", "move <id> <workspace>|none",
              "comment <id> <markdown>|-", "delete <id>", "flag <id> important|urgent on|off", "order <id> top|end|<n>",
              // Task 9: going to a task, starting Claude on it and opening one of its sessions.
-             "go <id>", "start <id> [--folder <path>]", "open-session <id> <session>",
+             // Task dca4ebeb: `open` is the menus' "Open in window", between go and start.
+             "go <id>", "open <id>", "start <id> [--folder <path>]", "open-session <id> <session>",
              // A Claude session's own forms (plan Task 8, RemoteControl.ClaudeHook.cs); `-` reads the text from stdin.
              "join <id> --session <session>", "new <title>|- --session <session>", "status-line <text>|- --session <session>",
              "ask <question>|- --session <session>", "answered --session <session>", "done --session <session>", "comment <markdown>|- --session <session>",
@@ -901,5 +902,32 @@ public class RemoteControlTaskTests
         Assert.Contains(RemoteControl.ClosedTaskRefusal, refused.Output);
         Assert.Equal(ControlReply.Failed, refusedWithFolder.ExitCode);
         Assert.Empty(commands.Calls);
+    }
+
+    // Task dca4ebeb: `task open <id>` hands the task the id names (any unique start of it) to the app's task window, and
+    // answers with the task; an unknown id refuses before anything opens, and a copy with no task windows refuses.
+    [Fact]
+    public void Task_open_hands_the_task_to_the_window_and_refuses_without_one()
+    {
+        var manager = Started();
+        var id = tasks.AddNote("A long brief", Maybe<Guid>.None).Value.Id;
+        var opened = new List<Guid>();
+        var control = new RemoteControl(manager, tasks: tasks, openTaskWindow: task =>
+        {
+            opened.Add(task.Id);
+            return Result.Success();
+        });
+
+        var reply = control.Execute(["task", "open", id.ToString()[..6]]);
+        Ok(reply);
+        Assert.Equal(id.ToString(), Json(reply).GetProperty("id").GetString());
+        Assert.Equal([id], opened);
+
+        Assert.Equal(ControlReply.Failed, control.Execute(["task", "open", "ffffffff"]).ExitCode);
+        Assert.Single(opened);
+
+        var without = Run(manager, "task", "open", id.ToString());
+        Assert.Equal(ControlReply.Failed, without.ExitCode);
+        Assert.Contains(RemoteControl.TaskWindowUnavailable, without.Output);
     }
 }

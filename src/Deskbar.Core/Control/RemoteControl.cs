@@ -73,6 +73,9 @@ namespace Deskbar.Core.Control;
 // docs/superpowers/specs/2026-11-23-tasks-open-claude-sessions-design.md): going to its workspace and its session's
 // window, starting `claude --bg` in a folder and opening one session. Windows, terminals and `claude` are the app's
 // business, so the app hands them in (ClaudeTaskActions); left null, the three refuse.
+//
+// `openTaskWindow` opens a task in its own window (`task open <id>`, the twin of the line menus' "Open in window"; task
+// dca4ebeb, TasksBoard.OpenWindow in the app). Windows are the app's business; left null, `task open` refuses.
 public sealed partial class RemoteControl(WorkspaceManager manager, Func<bool, Result>? setBarVisible = null, Func<ProgramLaunch, Result<int?>>? launch = null,
     Func<Result<string>>? dump = null, Func<Maybe<string>>? defaultBrowser = null,
     Func<(string Version, string? Exe, bool Packaged)>? identity = null,
@@ -86,7 +89,8 @@ public sealed partial class RemoteControl(WorkspaceManager manager, Func<bool, R
     Func<string, string>? longPath = null,
     GoalService? goals = null,
     TaskSessionCommands? taskSessions = null,
-    CommentInbox? inbox = null)
+    CommentInbox? inbox = null,
+    Func<TaskItem, Result>? openTaskWindow = null)
 {
     // `longPath` turns an 8.3 short path into its long form (GetLongPathNameW, LongPath on the Windows side), for
     // FolderPath. Left null, a path is taken as it is, which is all a test that names long paths needs.

@@ -477,6 +477,14 @@ line, which keeps the count; a subtask waiting on you stays in view. Drag a task
 under that task; drag a subtask out of its parent's block to make it a plain task again. A parent closes last: while
 any of its subtasks is open its tick will not close it, and its tooltip says how many are left.
 
+A long task reads better in a window of its own. Pick "Open in window" on a task's menu (in the tasks panel or on
+the bar), or the button at the top of its open thread, and the task opens in an ordinary window you can resize,
+maximize and Alt+Tab to: the whole description with its links and pictures, the question or status line in full,
+every comment with none cut short, its Claude sessions, its subtasks and its details. Edit (or F2) turns the title and
+description into large boxes, with a Preview tab for the markdown; Ctrl+S or Ctrl+Enter saves and Esc cancels. Ctrl+Enter
+posts a comment. Each task has one window, which opens on the desktop you are on, and every task window opens where you
+last left one, at the size you gave it. A script opens one with `deskbar.cmd task open <id>`.
+
 A task you cannot do anything about yet can be snoozed. In the tasks panel, the moon beside a line's two toggles
 (or "Snooze" on its menu) hides it for 1 hour, 3 hours, until 09:00 tomorrow or until 09:00 next Monday. A snoozed
 task leaves the bar and the panel's lists and waits under the panel's "Snoozed" chip, which says when each one

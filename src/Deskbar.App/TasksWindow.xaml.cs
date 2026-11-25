@@ -245,7 +245,7 @@ public partial class TasksWindow : Window
     internal Action<string> OpenImage { get; init; } = OpenInViewer;
 
     // A refusal (no viewer registered for PNG) is traced, never thrown: a click in the panel must not take the app down.
-    static void OpenInViewer(string path)
+    internal static void OpenInViewer(string path)
     {
         try
         {
@@ -1519,6 +1519,15 @@ public partial class TasksWindow : Window
     UIElement Thread(TaskRowView row)
     {
         var panel = new StackPanel();
+        // "Open in window" (task dca4ebeb) at the top of an open thread: the thread is where a long task stops fitting.
+        if (Actions?.OpenWindow is { } openWindow)
+        {
+            var window = Small(OpenInWindowText, OpenInWindowText, () => openWindow(row.Id),
+                "Read and edit the whole task in a window of its own");
+            window.Margin = new Thickness(0, 0, 0, 8);
+            window.HorizontalAlignment = HorizontalAlignment.Left;
+            panel.Children.Add(window);
+        }
         row.SessionList.ToList().ForEach(session => panel.Children.Add(SessionLine(row.Id, session)));
         if (Actions?.StartClaude is { } start && row.Status != TaskStatus.Closed && !row.Closing)
         {
@@ -1607,6 +1616,8 @@ public partial class TasksWindow : Window
     /// <summary>The words of the menu item and the thread's button (Task 9).</summary>
     internal const string StartClaudeText = "Start Claude on this";
 
+    /// <summary>The menus' and the thread's "Open in window" (task dca4ebeb), the panel's and the bar's alike.</summary>
+    internal const string OpenInWindowText = "Open in window";
     /// <summary>
     /// A Claude task's menu item, on the bar and in this window, that goes to its session without opening the task first
     /// (task 7f61af2e): what a double-click on the line does, minus the click that opens it.
@@ -2114,6 +2125,11 @@ public partial class TasksWindow : Window
         if (row.Status != TaskStatus.Closed && !row.Closing)
         {
             menu.Items.Add(Item("Edit", () => BeginRename(id)));
+            // OPEN IN WINDOW (task dca4ebeb): the task in a window of its own, for a long one (TasksBoard.OpenWindow). Right
+            // after Edit, its sibling: both are about reading and writing the task itself. Not a double-click on the line,
+            // which goes to the task's workspace (Ruling 54).
+            if (Actions?.OpenWindow is { } openWindow)
+                menu.Items.Add(Item(OpenInWindowText, () => Dispatcher.BeginInvoke(() => openWindow(id), System.Windows.Threading.DispatcherPriority.Input)));
             // OPEN CLAUDE (task 7f61af2e; Petre: "make it possible to open claude without opening the task first"): the
             // double-click's go (Actions.Go: the task's workspace, then its session's window) without the single click
             // that picks the task and opens its thread first (Ruling 54). Only on a Claude task, which has a session to
