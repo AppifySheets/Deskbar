@@ -967,9 +967,12 @@ public partial class App : Application
     const string ClaudeActionsNotReady = "Claude sessions are not ready yet; try again in a moment.";
 
     // The manager's open question as the bar and the panel draw it (task 61e4d143), or null while it has none. A question
-    // saved without its time (it cannot be, but the field is optional) counts as asked now.
+    // saved without its time (only a hand-edited state.json can) counts as asked when the manager last looked, else at the
+    // manager's start day: a FIXED time, since the bar's shape key holds it and "now" would repaint the list every pass.
     internal static ManagerAsk? ManagerAskOf(Core.Tasks.ManagerRecord? record) =>
-        record is { Question: { } question } ? new ManagerAsk(question, record.AskedAt ?? DateTimeOffset.Now) : null;
+        record is { Question: { } question }
+            ? new ManagerAsk(question, record.AskedAt ?? record.Since ?? new DateTimeOffset(record.Day.ToDateTime(TimeOnly.MinValue)))
+            : null;
 
     // The VS Code window a Claude session works in, from the session's folder, by the rule the control pipe's `open`
     // and `attention` use to find a caller's window (RemoteControl.CallerOf, EditorFolder.Best), each window offering its

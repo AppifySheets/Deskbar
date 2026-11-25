@@ -1139,7 +1139,9 @@ public class RemoteControlTaskTests
              "manager",
              // A Claude session's own forms (plan Task 8, RemoteControl.ClaudeHook.cs); `-` reads the text from stdin.
              "join <id> --session <session>", "new <title>|- --session <session>", "status-line <text>|- --session <session>",
-             "ask <question>|- --session <session>", "answered --session <session>", "done --session <session>", "comment <markdown>|- --session <session>",
+             "ask <question>|- --session <session>", "answered --session <session>",
+             "ask <question>|-   (the manager session, from its folder)", "answered   (the manager session, from its folder)",
+             "done --session <session>", "comment <markdown>|- --session <session>",
              "later <title>|- --session <session>",
              // Subtasks: a session splits its work and reads its family.
              "subtask <title>|- --session <session>",

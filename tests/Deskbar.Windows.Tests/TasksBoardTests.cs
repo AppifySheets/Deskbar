@@ -209,6 +209,26 @@ public class TasksBoardTests
         Assert.Equal(1, opened);
     });
 
+    // Pre-PR review, finding 1: `task ask`, `task answered` and the user's reply change only AppState.Manager, and the open
+    // panel redraws on a state pulse only when what it shows changed (TasksBoard.ShownStateKey). The question has to be
+    // part of that, or the line comes and goes only at the next unrelated redraw.
+    [Fact]
+    public void The_open_panel_shows_and_drops_the_manager_line_as_the_question_comes_and_goes() => StaThread.Run(() =>
+    {
+        using var t = Build(openManager: () => Result.Success());
+        t.Harness.Manager.SetManagerSession(new ManagerRecord("mgr", new DateOnly(2026, 11, 22)));
+        t.Controller.Show();
+        var host = (Border)LogicalTreeHelper.FindLogicalNode(t.Window, "ManagerLineHost");
+        Assert.Equal(Visibility.Collapsed, host.Visibility);
+
+        t.Harness.Manager.SetManagerSession(new ManagerRecord("mgr", new DateOnly(2026, 11, 22), Question: "Which comes first?", AskedAt: Start));
+        Assert.Equal(Visibility.Visible, host.Visibility);
+        Assert.Equal("Which comes first?", Inside(host).OfType<TextBlock>().Single(b => Equals(b.Tag, "manager-question")).Text);
+
+        t.Harness.Manager.SetManagerSession(new ManagerRecord("mgr", new DateOnly(2026, 11, 22)));
+        Assert.Equal(Visibility.Collapsed, host.Visibility);
+    });
+
     [Fact]
     public void The_manager_line_stays_hidden_without_the_open_action() => StaThread.Run(() =>
     {
