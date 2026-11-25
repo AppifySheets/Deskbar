@@ -265,6 +265,9 @@ public sealed class TasksBoard : IDisposable
             OpenFromStats = OpenFromStats,
         };
 
+        // Taken before the subscriptions below exist, so the first StateChanged pulse is compared with this state
+        // (RefreshIfShownStateChanged), as the StartWith(...).Skip(1) it replaces did.
+        shownState = ShownStateKey();
         subscriptions = new CompositeDisposable(
             tasks.Changed.Subscribe(_ => Refresh()),
             // A goal added, renamed, done or deleted (from the pipe, later the planner) changes the goal filter's label
@@ -275,7 +278,16 @@ public sealed class TasksBoard : IDisposable
             // Only a change the window shows (whole-PR review, minor 4): the workspaces (names, colours, groups, order),
             // which workspace is in front (where a new note goes) and the List / Matrix switch. Every other state pulse,
             // a window moving or a stats tick, used to rebuild the whole view for nothing; tasks have their own pulse.
-            manager.StateChanged.Select(_ => ShownStateKey()).StartWith(ShownStateKey()).DistinctUntilChanged().Skip(1).Subscribe(_ => Refresh()),
+            //
+            // ON THE UI THREAD, ALWAYS (task 07d4b83d, "current workspace takes a long time to refresh the tasks when i
+            // change workspace"). A desktop switch pulses StateChanged from the thread Windows raises its desktop change
+            // on, an MTA one, and this used to redraw right there: WPF threw ("The calling thread must be STA"), the
+            // manager's OnDesktopEvent caught and traced it (29 times in one day's trace), and the comparison had already
+            // taken the new workspace as seen, so the next pulse on the UI thread matched and drew nothing. The panel
+            // stayed on the old workspace's tasks until an unrelated change (a task edited, a session list arriving)
+            // happened to redraw it. So the pulse is moved onto the window's dispatcher BEFORE the comparison, which
+            // then only ever runs on one thread (OnUiThread, RefreshIfShownStateChanged).
+            manager.StateChanged.Subscribe(_ => OnUiThread(RefreshIfShownStateChanged)),
             this.selection.Changed.Subscribe(_ => window.PaintSelection(this.selection.Current)),
             // The grip goes on the edge facing the windows, which follows the edge the panel docks on (TasksPanel.Edge
             // says the current one at once, then each change).
@@ -292,6 +304,34 @@ public sealed class TasksBoard : IDisposable
 
     // The width the panel last docked at, DIPs; None before its first dock (View falls back to the saved width then).
     Maybe<double> dockedWidth = Maybe<double>.None;
+
+    // The ShownStateKey the window was last drawn for (or the board was built with). Read and written on the UI thread
+    // only, by RefreshIfShownStateChanged; set before the StateChanged subscription exists, so the first pulse compares
+    // against the state the board started from.
+    string shownState = "";
+
+    // Set by Dispose: a pulse queued onto the dispatcher before the subscriptions went away finds the board gone and
+    // draws nothing.
+    bool disposed;
+
+    // The StateChanged half of the redraw: draws when, and only when, something the window shows changed.
+    void RefreshIfShownStateChanged()
+    {
+        if (disposed) return;
+        var key = ShownStateKey();
+        if (key == shownState) return;
+        shownState = key;
+        Refresh();
+    }
+
+    // Runs the action on the window's thread: at once when already there (every pulse but a desktop switch, and every
+    // test, so a redraw stays synchronous for them), otherwise queued with InvokeAsync, which does not hold Windows'
+    // desktop-change thread while the panel draws (Invoke would, and could deadlock against a UI thread waiting on COM).
+    void OnUiThread(Action action)
+    {
+        if (window.Dispatcher.CheckAccess()) action();
+        else window.Dispatcher.InvokeAsync(action);
+    }
 
     // What of the workspace state the window shows, as text: compared, never parsed.
     string ShownStateKey() =>
@@ -886,6 +926,7 @@ public sealed class TasksBoard : IDisposable
 
     public void Dispose()
     {
+        disposed = true;
         subscriptions.Dispose();
         pendingCloses.Values.ToList().ForEach(p => p.Timer.Dispose());
         pendingCloses.Clear();
