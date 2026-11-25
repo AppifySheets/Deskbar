@@ -30,7 +30,14 @@ namespace Deskbar.Core.Tasks;
 // An unreadable list is a failure, not an empty list. Callers treat a failure as "cannot tell": nothing is ended and
 // nothing is resumed, because an empty list would read as "every session died" and wake them all. Unknown fields are
 // skipped; a row without a sessionId is an unknown shape and fails the whole parse.
-public sealed record ClaudeAgent(string SessionId, Maybe<string> ShortId, string Folder, bool Background, bool Busy, string Name);
+public sealed record ClaudeAgent(string SessionId, Maybe<string> ShortId, string Folder, bool Background, bool Busy, string Name)
+{
+    /// <summary>
+    /// startedAt (milliseconds since 1970), or none when the row has no number there. It tells the newest of several
+    /// sessions in the manager's folder (ManagerSession.Next). An init property, so every agent built before it still is.
+    /// </summary>
+    public Maybe<DateTimeOffset> StartedAt { get; init; } = Maybe<DateTimeOffset>.None;
+}
 
 public static partial class ClaudeAgents
 {
@@ -64,8 +71,15 @@ public static partial class ClaudeAgents
         row.ValueKind == JsonValueKind.Object && Text(row, "sessionId") is { HasValue: true } session
             ? new ClaudeAgent(session.Value, Text(row, "id"), Text(row, "cwd").GetValueOrDefault(""),
                 Text(row, "kind").GetValueOrDefault("") == "background", Text(row, "status").GetValueOrDefault("") == "busy",
-                Text(row, "name").GetValueOrDefault(""))
+                Text(row, "name").GetValueOrDefault("")) { StartedAt = Started(row) }
             : Maybe<ClaudeAgent>.None;
+
+    // startedAt as a moment, when it is a whole number of milliseconds a DateTimeOffset can hold; else none.
+    static Maybe<DateTimeOffset> Started(JsonElement row) =>
+        row.TryGetProperty("startedAt", out var value) && value.ValueKind == JsonValueKind.Number && value.TryGetInt64(out var ms)
+            && ms is >= 0 and <= 253_402_300_799_999
+            ? DateTimeOffset.FromUnixTimeMilliseconds(ms)
+            : Maybe<DateTimeOffset>.None;
 
     // A non-empty string field, or nothing.
     static Maybe<string> Text(JsonElement row, string name) =>

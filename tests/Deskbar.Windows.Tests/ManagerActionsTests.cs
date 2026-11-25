@@ -48,18 +48,24 @@ public class ManagerActionsTests
         // Sessions the daemon has not listed yet, so a search for one waits out its pauses (a slow start).
         public HashSet<string> NotListedYet { get; } = [];
 
+        // A `claude stop` that fails: as a failed Result, or as a fault the CLI did not turn into one.
+        public Func<Result<string>>? Stop { get; set; }
+        public bool StopThrows { get; set; }
+
         // Every call but the list reads, in order.
         public IReadOnlyList<Call> Acts => Calls.Where(c => c.Arguments is not ["agents", "--json"]).ToList();
 
         public Task<Result<string>> Run(IReadOnlyList<string> arguments, string? workingDirectory, TimeSpan timeout)
         {
             Calls.Add(new Call(arguments.ToList(), workingDirectory));
+            if (StopThrows && arguments is ["stop", _])
+                return Task.FromException<Result<string>>(new InvalidOperationException("the tree could not be killed"));
             return Task.FromResult(arguments switch
             {
                 ["agents", "--json"] => Result.Success(Json()),
                 ["--bg", "--resume", var id] => Woken(id, workingDirectory),
                 ["--bg", "--model", ..] => Start?.Invoke() ?? Started(workingDirectory),
-                ["stop", var shortId] => Stopped(shortId),
+                ["stop", var shortId] => Stop?.Invoke() ?? Stopped(shortId),
                 _ => Result.Failure<string>($"unexpected claude call: {string.Join(" ", arguments)}"),
             });
         }
@@ -341,6 +347,77 @@ public class ManagerActionsTests
         rig.Settle();
         Assert.Equal(ManagerSession.ResumeArguments(rig.Cli.NextId), rig.Cli.Acts[^1].Arguments);
         Assert.Equal(ManagerSession.Briefing(rig.ShimForward), File.ReadAllText(rig.BriefingPath));
+    }
+
+    // Task review, Important: a start Claude Code does not list within the search stores nothing, but the session runs on
+    // in the manager folder. The click says why no window came; the next click finds that session by its folder, stores
+    // it as today's and attaches, and starts no second manager beside it.
+    [Fact]
+    public void A_start_not_listed_in_time_is_claimed_by_the_next_click_not_started_again()
+    {
+        using var rig = new Rig();
+        rig.Cli.NotListedYet.Add(rig.Cli.NextId);
+
+        rig.Manager.Open();
+        rig.Clock.AdvanceBy(TimeSpan.FromSeconds(15).Ticks);
+        Assert.Contains(rig.Told, told => told.Contains("did not list it"));
+        Assert.Null(rig.Harness.Manager.State.Manager);
+        Assert.Empty(rig.Launches);
+
+        rig.Cli.NotListedYet.Clear();
+        Assert.True(rig.Manager.Open().IsSuccess);
+        rig.Settle();
+
+        Assert.Single(rig.Cli.Acts);
+        Assert.Equal(new ManagerRecord(rig.Cli.NextId, Today), rig.Harness.Manager.State.Manager);
+        AssertAttachedOnTheWorkspaceInFront(rig, rig.Cli.NextId);
+    }
+
+    // A start that fails for another reason than trust is told as it is, and the click is no longer pending: the next
+    // click starts again.
+    [Fact]
+    public void A_failed_start_is_told_and_the_next_click_starts_again()
+    {
+        using var rig = new Rig();
+        rig.Cli.Start = () => Result.Failure<string>("claude exited with code 1.\nsomething else went wrong");
+
+        rig.Manager.Open();
+        rig.Settle();
+        var told = Assert.Single(rig.Told);
+        Assert.Contains("something else went wrong", told);
+        Assert.Empty(rig.Asked);
+        Assert.Null(rig.Harness.Manager.State.Manager);
+
+        rig.Cli.Start = null;
+        Assert.True(rig.Manager.Open().IsSuccess);
+        rig.Settle();
+
+        Assert.Equal(2, rig.Cli.Acts.Count);
+        Assert.Equal(new ManagerRecord(rig.Cli.NextId, Today), rig.Harness.Manager.State.Manager);
+        AssertAttachedOnTheWorkspaceInFront(rig, rig.Cli.NextId);
+    }
+
+    // Yesterday's idle manager cannot be stopped (a failed answer, or a fault the CLI did not turn into one): today's
+    // manager still starts, and the click is not lost.
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void A_failed_stop_still_starts_todays_manager(bool throws)
+    {
+        using var rig = new Rig();
+        rig.Stored(Earlier, Today.AddDays(-1));
+        rig.Cli.Listed.Add(new Row(Earlier, rig.Folder, Busy: false));
+        rig.Cli.Stop = () => Result.Failure<string>("claude exited with code 1.\nno such session");
+        rig.Cli.StopThrows = throws;
+
+        rig.Manager.Open();
+        rig.Settle();
+
+        Assert.Equal(["stop", Earlier[..8]], rig.Cli.Acts[0].Arguments);
+        Assert.Equal(ManagerSession.StartArguments(rig.BriefingPath, rig.ShimForward), rig.Cli.Acts[1].Arguments);
+        Assert.Equal(new ManagerRecord(rig.Cli.NextId, Today), rig.Harness.Manager.State.Manager);
+        Assert.Single(rig.Launches);
+        Assert.Empty(rig.Told);
     }
 
     // As "Start Claude on this": while Claude sessions are off, the click is refused with the reason and runs nothing.

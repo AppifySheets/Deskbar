@@ -22,6 +22,12 @@ public abstract record ManagerStep
 
     /// <summary>Start a fresh manager; stop the named stale one first, when there is one.</summary>
     public sealed record StartNew(Maybe<ClaudeAgent> StopFirst) : ManagerStep;
+
+    /// <summary>
+    /// A manager runs in the manager folder that is not the stored one (a start whose session was not listed in time
+    /// stored nothing): record it as today's and open a window on it, never start another beside it.
+    /// </summary>
+    public sealed record Claim(ClaudeAgent Agent) : ManagerStep;
 }
 
 public static class ManagerSession
@@ -100,18 +106,34 @@ public static class ManagerSession
         "Name a task by its title and short id, so the user can find it.");
 
     /// <summary>
-    /// What a click does, in this order: nothing stored, start. Stored today and listed, attach. Stored today, not
-    /// listed, with its transcript on disk, resume. Stored today, transcript gone, start. Stored earlier and listed busy,
-    /// attach (never stop work in progress). Stored earlier and listed idle, start and stop the old one first. Stored
-    /// earlier and not listed, start.
+    /// What a click does, in this order. The stored manager not listed (or nothing stored) while a background session
+    /// runs in the manager folder: claim that one (the busy one first, else the newest). Otherwise: nothing stored,
+    /// start. Stored today and listed, attach. Stored today, not listed, with its transcript on disk, resume. Stored
+    /// today, transcript gone, start. Stored earlier and listed busy, attach (never stop work in progress). Stored earlier
+    /// and listed idle, start and stop the old one first. Stored earlier and not listed, start.
     /// </summary>
+    /// <param name="inManagerFolder">
+    /// Whether a listed session's folder is the manager folder (IsManager). The folder is the manager's identity (design,
+    /// "Who counts as the manager"), so a manager whose id was never stored is still found by it.
+    /// </param>
     public static ManagerStep Next(Maybe<ManagerRecord> stored, DateOnly today, IReadOnlyCollection<ClaudeAgent> listed,
-        Func<string, bool> transcriptExists)
+        Func<string, bool> transcriptExists, Func<ClaudeAgent, bool> inManagerFolder)
     {
+        var agent = stored.Bind(record => listed.TryFirst(a => a.SessionId == record.SessionId));
+        // Task review, Important: a start whose session Claude Code did not list within the search stored nothing, yet
+        // runs on. Starting again would put a second Fable manager beside it that nothing ever stops (the keeper leaves
+        // the manager folder alone), so a manager found in the folder is today's. Only background sessions: the trust
+        // terminal of the first start runs an interactive `claude` there, and no window can be attached to it.
+        if (agent.HasNoValue
+            && listed.Where(a => a.Background && inManagerFolder(a))
+                .OrderByDescending(a => a.Busy)
+                .ThenByDescending(a => a.StartedAt.GetValueOrDefault(DateTimeOffset.MinValue))
+                .TryFirst() is { HasValue: true } found)
+            return new ManagerStep.Claim(found.Value);
+
         if (stored.HasNoValue) return new ManagerStep.StartNew(Maybe<ClaudeAgent>.None);
 
         var record = stored.Value;
-        var agent = listed.TryFirst(a => a.SessionId == record.SessionId);
 
         return record.Day == today
             ? agent.HasValue ? new ManagerStep.Attach(agent.Value)

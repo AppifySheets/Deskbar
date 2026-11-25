@@ -16,29 +16,35 @@ public class ManagerSessionTests
 
     static Maybe<ManagerRecord> Stored(DateOnly day) => new ManagerRecord(Id, day);
 
+    const string Other = "bbbbbbbb-1111-2222-3333-444444444444";
+    const string Third = "cccccccc-1111-2222-3333-444444444444";
+
+    // The manager folder, as ManagerActions tells it (ManagerSession.IsManager on the agent's folder).
+    static bool InFolder(ClaudeAgent agent) => ManagerSession.IsManager(agent.Folder, @"C:\state\manager", Long);
+
     static string Long(string path) => path.Replace(@"PETRE~1.CHI", "petre.chitashvili");
 
     [Fact]
     public void Next_attaches_todays_listed_manager()
     {
         var agent = Agent(Id);
-        var step = ManagerSession.Next(Stored(today), today, [agent], _ => true);
+        var step = ManagerSession.Next(Stored(today), today, [agent], _ => true, InFolder);
         Assert.Equal(new ManagerStep.Attach(agent), step);
     }
 
     [Fact]
     public void Next_resumes_todays_unlisted_manager_with_transcript() =>
-        Assert.Equal(new ManagerStep.Resume(Id), ManagerSession.Next(Stored(today), today, [], _ => true));
+        Assert.Equal(new ManagerStep.Resume(Id), ManagerSession.Next(Stored(today), today, [], _ => true, InFolder));
 
     [Fact]
     public void Next_starts_new_when_todays_transcript_is_gone() =>
-        Assert.Equal(new ManagerStep.StartNew(Maybe<ClaudeAgent>.None), ManagerSession.Next(Stored(today), today, [], _ => false));
+        Assert.Equal(new ManagerStep.StartNew(Maybe<ClaudeAgent>.None), ManagerSession.Next(Stored(today), today, [], _ => false, InFolder));
 
     [Fact]
     public void Next_starts_new_and_stops_yesterdays_idle_manager()
     {
         var agent = Agent(Id);
-        var step = ManagerSession.Next(Stored(today.AddDays(-1)), today, [agent], _ => true);
+        var step = ManagerSession.Next(Stored(today.AddDays(-1)), today, [agent], _ => true, InFolder);
         Assert.Equal(new ManagerStep.StartNew(agent), step);
     }
 
@@ -46,19 +52,73 @@ public class ManagerSessionTests
     public void Next_attaches_yesterdays_busy_manager()
     {
         var agent = Agent(Id, busy: true);
-        var step = ManagerSession.Next(Stored(today.AddDays(-1)), today, [agent], _ => true);
+        var step = ManagerSession.Next(Stored(today.AddDays(-1)), today, [agent], _ => true, InFolder);
         Assert.Equal(new ManagerStep.Attach(agent), step);
     }
 
     [Fact]
     public void Next_starts_new_when_yesterdays_manager_is_not_listed() =>
         Assert.Equal(new ManagerStep.StartNew(Maybe<ClaudeAgent>.None),
-            ManagerSession.Next(Stored(today.AddDays(-1)), today, [], _ => true));
+            ManagerSession.Next(Stored(today.AddDays(-1)), today, [], _ => true, InFolder));
 
+    // A session elsewhere is not the manager, so it is no reason not to start one.
     [Fact]
     public void Next_starts_new_when_nothing_stored() =>
         Assert.Equal(new ManagerStep.StartNew(Maybe<ClaudeAgent>.None),
-            ManagerSession.Next(Maybe<ManagerRecord>.None, today, [Agent(Id)], _ => true));
+            ManagerSession.Next(Maybe<ManagerRecord>.None, today, [Agent(Id, folder: @"C:\repos\x")], _ => true, InFolder));
+
+    // THE FOLDER IS THE MANAGER'S IDENTITY (task review, Important). A start whose session was not listed in time stores
+    // nothing; the session still runs in the manager folder. The next click must take it as today's manager, never
+    // start a second Fable beside it that nothing would ever stop.
+    [Fact]
+    public void Next_claims_a_manager_in_the_folder_when_nothing_is_stored()
+    {
+        var orphan = Agent(Other);
+        Assert.Equal(new ManagerStep.Claim(orphan), ManagerSession.Next(Maybe<ManagerRecord>.None, today, [orphan], _ => true, InFolder));
+    }
+
+    // The stored manager is gone from the list, but another session runs in its folder: that one is claimed, not the
+    // stored one resumed beside it (nor a new one started when its transcript is gone).
+    [Fact]
+    public void Next_claims_another_manager_in_the_folder_when_the_stored_one_is_not_listed()
+    {
+        var orphan = Agent(Other);
+        Assert.Equal(new ManagerStep.Claim(orphan), ManagerSession.Next(Stored(today), today, [orphan], _ => true, InFolder));
+        Assert.Equal(new ManagerStep.Claim(orphan), ManagerSession.Next(Stored(today), today, [orphan], _ => false, InFolder));
+        Assert.Equal(new ManagerStep.Claim(orphan), ManagerSession.Next(Stored(today.AddDays(-1)), today, [orphan], _ => true, InFolder));
+    }
+
+    // Several in the folder: the busy one first (it is the one at work), else the newest by its start time.
+    [Fact]
+    public void Next_claims_the_busy_one_first_else_the_newest()
+    {
+        var older = Agent(Other) with { StartedAt = DateTimeOffset.UnixEpoch.AddDays(1) };
+        var newer = Agent(Third) with { StartedAt = DateTimeOffset.UnixEpoch.AddDays(2) };
+        var busy = Agent(Other, busy: true) with { StartedAt = DateTimeOffset.UnixEpoch.AddDays(1) };
+
+        Assert.Equal(new ManagerStep.Claim(newer), ManagerSession.Next(Maybe<ManagerRecord>.None, today, [older, newer], _ => true, InFolder));
+        Assert.Equal(new ManagerStep.Claim(busy), ManagerSession.Next(Maybe<ManagerRecord>.None, today, [busy, newer], _ => true, InFolder));
+    }
+
+    // Only a background session is a manager Deskbar started. The trust terminal of the first start runs an interactive
+    // `claude` in the manager folder; it is not claimed, since no window can be attached to it.
+    [Fact]
+    public void Next_does_not_claim_an_interactive_session_in_the_folder()
+    {
+        var trustTerminal = Agent(Other) with { Background = false, ShortId = Maybe<string>.None };
+        Assert.Equal(new ManagerStep.StartNew(Maybe<ClaudeAgent>.None),
+            ManagerSession.Next(Maybe<ManagerRecord>.None, today, [trustTerminal], _ => true, InFolder));
+    }
+
+    // While the stored manager is listed, the existing outcomes stand whatever else is in the folder.
+    [Fact]
+    public void Next_keeps_the_stored_managers_outcome_while_it_is_listed()
+    {
+        var stored = Agent(Id);
+        var orphan = Agent(Other);
+        Assert.Equal(new ManagerStep.Attach(stored), ManagerSession.Next(Stored(today), today, [orphan, stored], _ => true, InFolder));
+        Assert.Equal(new ManagerStep.StartNew(stored), ManagerSession.Next(Stored(today.AddDays(-1)), today, [orphan, stored], _ => true, InFolder));
+    }
 
     [Fact]
     public void IsManager_matches_short_path_form() =>

@@ -26,7 +26,11 @@ namespace Deskbar.App;
 //        * Resume: today's manager is not listed and its transcript is there: a BARE `claude --bg --resume <full id>`,
 //          which keeps every option it was started with (measured), then attach;
 //        * StartNew: nothing stored, yesterday's, or its transcript gone: `claude stop` on the old one first when it is
-//          still listed (idle), then the start (ManagerSession.StartArguments), its id stored with today, then attach.
+//          still listed (idle), then the start (ManagerSession.StartArguments), its id stored with today, then attach;
+//        * Claim: the stored manager is not listed (or nothing is stored) but a background session runs in the manager
+//          folder, as one does when a start was not listed within the search and so stored nothing. The folder is the
+//          manager's identity, so that session is stored as today's and attached; a second manager is never started
+//          beside it, since nothing would ever stop it (the keeper leaves the manager folder alone).
 //   3. Before every start AND every resume, the folder is created and the briefing (ManagerSession.Briefing) written to
 //      manager-briefing.md in it. A resume keeps the saved --append-system-prompt-file, which names this same path, so a
 //      Deskbar rebuilt with a new briefing reaches the manager at its next resume, not only at the next day's start.
@@ -58,6 +62,7 @@ public sealed class ManagerActions : IDisposable
     readonly IScheduler scheduler;
     readonly Func<DateOnly> today;
     readonly Action<string>? trace;
+    readonly Func<string, string> longPath;
     readonly SerialDisposable opening = new();
 
     // The manager's folder (ManagerSession.FolderIn the state dir), and the shim's full path with forward slashes: the
@@ -72,9 +77,11 @@ public sealed class ManagerActions : IDisposable
     /// <param name="shimPath">The `deskbar.cmd` ControlCommandLine.WriteShim writes in the state folder.</param>
     /// <param name="scheduler">Where answers land: the UI thread in the app.</param>
     /// <param name="today">The local calendar day; the system's unless a test says otherwise.</param>
+    /// <param name="longPath">Expands 8.3 short forms when a listed session's folder is compared with the manager's.</param>
     public ManagerActions(WorkspaceManager manager, ClaudeSessions sessions, ClaudeTaskActions actions, string stateDir, string shimPath,
-        IScheduler scheduler, Func<DateOnly>? today = null, Action<string>? trace = null)
+        IScheduler scheduler, Func<DateOnly>? today = null, Action<string>? trace = null, Func<string, string>? longPath = null)
     {
+        this.longPath = longPath ?? Deskbar.Windows.Control.LongPath.Of;
         this.manager = manager;
         this.sessions = sessions;
         this.actions = actions;
@@ -99,7 +106,8 @@ public sealed class ManagerActions : IDisposable
         var day = today();
         opening.Disposable = OnScheduler(sessions.ListNow)
             .SelectMany(listed => listed.Match(
-                list => Take(ManagerSession.Next(Maybe.From(manager.State.Manager), day, list, TranscriptExists), day),
+                list => Take(ManagerSession.Next(Maybe.From(manager.State.Manager), day, list, TranscriptExists,
+                    agent => ManagerSession.IsManager(agent.Folder, folder, longPath)), day),
                 error => Observable.Return(Result.Failure<ClaudeAgent>(
                     $"Claude Code's list of sessions could not be read, so the manager was not opened:\n\n{error}"))))
             .Subscribe(
@@ -120,6 +128,9 @@ public sealed class ManagerActions : IDisposable
     IObservable<Result<ClaudeAgent>> Take(ManagerStep step, DateOnly day) => step switch
     {
         ManagerStep.Attach attach => Observable.Return(Result.Success(attach.Agent)),
+        // A manager in the folder whose id was never stored (its start was not listed in time): today's from now on.
+        ManagerStep.Claim claim => Observable.Return(Result.Success(claim.Agent))
+            .Do(_ => manager.SetManagerSession(new ManagerRecord(claim.Agent.SessionId, day))),
         ManagerStep.Resume resume => Briefed(_ => OnScheduler(() =>
             sessions.RunAndFind(ManagerSession.ResumeArguments(resume.SessionId), folder, resume.SessionId))),
         ManagerStep.StartNew start => StopFirst(start.StopFirst).SelectMany(_ => Started(day)),
@@ -134,10 +145,12 @@ public sealed class ManagerActions : IDisposable
 
     // Yesterday's idle manager is stopped before today's starts, so two managers never run side by side. `claude stop`
     // returns once the process is gone (measured). A stop that fails (the session ended in the second since the list was
-    // read, say) does not hold today's manager back; it is traced.
+    // read, say) does not hold today's manager back; it is traced. A fault the CLI did not turn into a Result is such a
+    // failure too, not the end of the click.
     IObservable<Unit> StopFirst(Maybe<ClaudeAgent> stale) =>
         stale.HasValue
             ? OnScheduler(() => sessions.StopNow(ShortIdOf(stale.Value)))
+                .Catch((Exception e) => Observable.Return(Result.Failure(e.Message)))
                 .Do(stopped => stopped.TapError(e => trace?.Invoke($"manager: yesterday's {stale.Value.SessionId} not stopped: {e}")))
                 .Select(_ => Unit.Default)
             : Observable.Return(Unit.Default);

@@ -38,6 +38,24 @@ public class ClaudeAgentsTests
         Assert.False(agent.Busy);
     }
 
+    // startedAt (milliseconds since 1970, as measured) tells the newest of several sessions in the manager's folder
+    // (ManagerSession.Next); a row without it, or with something else there, is still read, with no start time.
+    [Fact]
+    public void The_start_time_is_read_when_the_row_has_one()
+    {
+        var json = """
+            [{"pid":1,"id":"884c127f","cwd":"E:\\x","kind":"background","startedAt":1795424165340,"sessionId":"884c127f-1","status":"idle"},
+             {"pid":2,"id":"abcd1234","cwd":"E:\\x","kind":"background","sessionId":"abcd1234-1","status":"idle"},
+             {"pid":3,"id":"abcd5678","cwd":"E:\\x","kind":"background","startedAt":"soon","sessionId":"abcd5678-1","status":"idle"}]
+            """;
+
+        var agents = ClaudeAgents.Parse(json).Value;
+
+        Assert.Equal(DateTimeOffset.FromUnixTimeMilliseconds(1795424165340), agents[0].StartedAt.Value);
+        Assert.True(agents[1].StartedAt.HasNoValue);
+        Assert.True(agents[2].StartedAt.HasNoValue);
+    }
+
     [Theory]
     [InlineData("{}")]
     [InlineData("")]
