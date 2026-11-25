@@ -484,7 +484,8 @@ Enter opens the new subtask in the same place. A Claude session that takes up a 
 with their status lines, your descriptions and comments, and every Claude session on them with the file its
 conversation is kept in, so it reads what the earlier work found instead of you explaining it again. A subtask is
 drawn right under its parent, starting with "↳", and a parent's line counts its open subtasks; opening a parent in
-the tasks panel lists the ones without a line of their own (folded away, or hidden by a filter). Going the other way, an open subtask's thread starts with "↑ Subtask of" and its
+the tasks panel lists the ones without a line of their own (folded away, or hidden by a filter); click one to
+open it right there, inside the parent's thread. Going the other way, an open subtask's thread starts with "↑ Subtask of" and its
 parent's title, which you can click to show the parent, and "Open parent" on a subtask's menu (in the panel or on the
 bar) does the same; a subtask's own window has a Parent button that opens the parent's window. Untick "Subtasks" at the top of the tasks panel to fold them into their parent's
 line, in the panel and on the bar, which keeps the count; a subtask waiting on you stays in view. Drag a task onto the middle of another to put it
