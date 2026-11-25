@@ -481,6 +481,9 @@ public partial class TasksWindow : Window
         // with the most squares needs, the same on every line so the chip after it sits at one x.
         slimLines = view.Slim && !view.Matrix;
         slimSquaresWidth = SquaresColumn(shownRows.Select(r => r.SessionCount).DefaultIfEmpty(0).Max());
+        // The slim line's Open Claude column (task 7f61af2e): there while any line shown has the button, zero on a board
+        // without one, so a list of notes gives its title the room, as the squares' column does.
+        slimOpenWidth = new(shownRows.Any(OpensClaude) ? OpenClaudeColumn : 0);
         if (view.Matrix) DrawMatrix(view);
         else
             view.Groups.ToList().ForEach(group =>
@@ -662,7 +665,7 @@ public partial class TasksWindow : Window
         // Every column but the title's is a fixed width, the same on every line of every group, so each sits at the
         // same x, flush to the right edge; the title takes the star column and trims first.
         var grid = new Grid();
-        (compactLines ? CompactColumns : slimLines ? SlimColumns(slimSquaresWidth) : LineColumns).ToList()
+        (compactLines ? CompactColumns : slimLines ? SlimColumns(slimSquaresWidth, slimOpenWidth) : LineColumns).ToList()
             .ForEach(width => grid.ColumnDefinitions.Add(new ColumnDefinition { Width = width }));
         // Only the full line has the session words, the assignee and the Reopen button. The age is on the slim line too.
         var full = !compactLines && !slimLines;
@@ -707,7 +710,10 @@ public partial class TasksWindow : Window
         Cell(grid, 7, Chip(row.Place));
         var comments = CommentsButton(row);
         Cell(grid, 8, comments);
-        Cell(grid, 9, full ? ActionOf(row) : null);
+        // The action column: Reopen on a closed task (full line only), else Open Claude on a Claude task (task 7f61af2e,
+        // OpenClaudeButton), on the full and the slim line. The two never meet: a closed task has no Open Claude.
+        var openClaude = compactLines ? null : OpenClaudeButton(row);
+        Cell(grid, 9, (full ? ActionOf(row) : null) ?? openClaude);
         var more = Small(new TextBlock { Text = "", FontFamily = IconFont, FontSize = 12, Foreground = Ink }, "More",
             () => OpenMenuFor(row.Id), "Edit, status, move, delete");
         menuButtons[row.Id] = more;
@@ -718,7 +724,7 @@ public partial class TasksWindow : Window
         // A line in its undo window keeps its own dimming (above): its quiet buttons are not brightened by a hover or a
         // selection (review minor).
         var quiet = row.Closing ? Array.Empty<UIElement>()
-            : new UIElement[] { comments, more }.Concat(flags?.Children.OfType<UIElement>() ?? []).ToArray();
+            : new UIElement?[] { comments, more, openClaude }.OfType<UIElement>().Concat(flags?.Children.OfType<UIElement>() ?? []).ToArray();
         Quieten(quiet, loud: false);
 
         // EVERY LINE IS A TILE (Petre's pick, option E of the task-separation mockup, 2026-11-25; the task was "better task
@@ -824,7 +830,7 @@ public partial class TasksWindow : Window
 
     // The line's columns: tick, title (the star, trimming first), the two flag toggles, status chip (72 DIP, "In progress"
     // fits), sessions, assignee (46 DIP, "Claude" fits), age, workspace chip,
-    // comments, action (close or Reopen), "…". Fixed widths, shared by every line, so each column sits at the same x on
+    // comments, action (Reopen, or Open Claude on a Claude task), "…". Fixed widths, shared by every line, so each column sits at the same x on
     // every line. The sessions column is wide enough for "2 sessions, 1 live" (116 DIP, so the words never spill into the
     // age column; it is empty on a note), the age is left-aligned in its own so its x never follows the text length, and this
     // line is drawn only from 710 DIP (TasksPanelLayout.SlimBelow: the old floating window's minimum, 620 until the status
@@ -853,8 +859,31 @@ public partial class TasksWindow : Window
     // The toggles' column on a full and a slim line: important, urgent and the snooze moon (see LineColumns).
     const double FlagsColumn = 56;
 
-    static IReadOnlyList<GridLength> SlimColumns(GridLength squares) =>
-        [new(22), new(1, GridUnitType.Star), new(FlagsColumn), new(0), squares, new(0), new(SlimAgeColumn), new(88), new(40), new(0), new(24)];
+    static IReadOnlyList<GridLength> SlimColumns(GridLength squares, GridLength open) =>
+        [new(22), new(1, GridUnitType.Star), new(FlagsColumn), new(0), squares, new(0), new(SlimAgeColumn), new(88), new(40), open, new(24)];
+
+    // The slim line's Open Claude column (task 7f61af2e): the glyph's 12 DIP and the small button's 4 DIP each side, plus
+    // a little air before the comments. Zero while no line shown has the button (see Present).
+    const double OpenClaudeColumn = 22;
+    GridLength slimOpenWidth = new(0);
+
+    // THE OPEN CLAUDE BUTTON (task 7f61af2e; Petre, on the menu item: "add a button on the task in the tasklist for it
+    // too"). A line's single click opens the task (picks it and expands its thread, Ruling 54) and its double-click goes
+    // to the session only after that; this button goes at once, the line menu's "Open Claude" and the double-click's go
+    // (Actions.Go: the task's workspace, then its session's window, resuming an ended session first). Its own Click is
+    // handled as every small button's is, so the line does not also pick the task and open the thread, and a press on it
+    // is not the line's double-click (IsTheLinesOwn stops at a Button). On a Claude task's line, full or slim, in the
+    // action column (Reopen's, which a closed task alone uses, and a closed task has no button); none in a Matrix line,
+    // whose menu has the item. Quiet like the comments and "⋯": half strength until the line is hovered or selected.
+    // Segoe's "OpenInNewWindow" U+E8A7, in both icon fonts.
+    Button? OpenClaudeButton(TaskRowView row) =>
+        OpensClaude(row)
+            ? Small(new TextBlock { Text = "", FontFamily = IconFont, FontSize = 12, Foreground = Ink, VerticalAlignment = VerticalAlignment.Center },
+                OpenClaudeText, () => Actions?.Go(row.Id), "Open Claude: go to its session without opening the task")
+            : null;
+
+    // Whether a line has the Open Claude button: a Claude task that is open and not in its undo window.
+    static bool OpensClaude(TaskRowView row) => row.Claudes && !row.Closing && row.Status != TaskStatus.Closed;
 
     // The slim line's age column (2026-11-24, the age moved off the bar): "27d23h", the widest TaskAge.Format writes, at
     // the age's 10.5 size is about 34 DIP, plus the 6 DIP left margin AgeOf gives it, so the text never trims.

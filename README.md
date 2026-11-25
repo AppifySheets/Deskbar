@@ -625,7 +625,8 @@ Double-click a task, on the bar or in the tasks panel, to go to its session. You
 workspace, and a background session's Windows Terminal window comes to the front, or opens attached to it
 (`claude attach`) when none is open; an ended session is resumed first. A VS Code session's window comes to
 the front instead. "Open Claude", right after Edit on a Claude task's menu, does the same without the first
-click, which would open the task in the tasks panel. "Start Claude on this", next on a task's menu and as a button in its thread,
+click, which would open the task in the tasks panel, and so does the Open Claude button on a Claude
+task's line in the tasks panel. "Start Claude on this", next on a task's menu and as a button in its thread,
 starts a background session with the task as its first message, in the task's folder or one you pick, and
 opens a window on it. It asks first when the task already has a session running. A folder Claude Code was
 never told to trust puts Claude's message in the thread and offers a terminal there so you can accept the
