@@ -826,6 +826,13 @@ public sealed record TasksPanelState(bool Open, double Width)
     // kept across opens and restarts for the same reason. An init property, so an older file loads as false.
     public bool ClaudeWorking { get; init; }
 
+    // The widths of the full task line's resizable columns (task 3df2d28f, Tasks.TaskColumnWidths), as Petre dragged them
+    // in the header. Null until he first drags one, and in a file written before it: the defaults then (ColumnWidths).
+    public Tasks.TaskColumnWidths? Columns { get; init; }
+
+    // The widths the lines are drawn with: the saved ones, or the defaults.
+    [JsonIgnore] public Tasks.TaskColumnWidths ColumnWidths => Columns ?? Tasks.TaskColumnWidths.Default;
+
     // What an absent AppState.TasksPanel means: closed, at the default width. Callers use this, not their own copy.
     public static readonly TasksPanelState Default = new(false, Tasks.TasksPanelLayout.DefaultWidth);
 }

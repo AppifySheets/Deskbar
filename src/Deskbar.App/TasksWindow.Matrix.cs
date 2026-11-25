@@ -28,7 +28,7 @@ public partial class TasksWindow
     readonly Dictionary<Quadrant, (Border Box, StackPanel Lines)> cells = [];
     bool matrixShown;
 
-    // While the Matrix draws its lines, they use the compact columns (Line, LineColumns).
+    // While the Matrix draws its lines, they use the compact columns (Line), in Part's own order (TasksWindow.Columns.cs).
     bool compactLines;
 
     static readonly Brush CellEdge = Frozen(0xFF, 0x33, 0x35, 0x3C);

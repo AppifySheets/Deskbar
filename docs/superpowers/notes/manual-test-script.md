@@ -1080,8 +1080,25 @@ NT1. Drag the panel to its narrowest (360 DIP). Every title reads across the lin
 NT2. Widen it to the default 460: the one-word task is a single row with its buttons to the right of the title. The long
      one wraps across the whole line, and its buttons sit at the right end of its last line, or in a row under it when
      that line runs into them.
-NT3. Hover a line: the flag toggles and the moon light up at the left end of the buttons, never over the title's text.
+NT3. Hover a line: the flag toggles and the moon light up just before the comments, never over the title's text.
 NT4. Press F2 on a narrow line: the editor takes the whole line. Press Esc: the buttons come back.
+
+## The tasks panel's columns
+
+(Task 3df2d28f.) The tasks panel at 740 DIP or wider, on the List, with a Claude task and a note.
+
+TC1. A header row sits over the lines: Task, Status, Sessions, Who, Age, Workspace, each over its column on every
+     line, with a hairline before each of the last five. With the list's scroll bar showing, the header still
+     lines up with the lines.
+TC2. The toggles, comments, Open Claude and the menu sit together at each line's right end. A long title wraps at
+     about twice the width it had before.
+TC3. Drag the hairline before Sessions to the left: the Sessions column widens on every line as you drag, and the
+     titles narrow. Drag it far left: it stops while the title still has about 80 DIP. Drag it right: it narrows to a
+     few letters and an ellipsis, never to nothing.
+TC4. Close and reopen the panel, then restart Deskbar: the width is kept.
+TC5. Double-click the hairline before Sessions: the column goes back to its usual width.
+TC6. Narrow the panel under 710 DIP: the lines go slim and the header goes. Switch to the Matrix (780 DIP or more):
+     no header there either.
 
 ## Results (2026-08-01)
 

@@ -267,6 +267,7 @@ public sealed class TasksBoard : IDisposable
             OpenFromStats = OpenFromStats,
             // "Subtask of" in a subtask's thread and "Open parent" in its line's menu (task 54b39c4c).
             OpenParent = OpenParent,
+            ResizeColumns = ResizeColumns,
         };
 
         // Taken before the subscriptions below exist, so the first StateChanged pulse is compared with this state
@@ -673,6 +674,15 @@ public sealed class TasksBoard : IDisposable
         _ = manager.SaveTasksPanel(PanelState with { ClaudeWorking = on });
     }
 
+    // THE HEADER'S DIVIDER DRAG END (task 3df2d28f): the full line's column widths saved with the panel, then a redraw so
+    // the view carries them. The window already shows them (it resized every line live during the drag); the redraw
+    // draws nothing new unless something else changed meanwhile. A no-op write when the drag ended where it began.
+    public void ResizeColumns(TaskColumnWidths widths)
+    {
+        _ = manager.SaveTasksPanel(PanelState with { Columns = widths });
+        Refresh();
+    }
+
     public void ToggleThread(Guid id)
     {
         if (!expanded.Remove(id)) expanded.Add(id);
@@ -1070,6 +1080,7 @@ public sealed class TasksBoard : IDisposable
             // The Stats view counts the whole board, not the filtered one: it is about the work, not about what a filter
             // shows (spec 2026-11-25-task-stats-design.md, "What it shows"). Made only while it shows.
             Stats = statsShown ? TaskStats.Of(tasks.Board, now(), TimeZoneInfo.Local, TaskStats.DaysToShow(tasks.Board, now(), TimeZoneInfo.Local)) : null,
+            Columns = PanelState.ColumnWidths,
         };
     }
 
@@ -1416,6 +1427,9 @@ internal sealed record TasksView(IReadOnlyList<TaskFilterChip> Filters, string W
     /// null otherwise.
     /// </summary>
     public TaskStatsView? Stats { get; init; }
+
+    /// <summary>The full line's resizable column widths (task 3df2d28f), as saved with the panel or the defaults.</summary>
+    public TaskColumnWidths Columns { get; init; } = TaskColumnWidths.Default;
 }
 
 /// <summary>
@@ -1514,6 +1528,12 @@ internal sealed record TasksWindowActions(
     /// "Open parent" in its line's menu (TasksBoard.OpenParent). None, neither shows.
     /// </summary>
     public Action<Guid>? OpenParent { get; init; }
+
+    /// <summary>
+    /// The header's divider drag end (task 3df2d28f): the full line's new column widths, saved with the panel. None, the
+    /// dividers still resize the lines on show but nothing is kept.
+    /// </summary>
+    public Action<TaskColumnWidths>? ResizeColumns { get; init; }
 }
 
 /// <summary>

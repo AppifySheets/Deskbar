@@ -189,6 +189,7 @@ public partial class TasksWindow : Window
         WireDrag();
         WireGrip();
         BuildToolbarEnd();
+        BuildColumnHeader();
     }
 
     // The controller's side, set once by TasksBoard's constructor.
@@ -492,6 +493,8 @@ public partial class TasksWindow : Window
             Headers = [];
             Keys = [];
             EmptyText.Visibility = Visibility.Collapsed;
+            // No lines, so no column header over them (task 3df2d28f).
+            ColumnHeader.Visibility = Visibility.Collapsed;
             return;
         }
         StatsPanel.Children.Clear();
@@ -505,9 +508,12 @@ public partial class TasksWindow : Window
         // with the most squares needs, the same on every line so the chip after it sits at one x.
         slimLines = view.Slim && !view.Matrix;
         slimSquaresWidth = SquaresColumn(shownRows.Select(r => r.SessionCount).DefaultIfEmpty(0).Max());
-        // The slim line's Open Claude column (task 7f61af2e): there while any line shown has the button, zero on a board
-        // without one, so a list of notes gives its title the room, as the squares' column does.
-        slimOpenWidth = new(shownRows.Any(OpensClaude) ? OpenClaudeColumn : 0);
+        // The button columns as narrow as the lines on show need, and the text columns' widths (TasksWindow.Columns.cs).
+        // The Open Claude column (task 7f61af2e) is there while any line shown has the button, zero on a board without
+        // one, so a list of notes gives its title the room, as the squares' column does.
+        SizeColumns(view, shownRows);
+        fullGrids.Clear();
+        fullGrids.Add(ColumnHeader);
         if (view.Matrix) DrawMatrix(view);
         else
             view.Groups.ToList().ForEach(group =>
@@ -525,6 +531,8 @@ public partial class TasksWindow : Window
         EmptyText.Text = view.EmptyText;
         // The Matrix always draws its four cells, empty or not, so it needs no empty line.
         EmptyText.Visibility = Keys.Count == 0 && !view.Matrix ? Visibility.Visible : Visibility.Collapsed;
+        // The column header (task 3df2d28f) heads full lines only: not the Matrix, not slim lines, not an empty list.
+        PaintColumnHeader(!view.Matrix && !slimLines && Keys.Count > 0);
         PaintActiveCell();
         PaintAddPlace();
     }
@@ -718,22 +726,27 @@ public partial class TasksWindow : Window
     {
         // ONE COLUMN LAYOUT FOR EVERY LINE (Petre's screenshot: each line sized a column to its own content, so the chip,
         // the comments and "…" sat at a different x on every line, and a long title pushed the chip off the window).
-        // Every column but the title's is a fixed width, the same on every line of every group, so each sits at the
-        // same x, flush to the right edge; the title takes the star column and trims first.
+        // Every column but the title's has one width for the whole draw, the same on every line of every group, so each
+        // sits at the same x, flush to the right edge; the title takes the star column. On a full line the five text
+        // columns are the header's, which Petre resizes, and the buttons sit together at the right end
+        // (TasksWindow.Columns.cs, task 3df2d28f); a part's column comes from At, since the Matrix orders them its own way.
         var grid = new Grid();
-        var columns = compactLines ? CompactColumns : slimLines ? SlimColumns(slimSquaresWidth, slimOpenWidth) : LineColumns;
+        var columns = compactLines ? CompactColumns : slimLines ? SlimColumns() : FullColumns();
         columns.ToList().ForEach(width => grid.ColumnDefinitions.Add(new ColumnDefinition { Width = width }));
         // Only the full line has the session words, the assignee and the Reopen button. The age is on the slim line too.
         var full = !compactLines && !slimLines;
+        // A full line's grid follows the header's dividers while they are dragged (ApplyColumns).
+        if (full) fullGrids.Add(grid);
         // WHERE THE CONTROLS GO (task 65ab598d): on a full or a Matrix line, the line's own grid, in the columns beside the
-        // title; on a slim line, a strip of their own that sits on the title's last line (SlimControls, below).
+        // title; on a slim line, a strip of their own that sits on the title's last line (SlimControls, below). A part's
+        // column comes from At either way (the List's order, TasksWindow.Columns.cs); the strip starts at FirstControlColumn.
         var tucked = slimLines;
         var controls = tucked ? SlimControls(columns) : grid;
         void Control(int column, UIElement? part) => Cell(controls, tucked ? column - FirstControlColumn : column, part);
         var left = LeftOf(row);
         // On a slim line the tick stays beside the title's first line while a long title wraps under it.
         if (tucked && left is FrameworkElement tick) tick.VerticalAlignment = VerticalAlignment.Top;
-        Cell(grid, 0, left);
+        Cell(grid, At(Part.Tick), left);
         // TWO ROWS: THE TITLE WITH EVERY CONTROL BESIDE IT, THEN WHAT IS UNDER THE TITLE ACROSS THE LINE (task d560f3eb,
         // "misaligned text", Petre's screenshot of a waiting task whose question stood in a column a few letters wide, two
         // or three letters to a line, with the tick, the toggles and the chip floating half way down it). The question,
@@ -746,45 +759,45 @@ public partial class TasksWindow : Window
         grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         var text = TextOf(row);
-        Cell(grid, 1, text.Title);
+        Cell(grid, At(Part.Title), text.Title);
         if (text.Below is { } below)
         {
             Grid.SetRow(below, 1);
             Grid.SetColumnSpan(below, grid.ColumnDefinitions.Count - 1);
-            Cell(grid, 1, below);
+            Cell(grid, At(Part.Title), below);
         }
         if (tucked) TuckUnderTitle(grid, text.Title, controls);
         var flags = FlagsOf(row);
-        Control(2, flags);
+        Control(At(Part.Flags), flags);
         // A Matrix line (compact) has no column for the sessions, the age or the close button, so they are not made at
         // all (whole-PR review, minor 5): no element in a zero-width column, and no age for the minute's tick to rewrite.
         // The status in words (Petre, 2026-11-23: "i can't currently see statuses"; TaskStatusMarks.Chip), in its own
         // column so it sits at the same x on every line. Only on a full line: none in a Matrix line (no room there; its
         // Done tick still shows) and none on a slim one (the tick still shows, and the status is named in its tooltip,
         // SlimTip), and none on a line in its undo window (it is closed).
-        Control(3, full && !row.Closing ? TaskStatusMarks.Chip(row.Status) : null);
+        Control(At(Part.Status), full && !row.Closing ? TaskStatusMarks.Chip(row.Status) : null);
         // A slim line has the sessions as squares alone, and no assignee or Reopen (Task 8): those are in its tooltip
         // and its "⋯" menu (SlimTip, OpenMenuFor).
-        Control(4, compactLines ? null : slimLines ? SquaresOf(row) : SessionsOf(row));
+        Control(At(Part.Sessions), compactLines ? null : slimLines ? SquaresOf(row) : SessionsOf(row));
         // Who the task is on (Ruling 57): "Me" or "Claude", dim; none in a Matrix line (no column there).
-        Control(5, full ? AssigneeOf(row) : null);
+        Control(At(Part.Assignee), full ? AssigneeOf(row) : null);
         // THE AGE ON EVERY LIST LINE, THE SLIM ONE INCLUDED (Petre, 2026-11-24, of the bar's "26m": "move the time from
         // here to the proper tasks window"). The bar's lines lost theirs that day, so the panel at its usual slim width
         // must show it, not only its tooltip. None in a Matrix line (no column there).
-        Control(6, compactLines ? null : AgeOf(row));
-        Control(7, Chip(row.Place));
+        Control(At(Part.Age), compactLines ? null : AgeOf(row));
+        Control(At(Part.Place), Chip(row.Place));
         var comments = CommentsButton(row);
-        Control(8, comments);
+        Control(At(Part.Comments), comments);
         // The action column: Reopen on a closed task (full line only), else Open Claude on a Claude task (task 7f61af2e,
         // OpenClaudeButton), on the full and the slim line. The two never meet: a closed task has no Open Claude.
         var openClaude = compactLines ? null : OpenClaudeButton(row);
-        Control(9, (full ? ActionOf(row) : null) ?? openClaude);
+        Control(At(Part.Action), (full ? ActionOf(row) : null) ?? openClaude);
         var more = Small(new TextBlock { Text = "", FontFamily = IconFont, FontSize = 12, Foreground = Ink }, "More",
             () => OpenMenuFor(row.Id), "Edit, status, move, delete");
         menuButtons[row.Id] = more;
-        Control(10, more);
+        Control(At(Part.More), more);
         if (row.Closing)
-            grid.Children.OfType<UIElement>().Where(part => Grid.GetColumn(part) != 0).ToList().ForEach(part => part.Opacity = 0.45);
+            grid.Children.OfType<UIElement>().Where(part => Grid.GetColumn(part) != At(Part.Tick)).ToList().ForEach(part => part.Opacity = 0.45);
         // The comments and "…" buttons are quiet until the pointer is on their line, like the bar's quiet controls.
         // A line in its undo window keeps its own dimming (above): its quiet buttons are not brightened by a hover or a
         // selection (review minor).
@@ -894,39 +907,26 @@ public partial class TasksWindow : Window
     }
 
 
-    // The line's columns: tick, title (the star, trimming first), the two flag toggles, status chip (72 DIP, "In progress"
-    // fits), sessions, assignee (46 DIP, "Claude" fits), age, workspace chip,
-    // comments, action (Reopen, or Open Claude on a Claude task), "…". Fixed widths, shared by every line, so each column sits at the same x on
-    // every line. The sessions column is wide enough for "2 sessions, 1 live" (116 DIP, so the words never spill into the
-    // age column; it is empty on a note), the age is left-aligned in its own so its x never follows the text length, and this
-    // line is drawn only from 710 DIP (TasksPanelLayout.SlimBelow: the old floating window's minimum, 620 until the status
-    // chip column took 72, 692 until the snooze moon took 18; narrower, the slim line below), so the title keeps a usable
-    // width even with the list's scroll bar showing (review I-3). The panel itself goes down to 360 DIP.
-    //
-    // The toggles' column is 56 DIP since the snooze moon joined the two flags (task 6da8d7eb): three 16 DIP glyph buttons
-    // and a little air, the same on the slim line.
-    static readonly IReadOnlyList<GridLength> LineColumns =
-        [new(22), new(1, GridUnitType.Star), new(FlagsColumn), new(72), new(116), new(46), new(44), new(88), new(40), new(52), new(24)];
+    // The line's columns: since task 3df2d28f they are TasksWindow.Columns.cs's (FullColumns, SlimColumns, the order in
+    // ListOrder). Before it a full line had fixed columns sized for the widest thing each could ever hold, 560 DIP in all:
+    // the toggles after the title (56), status chip (72), sessions (116, for "2 sessions, 1 live"), assignee (46), age (44),
+    // workspace chip (88), comments (40), action (52) and "…" (24). Now the five text columns start at about 300 DIP in
+    // all and Petre resizes them from the header, and the buttons sit together at the right end, as narrow as their
+    // glyphs. The age stays left-aligned in its own column so its x never follows the text length. The full line is
+    // still drawn only from 710 DIP (TasksPanelLayout.SlimBelow; narrower, the slim line below), a threshold set when the
+    // fixed columns were wider, so the title now keeps more than the 100 DIP it was built to guarantee there.
 
     // LINES AT PANEL WIDTH (spec docs/superpowers/specs/2026-11-23-tasks-panel-design.md, "Lines at panel width"; Petre's
-    // pick, "slim line when narrow"; plan 2026-11-23-tasks-panel, Task 8). The full line's fixed columns come to 560 DIP
-    // (542 before the snooze moon widened the toggles by 18, 470 before the 72 DIP status chip column), more than the
-    // panel's default 460, so below TasksPanelLayout.SlimBelow (710 DIP; the view's Slim) a line is slim: tick, title (a
-    // Done task's green tick still in front of it), the toggles and the snooze moon, the sessions as squares alone (no
-    // words), the age (since 2026-11-24, when it left the bar), the workspace chip, the comment count and "⋯". The status
-    // chip and the assignee move into the line's tooltip, with the age again (SlimTip, "Done · 5h · Claude"); Close and
-    // Reopen were already in "⋯"
+    // pick, "slim line when narrow"; plan 2026-11-23-tasks-panel, Task 8). Below TasksPanelLayout.SlimBelow (710 DIP; the
+    // view's Slim) a line is slim: tick, title (a Done task's green tick still in front of it), the sessions as squares
+    // alone (no words), the age (since 2026-11-24, when it left the bar), the workspace chip, then the buttons: the
+    // toggles and the snooze moon, the comment count, Open Claude and "⋯". The status chip and the assignee move into the
+    // line's tooltip, with the age again (SlimTip, "Done · 5h · Claude"); Close and Reopen were already in "⋯"
     // (OpenMenuFor), so the Reopen button goes without anything becoming unreachable. Same column indexes as the full
-    // line, the dropped ones zero wide and left empty. The switch happens only when the width changes at the grip's drag
-    // end, never during a drag (TasksBoard.ResizePanel), and then every line redraws once.
+    // line, the dropped ones zero wide and left empty, and no header over it. The switch happens only when the width
+    // changes at the grip's drag end, never during a drag (TasksBoard.ResizePanel), and then every line redraws once.
     bool slimLines;
     GridLength slimSquaresWidth = new(0);
-
-    // The toggles' column on a full and a slim line: important, urgent and the snooze moon (see LineColumns).
-    const double FlagsColumn = 56;
-
-    static IReadOnlyList<GridLength> SlimColumns(GridLength squares, GridLength open) =>
-        [new(22), new(1, GridUnitType.Star), new(FlagsColumn), new(0), squares, new(0), new(SlimAgeColumn), new(88), new(40), open, new(24)];
 
     // THE SLIM LINE'S TITLE HAS THE WHOLE LINE, AND THE CONTROLS SIT ON ITS LAST LINE (task 65ab598d). The slim line's
     // fixed columns come to about 300 DIP, so with the title in a column of its own beside them a 360 DIP panel left the
@@ -1003,11 +1003,6 @@ public partial class TasksWindow : Window
         Panel panel => panel.Children.OfType<UIElement>().Select(TitleBlockIn).FirstOrDefault(block => block is not null),
         _ => null,
     };
-
-    // The slim line's Open Claude column (task 7f61af2e): the glyph's 12 DIP and the small button's 4 DIP each side, plus
-    // a little air before the comments. Zero while no line shown has the button (see Present).
-    const double OpenClaudeColumn = 22;
-    GridLength slimOpenWidth = new(0);
 
     // THE OPEN CLAUDE BUTTON (task 7f61af2e; Petre, on the menu item: "add a button on the task in the tasklist for it
     // too"). A line's single click opens the task (picks it and expands its thread, Ruling 54) and its double-click goes
@@ -1564,14 +1559,25 @@ public partial class TasksWindow : Window
     const string AssigneeTag = "task-assignee";
 
     // The sessions, a square each (blue while live, haloed while Claude works in it; SessionSquare), then the words:
-    // "2 sessions, 1 live". Empty for a note.
+    // "2 sessions, 1 live". Empty for a note. A DockPanel rather than a horizontal StackPanel (task 3df2d28f): the column
+    // is now as narrow as Petre drags it, and a StackPanel gives its text all the width it wants, so the words were cut
+    // mid-letter by the column's edge; docked after the squares, they get what is left and end in an ellipsis, whole in
+    // their tooltip.
     UIElement? SessionsOf(TaskRowView row)
     {
         if (row.Sessions.Length == 0) return null;
-        var panel = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
-        Enumerable.Range(0, Math.Min(SessionSquares, row.SessionCount)).ToList()
-            .ForEach(i => panel.Children.Add(SessionSquare(10, MarkOf(row, i))));
-        panel.Children.Add(new TextBlock { Text = row.Sessions, FontSize = 10, Foreground = DimInk, Margin = new Thickness(2, 0, 0, 0), TextTrimming = TextTrimming.CharacterEllipsis });
+        var panel = new DockPanel { LastChildFill = true, VerticalAlignment = VerticalAlignment.Center };
+        Enumerable.Range(0, Math.Min(SessionSquares, row.SessionCount)).ToList().ForEach(i =>
+        {
+            var square = SessionSquare(10, MarkOf(row, i));
+            DockPanel.SetDock(square, Dock.Left);
+            panel.Children.Add(square);
+        });
+        panel.Children.Add(new TextBlock
+        {
+            Text = row.Sessions, FontSize = 10, Foreground = DimInk, Margin = new Thickness(2, 0, 4, 0),
+            TextTrimming = TextTrimming.CharacterEllipsis, VerticalAlignment = VerticalAlignment.Center, ToolTip = row.Sessions,
+        });
         return panel;
     }
 
@@ -1591,6 +1597,8 @@ public partial class TasksWindow : Window
             Foreground = place.Workspace.HasValue ? Ink : NoneInk,
             TextTrimming = TextTrimming.CharacterEllipsis,
         },
+        // The whole name, for a chip its column has trimmed (task 3df2d28f: the column is as narrow as Petre drags it).
+        ToolTip = place.Name,
     };
 
     // A comment glyph, with the count beside it when there are comments (Petre asked what the old "▸" arrow meant). A
