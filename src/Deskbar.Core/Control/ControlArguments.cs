@@ -137,8 +137,14 @@ public static class ControlArguments
     // CLAUDE_PROJECT_DIR as --from when Claude Code set it; otherwise the folder the hook was started in is the session's.
     static readonly string[] AboutTheCaller = ["open", "attention", "task", ClaudeHookVerb, ClaudeWaitVerb];
 
+    //
+    // `task` ALWAYS gets the client's folder, last, even when the caller typed a --from of its own (final review, item 4):
+    // the server tells the manager session by that folder and takes the last pair as the caller (RemoteControl.SplitFrom),
+    // so a typed `--from C:/x` can no longer pass the manager off as someone else. The other verbs keep the old rule, a
+    // --from given is used as it is: the hooks pass CLAUDE_PROJECT_DIR that way.
     public static IReadOnlyList<string> WithCallerFolder(IReadOnlyList<string> args, string callerFolder) =>
-        args.Count > 0 && AboutTheCaller.Contains(args[0], StringComparer.OrdinalIgnoreCase) && !args.Contains("--from")
+        args.Count > 0 && AboutTheCaller.Contains(args[0], StringComparer.OrdinalIgnoreCase)
+        && (args[0].Equals("task", StringComparison.OrdinalIgnoreCase) || !args.Contains("--from"))
             ? [.. args, "--from", callerFolder]
             : args;
 

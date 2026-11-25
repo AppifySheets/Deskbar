@@ -96,6 +96,10 @@ public sealed partial class RemoteControl
         // and never finishes a task: close, delete and the done/closed statuses are refused before anything is looked up.
         var byManager = ManagerSession.IsManager(Folder(from), taskSessions?.ManagerFolder ?? "", LongPath);
         if (byManager && FinishesATask(args)) return ControlReply.Fail(ManagerSession.Refusal);
+        // Nor does it touch a comment's text or fold one away (final review, item 1): comment-edit would rewrite the
+        // user's own words as the user's edit, and comment-settle is checked here, before the session forms' refusal
+        // below, so it gets this answer with or without its --session.
+        if (byManager && TouchesAComment(args)) return ControlReply.Fail(ManagerSession.CommentRefusal);
         // The manager has no task of its own, so every session form (--session) is refused from its folder: `done` would
         // finish a task, and join, ask, answered, comment --session and the rest would answer another session's question
         // or speak as that session. Its own ids come from `task show`, so it can name any session.
@@ -230,9 +234,20 @@ public sealed partial class RemoteControl
         _ => ControlReply.Fail(ControlUsage.LineFor("tasks-window")),
     };
 
-    // The client's `--from <folder>` is always last (WithCallerFolder appends it), so it is taken off the end.
+    // The client's `--from <folder>` is always last (WithCallerFolder appends it to every `task` call, even one that
+    // already has a --from), so the LAST pair is the caller and is taken off the end. Any earlier `--from <folder>` pair
+    // was typed by the caller and is dropped (final review, item 4): the manager's allow rule matches
+    // `<shim> task close <id> --from C:/x`, and taking that typed folder as the caller made the manager someone else.
+    // Nothing legitimate types --from on a `task` call; the hooks pass it to claude-hook and claude-wait only.
     static (string[] Args, string? From) SplitFrom(string[] rest) =>
-        rest is [.., "--from", var folder] ? (rest[..^2], folder) : (rest, null);
+        rest is [.. var words, "--from", var folder] ? (WithoutFrom(words), folder) : (rest, null);
+
+    static string[] WithoutFrom(string[] words) => words switch
+    {
+        [] => [],
+        ["--from", _, .. var tail] => WithoutFrom(tail),
+        [var head, .. var tail] => [head, .. WithoutFrom(tail)],
+    };
 
     // Every line of the Tasks section, as `deskbar.cmd task <form>`.
     static string TaskUsage() => string.Join("\n", ControlUsage.Sections.SelectMany(s => s.Commands)
@@ -248,6 +263,10 @@ public sealed partial class RemoteControl
         ["status", _, var status] => status.Trim().ToLowerInvariant() is "done" or "closed",
         _ => false,
     };
+
+    // The comment forms the manager may not run (ManagerSession.CommentRefusal): editing a comment's text, and settling
+    // one, which is the user's call. Matched on the verb alone, so a malformed call gets the same answer.
+    static bool TouchesAComment(string[] args) => args is ["comment-edit", ..] or ["comment-settle", ..];
 
     // The four names `status` takes; closed and anything else are refused before the task is looked up.
     static Result<TaskStatus> ParseStatus(string name) =>

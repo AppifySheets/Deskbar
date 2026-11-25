@@ -161,6 +161,21 @@ public class ManagerSessionTests
         Assert.Equal(ManagerSession.FirstMessage, args[^1]);
     }
 
+    // Final review, item 2: every tool the spec and the briefing rule out is in --disallowedTools, between the flag and
+    // the `--` that ends it: file, web, agent and timer tools, PowerShell, worktrees, artifacts and messages to sessions.
+    [Fact]
+    public void StartArguments_disallow_every_tool_the_manager_must_not_use()
+    {
+        var args = ManagerSession.StartArguments("b.md", Shim).ToList();
+        var from = args.IndexOf("--disallowedTools") + 1;
+        var disallowed = args.Skip(from).Take(args.IndexOf("--") - from).ToList();
+
+        Assert.Equal(
+            ["Read", "Edit", "Write", "NotebookEdit", "Agent", "WebFetch", "WebSearch", "Monitor", "PowerShell",
+             "ScheduleWakeup", "CronCreate", "CronDelete", "Workflow", "EnterWorktree", "Artifact", "RemoteTrigger", "SendMessage"],
+            disallowed);
+    }
+
     [Fact]
     public void ResumeArguments_are_bare_because_flags_on_a_resume_fork_a_copy() =>
         Assert.Equal(["--bg", "--resume", Id], ManagerSession.ResumeArguments(Id));
@@ -176,7 +191,13 @@ public class ManagerSessionTests
         Assert.Contains("close", text);
         Assert.Contains("delete", text);
         Assert.Contains(ManagerSession.Refusal, text);
+        Assert.Contains(ManagerSession.CommentRefusal, text);
         Assert.Contains("Never use Monitor", text);
+        // Final review, item 6: the other verbs are named as allowed, `<shim> task` prints them, and free text goes on
+        // stdin with `-`, never quoted on the command line.
+        Assert.Contains("start, flag, order, move, assign, add, rename, describe, and a subtask by add --parent", text);
+        Assert.Contains($"{Shim} task prints them", text);
+        Assert.Contains("Free text always goes on stdin with - in its place, never quoted on the command line.", text);
         Assert.True(text.Split('\n').Length < 40);
     }
 }

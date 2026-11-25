@@ -43,6 +43,11 @@ public static class ManagerSession
     // What the task verbs answer when the caller is the manager and the verb would end a task.
     public const string Refusal = "The manager coordinates; it does not close, delete or finish tasks. Ask the user.";
 
+    // What `task comment-edit` and `task comment-settle` answer when the caller is the manager (final review, item 1).
+    // EditComment refuses only a session's comment, so without this the manager could rewrite the user's own words, and
+    // the edit would count as the user's (it clears Adopted). Settling a comment folds it away, which is the user's call.
+    public const string CommentRefusal = "The manager does not edit or settle the user's comments. Ask the user.";
+
     // What `task join` answers when the caller is the manager: it coordinates, it never owns a task.
     public const string JoinRefusal = "The manager session does not take a task of its own.";
 
@@ -66,17 +71,29 @@ public static class ManagerSession
     //  * --allowedTools: only the shim's `task` verbs, by its FULL path with forward slashes. The short `deskbar.cmd`
     //    form matches but is not on Git Bash's PATH, and a `$APPDATA` spelling hits a permission prompt.
     //  * --disallowedTools: no file, web, agent or timer tools; PowerShell too, because a Bash rule does not cover it
-    //    and the manager would otherwise run anything through it.
+    //    and the manager would otherwise run anything through it. The timers (ScheduleWakeup, CronCreate, CronDelete,
+    //    RemoteTrigger) and Workflow because nothing of the manager's runs on a timer or in the background; EnterWorktree
+    //    and Artifact because it touches no repo and publishes nothing; SendMessage because it talks to sessions only
+    //    through task comments, which the user can read. Every name was measured to be accepted by `claude --bg` 2.1.332
+    //    and to take the tool off the session's list, deferred ones included (probe notes, "Final review probes").
     //  * `--` before the message, so the variadic --disallowedTools does not swallow it.
-    // The briefing path and shim path are parameters: both come from the user's real expanded paths at runtime.
+    // The briefing path and shim path are parameters: both come from the user's real expanded paths at runtime. The shim
+    // is the form ManagerActions.ShimCommand chose, so a path with a space arrives as its 8.3 short form, or quoted.
     public static IReadOnlyList<string> StartArguments(string briefingPath, string shimPath) =>
     [
         "--bg", "--model", "fable", "-n", Name, "--strict-mcp-config",
         "--permission-mode", "dontAsk",
         "--append-system-prompt-file", briefingPath,
         "--allowedTools", $"Bash({shimPath.Replace('\\', '/')} task:*)",
-        "--disallowedTools", "Read", "Edit", "Write", "NotebookEdit", "Agent", "WebFetch", "WebSearch", "Monitor", "PowerShell",
+        "--disallowedTools", .. DisallowedTools,
         "--", FirstMessage
+    ];
+
+    /// <summary>The tools the manager is started without (StartArguments has the reasons).</summary>
+    public static readonly IReadOnlyList<string> DisallowedTools =
+    [
+        "Read", "Edit", "Write", "NotebookEdit", "Agent", "WebFetch", "WebSearch", "Monitor", "PowerShell",
+        "ScheduleWakeup", "CronCreate", "CronDelete", "Workflow", "EnterWorktree", "Artifact", "RemoteTrigger", "SendMessage",
     ];
 
     // A BARE resume and nothing else: it keeps every saved option (measured), while any flag on a resume starts a
@@ -85,17 +102,21 @@ public static class ManagerSession
 
     /// <summary>
     /// The system prompt appended to the manager, short imperative lines. The shim is named by the exact full path with
-    /// forward slashes, because it is what the allow rule matches.
+    /// forward slashes, because it is what the allow rule matches; a path with a space comes as its 8.3 short form, or
+    /// in double quotes when the volume has no short names (ManagerActions.ShimCommand), and is written as it came.
     /// </summary>
     public static string Briefing(string shim) => string.Join("\n",
         "You are the Deskbar manager. You coordinate the user's task board; you do not do the tasks.",
-        $"Call the Deskbar shim by exactly this full path, forward slashes, never a variable or $APPDATA: {shim}",
+        $"Call the Deskbar shim exactly as written here (full path, forward slashes, any quotes kept), never a variable or $APPDATA: {shim}",
         "Allowed:",
         $"- {shim} task overview : the whole board, once per question.",
         $"- {shim} task show <id> : one task in full.",
         $"- {shim} task comment <id> - : post a comment; the text goes on stdin.",
+        $"The other task verbs are allowed too (start, flag, order, move, assign, add, rename, describe, and a subtask by add --parent); {shim} task prints them.",
+        "Free text always goes on stdin with - in its place, never quoted on the command line.",
         "Refused: close, delete, and setting a task to done or closed. The shim answers:",
         $"  {Refusal}",
+        $"Editing or settling a comment is refused too: {CommentRefusal}",
         "When that happens, tell the user and leave the task alone.",
         $"When you quote the user in a comment, start it with the exact marker \"{QuoteMarker}\" and copy their words unchanged.",
         "Never paraphrase into a quote.",

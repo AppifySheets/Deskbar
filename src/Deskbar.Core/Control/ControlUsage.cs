@@ -72,7 +72,7 @@ public static class ControlUsage
             new("task", "show <id>", "one task in full, its thread included (the JSON of list, for one task)"),
             new("task", "add <title>|- [--workspace <name>|none] [--important] [--urgent] [--parent <id>]",
                 "add a note to the backlog; without --workspace it goes on the workspace of the VS Code window\n"
-                + "      whose folder holds --from (the caller's own folder if not given), else on the workspace of the\n"
+                + "      whose folder holds the caller's own folder, else on the workspace of the\n"
                 + "      latest task worked on in that folder's repo; - reads the title from stdin;\n"
                 + "      --important and --urgent set its flags, and it goes to the top of the quadrant they give"),
             new("task", "close <id> [--stop-claude]", "close a task: it leaves the bar and the window's open tasks; one Claude is still working on needs --stop-claude, which stops its background sessions"),

@@ -385,6 +385,76 @@ public class RemoteControlTaskTests
         Assert.Equal(ManagerSession.Refusal, reply.Output.Trim());
     }
 
+    // Final review, item 1: EditComment refuses only a session's comment, so the manager could rewrite the user's own
+    // words, and the edit would count as the user's. It is refused before anything is looked up, and the board is the
+    // very same object afterwards.
+    [Fact]
+    public void Manager_may_not_edit_the_users_comment()
+    {
+        var manager = Started();
+        var id = Prefix(Added(manager));
+        Assert.Equal(ControlReply.Ok, Run(manager, "task", "comment", id, "the user's words").ExitCode);
+        var comment = Only.Comments.Single().Id.ToString();
+        var before = tasks.Board;
+
+        var reply = RunAsManager(manager, "task", "comment-edit", comment, "rewritten");
+
+        AssertRefusedAndUnchanged(reply, before);
+        Assert.Equal(ManagerSession.CommentRefusal, reply.Output.Trim());
+        Assert.Equal("the user's words", Only.Comments.Single().Markdown);
+    }
+
+    // Settling a comment folds it away, which is the user's call: refused from the manager folder with the same answer,
+    // with its --session (the one form the pipe has) and without.
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void Manager_may_not_settle_a_comment(bool withSession)
+    {
+        var manager = Started();
+        var id = Prefix(Added(manager));
+        Assert.Equal(ControlReply.Ok, Run(manager, "task", "comment", id, "the user's words").ExitCode);
+        var comment = Only.Comments.Single().Id.ToString();
+        var before = tasks.Board;
+        string[] args = withSession ? ["task", "comment-settle", comment, "--session", "s1"] : ["task", "comment-settle", comment];
+
+        var reply = RunAsManager(manager, args);
+
+        AssertRefusedAndUnchanged(reply, before);
+        Assert.Equal(ManagerSession.CommentRefusal, reply.Output.Trim());
+        Assert.False(Only.Comments.Single().Settled.HasValue);
+    }
+
+    // Final review, item 4: the caller is the LAST --from, the one the client appends; one the caller typed before it is
+    // dropped. The manager typing `--from C:/x` is still the manager, and is refused.
+    [Fact]
+    public void A_typed_from_does_not_hide_the_manager()
+    {
+        var manager = Started();
+        var id = Prefix(Added(manager));
+        var before = tasks.Board;
+
+        var reply = RunAsManager(manager, "task", "close", id, "--from", @"C:\repos\other");
+
+        AssertRefusedAndUnchanged(reply, before);
+        Assert.Equal(ManagerSession.Refusal, reply.Output.Trim());
+    }
+
+    // The other way round: the user typing the manager's folder does not become the manager, and the typed pair is gone
+    // from the words, so the command reads as usual.
+    [Fact]
+    public void A_typed_from_is_dropped_and_the_last_one_is_the_caller()
+    {
+        var manager = Started();
+        var id = Prefix(Added(manager));
+
+        Assert.Equal(ControlReply.Ok, RunFrom(manager, ManagerDir, @"C:\repos\other", "task", "comment", id, "hello", "--from", ManagerDir).ExitCode);
+
+        var comment = Only.Comments.Single();
+        Assert.Equal("hello", comment.Markdown);
+        Assert.False(comment.ByManager);
+    }
+
     [Fact]
     public void The_user_may_still_close_from_elsewhere()
     {
@@ -757,6 +827,16 @@ public class RemoteControlTaskTests
     [Fact]
     public void The_client_adds_its_folder_to_task() =>
         Assert.Equal(["task", "add", "x", "--from", @"C:\work"], ControlArguments.WithCallerFolder(["task", "add", "x"], @"C:\work"));
+
+    // Final review, item 4: a `task` call ALWAYS gets the client's folder last, even when the caller typed a --from, so
+    // the server's caller (the last pair) is the folder the shim really ran in. Other verbs keep a --from they were given.
+    [Fact]
+    public void The_client_adds_its_folder_to_task_even_after_a_typed_from()
+    {
+        Assert.Equal(["task", "close", "3f2a", "--from", @"C:\x", "--from", @"C:\state\manager"],
+            ControlArguments.WithCallerFolder(["task", "close", "3f2a", "--from", @"C:\x"], @"C:\state\manager"));
+        Assert.Equal(["claude-hook", "--from", @"C:\given"], ControlArguments.WithCallerFolder(["claude-hook", "--from", @"C:\given"], @"C:\work"));
+    }
 
     // A closed task leaves `task list`, so a note ticked by mistake would otherwise be out of reach from a script:
     // `task list --closed` prints the closed ones, the latest closed first, in the same shape, and `reopen` brings one
