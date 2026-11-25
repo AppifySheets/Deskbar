@@ -263,7 +263,7 @@ public sealed class TasksBoard : IDisposable
             OpenSession = openSession is null ? null : (id, session) => OpenSession(id, session),
             SubtaskParent = id => tasks.Board.SubtaskParentFor(id)
                 .Match(p => new SubtaskParentView(p.Id, p.Title, p.WorkspaceId), () => (SubtaskParentView?)null),
-            AddSubtask = (title, workspace, quadrant, parent, describe) => AddNote(title, workspace, quadrant, parent, describe).IsSuccess,
+            AddSubtaskHere = (lineId, title, describe) => AddSubtaskInThread(lineId, title, describe).IsSuccess,
             // A subtask in its parent's thread and the task window's "Show in the tasks panel": both ask for that very
             // task, so it is let past a filter that hides it (task b0526e18: a closed subtask, which the Open filter
             // hides, was a link that did nothing), as "Subtask of" lets a parent through.
@@ -797,17 +797,20 @@ public sealed class TasksBoard : IDisposable
     // OpenFromStats for which and how), then the task is shown (ShowTask).
     void ShowTaskPastFilters(Guid id)
     {
-        var found = tasks.Board.Tasks.TryFirst(t => t.Id == id);
-        if (found.HasValue)
+        LetPastFilters(id);
+        ShowTask(id);
+    }
+
+    // Every filter that would hide the task is let through: the status filter switches to one that lists it, and the
+    // workspace, assignee and goal filters go back to all. Nothing is drawn here; the caller's redraw shows the change.
+    void LetPastFilters(Guid id) =>
+        tasks.Board.Tasks.TryFirst(t => t.Id == id).Tap(task =>
         {
-            var task = found.Value;
             if (!TaskViews.Lists(filter, task)) filter = TaskViews.FilterListing(task);
             if (!where.Resolved(manager.CurrentWorkspaceId).Admits(task)) where = TaskWorkspaceFilter.All;
             if (!assigneeFilter.Admits(task)) assigneeFilter = TaskAssigneeFilter.All;
             if (goals is not null && !goalFilter.Admits(task, goals.Board)) goalFilter = TaskGoalFilter.All;
-        }
-        ShowTask(id);
-    }
+        });
 
     // THE TASK PETRE CLICKED ON THE BAR IS ON SCREEN (Task 7 review, ruling on ShowTask). On an open panel the search and
     // the Claude working chip stay as they were, and either could hide the very task asked for, so the one that hides it
@@ -964,6 +967,31 @@ public sealed class TasksBoard : IDisposable
         Report((describe is null
             ? tasks.AddNote(title, workspace, quadrant, parent)
             : tasks.AddNote(title, workspace, quadrant, parent, describe)).Tap(task => ShowAdded(task.Id)).Bind(_ => Result.Success()));
+
+    /// <summary>
+    /// A subtask typed into the box in a thread, where "Add subtask" was (task 0eb943d8, Petre: "make it right there, at
+    /// the add subtask button", "and then make that same space open and show the subtask"). It goes under the task
+    /// <paramref name="lineId"/> names (TaskBoard.SubtaskParentFor: that task, or its parent when it is a subtask itself,
+    /// since subtasks are one level deep), on the parent's workspace, as a plain backlog note. Then the thread the box
+    /// was in closes and the new subtask's own thread opens: the subtask is drawn right under its parent, so it opens in
+    /// the space the thread took. It is picked, glows and is scrolled to, as any task just added is (ShowAdded).
+    /// </summary>
+    public Result AddSubtaskInThread(Guid lineId, string title, Func<Guid, Result<string>>? describe) =>
+        Report(tasks.Board.SubtaskParentFor(lineId).ToResult("That task is gone")
+            .Bind(parent => describe is null
+                ? tasks.AddNote(title, parent.WorkspaceId, Quadrant.IV, parent.Id)
+                : tasks.AddNote(title, parent.WorkspaceId, Quadrant.IV, parent.Id, describe))
+            .Tap(task =>
+            {
+                expanded.Remove(lineId);
+                expanded.Add(task.Id);
+                // A new backlog note is hidden by the Waiting on you, In progress or Done chip, by an Assigned or goal
+                // filter, and so on (review of this change). Opened where the thread was, it must be on the list, so
+                // those filters let it through, as a subtask clicked in a thread is let through.
+                LetPastFilters(task.Id);
+                ShowAdded(task.Id);
+            })
+            .Bind(_ => Result.Success()));
 
     // THE TASK JUST ADDED IS HIGHLIGHTED, as the bar's add box does it (task ee75f046, Petre's "yes" to option 3 of the
     // mockup; TaskGlow has the rest). The add's pulse has already redrawn the panel (tasks.Changed runs Refresh inline).
@@ -1601,8 +1629,12 @@ internal sealed record TasksWindowActions(
     /// </summary>
     public Func<Guid, SubtaskParentView?>? SubtaskParent { get; init; }
 
-    /// <summary>Adds a subtask under the parent (the fourth argument), as AddNote adds a note, pictures included; whether it worked.</summary>
-    public Func<string, Maybe<Guid>, Quadrant, Guid, Func<Guid, Result<string>>?, bool>? AddSubtask { get; init; }
+    /// <summary>
+    /// The box in a thread (task 0eb943d8): adds a subtask under the line's task (or its parent, for a subtask's line) with
+    /// that title and, when given, that description (pictures included), then opens it where the thread was
+    /// (TasksBoard.AddSubtaskInThread); whether it worked.
+    /// </summary>
+    public Func<Guid, string, Func<Guid, Result<string>>?, bool>? AddSubtaskHere { get; init; }
 
     /// <summary>
     /// Shows one task: picked, its thread open, scrolled into view, past any filter that hides it

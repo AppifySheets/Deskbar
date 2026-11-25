@@ -4648,7 +4648,8 @@ public class TasksBoardTests
         finally { Directory.Delete(root, true); }
     });
 
-    // "Add subtask…" takes pictures too: the subtask gets them as its description, under its own id.
+    // "Add subtask…" takes pictures too: the subtask gets them as its description, under its own id. The box is the one in
+    // the thread (task 0eb943d8).
     [Fact]
     public void A_subtask_takes_pasted_pictures() => StaThread.Run(() =>
     {
@@ -4660,8 +4661,9 @@ public class TasksBoardTests
             t.Controller.Show();
             t.Window.BeginSubtaskAdd(parent.Id);
 
-            t.Window.PasteIntoAdd(BitmapData());
-            Assert.True(t.Window.TypeNote("Fix the dialog", Key.Enter));
+            Assert.True(t.Window.PasteIntoSubtaskBox(BitmapData()));
+            Assert.Single(t.Window.SubtaskBoxImages);
+            Assert.True(t.Window.TypeSubtask("Fix the dialog", Key.Enter));
 
             var child = t.Tasks.Board.Tasks.Single(x => x.Title == "Fix the dialog");
             Assert.Equal(Maybe.From(parent.Id), child.ParentId);
@@ -4804,34 +4806,113 @@ public class TasksBoardTests
         menu.IsOpen = false;
     });
 
+    // Task 0eb943d8 (Petre: "when adding a subtask, a new textbox appears at the top of the bar; make it right there, at
+    // the add subtask button", "and then make that same space open and show the subtask"). "Add subtask…" opens the
+    // task's thread and a box in it, where the "Add subtask" button was, not the add box at the top. Enter adds the
+    // subtask on the parent's workspace; then the parent's thread closes and the new subtask is picked with its own
+    // thread open, right under the parent.
     [Fact]
-    public void Add_subtask_opens_the_box_with_the_parent_on_its_workspace() => StaThread.Run(() =>
+    public void Add_subtask_opens_a_box_in_the_thread_and_then_opens_the_new_subtask() => StaThread.Run(() =>
     {
-        using var t = Build();
+        var selection = new TaskSelection();
+        using var t = Build(selection: selection);
         var parent = t.Tasks.AddNote("Ship the release", t.Sparrow).Value;
         t.Controller.Show();
+        Assert.False(t.Window.ThreadShown(parent.Id));
 
         t.Window.BeginSubtaskAdd(parent.Id);
 
-        Assert.True(t.Window.AddBoxShown);
-        Assert.Equal("A subtask: Enter adds it, Esc drops the parent", t.Window.AddPlaceholderText);
-        Assert.Contains("Ship the release", TextOf(ButtonNamed(t.Window, "Subtask of")));
-        Assert.True(t.Window.TypeNote("Write the notes", Key.Enter));
+        Assert.True(t.Window.ThreadShown(parent.Id));
+        Assert.NotNull(t.Window.SubtaskBoxShown);
+        Assert.False(t.Window.AddBoxShown);
+        Assert.False(HasButtonNamed(t.Window, "Add subtask"));
+        Assert.True(t.Window.TypeSubtask("Write the notes", Key.Enter));
+
         var child = t.Tasks.Board.Tasks.Single(x => x.Title == "Write the notes");
         Assert.Equal(Maybe.From(parent.Id), child.ParentId);
         Assert.Equal(t.Sparrow, child.WorkspaceId.Value);
+        Assert.Null(t.Window.SubtaskBoxShown);
         Assert.False(t.Window.AddBoxShown);
+        Assert.Equal(child.Id, selection.Current.Value);
+        Assert.False(t.Window.ThreadShown(parent.Id));
+        Assert.True(t.Window.ThreadShown(child.Id));
+        Assert.Equal([parent.Id, child.Id], t.Window.Keys);
     });
 
-    // Task f212d886 ("adding a subtask is impossible", Petre's screenshot): the toggles, the parent chip (up to 220 DIP)
-    // and the workspace chip sat to the right of the box on one line, and on a narrow panel they took the whole width,
-    // so the text box was squeezed to nothing and there was nowhere to type. The box must keep room to type at any width
-    // the panel is used at; when the chips do not fit beside it they go on a line of their own under it.
+    // Shift+Enter starts a new line, and the lines after the first are the subtask's description, as in the add box.
+    [Fact]
+    public void A_subtask_box_takes_a_description_on_the_lines_after_the_title() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var parent = t.Tasks.AddNote("Ship the release", t.Gepha).Value;
+        t.Controller.Show();
+        t.Window.BeginSubtaskAdd(parent.Id);
+
+        Assert.False(t.Window.TypeSubtask("Write the notes", Key.Enter, ModifierKeys.Shift));
+        Assert.True(t.Window.TypeSubtask("Write the notes\nfor the store listing", Key.Enter));
+
+        var child = t.Tasks.Board.Tasks.Single(x => x.Title == "Write the notes");
+        Assert.Equal("for the store listing", child.Description);
+    });
+
+    // Review of task 0eb943d8: under the Waiting on you chip a new backlog subtask is not listed, so it vanished and the
+    // thread it was typed in folded. The filter lets it through and it opens under its parent.
+    [Fact]
+    public void A_subtask_added_under_a_filter_that_hides_it_still_opens() => StaThread.Run(() =>
+    {
+        var selection = new TaskSelection();
+        using var t = Build(selection: selection);
+        var asking = t.Tasks.Create("Tasks redesign", t.Gepha, Session("s1")).Value.Id;
+        t.Tasks.Ask(asking, "OK to restart Deskbar?");
+        t.Controller.Show();
+        t.Controller.Filter(TaskFilter.WaitingOnYou);
+        t.Window.BeginSubtaskAdd(asking);
+
+        Assert.True(t.Window.TypeSubtask("Write the notes", Key.Enter));
+
+        var child = t.Tasks.Board.Tasks.Single(x => x.Title == "Write the notes").Id;
+        Assert.Equal(child, selection.Current.Value);
+        Assert.Contains(child, t.Window.Keys);
+        Assert.True(t.Window.ThreadShown(child));
+    });
+
+    // An empty Enter is refused (the problem line says why) and the box stays open where it was.
+    [Fact]
+    public void An_empty_subtask_keeps_the_box_open() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var parent = t.Tasks.AddNote("Ship the release", t.Gepha).Value;
+        t.Controller.Show();
+        t.Window.BeginSubtaskAdd(parent.Id);
+
+        Assert.False(t.Window.TypeSubtask("   ", Key.Enter));
+
+        Assert.NotNull(t.Window.SubtaskBoxShown);
+        Assert.Single(t.Tasks.Board.Tasks);
+    });
+
+    // The box survives a redraw (a session changing a status line) with its text.
+    [Fact]
+    public void A_subtask_box_keeps_its_text_through_a_redraw() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var parent = t.Tasks.AddNote("Ship the release", t.Gepha).Value;
+        t.Controller.Show();
+        t.Window.BeginSubtaskAdd(parent.Id);
+        t.Window.SubtaskBoxShown!.Text = "Write the";
+
+        t.Tasks.SetStatusLine(parent.Id, "halfway");
+
+        Assert.Equal("Write the", t.Window.SubtaskBoxShown!.Text);
+    });
+
+    // Task f212d886 ("adding a subtask is impossible"): there must be room to type at any width the panel is used at.
+    // The box in the thread spans the thread, with nothing docked beside it.
     [Theory]
     [InlineData(420)]
     [InlineData(560)]
     [InlineData(TasksPanelLayout.SlimBelow)]
-    public void A_subtask_box_keeps_room_to_type_beside_a_long_parent(double width) => StaThread.Run(() =>
+    public void A_subtask_box_has_room_to_type_on_a_narrow_panel(double width) => StaThread.Run(() =>
     {
         using var t = Build();
         var parent = t.Tasks.AddNote("there was a task about a new image endpoint the portal should call instead", t.Sparrow).Value;
@@ -4840,67 +4921,48 @@ public class TasksBoardTests
         t.Window.BeginSubtaskAdd(parent.Id);
         t.Window.UpdateLayout();
 
-        Assert.True(t.Window.AddBox.ActualWidth >= 150, $"at {width} DIP the box has {t.Window.AddBox.ActualWidth} DIP to type in");
-        var chip = ButtonNamed(t.Window, "Subtask of");
-        Assert.True(chip.ActualWidth > 0, "the parent chip is still shown");
+        var box = t.Window.SubtaskBoxShown!;
+        Assert.True(box.ActualWidth >= 150, $"at {width} DIP the box has {box.ActualWidth} DIP to type in");
     });
 
-    // Review of the fix: the chips' width was first measured with the margin the last fit had left (-4 DIP under the
-    // box), so in a 4 DIP band of widths every redraw moved them between beside and under. Swept a DIP at a time across
-    // the switch-over, a second paint at the same width must leave them where the first one put them.
+    // Esc closes the box first and leaves the thread open, with "Add subtask" back; the next Esc folds the thread.
     [Fact]
-    public void A_redraw_at_the_same_width_never_moves_the_add_chips() => StaThread.Run(() =>
+    public void Esc_in_a_subtask_box_closes_the_box_before_the_thread() => StaThread.Run(() =>
     {
-        using var t = Build();
-        var parent = t.Tasks.AddNote("there was a task about a new image endpoint the portal should call instead", t.Sparrow).Value;
+        var selection = new TaskSelection();
+        using var t = Build(selection: selection);
+        var parent = t.Tasks.AddNote("Parent", t.Gepha).Value;
         t.Controller.Show();
         t.Window.BeginSubtaskAdd(parent.Id);
-        var docks = Enumerable.Range(400, 400).Select(width =>
-        {
-            t.Window.Width = width;
-            t.Window.UpdateLayout();
-            var first = DockPanel.GetDock(t.Window.AddEnd);
-            t.Window.BeginSubtaskAdd(parent.Id);
-            t.Window.UpdateLayout();
-            var second = DockPanel.GetDock(t.Window.AddEnd);
-            Assert.True(first == second, $"at {width} DIP a redraw moved the chips from {first} to {second}");
-            return first;
-        }).Distinct().ToList();
-        Assert.Equal([Dock.Bottom, Dock.Right], docks);
-    });
+        t.Window.SubtaskBoxShown!.Text = "Half";
 
-    // The other side of the same rule: on a wide panel the chips stay beside the box, on its line, as before.
-    [Fact]
-    public void A_subtask_box_on_a_wide_panel_keeps_its_chips_beside_it() => StaThread.Run(() =>
-    {
-        using var t = Build();
-        var parent = t.Tasks.AddNote("Ship the release", t.Sparrow).Value;
-        t.Controller.Show();
-        t.Window.Width = 1000;
+        Assert.True(t.Window.Press(Key.Escape, ModifierKeys.None));
+
+        Assert.Null(t.Window.SubtaskBoxShown);
+        Assert.True(t.Window.ThreadShown(parent.Id));
+        Assert.True(HasButtonNamed(t.Window, "Add subtask"));
+        Assert.Single(t.Tasks.Board.Tasks);
+
+        // Opened again, the box is empty.
         t.Window.BeginSubtaskAdd(parent.Id);
-        t.Window.UpdateLayout();
-
-        var chip = ButtonNamed(t.Window, "Subtask of");
-        var box = t.Window.AddBox.TransformToAncestor(t.Window).TransformBounds(new Rect(t.Window.AddBox.RenderSize));
-        var chipAt = chip.TransformToAncestor(t.Window).TransformBounds(new Rect(chip.RenderSize));
-        Assert.True(chipAt.Left >= box.Right, $"the chip starts at {chipAt.Left}, right of the box ending at {box.Right}");
-        Assert.True(chipAt.Top < box.Bottom, $"the chip at {chipAt.Top} is on the box's line (ends at {box.Bottom})");
+        Assert.Equal("", t.Window.SubtaskBoxShown!.Text);
     });
 
+    // A box whose thread folds goes with it, and does not come back the next time the thread opens.
     [Fact]
-    public void Esc_in_a_subtask_box_drops_the_parent_first() => StaThread.Run(() =>
+    public void A_subtask_box_closes_with_its_thread() => StaThread.Run(() =>
     {
         using var t = Build();
         var parent = t.Tasks.AddNote("Parent", t.Gepha).Value;
         t.Controller.Show();
         t.Window.BeginSubtaskAdd(parent.Id);
 
-        Assert.True(t.Window.Press(Key.Escape, ModifierKeys.None));
+        t.Controller.ToggleThread(parent.Id);
+        Assert.Null(t.Window.SubtaskBoxShown);
+        t.Controller.ToggleThread(parent.Id);
 
-        Assert.True(t.Window.AddBoxShown);
-        Assert.Equal("A note: Enter adds it, Esc closes the box", t.Window.AddPlaceholderText);
-        Assert.True(t.Window.TypeNote("Loose", Key.Enter));
-        Assert.True(t.Tasks.Board.Tasks.Single(x => x.Title == "Loose").ParentId.HasNoValue);
+        Assert.Null(t.Window.SubtaskBoxShown);
+        Assert.True(HasButtonNamed(t.Window, "Add subtask"));
     });
 
     // Petre's pick A in the panel: a full line names the parent in front of a subtask's title, a slim one only "↳", and a
@@ -4993,10 +5055,10 @@ public class TasksBoardTests
         Click(entry);
         Assert.Equal(child.Id, selection.Current.Value);
 
-        // The parent's thread is still open.
+        // The parent's thread is still open, and its "Add subtask" opens the box right there (task 0eb943d8).
         Click(ButtonNamed(t.Window, "Add subtask"));
-        Assert.True(t.Window.AddBoxShown);
-        Assert.Equal(FloatingBar.SubtaskPlaceholder, t.Window.AddPlaceholderText);
+        Assert.NotNull(t.Window.SubtaskBoxShown);
+        Assert.False(t.Window.AddBoxShown);
     });
 
     // Task 54b39c4c (Petre: "subtask should show its parent and have a way to open the parent easily"): an open subtask's
@@ -5208,7 +5270,7 @@ public class TasksBoardTests
         t.Controller.Show();
 
         t.Window.BeginSubtaskAdd(child.Id);
-        Assert.True(t.Window.TypeNote("Sibling", Key.Enter));
+        Assert.True(t.Window.TypeSubtask("Sibling", Key.Enter));
 
         Assert.Equal(Maybe.From(parent.Id), t.Tasks.Board.Tasks.Single(x => x.Title == "Sibling").ParentId);
     });
