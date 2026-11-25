@@ -420,6 +420,33 @@ public class ManagerActionsTests
         Assert.Empty(rig.Told);
     }
 
+    // Final review, item 3: the shim as the allow rule and the briefing name it. A path with no space is the full path
+    // with forward slashes, its short form never asked for.
+    [Fact]
+    public void ShimCommand_is_the_forward_slash_path_when_it_has_no_space() =>
+        Assert.Equal("C:/Users/me/AppData/Roaming/Deskbar/deskbar.cmd",
+            ManagerActions.ShimCommand(@"C:\Users\me\AppData\Roaming\Deskbar\deskbar.cmd",
+                _ => throw new InvalidOperationException("no short form is needed")));
+
+    // A space never matches the unquoted rule (the model quotes the path; measured denied), so the 8.3 short form is used,
+    // which has none and was measured to run.
+    [Fact]
+    public void ShimCommand_takes_the_short_form_of_a_path_with_a_space() =>
+        Assert.Equal("C:/Users/JOHNDO~1/AppData/Roaming/Deskbar/deskbar.cmd",
+            ManagerActions.ShimCommand(@"C:\Users\John Doe\AppData\Roaming\Deskbar\deskbar.cmd",
+                path => path.Replace("John Doe", "JOHNDO~1")));
+
+    // A volume with 8.3 names off hands the long form back: the path is double-quoted, the form the model writes, and the
+    // allow rule built from it carries the same quotes (measured to match).
+    [Fact]
+    public void ShimCommand_quotes_a_spaced_path_that_has_no_short_form()
+    {
+        var shim = ManagerActions.ShimCommand(@"C:\Users\John Doe\AppData\Roaming\Deskbar\deskbar.cmd", path => path);
+
+        Assert.Equal("\"C:/Users/John Doe/AppData/Roaming/Deskbar/deskbar.cmd\"", shim);
+        Assert.Contains("Bash(\"C:/Users/John Doe/AppData/Roaming/Deskbar/deskbar.cmd\" task:*)", ManagerSession.StartArguments("b.md", shim));
+    }
+
     // As "Start Claude on this": while Claude sessions are off, the click is refused with the reason and runs nothing.
     [Fact]
     public void Click_while_Claude_sessions_are_off_is_refused()

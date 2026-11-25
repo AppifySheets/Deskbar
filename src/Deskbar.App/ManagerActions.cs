@@ -67,6 +67,7 @@ public sealed class ManagerActions : IDisposable
 
     // The manager's folder (ManagerSession.FolderIn the state dir), and the shim's full path with forward slashes: the
     // allow rule and the briefing must name exactly what the manager runs, and Git Bash wants forward slashes (probes).
+    // A path with a space is its short form, or quoted (ShimCommand).
     readonly string folder;
     readonly string shim;
 
@@ -78,8 +79,10 @@ public sealed class ManagerActions : IDisposable
     /// <param name="scheduler">Where answers land: the UI thread in the app.</param>
     /// <param name="today">The local calendar day; the system's unless a test says otherwise.</param>
     /// <param name="longPath">Expands 8.3 short forms when a listed session's folder is compared with the manager's.</param>
+    /// <param name="shortPath">The 8.3 short form of a path (ShortPath.Of), for a shim path with a space (ShimCommand).</param>
     public ManagerActions(WorkspaceManager manager, ClaudeSessions sessions, ClaudeTaskActions actions, string stateDir, string shimPath,
-        IScheduler scheduler, Func<DateOnly>? today = null, Action<string>? trace = null, Func<string, string>? longPath = null)
+        IScheduler scheduler, Func<DateOnly>? today = null, Action<string>? trace = null, Func<string, string>? longPath = null,
+        Func<string, string>? shortPath = null)
     {
         this.longPath = longPath ?? Deskbar.Windows.Control.LongPath.Of;
         this.manager = manager;
@@ -89,8 +92,22 @@ public sealed class ManagerActions : IDisposable
         this.today = today ?? (() => DateOnly.FromDateTime(DateTime.Now));
         this.trace = trace;
         folder = ManagerSession.FolderIn(stateDir);
-        shim = shimPath.Replace('\\', '/');
+        shim = ShimCommand(shimPath, shortPath ?? Deskbar.Windows.Control.ShortPath.Of);
     }
+
+    /// <summary>
+    /// The shim as the manager's allow rule and briefing name it (final review, item 3): the full path with forward
+    /// slashes, as measured. A path with a space (a user folder like C:\Users\John Doe) never matches an unquoted rule,
+    /// because the model double-quotes it and under dontAsk every call is then denied silently; so such a path becomes
+    /// its 8.3 short form, which has no space and was measured to run unquoted. On a volume with short names turned off
+    /// the short form is the long one, still spaced; then the path goes in double quotes, the form the model writes,
+    /// which a rule carrying the same quotes was measured to match. Both measured in
+    /// docs/superpowers/notes/2026-11-25-manager-session-probes.md, "A shim path with a space".
+    /// </summary>
+    public static string ShimCommand(string shimPath, Func<string, string> shortPath) =>
+        (shimPath.Contains(' ') ? shortPath(shimPath) : shimPath).Replace('\\', '/') is var command && command.Contains(' ')
+            ? $"\"{command}\""
+            : command;
 
     /// <summary>
     /// The Manager button and `task manager`: attaches to today's manager, resumes it or starts it (see the header).
