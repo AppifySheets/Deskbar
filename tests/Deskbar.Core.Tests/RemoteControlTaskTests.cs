@@ -289,6 +289,38 @@ public class RemoteControlTaskTests
         Assert.Equal("task comment-edit 3f2a (5 characters)", ControlArguments.ForTrace(["task", "comment-edit", "3f2a", "hello"]));
     }
 
+    // `task rename <id> -` once set the title to a literal "-": rename was missing from the verbs that read stdin. The
+    // goals' two title forms had the same hole, so they are covered here too.
+    [Fact]
+    public void Rename_and_goal_titles_read_their_text_from_stdin()
+    {
+        Assert.Equal(["task", "rename", "3f2a", "a & \"b\""],
+            ControlArguments.WithInput(["task", "rename", "3f2a", "-"], () => "a & \"b\"\n"));
+        Assert.Equal(["goal", "rename", "9c1d", "ship <it>"],
+            ControlArguments.WithInput(["goal", "rename", "9c1d", "-"], () => "ship <it>\r\n"));
+        Assert.Equal(["goal", "add", "plan | trip", "--week", "2026-12-07"],
+            ControlArguments.WithInput(["goal", "add", "-", "--week", "2026-12-07"], () => "plan | trip\n"));
+        // The id stays readable in the trace; the title is written as its length.
+        Assert.Equal("task rename 3f2a (5 characters)", ControlArguments.ForTrace(["task", "rename", "3f2a", "hello"]));
+        Assert.Equal("goal rename 9c1d (5 characters)", ControlArguments.ForTrace(["goal", "rename", "9c1d", "hello"]));
+        Assert.Equal("goal add (5 characters) --week 2026-12-07", ControlArguments.ForTrace(["goal", "add", "hello", "--week", "2026-12-07"]));
+        // A verb that takes no text never reads stdin, so a terminal never sits waiting on the keyboard.
+        Assert.Equal(["goal", "done", "-"], ControlArguments.WithInput(["goal", "done", "-"], () => throw new InvalidOperationException("read")));
+    }
+
+    [Fact]
+    public void Renaming_a_task_from_stdin_keeps_the_text_as_given()
+    {
+        var manager = Started();
+        Run(manager, "task", "add", "first", "--workspace", "none");
+        var id = Only.Id.ToString();
+
+        var renamed = Run(manager, [.. ControlArguments.WithInput(["task", "rename", id, "-"], () => "it's \"quoted\" & done\n")]);
+
+        Assert.Equal(ControlReply.Ok, renamed.ExitCode);
+        Assert.Equal("it's \"quoted\" & done", Only.Title);
+    }
+
     [Fact]
     public void Add_to_an_unknown_workspace_is_refused()
     {
@@ -723,7 +755,7 @@ public class RemoteControlTaskTests
     public void Task_is_in_the_help() =>
         Assert.Equal(
             ["list [--closed]", "add <title>|- [--workspace <name>|none] [--important] [--urgent] [--parent <id>]", "close <id> [--stop-claude]", "reopen <id>",
-             "status <id> <backlog|in-progress|waiting|done>", "rename <id> <title>", "move <id> <workspace>|none",
+             "status <id> <backlog|in-progress|waiting|done>", "rename <id> <title>|-", "move <id> <workspace>|none",
              "comment <id> <markdown>|-", "delete <id>", "flag <id> important|urgent on|off", "order <id> top|end|<n>",
              // Task 9: going to a task, starting Claude on it and opening one of its sessions.
              "go <id>", "start <id> [--folder <path>]", "open-session <id> <session>",

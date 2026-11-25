@@ -190,11 +190,19 @@ public static class ControlArguments
     // Git Bash (`task comment - --session <id> <<'EOF'`), a pipe in PowerShell. Stdin is bytes to cmd, never parsed.
     // A `-` that is an option's value (after --session, say) is not text. The heredoc's last line break is dropped.
     // `add` too (Petre): a script's note can carry quotes or & just as a session's text can.
-    static readonly string[] TextVerbs = ["status-line", "ask", "comment", "new", "later", "add", "describe", "comment-edit", "subtask"];
+    //
+    // `rename` was missing until task bd4f3580: `task rename <id> -` was sent on as it stood and set the title to a
+    // literal "-". Every form that takes a title or text belongs on one of these two lists; a form left off takes `-`
+    // as its text without a word. The goals' two title forms (`goal add`, `goal rename`) had the same hole.
+    static readonly string[] TextVerbs = ["status-line", "ask", "comment", "new", "later", "add", "describe", "comment-edit", "subtask", "rename"];
+
+    static readonly string[] GoalTextVerbs = ["add", "rename"];
 
     static bool IsTextForm(IReadOnlyList<string> args) =>
-        args.Count > 2 && args[0].Equals("task", StringComparison.OrdinalIgnoreCase)
-        && TextVerbs.Contains(args[1], StringComparer.OrdinalIgnoreCase);
+        args.Count > 2 && (IsForm(args, "task", TextVerbs) || IsForm(args, "goal", GoalTextVerbs));
+
+    static bool IsForm(IReadOnlyList<string> args, string noun, string[] verbs) =>
+        args[0].Equals(noun, StringComparison.OrdinalIgnoreCase) && verbs.Contains(args[1], StringComparer.OrdinalIgnoreCase);
 
     public static IReadOnlyList<string> WithTextInput(IReadOnlyList<string> args, Func<string> readInput) =>
         IsTextForm(args) && Enumerable.Range(2, args.Count - 2).Where(i => args[i] == "-" && !IsOption(args[i - 1])).ToList() is [var at, ..]
@@ -231,12 +239,13 @@ public static class ControlArguments
 
     // The words of a task text form, its text as a length. The positional words are the text, except the id that the
     // user's `task comment <id> <markdown>` names first.
-    static readonly string[] IdFirst = ["comment", "describe", "comment-edit"];
+    static readonly string[] IdFirst = ["comment", "describe", "comment-edit", "rename"];
 
     static IEnumerable<string> TextForTrace(IReadOnlyList<string> args)
     {
         var positional = Enumerable.Range(2, args.Count - 2).Where(i => !IsOption(args[i]) && !IsOption(args[i - 1])).ToList();
-        // `comment`, `describe` and `comment-edit` name an id first (Ruling 58 added the last two).
+        // `comment`, `describe` and `comment-edit` name an id first (Ruling 58 added the last two), and so does `rename`,
+        // a task's or a goal's.
         var text = IdFirst.Contains(args[1], StringComparer.OrdinalIgnoreCase) && positional.Count > 1 ? positional.Skip(1) : positional;
         return args.Select((word, i) => text.Contains(i) ? $"({word.Length} characters)" : word);
     }
