@@ -336,6 +336,9 @@ internal sealed class TasksPanel : IDisposable
         if (behind) return;
         NativeMethods.SetWindowPos(hwnd, BehindTheBar(), 0, 0, 0, 0,
             NativeMethods.SWP_NOMOVE | NativeMethods.SWP_NOSIZE | NativeMethods.SWP_NOACTIVATE);
+        // Then any of Deskbar's own tooltips back over the panel and the bar: an open tooltip has no owner window, so the
+        // bar's climb and this one just covered it (task d4695a97, OwnToolTips).
+        OwnToolTips.Lift();
     }
 
     // WHERE IN THE TOPMOST BAND THE PANEL GOES: directly behind the bar, so the bar is never under its own panel.

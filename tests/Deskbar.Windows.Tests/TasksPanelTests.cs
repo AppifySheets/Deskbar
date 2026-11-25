@@ -854,6 +854,55 @@ public class TasksPanelTests
         rig.Close();
     });
 
+    // Task d4695a97, Petre's screenshot of 2026-11-25: a task line's hover text in the tasks panel, its right half under
+    // the bar. A ToolTip's popup has no owner either, so the bar's 1 s climb to the top of the band covered it wherever
+    // the two overlap, and the panel's own climb did the same to the part over the panel. Unlike a menu, a tooltip does
+    // not hold the re-assertion back (OwnToolTips says why): the bar and the panel still climb, and the open tooltip is
+    // lifted back above them straight after. Here a plain topmost window stands in for the bar and climbs over the
+    // tooltip the way FloatingBar.ReclaimTopmost does; the panel's own re-assertion then has to leave the tooltip on top
+    // of both. Once the tooltip has closed nothing is lifted any more.
+    [Fact]
+    public void An_open_tooltip_is_lifted_back_above_the_bar_and_the_panel_after_they_climb_on_top() => StaThread.Run(() =>
+    {
+        OwnToolTips.Start();
+        var rig = new Rig().Open();
+        var barWindow = new Window
+        {
+            WindowStyle = WindowStyle.None,
+            ResizeMode = ResizeMode.NoResize,
+            ShowInTaskbar = false,
+            ShowActivated = false,
+            Topmost = true,
+        };
+        barWindow.Show();
+        var bar = new WindowInteropHelper(barWindow).Handle;
+        rig.BarHwnd = bar;
+        var tip = new System.Windows.Controls.ToolTip { PlacementTarget = rig.Window, Content = "Done: checkbox at the top" };
+        tip.IsOpen = true;
+        rig.Pump();
+        var tipHwnd = ((HwndSource)PresentationSource.FromVisual(tip)!).Handle;
+        var panel = new WindowInteropHelper(rig.Window).Handle;
+        Assert.True(OwnToolTips.AnyOpen);
+
+        // The bar's climb, as FloatingBar.ReclaimTopmost makes it before lifting the tooltip: the tooltip is under it now.
+        NativeMethods.SetWindowPos(bar, NativeMethods.HWND_TOPMOST, 0, 0, 0, 0,
+            NativeMethods.SWP_NOMOVE | NativeMethods.SWP_NOSIZE | NativeMethods.SWP_NOACTIVATE);
+        Assert.True(Above(bar, tipHwnd));
+
+        rig.Panel.ReclaimTopmost();
+        Assert.True(Above(tipHwnd, bar));
+        Assert.True(Above(tipHwnd, panel));
+        // The panel still took its place behind the bar, and still topmost: the tooltip did not hold it back.
+        Assert.True(Above(bar, panel));
+        Assert.True(IsTopmost(rig.Window));
+
+        tip.IsOpen = false;
+        rig.Pump();
+        Assert.False(OwnToolTips.AnyOpen);
+        barWindow.Close();
+        rig.Close();
+    });
+
     // The trace (CLAUDE.md, "Instrumentation"): one line per dock with its reason, and the geometry line (the granted
     // rectangle and the bar's edge) only when it changes. Nothing at all with tracing off.
     [Fact]

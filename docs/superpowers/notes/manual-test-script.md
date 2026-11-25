@@ -368,6 +368,11 @@ written for the floating window and now describe the panel; 64a to 64n cover wha
     Neither came to the front. Drag Notepad back under the panel: it stays there (the panel clears its strip once,
     when it takes it). Widen the panel with its grip: Notepad is moved again, by the new width. In a tiled workspace
     the tiles are left to the tiler. With tracing on, each move is a "tasks panel: moved ... off the strip" line.
+64p. Hover text over the bar. With the panel open beside the docked bar, rest the pointer on a task line in the panel
+    near the bar, long enough for its hover text to open and reach onto the bar. Keep it there for a few seconds: the
+    whole text stays readable on top of the bar, and does not slip under it after a second. Do the same on one of
+    the bar's own buttons whose hover text reaches onto a screen strip or the panel. Then click the taskbar twice:
+    the bar still comes back over it within a second.
 
 ## Claude sessions and their tasks
 
