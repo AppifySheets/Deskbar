@@ -97,6 +97,19 @@ public sealed class SessionBriefingTests
         Assert.Contains("task done with what to try in the status line", SessionBriefing.ParkedNudge);
     }
 
+    // Task 6e4dc116 (Petre: "still conflicting; you should keep rebasing open prs", then "make that a deskbar level change"):
+    // every task session, in any repository, is told to keep its open pull request on top of its base, and to push the
+    // rebase at once rather than hold it back while the tests run.
+    [Fact]
+    public void An_open_pull_request_is_kept_rebased_on_its_base()
+    {
+        var text = SessionBriefing.Start(Start(), Task("Tasks board"), []);
+
+        Assert.Contains("While your pull request is open, keep it on top of its base without being asked", text);
+        Assert.Contains("as soon as the base moves or the pull request conflicts, rebase it onto the latest base", text);
+        Assert.Contains("push it straight away with --force-with-lease", text);
+    }
+
     // Task 08cdb052 ("when asking for action, prs should have links, or artifacts; make that clickable"): an ask copied
     // from the old example named "PR 490" with nothing to click. The briefing's ask now gives what to open as a link, and
     // the Stop hook's nudge says so too.

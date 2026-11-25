@@ -257,6 +257,13 @@ public static class SessionBriefing
         // it live" when the work was finished. Done already means "waiting for the user to close it", and closing is
         // where Petre's own test happens, so the try-it-live step goes into the status line of a Done task, not an ask.
         "Once your pull request is merged, the task is done: do not ask the user to test it. Mark it done and put what to try in the status line; the user closes the task once they have tried it and it works.",
+        // AN OPEN PULL REQUEST STAYS ON TOP OF ITS BASE (task 6e4dc116, Petre: "still conflicting; you should keep rebasing
+        // open prs", then "make that a deskbar level change"). Other sessions merge all day, so a pull request waiting on
+        // the user falls behind its base or starts to conflict while it waits, and the merge he comes to do is blocked or
+        // lands code nobody tested together. A repository's own instructions can say this (the Deskbar repo's CLAUDE.md
+        // did), but every task session in every repository reads this briefing, so the rule lives here. "Push it straight
+        // away" is part of the rule: a rebase held back locally while the tests wait still shows the user a conflict.
+        "While your pull request is open, keep it on top of its base without being asked: watch the base until the pull request is merged or closed, and as soon as the base moves or the pull request conflicts, rebase it onto the latest base, resolve any conflict, and push it straight away with --force-with-lease, then build, test and watch CI on what you pushed.",
         $"  {Shim} task answered --session {sessionId}   (when the user's reply settles your question, or you settle it yourself; run it straight away; it also settles, that is folds away, your comments written since you asked)",
         $"  {Shim} task comment-settle <comment-id> --session {sessionId}   (settle one of your own comments that no longer matters)",
         "A message from the user never resolves your question by itself: you do, with task answered. Never leave a question open once it is resolved.",
