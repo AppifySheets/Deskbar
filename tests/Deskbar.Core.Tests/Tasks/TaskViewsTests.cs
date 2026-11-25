@@ -66,8 +66,10 @@ public class TaskViewsTests
         Assert.NotEqual(TaskWorkspaceFilter.On(Free), TaskWorkspaceFilter.Current);
     }
 
+    // Task 93fa0b9b: the task Claude is at work on (a live session, in progress) sits in the Claude working block right
+    // after Waiting on you; the Done one keeps its quadrant place.
     [Fact]
-    public void The_open_view_is_waiting_then_done_then_the_quadrants()
+    public void The_open_view_is_waiting_then_done_then_claude_working_then_the_quadrants()
     {
         var note = Note("Dishwasher tablets", Free);
         var working = Claudes("DurableFile move guard", ws, "s1");
@@ -81,13 +83,14 @@ public class TaskViewsTests
         Assert.Equal(
             [
                 $"WaitingOnYou: {Title(asking)}, {Title(done)}",
-                $"IV: {Title(working)}, {Title(note)}",
+                $"ClaudeWorking: {Title(working)}",
+                $"IV: {Title(note)}",
             ],
             Shown(TaskFilter.Open, TaskWorkspaceFilter.All));
         // A status filter narrows the pinned block as it narrows a quadrant.
         Assert.Equal([$"WaitingOnYou: {Title(asking)}"], Shown(TaskFilter.WaitingOnYou, TaskWorkspaceFilter.All));
         Assert.Equal([$"WaitingOnYou: {Title(done)}"], Shown(TaskFilter.Done, TaskWorkspaceFilter.All));
-        Assert.Equal([$"IV: {Title(working)}"], Shown(TaskFilter.InProgress, TaskWorkspaceFilter.All));
+        Assert.Equal([$"ClaudeWorking: {Title(working)}"], Shown(TaskFilter.InProgress, TaskWorkspaceFilter.All));
     }
 
     // Task 12 (Ruling 28): each quadrant is a group of its own, in Covey's order, captioned in his words; a status filter
@@ -104,9 +107,10 @@ public class TaskViewsTests
         Change(x => x.SetFlag(c, TaskFlag.Important, true, clock));
         Change(x => x.SetFlag(c, TaskFlag.Urgent, true, clock));
 
-        Assert.Equal(["I: c", "II: a", "III: b", "IV: d"], Shown(TaskFilter.Open, TaskWorkspaceFilter.All));
+        // d has a live session, so it is in the Claude working block (task 93fa0b9b), which a status filter keeps too.
+        Assert.Equal(["ClaudeWorking: d", "I: c", "II: a", "III: b"], Shown(TaskFilter.Open, TaskWorkspaceFilter.All));
         Assert.Equal(["I: c", "II: a", "III: b"], Shown(TaskFilter.Backlog, TaskWorkspaceFilter.All));
-        Assert.Equal(["IV: d"], Shown(TaskFilter.InProgress, TaskWorkspaceFilter.All));
+        Assert.Equal(["ClaudeWorking: d"], Shown(TaskFilter.InProgress, TaskWorkspaceFilter.All));
         Assert.Equal("I  Urgent and important", TaskViews.GroupName(TaskGroupKind.I));
         Assert.Equal("II  Important, not urgent", TaskViews.GroupName(TaskGroupKind.II));
         Assert.Equal("III  Urgent, not important", TaskViews.GroupName(TaskGroupKind.III));
@@ -321,4 +325,58 @@ public class TaskViewsTests
     [InlineData("", "")]
     public void Inline_markdown_is_plain_text(string markdown, string expected) =>
         Assert.Equal(expected, TaskViews.PlainInline(markdown));
+
+    // Task 93fa0b9b (Petre: "tasks that have a working claude session should sit after waiting on me tasks"). The Claude
+    // working block holds the open tasks with a live session that are neither waiting on Petre nor Done, in quadrant
+    // order and each quadrant's manual order. A session that ends sends its task back to its quadrant; a snoozed task stays
+    // out of view; a waiting one stays in Waiting on you.
+    [Fact]
+    public void Claude_working_sits_after_waiting_in_quadrant_order_and_leaves_when_the_session_ends()
+    {
+        var plain = Claudes("plain", ws, "s1");
+        var urgent = Claudes("urgent", ws, "s2");
+        var asking = Claudes("asking", ws, "s3");
+        var snoozed = Claudes("snoozed", ws, "s4");
+        var note = Note("note", Free);
+        Change(b => b.SetFlag(urgent, TaskFlag.Important, true, clock));
+        Change(b => b.SetFlag(urgent, TaskFlag.Urgent, true, clock));
+        Change(b => b.Ask(asking, "Merge it?", clock));
+        Change(b => b.Snooze(snoozed, clock.AddHours(2), clock));
+
+        Assert.Equal(["WaitingOnYou: asking", "ClaudeWorking: urgent, plain", "IV: note"], Shown(TaskFilter.Open, TaskWorkspaceFilter.All));
+        Assert.True(TaskViews.AtWork(board.Tasks.Single(t => t.Id == plain)));
+        Assert.False(TaskViews.AtWork(board.Tasks.Single(t => t.Id == asking)));
+        Assert.Equal("Claude working", TaskViews.GroupName(TaskGroupKind.ClaudeWorking));
+        Assert.True(TaskViews.QuadrantOf(TaskGroupKind.ClaudeWorking).HasNoValue);
+
+        // The session ends: the task is no longer at work and goes back to its quadrant, at its own rank (the note, added
+        // after it, went on top of IV).
+        board = board.SessionEnded("s1", clock);
+        Assert.Equal(["WaitingOnYou: asking", "ClaudeWorking: urgent", "IV: note, plain"], Shown(TaskFilter.Open, TaskWorkspaceFilter.All));
+    }
+
+    // A subtask Claude is at work on stays in the Claude working block unless its parent is there too, as a question stays
+    // in Waiting on you; a plain subtask is drawn under a parent in the block.
+    [Fact]
+    public void A_working_subtask_nests_only_under_a_working_parent()
+    {
+        Assert.False(TaskViews.NestsUnder(TaskGroupKind.ClaudeWorking, TaskGroupKind.IV));
+        Assert.False(TaskViews.NestsUnder(TaskGroupKind.ClaudeWorking, TaskGroupKind.WaitingOnYou));
+        Assert.True(TaskViews.NestsUnder(TaskGroupKind.ClaudeWorking, TaskGroupKind.ClaudeWorking));
+        Assert.True(TaskViews.NestsUnder(TaskGroupKind.IV, TaskGroupKind.ClaudeWorking));
+    }
+
+    // The Matrix keeps every task in its own quadrant's cell, waiting first, then the ones Claude is at work on, then the rest.
+    [Fact]
+    public void A_matrix_cell_lists_waiting_then_claude_working_then_the_rest()
+    {
+        var note = Note("note", Free);
+        var working = Claudes("working", ws, "s1");
+        var asking = Claudes("asking", ws, "s2");
+        var older = Note("older", Free);
+        Change(b => b.Ask(asking, "OK?", clock));
+
+        var cell = TaskViews.Matrix(board, TaskFilter.Open, TaskWorkspaceFilter.All).Single(c => c.Quadrant == Quadrant.IV);
+        Assert.Equal(["asking", "working", "older", "note"], cell.Tasks.Select(t => t.Title));
+    }
 }

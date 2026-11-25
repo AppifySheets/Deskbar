@@ -347,7 +347,8 @@ written for the floating window and now describe the panel; 64a to 64n cover wha
     task is back, the × is gone and the keyboard is still in the box. Close and reopen the panel: the search is empty.
 64j. Claude working. With one task that has a live Claude session, one with an ended session and one note, click
     the "Claude working N" chip: only the live one stays, N is 1, and its session square glows while Claude is
-    working. Click the chip again: all tasks are back. Reopen the panel: the filter is cleared.
+    working. Close and reopen the panel, then restart Deskbar: the chip is still on (task 93fa0b9b). Click the chip
+    again: all tasks are back, and a reopen keeps it off.
 64k. Floating bar. Undock the bar so it floats, near the left edge of a screen: the panel opens on that edge, by the
     bar. Move the bar to the right half: the panel stays on the left edge (a floating bar's moves are not followed,
     by decision). Dock the bar again: the panel docks inside it.
@@ -597,6 +598,12 @@ throwaway folder Claude Code trusts, and tracing on for the `claude actions:` an
     lines out of sight. With a task waiting on you at the top, scroll down past it: the count turns orange and reads
     "+N more, 1 waiting". Scroll back up. Then bring a Claude terminal whose task line is scrolled out of sight to
     the front: the list scrolls just far enough to show that line, selected.
+109. Claude working block (task 93fa0b9b). In the tasks panel's List, with one task waiting on you, one task a Claude
+    session is working on and a note: the order is the waiting task, a "CLAUDE WORKING" caption with the working
+    task under it, then the note's quadrant. With two working tasks in one quadrant, drag one above the other: they
+    swap. Stop its session: the task drops back into its quadrant at its place; marked done instead, it joins the
+    done tasks in the Waiting on you block. In the Matrix, its cell lists the waiting task first, then the working
+    one.
 
 ## Subtasks
 
