@@ -127,6 +127,9 @@ public sealed class TasksBoard : IDisposable
     // The search box's text and the "Claude working" chip (Task 7, see the header); both start over on a fresh open.
     TaskSearch search = TaskSearch.None;
     bool claudeWorking;
+    // Whether the Stats view shows in place of the List or the Matrix (task 521d2b07, TasksWindow.Stats.cs). Not
+    // remembered: a fresh open starts on the List or the Matrix, whichever AppState.TasksMatrix says, as before.
+    bool statsShown;
     // Set by Shutdown, which runs once (see there).
     bool shutDown;
 
@@ -223,7 +226,14 @@ public sealed class TasksBoard : IDisposable
             AddNote: (title, workspace, quadrant, describe) => AddNote(title, workspace, quadrant, describe: describe).IsSuccess,
             SetFlag: (id, flag, on) => SetFlag(id, flag, on),
             Place: (id, quadrant, place) => Place(id, quadrant, place),
-            ShowMatrix: on => Report(manager.SetTasksMatrix(on)),
+            // List or Matrix also leaves the Stats view. SetTasksMatrix pulses only when the setting changes, so the
+            // view is drawn here as well: "List" pressed on Stats while the List is already the setting must still show it.
+            ShowMatrix: on =>
+            {
+                statsShown = false;
+                Report(manager.SetTasksMatrix(on));
+                Refresh();
+            },
             Filter: Filter,
             FilterWorkspace: FilterWorkspace,
             ClosePanel: Hide,
@@ -249,6 +259,8 @@ public sealed class TasksBoard : IDisposable
             ShowSubtasks = ShowSubtasks,
             // "Open in window" (task dca4ebeb): the task in a window of its own (OpenWindow).
             OpenWindow = id => OpenWindow(id),
+            ShowStats = ShowStats,
+            OpenFromStats = OpenFromStats,
         };
 
         subscriptions = new CompositeDisposable(
@@ -359,6 +371,7 @@ public sealed class TasksBoard : IDisposable
         // The window empties its search box in its own Open (TasksWindow.Open), so the box and this agree.
         search = TaskSearch.None;
         claudeWorking = false;
+        statsShown = false;
         expanded.Clear();
         window.ShowProblem(null);
         window.PaintSelection(selection.Current);
@@ -645,6 +658,40 @@ public sealed class TasksBoard : IDisposable
         window.PaintSelection(selection.Current);
         Refresh();
         window.ScrollToSelected();
+    }
+
+    /// <summary>
+    /// The toolbar's Stats switch and `tasks-window stats` (task 521d2b07; spec
+    /// docs/superpowers/specs/2026-11-25-task-stats-design.md): the panel opens if it was hidden, then shows the Stats view
+    /// in place of the List or the Matrix. Opened fresh first, so the fresh open's reset does not undo it.
+    /// </summary>
+    public void ShowStats()
+    {
+        if (!IsOpen) Show();
+        statsShown = true;
+        Refresh();
+    }
+
+    /// <summary>
+    /// A task's line in the Stats view, the "link to each task" Petre asked for: the panel leaves Stats and shows that
+    /// task, picked, scrolled to and opened to its thread (ShowTask). A task the filters in force would hide is let
+    /// through first: the status filter becomes the one that lists it (Closed for a closed task, Snoozed for a snoozed
+    /// one, Open otherwise, unless the one in force already shows it), and a workspace, assignee or goal filter that
+    /// leaves it out goes back to all. The search and "Claude working" are ShowTask's own business (RevealPastSearch).
+    /// </summary>
+    public void OpenFromStats(Guid id)
+    {
+        statsShown = false;
+        var found = tasks.Board.Tasks.TryFirst(t => t.Id == id);
+        if (found.HasValue)
+        {
+            var task = found.Value;
+            if (!TaskViews.Lists(filter, task)) filter = TaskViews.FilterListing(task);
+            if (!where.Resolved(manager.CurrentWorkspaceId).Admits(task)) where = TaskWorkspaceFilter.All;
+            if (!assigneeFilter.Admits(task)) assigneeFilter = TaskAssigneeFilter.All;
+            if (goals is not null && !goalFilter.Admits(task, goals.Board)) goalFilter = TaskGoalFilter.All;
+        }
+        ShowTask(id);
     }
 
     // THE TASK PETRE CLICKED ON THE BAR IS ON SCREEN (Task 7 review, ruling on ShowTask). On an open panel the search and
@@ -935,6 +982,9 @@ public sealed class TasksBoard : IDisposable
             ClaudeWorking = claudeWorking,
             ClaudeWorkingCount = claudeWorkingCount,
             ShowsSubtasks = showsSubtasks,
+            // The Stats view counts the whole board, not the filtered one: it is about the work, not about what a filter
+            // shows (spec 2026-11-25-task-stats-design.md, "What it shows"). Made only while it shows.
+            Stats = statsShown ? TaskStats.Of(tasks.Board, now(), TimeZoneInfo.Local, TaskStats.DaysToShow(tasks.Board, now(), TimeZoneInfo.Local)) : null,
         };
     }
 
@@ -1267,6 +1317,11 @@ internal sealed record TasksView(IReadOnlyList<TaskFilterChip> Filters, string W
 
     /// <summary>Whether the "Subtasks" checkbox is ticked (task 173ef268): subtasks drawn under their parent, not folded.</summary>
     public bool ShowsSubtasks { get; init; } = true;
+    /// <summary>
+    /// The Stats view's numbers while it shows in place of the List or the Matrix (task 521d2b07, TasksWindow.Stats.cs),
+    /// null otherwise.
+    /// </summary>
+    public TaskStatsView? Stats { get; init; }
 }
 
 /// <summary>
@@ -1354,6 +1409,11 @@ internal sealed record TasksWindowActions(
     /// thread's button do not show.
     /// </summary>
     public Action<Guid>? OpenWindow { get; init; }
+    /// <summary>The toolbar's Stats switch (task 521d2b07): the Stats view in place of the List or the Matrix (TasksBoard.ShowStats).</summary>
+    public Action? ShowStats { get; init; }
+
+    /// <summary>A task's line in the Stats view: leave Stats and show that task (TasksBoard.OpenFromStats).</summary>
+    public Action<Guid>? OpenFromStats { get; init; }
 }
 
 /// <summary>

@@ -6,7 +6,8 @@ clip: tasks-bar
 # Clips to film: tasks-bar (the bar's list with bold and italic titles, no signs or ages, and a drag; re-film since 2026-11-24), tasks-window (the List view), tasks-matrix
 # (the Matrix, with a drag between cells). task-due showed the stopwatch build and is retired. Film tasks-window again
 # with a goal in place, since its toolbar then shows the goal filter, and with a screenshot pasted into a comment
-# (Win+Shift+S, Ctrl+V, Enter), which shows the thumbnail in the thread.
+# (Win+Shift+S, Ctrl+V, Enter), which shows the thumbnail in the thread. tasks-stats (new 2026-11-25): the Stats switch,
+# a click on a day's column, then a click on a task in its list landing on that task.
 ---
 
 The bottom of the bar carries a short task list, for the things you want to remember while you work.
@@ -81,6 +82,18 @@ The panel is narrow on purpose, which makes a long task hard to read and harder 
 - Each task has one window: asking again brings it to the front. It always comes to the desktop you are on, moved there if you left it on another. Every task window opens where you last moved, resized or closed one, maximized if that one was, and a second one open at the same time opens a little down and to the right. Deleting the task closes its window, and the windows close with Deskbar.
 - `deskbar.cmd task open <id>` does the same from a script.
 
+## Stats
+
+**Stats**, after **List** and **Matrix** at the top right of the tasks panel, shows how the work is going. It is there at every width. While Stats is on, **List** shows too, even on a narrow panel, as the way back. **Matrix** goes back as well where the panel is wide enough for it. The search box and the filter chips step aside while Stats shows, because Stats counts every task, whatever the filters say. The panel opens on the List or the Matrix again the next time, so Stats is not remembered.
+
+- Four numbers at the top: **Open** (backlog, in progress and waiting on you), **Added, 7 days**, **Finished, 7 days** and **Median to finish**, the middle time from added to finished over the tasks finished in the last 14 days. Finished means Done or closed.
+- **Open at the end of the day**: one line, one point a day, today at the right with its number. This is what a burndown would draw. A burndown assumes a fixed amount of work shrinking to zero, though, and a task list keeps growing, so the chart below shows why the line moved.
+- **Added and finished per day**: two bars a day, blue for added and green for finished.
+- The charts start on the day your oldest task was added and cover between 7 and 14 days. Point at a day's column for its three numbers.
+- Under the charts, the picked day's tasks: **Finished** and **Added**, each line the task's status and title. It is today until you click another day's column. Click a task to go to it: the panel leaves Stats and shows the task with its comments open. For a closed task it switches to the **Closed** chip, and any workspace, assignee or goal filter that would hide the task goes back to all.
+
+From this version on, Deskbar records when each task's status changes, so finish times are exact. For tasks finished before that, the finish time is estimated: when a done task became done, and when a closed task was last changed (closing changes it). While any counted task leans on an estimate, a line under the charts says so. A task reopened and finished again counts once, on its last finish.
+
 ## Subtasks
 
 A task can have subtasks, one level deep: a subtask cannot have subtasks of its own.
@@ -136,6 +149,8 @@ The full set:
 - `task order <id> top|end|<n>`, the drag's twin, within the task's own quadrant; a task waiting on you or done moves among the questions or the done tasks on top
 - `tasks-window show` and `tasks-window hide`, to open or bring forward the tasks panel, or close it
 - `tasks-window list` and `tasks-window matrix`, to switch the panel's view (remembered)
+- `tasks-window stats`, to open the panel on its [Stats](#stats) view (not remembered)
+- `task stats [--days <n>]`, the Stats view's numbers as JSON: `openNow`, `addedLast7Days`, `finishedLast7Days`, `medianHoursToFinish` (null when nothing finished), `estimated`, and `days`, one per local day (14 by default, today last), each with its `date`, `openAtEnd`, and the tasks `added` and `finished` that day (`id`, `title`, `status`)
 - `task assign <id> me|claude`, the **Assign to** menu's twin; `task list` gives each task's `assignee`, `me` or `claude`
 - `task comment-settle <comment-id> --session <id>`, a session settling one of its own comments (another's is refused); `task list`'s `thread` shows each comment's `settled` time, or null
 - `task describe <id> <markdown>|-`, the description Edit sets (empty clears it), and `task comment-edit <comment-id> <markdown>|-`, which rewrites one of your own comments and refuses a session's; `task list` gives each task's `description` and its `thread`, each comment's id, `you` or `claude` for who wrote it, and its `markdown`, the comment's text; in both, a pasted picture's line carries its full path, ready for a session to read

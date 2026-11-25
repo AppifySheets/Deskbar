@@ -1692,7 +1692,12 @@ public partial class App : Application
             },
             // `claude-wait`, the comment waiter registering, and SessionEnd forgetting a session's inbox (a comment wakes
             // its session).
-            inbox: commentInbox);
+            inbox: commentInbox,
+            // `tasks-window stats` (task 521d2b07), the twin of the panel's Stats switch: the panel opened on its Stats
+            // view (TasksBoard.ShowStats). Read when the command arrives, like setTasksWindow.
+            showTasksStats: () => tasksBoard is { } statsBoard
+                ? Result.Success().Tap(statsBoard.ShowStats)
+                : Result.Failure("The tasks panel is not available in this mode."));
         controlServer = new ControlPipeServer(ControlCommandLine.PipeName,
             args => Dispatcher.InvokeAsync(() =>
             {

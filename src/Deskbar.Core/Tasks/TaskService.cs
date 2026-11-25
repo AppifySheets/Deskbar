@@ -310,7 +310,9 @@ public sealed class TaskService(ITaskStore store, Func<DateTimeOffset> now, Func
     /// </summary>
     void Commit(TaskBoard board)
     {
-        Board = board;
+        // Every status this change moved goes into its task's status log here, the one place every change passes
+        // through (TaskStatusLog.cs has why it is not done in TaskBoard's own paths).
+        Board = TaskStatusLog.Logged(Board, board, now());
         var saved = store.Save(board);
         if (saved.IsFailure) trace?.Invoke($"tasks: save failed: {saved.Error}");
         changed.OnNext(Unit.Default);

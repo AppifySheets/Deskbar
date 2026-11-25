@@ -390,6 +390,20 @@ public static class TaskViews
         _ => status.ToString(),
     };
 
+    /// <summary>
+    /// Whether a status filter lists the task, on its status alone (the workspace, assignee, goal and search filters are
+    /// asked apart): a snoozed open task only under Snoozed, any other only under a filter naming its status. For the
+    /// Stats view's click-through (task 521d2b07, TasksBoard.OpenFromStats), which must land on a list that has the task.
+    /// </summary>
+    public static bool Lists(TaskFilter filter, TaskItem task) =>
+        task.IsOpen && task.IsSnoozed
+            ? filter == TaskFilter.Snoozed
+            : filter != TaskFilter.Snoozed && StatusesOf(filter).Contains(task.Status);
+
+    /// <summary>The status filter that lists the task (see <see cref="Lists"/>): Closed, Snoozed or Open.</summary>
+    public static TaskFilter FilterListing(TaskItem task) =>
+        !task.IsOpen ? TaskFilter.Closed : task.IsSnoozed ? TaskFilter.Snoozed : TaskFilter.Open;
+
     static IReadOnlyList<TaskStatus> StatusesOf(TaskFilter filter) => filter switch
     {
         TaskFilter.Open or TaskFilter.Snoozed => [TaskStatus.WaitingOnYou, TaskStatus.Done, TaskStatus.InProgress, TaskStatus.Backlog],

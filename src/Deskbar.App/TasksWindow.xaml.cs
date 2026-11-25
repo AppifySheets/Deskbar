@@ -476,6 +476,25 @@ public partial class TasksWindow : Window
         authors.Clear();
         shownComments.Clear();
         closing.Clear();
+        // THE STATS VIEW (task 521d2b07, TasksWindow.Stats.cs) takes the place of both the List and the Matrix, and of the
+        // search row and the filter chips, which do not apply to it (it counts every task). Drawn, and nothing else.
+        statsShown = view.Stats is not null;
+        StatsScroller.Visibility = statsShown ? Visibility.Visible : Visibility.Collapsed;
+        SearchRow.Visibility = statsShown ? Visibility.Collapsed : Visibility.Visible;
+        Filters.Visibility = statsShown ? Visibility.Collapsed : Visibility.Visible;
+        if (view.Stats is { } stats)
+        {
+            matrixShown = false;
+            Scroller.Visibility = Visibility.Collapsed;
+            MatrixGrid.Visibility = Visibility.Collapsed;
+            MatrixGrid.Children.Clear();
+            DrawStats(stats);
+            Headers = [];
+            Keys = [];
+            EmptyText.Visibility = Visibility.Collapsed;
+            return;
+        }
+        StatsPanel.Children.Clear();
         // The List or the Matrix (TasksWindow.Matrix.cs), whichever the switch says; the other is emptied and hidden.
         matrixShown = view.Matrix;
         Scroller.Visibility = view.Matrix ? Visibility.Collapsed : Visibility.Visible;
@@ -535,6 +554,8 @@ public partial class TasksWindow : Window
             // The two width flags (Task 8): which line is drawn and whether the view switch shows. Not the width itself, so
             // a grip drag that crosses neither threshold redraws nothing.
             $"{view.Matrix}{view.MatrixAllowed}{view.Slim}",
+            // The Stats view (task 521d2b07): its numbers and every task it lists, so a status changing redraws it.
+            StatsSignature(view.Stats),
             // A List row's WorkingCount is in its line below (Task 8): a new agents list that only starts or stops Claude
             // working changes the squares' halos and nothing else, and must still redraw the line. Not in a Matrix cell's:
             // a compact line draws no sessions, so it would only rebuild the Matrix for nothing (review minor 2).
@@ -651,6 +672,7 @@ public partial class TasksWindow : Window
     // The List / Matrix switch (Task 12, Ruling 28): two chips, the one on show outlined (DrawFilters).
     Button? listSwitch;
     Button? matrixSwitch;
+    Button? statsSwitch;
 
     // The view switch, "+ Add" and the panel's ×, made once. The × is the panel's close (spec "The panel window": its
     // toolbar gains a close button at the right end, after "+ Add"), since a panel has no title bar to close it from.
@@ -660,9 +682,14 @@ public partial class TasksWindow : Window
         listSwitch.ToolTip = "The tasks grouped, one group under another";
         matrixSwitch = Flat(new TextBlock { Text = "Matrix", Foreground = Ink, FontSize = 11 }, "Matrix", () => Actions?.ShowMatrix(true), new Thickness(8, 2, 8, 2));
         matrixSwitch.ToolTip = "Covey's matrix: urgent and not urgent across, important and not important down";
-        matrixSwitch.Margin = new Thickness(4, 0, 10, 0);
+        matrixSwitch.Margin = new Thickness(4, 0, 0, 0);
+        // The Stats switch (task 521d2b07, TasksWindow.Stats.cs): always there, whatever the width, unlike List and Matrix.
+        statsSwitch = Flat(new TextBlock { Text = "Stats", Foreground = Ink, FontSize = 11 }, "Stats", () => Actions?.ShowStats?.Invoke(), new Thickness(8, 2, 8, 2));
+        statsSwitch.ToolTip = "Added, finished and open tasks per day, each task a link";
+        statsSwitch.Margin = new Thickness(4, 0, 10, 0);
         ToolbarEnd.Children.Add(listSwitch);
         ToolbarEnd.Children.Add(matrixSwitch);
+        ToolbarEnd.Children.Add(statsSwitch);
         var add = Flat(new TextBlock { Text = "+ Add", Foreground = Ink, FontSize = 11 }, "Add", ShowAdd, new Thickness(10, 2, 10, 2));
         add.ToolTip = "Write a note";
         ToolbarEnd.Children.Add(add);
