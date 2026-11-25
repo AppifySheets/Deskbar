@@ -3643,7 +3643,7 @@ public class TasksBoardTests
     // "Open Claude" right after Edit, going where the double-click goes (goTo) once the menu has closed, without picking
     // the task or opening its thread. A note's menu has no such item.
     // Task b6f068b1 (Petre: "open claude and start claude , no need for both"): the menu has ONE Claude item, so a Claude
-    // task's has no "Start Claude on this" (its thread keeps the button, for a second session) and a note's has no
+    // task's has no "Start Claude on this" (its thread has the button once no session of it is running) and a note's has no
     // "Open Claude".
     [Fact]
     public void Open_Claude_on_the_window_menu_goes_without_opening_the_thread() => StaThread.Run(() =>
@@ -3669,9 +3669,14 @@ public class TasksBoardTests
         Assert.Contains(noteMenu.Items.OfType<MenuItem>(), i => i.Header is TextBlock { Text: "Start Claude on this" });
         noteMenu.IsOpen = false;
 
-        // The thread of the Claude task still has the button that starts another session.
+        // Task 9b6275bc (Petre: "do i need start claude on this when there's an open session?"): while the task's session
+        // is running, its thread has the session's Open and no start button under it. Once the session has ended the
+        // button is back, for a fresh one.
         t.Controller.ToggleThread(id);
-        Assert.Contains(Inside(t.Window).OfType<Button>(), b => AutomationProperties.GetName(b) == "Start Claude on this");
+        Assert.True(HasButton(t.Window, "Open session s1"));
+        Assert.False(HasButton(t.Window, "Start Claude on this"));
+        t.Tasks.SessionEnded("s1");
+        Assert.True(HasButton(t.Window, "Start Claude on this"));
     });
 
     // Task 7f61af2e (Petre: "add a button on the task in the tasklist for it too"): a Claude task's line, full and slim,

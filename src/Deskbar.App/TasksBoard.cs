@@ -1338,6 +1338,15 @@ internal sealed record TaskRowView(Guid Id, string Title, string Detail, TaskSta
     public IReadOnlyList<SessionView> SessionList { get; init; } = [];
 
     /// <summary>
+    /// Whether one of the listed sessions is still running, working or idle (task 9b6275bc; Petre, on a thread that
+    /// showed an idle session's Open and the start button under it: "do i need start claude on this when there's an
+    /// open session?"). While one is, the thread and the task's window leave "Start Claude on this" out: the session's
+    /// Open is the way in, and a second session beside a running one is rarely meant (`deskbar task start` still does
+    /// it). Once every session has ended or expired the button is back, for a fresh start.
+    /// </summary>
+    public bool HasOpenSession => SessionList.Any(s => s.State is SessionState.Working or SessionState.Idle);
+
+    /// <summary>
     /// How many of the task's live sessions Claude is working in right now (tasks panel plan, Task 8): the first that many
     /// live squares on the line wear a halo. From the board's `workingOf`, 0 with none or before the first agents list.
     /// </summary>

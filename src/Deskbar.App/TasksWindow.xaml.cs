@@ -1638,7 +1638,9 @@ public partial class TasksWindow : Window
             panel.Children.Add(window);
         }
         row.SessionList.ToList().ForEach(session => panel.Children.Add(SessionLine(row.Id, session)));
-        if (Actions?.StartClaude is { } start && row.Status != TaskStatus.Closed && !row.Closing)
+        // Not while a session of the task is running (task 9b6275bc, TaskRowView.HasOpenSession): its line above has
+        // Open, and a start button under it read as the thing to press. It is back once every session has ended.
+        if (Actions?.StartClaude is { } start && row.Status != TaskStatus.Closed && !row.Closing && !row.HasOpenSession)
         {
             var button = Small(StartClaudeText, StartClaudeText, () => start(row.Id),
                 "Start a background Claude session on this task, with the task as its first message");
@@ -2273,7 +2275,7 @@ public partial class TasksWindow : Window
             // has closed: it may ask a question or open a pick list of folders at the pointer.
             // ONE CLAUDE ITEM PER MENU (task b6f068b1; Petre: "open claude and start claude , no need for both"): only on
             // a task no session has joined. A Claude task has Open Claude above, which resumes an ended session, and its
-            // thread keeps the "Start Claude on this" button for a second session (the bar's menu follows the same rule,
+            // thread keeps the "Start Claude on this" button while none of its sessions is running (the bar's menu follows the same rule,
             // FloatingBar.OpenTaskLineMenu).
             else if (Actions?.StartClaude is { } start)
                 menu.Items.Add(Item(StartClaudeText, () => Dispatcher.BeginInvoke(() => start(id), System.Windows.Threading.DispatcherPriority.Input)));
