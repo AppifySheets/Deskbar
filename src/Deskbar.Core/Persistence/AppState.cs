@@ -80,7 +80,7 @@ public sealed record AppState(
     // and null means BarText.Default rather than zero.
     public double? BarTextOffset { get; init; }
 
-    // How blurred the docked bar's frost is, in screen pixels (Petre: "it's too blurry", "make it a setting?").
+    // How blurred the bar's frost is, docked or floating, in screen pixels (Petre: "it's too blurry", "make it a setting?").
     // Same nullable/no-migration pattern as the settings above, read through FrostBlur.Clamp, and null means
     // FrostBlur.Default, so a later change of default reaches everyone who never moved the slider.
     public double? FrostBlur { get; init; }

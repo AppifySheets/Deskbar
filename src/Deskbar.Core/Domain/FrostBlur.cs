@@ -1,6 +1,6 @@
 namespace Deskbar.Core.Domain;
 
-// HOW BLURRED THE DOCKED BAR'S FROST IS, as one setting in screen pixels (AppState.FrostBlur, Manage's slider).
+// HOW BLURRED THE BAR'S FROST IS (docked, and floating since task b971ca3f), as one setting in screen pixels (AppState.FrostBlur, Manage's slider).
 //
 // The frost (FloatingBar.Frost.cs) shipped at about 28 screen pixels of blur, the mockup's CSS blur(18px) carried
 // across. On his laptop's spring tree Petre: "it's too blurry", "can you make it less blurry?", "and make it a

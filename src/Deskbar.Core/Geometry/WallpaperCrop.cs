@@ -88,6 +88,20 @@ public static class WallpaperCrop
 
     static (double, double) Same(double scale) => (scale, scale);
 
+    // Where `bar` lies on `screen`, as shares of the screen's width and height (0 to 1), for an ImageBrush's relative
+    // Viewbox. The FLOATING bar uses it (task b971ca3f): it frosts its screen's whole picture once and shows the slice
+    // under its window, so a drag only moves the slice and never cuts or blurs again. Nothing when the bar is not
+    // wholly on that screen (dragged across to the next one, or straddling the seam): the caller then drops the frost
+    // rather than show a slice that runs off the picture.
+    public static Maybe<Area> ShareOf(Rect screen, Rect bar) =>
+        screen.Width <= 0 || screen.Height <= 0 || bar.Width <= 0 || bar.Height <= 0 || !Inside(bar, screen)
+            ? Maybe<Area>.None
+            : new Area(
+                (double)(bar.Left - screen.Left) / screen.Width,
+                (double)(bar.Top - screen.Top) / screen.Height,
+                (double)bar.Width / screen.Width,
+                (double)bar.Height / screen.Height);
+
     static bool Inside(Rect inner, Rect outer) =>
         inner.Left >= outer.Left && inner.Top >= outer.Top && inner.Right <= outer.Right && inner.Bottom <= outer.Bottom;
 

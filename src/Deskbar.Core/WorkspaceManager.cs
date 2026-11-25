@@ -2249,7 +2249,7 @@ public sealed class WorkspaceManager(
         return Result.Success();
     }
 
-    // The docked bar's frost strength (see FrostBlur), Manage's slider. Same three rules as SetBarTextOffset: null
+    // The bar's frost strength (see FrostBlur), Manage's slider. Same three rules as SetBarTextOffset: null
     // means back to the default, the value is clamped and snapped on the way in, and an unchanged value writes
     // nothing, so opening Manage neither rewrites state.json nor rebuilds the bar.
     public Result SetFrostBlur(double? pixels)

@@ -15,8 +15,9 @@ namespace Deskbar.App;
 // opaque plate (FloatingBar.Recency.cs). Only the band behind idle rows shows the desktop, and only 15% of it.
 //
 // Then, over his laptop's bright spring tree, 15% read as dark olive: "could you do transparency that's not
-// black-ish?" A docked bar now paints the wallpaper behind it, blurred, under FrostVeil (FloatingBar.Frost.cs), and
-// keeps SeeThrough wherever there is no frost (floating, across the seam, a tiled or solid-colour wallpaper).
+// black-ish?" The bar now paints the wallpaper behind it, blurred, under FrostVeil (FloatingBar.Frost.cs), docked and,
+// since task b971ca3f, floating, and keeps SeeThrough wherever there is no frost (across the seam or two screens, a
+// tiled or solid-colour wallpaper).
 public static class BarSurface
 {
     // The bar's flat colour: one step lighter than the old #141518, and still dark enough that the white text and
