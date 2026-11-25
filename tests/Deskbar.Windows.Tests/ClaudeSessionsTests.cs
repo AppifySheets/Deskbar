@@ -121,6 +121,8 @@ public class ClaudeSessionsTests
         public string Home { get; } = Path.Combine(Path.GetTempPath(), "deskbar-claude-sessions-" + Guid.NewGuid().ToString("N"));
         public Func<string, Maybe<Guid>> WorkspaceOfFolder { get; set; } = _ => Maybe<Guid>.None;
         public Func<TaskItem, bool> WindowOpen { get; set; } = _ => false;
+        // The manager session's folder, handed to ClaudeSessions; none, nothing is left out.
+        public string? ManagerFolder { get; set; }
         public ClaudeSessions? Sessions { get; private set; }
         public List<string> Traces { get; } = [];
 
@@ -143,7 +145,7 @@ public class ClaudeSessionsTests
         {
             T0 = Clock.Now;
             Sessions = new ClaudeSessions(Tasks, Manager, Cli, Clock, WorkspaceOfFolder, Home, background: Scheduler.Immediate, trace: Traces.Add,
-                windowOpen: task => WindowOpen(task));
+                windowOpen: task => WindowOpen(task), managerFolder: ManagerFolder);
             return Sessions;
         }
 
@@ -887,6 +889,36 @@ public class ClaudeSessionsTests
         Assert.Contains("Workspace not trusted", result.Error);
         Assert.Empty(rig.Task(note.Id).Sessions);
     }
+    // The manager session lives in its own folder and is started, resumed and stopped only by Petre's click. The keeper
+    // must not take it for a stranger and adopt it as a task after the two minutes.
+    [Fact]
+    public void Manager_session_is_never_adopted()
+    {
+        using var rig = new Rig { ManagerFolder = @"E:\state\manager" };
+        var managerId = Guid.NewGuid().ToString();
+        rig.Cli.Listed.Add(new Row(managerId, @"E:\state\manager", "Deskbar manager"));
+        rig.Tasks.HeardAttended(managerId);
+        rig.Begin();
+
+        rig.RunTo(Seconds(240));
+
+        Assert.DoesNotContain(rig.Tasks.Board.Tasks, t => t.Sessions.Any(s => s.Id == managerId));
+    }
+
+    // Were the manager's session ever attached to a Done task, the done sweep would stop it; it is Petre's to stop.
+    [Fact]
+    public void Manager_session_is_never_stopped()
+    {
+        using var rig = new Rig { ManagerFolder = @"E:\state\manager" };
+        var (taskId, _) = rig.Running("Finished work", @"E:\state\manager");
+        Assert.True(rig.Tasks.SetStatus(taskId, TaskStatus.Done).IsSuccess);
+        rig.Begin();
+
+        rig.RunTo(SessionKeeper.StopAfter + Seconds(60));
+
+        Assert.Empty(rig.Cli.Stops);
+    }
+
     // --- stopping finished sessions (task 87f899ad) ----------------------------------------------------------------
 
     // Petre: "i want to not have a stagnant session". A Done task's background session is stopped once it has been idle

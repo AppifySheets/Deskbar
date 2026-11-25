@@ -193,6 +193,15 @@ public sealed class ClaudeSessions : IDisposable
     // read and while the feature is off.
     readonly BehaviorSubject<Maybe<string>> listProblem = new(Maybe<string>.None);
 
+    // The manager session's folder, or none; see the constructor.
+    readonly string? managerFolder;
+    readonly Func<string, string> longPath;
+
+    // The listed sessions the keeper may adopt, resume or stop: everyone but the manager. `live` and the tasks'
+    // reconcile keep the full list, since the manager's click reads it.
+    IReadOnlyList<ClaudeAgent> KeeperView(IReadOnlyList<ClaudeAgent> listed) =>
+        managerFolder is null ? listed : ManagerSession.Others(listed, managerFolder, longPath);
+
     /// <param name="scheduler">Where answers land and timers run: the UI thread in the app.</param>
     /// <param name="workspaceOfFolder">The workspace of the editor window showing a folder, or none, for adopted sessions.</param>
     /// <param name="claudeHome">The folder that holds Claude Code's `projects`, normally %USERPROFILE%\.claude.</param>
@@ -201,10 +210,17 @@ public sealed class ClaudeSessions : IDisposable
     /// Whether a window of Deskbar's is attached to the task's session (ClaudeTaskActions.HasWindow); a finished task's
     /// session is not stopped while one is (job 5). Left out, none ever is.
     /// </param>
+    /// <param name="managerFolder">
+    /// The manager session's folder (ManagerSession.FolderIn). A session listed there is Petre's manager, started,
+    /// resumed and stopped only by his click, so the keeper neither adopts nor stops it. None, nothing is left out.
+    /// </param>
+    /// <param name="longPath">Expands 8.3 short forms when comparing folders; the file system's answer unless a test says otherwise.</param>
     public ClaudeSessions(TaskService tasks, WorkspaceManager manager, IClaudeCli cli, IScheduler scheduler,
         Func<string, Maybe<Guid>> workspaceOfFolder, string claudeHome, IScheduler? background = null, Action<string>? trace = null,
-        Func<TaskItem, bool>? windowOpen = null)
+        Func<TaskItem, bool>? windowOpen = null, string? managerFolder = null, Func<string, string>? longPath = null)
     {
+        this.managerFolder = managerFolder;
+        this.longPath = longPath ?? Deskbar.Windows.Control.LongPath.Of;
         this.windowOpen = windowOpen ?? (_ => false);
         this.tasks = tasks;
         this.manager = manager;
@@ -488,7 +504,9 @@ public sealed class ClaudeSessions : IDisposable
         // With the resume off, the keeper is still asked (for its adoptions), but told every transcript exists, so it
         // reads no files for steps nobody will take.
         var resuming = manager.State.ClaudeResumeInEffect;
-        SessionKeeper.Plan(tasks.Board, listed, ledger,
+        // The manager is left out of what the keeper sees: it is never adopted as a task nor stopped as a finished one.
+        var keeperView = KeeperView(listed);
+        SessionKeeper.Plan(tasks.Board, keeperView, ledger,
                 resuming ? TranscriptExists : _ => true,
                 // Whether a turn was cut off is read when the resume is ISSUED, off the UI thread (Issue), not here: a
                 // transcript can run to tens of MB and this runs on every poll for every session waiting in the queue.
@@ -503,7 +521,7 @@ public sealed class ClaudeSessions : IDisposable
         idleSince = listed.Where(agent => !agent.Busy).Select(agent => agent.SessionId).Distinct()
             .ToImmutableDictionary(id => id, id => idleSince.TryGetValue(id, out var since) ? since : now);
         stopSent = stopSent.Where(pair => listedIds.Contains(pair.Key)).ToImmutableDictionary();
-        SessionKeeper.Stops(tasks.Board, listed, id => idleSince.TryGetValue(id, out var since) ? since : now, windowOpen, now)
+        SessionKeeper.Stops(tasks.Board, keeperView, id => idleSince.TryGetValue(id, out var since) ? since : now, windowOpen, now)
             // Not while it is being resumed (a click on the Done task), and not again while a stop sent is on its way.
             .Where(stop => !Queued(stop.Agent.SessionId) && !AnsweredWithinGrace(stop.Agent.SessionId))
             .Where(stop => !stopSent.TryGetValue(stop.Agent.SessionId, out var sent) || now - sent >= StopRetry)
