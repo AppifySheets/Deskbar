@@ -30,15 +30,17 @@ Measured with Claude Code 2.1.332 (the CLI on this machine; the brief said 2.1.3
 - `claude --bg --resume <full id> --model haiku --append-system-prompt-file P -- "Say hello."` against a stopped background session printed `note: background session 14cdea32 keeps its own saved options, so the flags you passed started a copy as 3da98176`. Flags on resume start a COPY under a new id; the copy was stopped and removed.
 - Same with a short id instead of the full one: `note: started a copy of that conversation as cca8c317. To continue a session under its own id, pass its full session id (lowercase...)`. Also a copy, removed.
 - `claude --bg --resume 14cdea32-78db-4056-9ebd-84aaf4ec1b5c -- "Say hello."` (no flags): `note: woke session 14cdea32 with its saved options (-n, --strict-mcp-config, --append-system-prompt-file, --disallowedTools, --model).` Same id, name still `probe manager`, reply `● PINEAPPLE` then `Hello, Petre.`, banner still Fable 5.2. The briefing and model survive a bare resume.
-- Only the flags I started with were listed as saved. `--allowedTools` and `--permission-mode` were not in that list (not started with them in that session, so not shown as proof either way; Task 2 should check).
+- In this session only the flags I started with were listed as saved; the later dontAsk probe, started with `--allowedTools` and `--permission-mode`, shows both saved too.
+- The forked copies from the two flag forms above were not checked for PINEAPPLE or model: they are forks, not used, so what they carry does not matter.
 
 ## So
 
-- Start: `--bg --model fable -n "manager" --strict-mcp-config --append-system-prompt-file <briefing path> --allowedTools "Bash(<expanded shim path with forward slashes> task:*)" --disallowedTools Read Edit Write NotebookEdit Agent WebFetch WebSearch Monitor PowerShell -- "<first prompt>"`.
-- Resume: `--bg --resume <FULL session id> -- "<prompt>"`, with no other flags. Repeating flags forks a copy.
+- Start (final): `--bg --model fable -n "manager" --strict-mcp-config --permission-mode dontAsk --append-system-prompt-file <briefing path> --allowedTools "Bash(<expanded shim path with forward slashes> task:*)" --disallowedTools Read Edit Write NotebookEdit Agent WebFetch WebSearch Monitor PowerShell -- "<first prompt>"`. (Probed with `--model haiku`; `--model fable` was probed separately without the permission flags.)
+- Resume (final): `--bg --resume <FULL session id> -- "<prompt>"`, with no other flags. Repeating flags forks a copy. Wait until `claude agents --json` no longer lists the session as running before resuming, or it forks a copy ("already running").
+- Bare resume keeps `--permission-mode`, `--allowedTools`, `--disallowedTools`, `--model`, `--append-system-prompt-file`, `--strict-mcp-config` and `-n` (measured, see the dontAsk section).
+- `--permission-mode dontAsk` is needed: sessions default to auto mode, which runs everything. Under dontAsk a state-changing command with no matching rule (`git branch probe-dontask-x`) is denied with no prompt (`Permission to use Bash has been denied because Claude Code is running in don't ask mode`), no branch is created, and the full-path shim call still runs. Read-only commands such as `git status` are still allowed without a rule.
 - Allowed-tools rule: the full shim path form works; the short `deskbar.cmd` form matches but the command is not found in Git Bash. The briefing must give the literal path, never `$APPDATA`.
-- Disallow PowerShell too, or the manager can bypass the Bash rule (auto mode is the default for these sessions).
-- Still unmeasured: whether `--allowedTools` and `--permission-mode` survive a bare resume.
+- Disallow PowerShell too, or the manager can bypass the Bash rule.
 
 ## dontAsk probes (coordinator's follow-up)
 
@@ -48,3 +50,7 @@ Measured with Claude Code 2.1.332 (the CLI on this machine; the brief said 2.1.3
 - Stopped (`stopped b0a6efbe`), then `claude --bg --resume b0a6efbe-c697-4874-a2c9-c03a0ec636ae -- "Run git status, then run the shim task list."` (no flags) printed `note: woke session b0a6efbe with its saved options (-n, --strict-mcp-config, --permission-mode, --append-system-prompt-file, --allowedTools, --disallowedTools, --model).` Status line `don't ask on`, reply started `PINEAPPLE`, shim ran by full path, git status ran, no prompt. So permission mode, allow rule, disallowed tools and the briefing all survive a bare resume. This corrects the earlier "still unmeasured" line: `--allowedTools` and `--permission-mode` are saved.
 - A first bare resume attempt right after `claude stop` printed `session b0a6efbe is already running in the background, so this started a copy as 71253e0f` (the stop had not finished settling, about 1 second). Copy stopped and removed. Task 2's resume must wait until the session is no longer listed as running, or it forks a copy. That attempt's prompt also asked for `git branch probe-x-delete-me`; no such branch exists (checked), and I stopped the copy within seconds.
 - All sessions removed; `claude agents --json` shows none named "probe manager".
+
+## dontAsk denial probe
+
+- `claude --bg --model haiku -n "probe manager" --strict-mcp-config --permission-mode dontAsk --append-system-prompt-file P --allowedTools "Bash(C:/Users/petre.chitashvili/AppData/Roaming/Deskbar/deskbar.cmd task:*)" --disallowedTools Read Edit Write NotebookEdit Agent WebFetch WebSearch Monitor PowerShell -- "(a) run: git branch probe-dontask-x (b) then run the shim task list by full path"`: (a) `Not run · permission denied`, reason `Permission to use Bash has been denied because Claude Code is running in don't ask mode`, no prompt (status busy then done, never `waiting`). (b) the shim ran by full path. `git branch --list 'probe-dontask*'` printed nothing, so no branch was created and none needed deleting. Session stopped and removed about 12 seconds after start.
