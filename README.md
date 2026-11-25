@@ -456,7 +456,7 @@ maximized windows aside as the bar does. A window that is not maximized but reac
 it opens or grows is moved out from under it, keeping its size where there is room and narrowed where
 there is not. Click the same button, or the x in the panel's toolbar, to close
 it. Drag its inner edge to change the width (460 to start, 360 at the least, half the screen at the most);
-Deskbar remembers the width and whether the panel was open. A search box (Ctrl+F, Esc clears it) finds
+Deskbar remembers the width and whether the panel was open. A search box (Ctrl+F; Esc or its x clears it) finds
 tasks by every word you type, in titles, status lines and questions. The "Claude working" chip shows only the
 tasks whose Claude session is working right now. Below 710 DIP wide the lines go slim, and the List and
 Matrix switch appears from 780 DIP. A full-screen app makes the panel step back until you leave it.

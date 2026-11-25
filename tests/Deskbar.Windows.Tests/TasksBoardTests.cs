@@ -794,6 +794,31 @@ public class TasksBoardTests
         Assert.Equal([disk, dishes], t.Window.Keys);
     });
 
+    // The clear button (×) in the search box: hidden while the box is empty, shown once it has text; a click empties the
+    // box, brings every task back, hides itself again and leaves the keyboard in the box for the next search.
+    [Fact]
+    public void The_search_clear_button_shows_with_text_and_clears_the_search() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var dishes = t.Tasks.AddNote("Dishwasher tablets", t.Gepha).Value.Id;
+        var disk = t.Tasks.AddNote("Runner disk", t.Gepha).Value.Id;
+        t.Controller.Show();
+        t.Window.Activate();
+        Assert.Equal(Visibility.Collapsed, t.Window.SearchClear.Visibility);
+
+        t.Window.SearchBox.Text = "runner";
+        Assert.Equal([disk], t.Window.Keys);
+        Assert.Equal(Visibility.Visible, t.Window.SearchClear.Visibility);
+
+        Click(t.Window.SearchClear);
+
+        Assert.Equal("", t.Window.SearchBox.Text);
+        Assert.Equal([disk, dishes], t.Window.Keys);
+        Assert.Equal(Visibility.Collapsed, t.Window.SearchClear.Visibility);
+        Assert.Equal(Visibility.Visible, t.Window.SearchPlaceholder.Visibility);
+        Assert.True(t.Window.SearchBox.IsKeyboardFocused);
+    });
+
     // The chip as the approved mockup draws it (Task 7 review, Important): the orange edge on or off, the normal chip fill
     // while off and the AskTint fill while on, never the other chips' blue selected edge.
     [Fact]
