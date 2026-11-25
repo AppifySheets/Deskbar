@@ -72,9 +72,10 @@ public sealed partial class RemoteControl
     ControlReply ClaudeWait(IReadOnlyList<string> rest) =>
         ControlArguments.ParseClaudeHook(rest)
             .Bind(request => ClaudeHookEvent.Parse(request.Json!, request.Entrypoint, request.Attended, request.Job).Map(hook => (request, hook)))
-            // The manager has no task, so no comment is ever addressed to it: it gets no waiter either (Task 6).
+            // The manager gets a waiter like any session: it has no task, so no comment is ever addressed to it, but
+            // Deskbar's event wakes reach a running, idle manager through its inbox (ManagerWaker; design
+            // docs/superpowers/specs/2026-11-25-manager-event-wakes-design.md). Step 1 left it out; step 2 needs it.
             .Match(found => inbox is { } box && !found.hook.Headless && manager.State.ClaudeTasksInEffect
-                    && !IsManagerFolder(Folder(found.request.From) ?? Folder(found.hook.Folder))
                     ? box.Register(found.hook.SessionId).Match(
                         waiter => Said($"{found.hook.SessionId} {waiter.Generation}\r\n"),
                         _ => Quiet)

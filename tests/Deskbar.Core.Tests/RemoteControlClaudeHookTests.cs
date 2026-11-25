@@ -1178,9 +1178,10 @@ public class RemoteControlClaudeHookTests
         Assert.False(tasks.WasAttended("mgr"));
     }
 
-    // The waiting Stop hook registers no waiter for the manager: it has no task, so no comment is ever for it.
+    // The waiting Stop hook registers a waiter for the manager too (event wakes, docs/superpowers/specs/2026-11-25-manager-
+    // event-wakes-design.md): Deskbar's wake of a running, idle manager goes into its inbox, as a comment goes to a task's.
     [Fact]
-    public void Manager_gets_no_comment_waiter()
+    public void Manager_gets_a_waiter_for_its_wakes()
     {
         try
         {
@@ -1191,8 +1192,8 @@ public class RemoteControlClaudeHookTests
                     })
                 .Execute(["claude-wait", "--entry", "claude-vscode", "--attended", "1", "--from", ManagerDir, "--json", HookOf("Stop", "mgr", null)]);
 
-            Assert.Equal("", reply.Output);
-            Assert.False(File.Exists(Path.Combine(InboxFolder, "mgr.gen")));
+            Assert.StartsWith("mgr ", reply.Output);
+            Assert.True(File.Exists(Path.Combine(InboxFolder, "mgr.gen")));
         }
         finally
         {

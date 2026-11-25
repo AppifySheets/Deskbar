@@ -210,4 +210,18 @@ public class ManagerSessionTests
         Assert.Contains("Free text always goes on stdin with - in its place, never quoted on the command line.", text);
         Assert.True(text.Split('\n').Length < 40);
     }
+
+    // Step 2 (docs/superpowers/specs/2026-11-25-manager-event-wakes-design.md): the briefing says what to do with a wake,
+    // whose message ManagerWakes starts with "Deskbar wake." and marks a repeat hand-back AGAIN.
+    [Fact]
+    public void Briefing_says_what_a_Deskbar_wake_asks_for()
+    {
+        var text = ManagerSession.Briefing(Shim);
+
+        Assert.Contains("\"Deskbar wake.\"", text);
+        Assert.Contains($"{Shim} task comment <id> -) to wake its session", text);
+        Assert.Contains("A task marked AGAIN gets no comment", text);
+        Assert.Contains("oldest and most blocking first, each with your suggested answer", text);
+        Assert.DoesNotContain("Nothing runs on a timer", text);
+    }
 }

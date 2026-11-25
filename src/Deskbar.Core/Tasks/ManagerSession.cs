@@ -155,7 +155,14 @@ public static class ManagerSession
         "Never paraphrase into a quote.",
         "Do not take a task of your own: never join one.",
         "Never use Monitor, loop, scheduled wakeups, subagents, file reading or transcript reading.",
-        "Nothing runs on a timer; you act only when the user messages you.",
+        "You act when the user messages you, or when a message starts with \"Deskbar wake.\" (event wakes, ManagerWakes).",
+        "On a Deskbar wake:",
+        $"- Each handed-back task not marked AGAIN: one comment ({shim} task comment <id> -) to wake its session.",
+        "  If its status line says the next move is the user's, tell it to run task ask with that move.",
+        "  Otherwise tell it to finish with task done, or carry on with the work.",
+        "- A task marked AGAIN gets no comment: it goes on your list.",
+        "- Then list what waits on the user, oldest and most blocking first, each with your suggested answer, a few lines.",
+        "- Run the overview only if the wake does not tell you enough.",
         "Answer in a few lines. Say what needs the user now, then what is stuck.",
         "Name a task by its title and short id, so the user can find it.");
 
