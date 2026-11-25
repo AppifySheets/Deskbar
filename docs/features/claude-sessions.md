@@ -53,6 +53,8 @@ Double-click a task's line, on the bar or in the tasks window, and you go to its
 - A session that has ended is resumed first, then its window opens.
 - A note with no session just takes you to its workspace. A double-click never starts a session.
 
+The first click of that double-click opens the task in the tasks panel. To go to the session without that, right-click a Claude task's line and pick **Open Claude**, right after Edit, on the bar and in the tasks window: it does what the double-click does, and the task stays as it was.
+
 Closing the terminal window only detaches it. The session keeps running, and the next double-click opens a new window on it.
 
 Switching to a session's terminal window works the other way round too: its task becomes the selected one, highlighted on the bar and in the tasks panel as if you had clicked it, so you can see which task the terminal in front belongs to. If its line is scrolled out of sight, on the bar or in the open tasks panel, the list scrolls just far enough to show it. It stays selected when you move on to another window. A VS Code window does not select anything, since one folder can hold the sessions of many tasks.

@@ -12,7 +12,8 @@ namespace Deskbar.App;
 // A TASK LINE'S RIGHT-CLICK MENU AND ITS IN-PLACE EDITOR ON THE BAR (Ruling 44; Petre: "task rightclick should let me
 // edit it first, first option"). Design: docs/superpowers/specs/2026-11-22-tasks-board-design.md, "The bar".
 //
-// Right-clicking a task line opens its menu, Edit first: Edit, "Start Claude on this" (Task 9, when the App wires it),
+// Right-clicking a task line opens its menu, Edit first: Edit, "Open Claude" on a Claude task (task 7f61af2e, the
+// double-click's go without the click that opens the task), "Start Claude on this" (Task 9, when the App wires it),
 // then the line's other actions (the two flags, Move to workspace…, Close). Held open the way the bar's other menus are (HoldFadeWhileOpen): the bar neither fades nor
 // repaints under it.
 //
@@ -69,6 +70,16 @@ public partial class FloatingBar
         if (taskService is null || line is null || line.Closing) return null;
         var menu = new ContextMenu { Placement = PlacementMode.MousePoint };
         menu.Items.Add(TaskMenuItem("Edit", () => BeginTaskEdit(id)));
+        // OPEN CLAUDE (task 7f61af2e; Petre: "make it possible to open claude without opening the task first"). A line's
+        // single click opens the task in the tasks panel (Ruling 54), so the double-click that reaches the session opened
+        // the panel on its first press, and the panel's strip moved every window on the screen on the way. This item is
+        // the double-click's go (OnTaskLineGo: its workspace, then its session's window through GoToTask) with no click
+        // on the line, so nothing opens first. Only on a Claude task: a note has no session, and its go is the workspace
+        // switch a row of the bar already gives. Run once this menu has closed, so the window it brings forward is not
+        // brought forward under an open menu.
+        if (line.Claudes)
+            menu.Items.Add(TaskMenuItem(TasksWindow.OpenClaudeText, () => Dispatcher.BeginInvoke(() => OnTaskLineGo(line),
+                System.Windows.Threading.DispatcherPriority.Input)));
         // Task 9: handing the task to Claude, right after Edit (the spec, "Where the clicks are"). Run once this menu has
         // closed, as "Move to workspace…" is: it may ask first, and may open a pick list of folders at the pointer, which
         // holds the bar still the way the bar's own menus do.
