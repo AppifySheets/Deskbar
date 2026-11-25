@@ -4307,6 +4307,35 @@ public class TasksBoardTests
         Assert.Equal("↳ Release 2.6 › Write the notes", RunsOf(TitleOf(t.Window, child.Id)));
     });
 
+    // Task 9e85caee (Petre's screenshot: a done "research" subtask's arrow stood further right than its siblings', and
+    // "what's up with research being nested further than the other tasks?"). The done tick used to be docked in front of
+    // the title, so in front of its "↳". A done subtask's title now starts with the arrow, and the tick comes right after
+    // it, in the title; nothing is docked before the title, so the arrow lines up with every sibling's.
+    [Fact]
+    public void A_done_subtasks_tick_comes_after_its_arrow_so_the_arrow_lines_up() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var parent = t.Tasks.AddNote("Ship the release", t.Gepha).Value;
+        var open = t.Tasks.AddNote("Write the notes", t.Gepha, parent: parent.Id).Value;
+        var done = t.Tasks.AddNote("Research it", t.Gepha, parent: parent.Id).Value;
+        Assert.True(t.Tasks.MarkDone(done.Id).IsSuccess);
+        t.Controller.Show();
+        t.Window.UpdateLayout();
+
+        var title = TitleOf(t.Window, done.Id);
+        var inlines = title.Inlines.ToArray();
+        Assert.StartsWith("↳", Assert.IsType<System.Windows.Documents.Run>(inlines[0]).Text, StringComparison.Ordinal);
+        var tick = Assert.IsType<System.Windows.Documents.InlineUIContainer>(inlines[1]);
+        Assert.Equal(TaskStatusMarks.DoneTickTag, ((FrameworkElement)tick.Child).Tag);
+        Assert.True(HasDoneTick(LineOf(t.Window, done.Id)));
+        // Measured, not only ordered: both arrows start at the same x on the line.
+        var line = LineOf(t.Window, done.Id);
+        var openLine = LineOf(t.Window, open.Id);
+        var arrowX = title.TranslatePoint(new Point(0, 0), line).X;
+        var openArrowX = TitleOf(t.Window, open.Id).TranslatePoint(new Point(0, 0), openLine).X;
+        Assert.Equal(openArrowX, arrowX, 1);
+    });
+
     // Follow-up: the List draws a subtask right under its parent, in the parent's group, whatever its own flags.
     static IReadOnlyList<Guid> ListOrder(TasksWindow window) =>
         Inside(window).OfType<Button>().Where(b => b.Tag is Guid).Select(b => (Guid)b.Tag).ToArray();
