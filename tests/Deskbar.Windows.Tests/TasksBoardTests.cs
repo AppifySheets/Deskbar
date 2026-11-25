@@ -3099,6 +3099,65 @@ public class TasksBoardTests
         Assert.Equal(TextTrimming.CharacterEllipsis, Detail().TextTrimming);
     });
 
+    // Task e91f8aa5 (Petre, of a waiting task's nine-line question filling the panel: "limit how much can fit here.
+    // expanding should open a detailview"): an open line shows a long question and a long description only to
+    // TasksWindow.OpenLineShown lines each, cut at a line's edge, and "Show all in window" under them opens the task's window.
+    [Fact]
+    public void An_open_lines_long_question_stops_at_a_few_lines_and_opens_its_window() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var id = t.Tasks.Create("Accounts case", t.Gepha, Session("s1")).Value.Id;
+        t.Tasks.Describe(id, "A brief that runs on.\n\n" + string.Join("\n\n", Enumerable.Range(1, 12).Select(n => $"Paragraph {n} of the brief.")));
+        t.Tasks.Ask(id, string.Join(" ", Enumerable.Repeat("Which accounts do we debit and credit offline, and what do we send where?", 20)));
+        t.Controller.Show();
+        t.Controller.ToggleThread(id);
+        t.Window.UpdateLayout();
+
+        var line = LineOf(t.Window, id);
+        var caps = Inside(line).OfType<HeightCap>().ToArray();
+        // One around the description, one around the question, and both cut something.
+        Assert.Equal(2, caps.Length);
+        Assert.All(caps, cap => Assert.True(cap.Overflowing));
+        var detail = Inside(line).OfType<TextBlock>().Single(b => Equals(b.Tag, TasksWindow.DetailTag));
+        var cap = caps.Single(c => ReferenceEquals(c.Child, detail));
+        // The question is far taller than what shows, and what shows is the cap.
+        Assert.True(detail.ActualHeight > cap.ActualHeight * 2, $"the question is {detail.ActualHeight} DIP, its cap {cap.ActualHeight}");
+        Assert.Equal(cap.Cap, cap.ActualHeight, 0.5);
+        // The description's cut falls between two of its lines, never through one, though its paragraphs are spaced
+        // (review of this change: a cut at the plain cap showed 3 lines and a sliver of the 4th). Its real lines, walked.
+        var description = Inside(line).OfType<RichTextBox>().Single();
+        var shown = caps.Single(c => ReferenceEquals(c.Child, description)).ActualHeight;
+        var start = description.Document.ContentStart.GetInsertionPosition(LogicalDirection.Forward);
+        var lines = Enumerable.Range(0, 40).Select(n => start.GetLineStartPosition(n)).TakeWhile(p => p is not null)
+            .Select(p => p!.GetCharacterRect(LogicalDirection.Forward)).ToArray();
+        Assert.True(lines.Length > TasksWindow.OpenLineShown, $"the description has {lines.Length} lines");
+        Assert.DoesNotContain(lines, l => l.Top < shown - 0.5 && l.Bottom > shown + 0.5);
+        Assert.Contains(lines, l => l.Bottom <= shown + 0.5 && l.Top > 0);
+
+        var showAll = Inside(line).OfType<Button>().Single(b => Equals(b.Tag, TasksWindow.ShowAllTag));
+        Assert.Equal(Visibility.Visible, showAll.Visibility);
+        Assert.False(t.Controller.HasWindow(id));
+        Click(showAll);
+        Assert.True(t.Controller.HasWindow(id));
+    });
+
+    // A short question and description on an open line show whole, with no "Show all in window" under them.
+    [Fact]
+    public void An_open_lines_short_question_shows_whole_without_a_link() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var id = t.Tasks.Create("Tasks redesign", t.Gepha, Session("s1")).Value.Id;
+        t.Tasks.Describe(id, "One line of brief.");
+        t.Tasks.Ask(id, "Merge it?");
+        t.Controller.Show();
+        t.Controller.ToggleThread(id);
+        t.Window.UpdateLayout();
+
+        var line = LineOf(t.Window, id);
+        Assert.All(Inside(line).OfType<HeightCap>(), cap => Assert.False(cap.Overflowing));
+        Assert.Equal(Visibility.Collapsed, Inside(line).OfType<Button>().Single(b => Equals(b.Tag, TasksWindow.ShowAllTag)).Visibility);
+    });
+
     // Task d560f3eb ("misaligned text"): a waiting task's question stood in the title's column, a few letters wide, in a
     // narrow panel. Before the fix, an open line's question was 29 DIP wide and 629 tall at 360 DIP, 129 wide at 460 and
     // 211 at 542 (measured here). Now it spans the line under the title, from the title's left edge to the line's right
