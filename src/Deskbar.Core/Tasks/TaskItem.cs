@@ -25,9 +25,10 @@ public enum TaskStatus { Backlog, InProgress, WaitingOnYou, Done, Closed }
 // DONE WAITS ON PETRE TOO (task eefb986a, 2026-11-25, Petre: "tasks marked as done should be in the waiting on me
 // section"). A Done task is finished work that sits until he closes it, so it is his next move just as a question is.
 // Both statuses are pinned above Covey's quadrants, in the one block the bar and the tasks panel caption "Waiting on
-// you": the questions first, the latest ask on top, then the Done tasks, the latest finished on top (TaskBoard.Pinned).
-// A pinned task is out of its quadrant's manual order (TaskBoard.Group) and cannot be dragged, so it keeps its Rank
-// untouched and comes back to the same place in its quadrant when it goes back to In progress.
+// you": the questions first, then the Done tasks (TaskBoard.Pinned), each part a new one on top and otherwise in the
+// order Petre drags it to (TaskItem.Pin; task f41d7857). A pinned task is out of its quadrant's manual order
+// (TaskBoard.Group), so it keeps its Rank untouched and comes back to the same place in its quadrant when it goes back
+// to In progress.
 
 /// <summary>Which statuses are pinned above the quadrants, in the "Waiting on you" block (see the comment above).</summary>
 public static class TaskStatusPinning
@@ -113,8 +114,9 @@ public sealed record TaskComment(Guid Id, Maybe<string> SessionId, DateTimeOffse
 /// One task. <see cref="WorkspaceId"/> is none for a free task. <see cref="StatusLine"/> is the short line a session
 /// keeps current ("waiting for CI on #398"), "" when there is none. <see cref="Question"/> is what a session asked
 /// Petre while the task is <see cref="TaskStatus.WaitingOnYou"/>. <see cref="UpdatedAt"/> moves on every change so a
-/// later sync can tell which copy is newer. <see cref="Raised"/> orders the Waiting on you block (the latest ask on
-/// top): set when the task is made, when a session asks and when the task becomes Done, and by nothing else.
+/// later sync can tell which copy is newer. <see cref="Raised"/> is set when the task is made, when a session asks and
+/// when the task becomes Done, and by nothing else; the pinned block is ordered by <see cref="Pin"/>, with Raised
+/// breaking ties (the latest on top, the block's whole order before it could be dragged).
 /// Everything below that block is ordered by the quadrant its two flags name and its <see cref="Rank"/> in it
 /// (TaskOrder.cs), so a status line, a comment or a session ending never moves a line (spec, "The bar's order").
 /// </summary>
@@ -146,6 +148,18 @@ public sealed record TaskItem(
     /// means anything; the numbers themselves are arbitrary (TaskBoard.Place takes the middle of two neighbours).
     /// </summary>
     public double Rank { get; init; }
+
+    /// <summary>
+    /// The task's place in its part of the pinned "Waiting on you" block, the questions or the Done tasks (task f41d7857,
+    /// Petre: "drag and drop of tasks waiting on me doesn't work ... it should"): smaller is higher, like
+    /// <see cref="Rank"/>, and only the order of the pins within one part means anything. Joining a part (a session's
+    /// ask, Claude's finish, a status set by hand) puts the task on top of it (TaskBoard.TopPin); a drag within the part
+    /// (TaskBoard.PlacePinned) takes the middle of its new neighbours. Its quadrant rank is left alone meanwhile, so the
+    /// task goes back to where it was in its quadrant once it is answered or put back to work. Two equal pins (tasks
+    /// made in code, a file from before the field) fall back to the latest raised first, the block's order before it
+    /// could be dragged.
+    /// </summary>
+    public double Pin { get; init; }
 
     /// <summary>
     /// The goal this task counts toward, weekly or monthly, or none (goals spec,

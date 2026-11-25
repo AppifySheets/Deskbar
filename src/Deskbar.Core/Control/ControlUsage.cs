@@ -79,7 +79,7 @@ public static class ControlUsage
                 + "      in (I urgent and important, II important, III urgent, IV neither)"),
             new("task", "order <id> top|end|<n>",
                 "move a task within its quadrant, as a drag does: to the top, the end or place n counting from 1.\n"
-                + "      A task waiting on you stays on top until it is answered, a done one until it is closed"),
+                + "      A task waiting on you or done moves among the waiting or the done tasks, on top"),
             // Task 9 (docs/superpowers/specs/2026-11-23-tasks-open-claude-sessions-design.md): the twins of a line's
             // double-click, "Start Claude on this" and the thread's Open (RemoteControl.Tasks.cs, TaskSessionCommands).
             new("task", "go <id>",

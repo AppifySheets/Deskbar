@@ -12,7 +12,8 @@ namespace Deskbar.Core.Tasks;
 //   Important        I           II
 //   Not important    III         IV
 //
-// The open tasks are shown Waiting on you first (pinned, in its own automatic order), then quadrant I, II, III and IV,
+// The open tasks are shown Waiting on you first (pinned: the questions, then the Done tasks, each a new one on top and otherwise in the order
+// Petre drags it to, TaskItem.Pin), then quadrant I, II, III and IV,
 // each in an order Petre sets by dragging. That order is a number on each task, its Rank: smaller is higher. TaskBoard
 // keeps the rules (TaskBoard.Place, SetFlag, Group); this file holds the vocabulary.
 //

@@ -14,8 +14,9 @@ namespace Deskbar.App;
 //
 // WHAT A DROP MEANS is TaskDropTarget's rule, shared with the tasks window: before or after the line under the pointer,
 // in that line's quadrant, so a line dropped among another quadrant's lines takes that quadrant's flags. Waiting on
-// you is pinned: its lines cannot be dragged, and nothing drops above them. A closed line in its undo window is not a
-// target either; the nearest open line answers. Below the last line is after the last line. A quadrant with no line on
+// you (its questions and its Done tasks) is pinned: nothing else drops above its lines, and its own lines move within
+// their part of it (task f41d7857; TaskDropTarget's header). A closed line in its undo window is not a target either;
+// the nearest open line answers. Below the last line is after the last line. A quadrant with no line on
 // show cannot be dropped into on the bar: the toggles set flags, and the window's Matrix has a cell for each quadrant.
 //
 // THE BAR'S DRAG RULES, the arrange drag's (FloatingBar.ArrangeDrag.cs) and #48's (ClickTrace):
@@ -103,13 +104,14 @@ public partial class FloatingBar
     }
 
     /// <summary>
-    /// A press on a line: arms a drag of its task. A pinned line (waiting on Petre or Done) or one closed in its undo window arms nothing;
+    /// A press on a line: arms a drag of its task, a pinned one (waiting on Petre or Done) too since task f41d7857. One
+    /// closed in its undo window arms nothing;
     /// so does a list with no service. Nothing is drawn and nothing is captured yet.
     /// </summary>
     internal void TaskDragPress(Guid id, Point inList)
     {
         taskDrag = null;
-        if (taskService?.Board.Tasks.FirstOrDefault(t => t.Id == id) is not { IsOpen: true } task || task.Status.IsPinned()) return;
+        if (taskService?.Board.Tasks.FirstOrDefault(t => t.Id == id) is not { IsOpen: true } task) return;
         if (LineButtonOf(id) is not { } line || ((TaskLine)line.Tag).Closing) return;
         taskDrag = new TaskDragState(id, inList, Started: false, line);
         if (ClickTrace.On) ClickTrace.Write($"task press {task.Title}");
@@ -213,14 +215,15 @@ public partial class FloatingBar
             .Select(b => (TaskLine)b.Tag is var line
                 ? new TaskDropTarget.Drawn(new TaskDropTarget.Placed(line.Id, line.Quadrant, line.Status.IsPinned(),
                     new Rect(b.TranslatePoint(new Point(0, 0), taskLinesPanel), b.RenderSize))
-                    { TakesChild = parents.Contains(line.Id) && !line.Status.IsPinned() }, line.ShownIn is not null)
+                    { TakesChild = parents.Contains(line.Id), Pinned = TaskDropTarget.PartOf(line.Status) }, line.ShownIn is not null)
                 : null)
             .OfType<TaskDropTarget.Drawn>()
             .ToList();
         // A nested subtask released inside its own parent's block stays where it is.
         if (TaskDropTarget.InOwnBlock(drawn, dragged, inList)) return null;
-        var own = taskService.Board.Tasks.FirstOrDefault(t => t.Id == dragged)?.Quadrant ?? Quadrant.IV;
-        return TaskDropTarget.At(TaskDropTarget.Anchors(drawn), [], own, inList) is { } drop
+        var task = taskService.Board.Tasks.FirstOrDefault(t => t.Id == dragged);
+        return TaskDropTarget.At(TaskDropTarget.Anchors(drawn), [], task?.Quadrant ?? Quadrant.IV, inList,
+                task is null ? TaskDropTarget.Part.None : TaskDropTarget.PartOf(task.Status)) is { } drop
             ? new TaskDropPreview(drop.Quadrant, drop.Place, drop.LineY) { Into = drop.Into, IntoBounds = drop.IntoBounds }
             : null;
     }

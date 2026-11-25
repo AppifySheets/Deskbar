@@ -4,7 +4,7 @@ namespace Deskbar.Core.Tasks;
 
 // THE TASKS WINDOW'S GROUPING AND FILTERS, pure. Design: docs/superpowers/specs/2026-11-22-tasks-board-design.md,
 // "The window", with Task 12's order (progress.md Rulings 25 and 28): the window's List view is grouped as the bar is,
-// Waiting on you first (the latest ask on top, then the Done tasks), then Covey's quadrants I to IV, each in Petre's manual order
+// Waiting on you first (the questions, then the Done tasks, each in its own order, TaskBoard.Pinned), then Covey's quadrants I to IV, each in Petre's manual order
 // (TaskBoard.Group), each captioned in Covey's words. Filters by status (Closed among them) and by workspace.
 //
 // A status filter keeps the groups: "In progress" shows the quadrants with only their tasks in progress, in the
@@ -112,8 +112,8 @@ public static class TaskViews
         [(TaskGroupKind.I, Quadrant.I), (TaskGroupKind.II, Quadrant.II), (TaskGroupKind.III, Quadrant.III), (TaskGroupKind.IV, Quadrant.IV)];
 
     /// <summary>
-    /// The groups the window draws for a filter, empty groups left out (see the header): Waiting on you by its latest
-    /// ask, each quadrant in its manual order, the closed tasks the latest closed first.
+    /// The groups the window draws for a filter, empty groups left out (see the header): Waiting on you in its order
+    /// (TaskBoard.Pinned), each quadrant in its manual order, the closed tasks the latest closed first.
     /// </summary>
     public static IReadOnlyList<TaskGroup> Grouped(TaskBoard board, TaskFilter filter, TaskWorkspaceFilter workspaceFilter, TaskAssigneeFilter? who = null) =>
         Grouped(board, filter, new Admit(workspaceFilter, who ?? TaskAssigneeFilter.All));
@@ -264,18 +264,17 @@ public static class TaskViews
 
     /// <summary>
     /// The List's groups with every subtask moved to right after its parent (SubtaskOrder), into the parent's group, when
-    /// both are shown and the parent is in a quadrant. A subtask waiting on Petre stays pinned, and nothing moves into the
-    /// Waiting on you or Closed groups. A group the move empties is left out. <c>Moved</c> is the subtasks drawn under
-    /// their parent, whose line then needs no parent's name. The Matrix keeps each task in its own quadrant's cell.
+    /// both are shown (<see cref="NestsUnder"/> says which pairs). A group the move empties is left out. <c>Moved</c> is
+    /// the subtasks drawn under their parent, whose line then needs no parent's name. The Matrix keeps each task in its
+    /// own quadrant's cell.
     /// </summary>
     public static (IReadOnlyList<TaskGroup> Groups, IReadOnlySet<Guid> Moved) UnderParents(IReadOnlyList<TaskGroup> groups)
     {
         var flat = groups.SelectMany(g => g.Tasks.Select(t => (Task: t, g.Kind))).ToArray();
         // GroupBy: a duplicate id (a hand-edited file) must not throw here (review of #467, finding 5).
         var kindOf = flat.GroupBy(x => x.Task.Id).ToDictionary(g => g.Key, g => g.First().Kind);
-        bool InQuadrant(TaskGroupKind kind) => kind is not (TaskGroupKind.WaitingOnYou or TaskGroupKind.Closed);
         bool Movable((TaskItem Task, TaskGroupKind Kind) x) =>
-            InQuadrant(x.Kind) && x.Task.ParentId.Map(p => kindOf.TryGetValue(p, out var k) && InQuadrant(k)).GetValueOrDefault(false);
+            x.Task.ParentId.Map(p => kindOf.TryGetValue(p, out var k) && NestsUnder(x.Kind, k)).GetValueOrDefault(false);
         var moved = SubtaskOrder.Nested(flat, x => x.Task.Id, x => x.Task.ParentId, Movable);
         var ordered = SubtaskOrder.UnderParents(flat, x => x.Task.Id, x => x.Task.ParentId, Movable);
         // A moved subtask belongs to its parent's group; every other task to its own.
@@ -283,6 +282,19 @@ public static class TaskViews
         return (groups.Select(g => new TaskGroup(g.Kind, placed.Where(x => x.Kind == g.Kind).Select(x => x.Task).ToArray()))
             .Where(g => g.Tasks.Count > 0).ToArray(), moved);
     }
+
+    /// <summary>
+    /// Whether a subtask in group <paramref name="own"/> is drawn under its parent in group <paramref name="parent"/>, the
+    /// rule the bar's FloatingBar.UnderParents keeps too. Under a parent in a quadrant or in the pinned block (waiting on
+    /// Petre, or Done), yes: a task dropped into a pinned one (task f41d7857, Petre: "neither moving them into
+    /// each-other as subtasks. it should") is drawn under it in the pinned block, as it would be under any parent. Two
+    /// exceptions. A pinned subtask stays in the pinned block unless its parent is there too: the block is what makes a
+    /// question (or finished work) findable, and drawn under a plain parent it would sink below the quadrants' lines. And
+    /// nothing moves out of or into the Closed group, which is history.
+    /// </summary>
+    public static bool NestsUnder(TaskGroupKind own, TaskGroupKind parent) =>
+        own != TaskGroupKind.Closed && parent != TaskGroupKind.Closed
+        && (own != TaskGroupKind.WaitingOnYou || parent == TaskGroupKind.WaitingOnYou);
 
     // --- subtasks folded into their parent (task 173ef268, the tasks panel's "Subtasks" checkbox) ----------------------
     //
@@ -294,11 +306,12 @@ public static class TaskViews
 
     /// <summary>
     /// The List's groups with every subtask drawn under its parent (<paramref name="nested"/>, from
-    /// <see cref="UnderParents"/>) left out. UnderParents never nests a subtask waiting on Petre or a closed one, so those
-    /// stay. A group the folding empties is left out, as UnderParents leaves out one its move empties.
+    /// <see cref="UnderParents"/>) left out, except one waiting on Petre. UnderParents never nests a closed one, and it
+    /// nests a subtask waiting on Petre only under a parent that is pinned too (task f41d7857), where it stays on show,
+    /// under that parent. A group the folding empties is left out, as UnderParents leaves out one its move empties.
     /// </summary>
     public static IReadOnlyList<TaskGroup> FoldSubtasks(IReadOnlyList<TaskGroup> groups, IReadOnlySet<Guid> nested) =>
-        groups.Select(g => g with { Tasks = g.Tasks.Where(t => !nested.Contains(t.Id)).ToArray() })
+        groups.Select(g => g with { Tasks = g.Tasks.Where(t => !nested.Contains(t.Id) || t.Status == TaskStatus.WaitingOnYou).ToArray() })
             .Where(g => g.Tasks.Count > 0)
             .ToArray();
 

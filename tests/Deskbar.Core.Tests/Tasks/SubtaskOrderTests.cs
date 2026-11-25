@@ -108,8 +108,10 @@ public class SubtaskOrderTests
         Assert.Equal([child.Id], moved);
     }
 
+    // Task f41d7857 ("neither moving them into each-other as subtasks. it should"): a parent waiting on Petre takes its
+    // subtasks under it in the pinned block, the waiting ones and the plain ones alike.
     [Fact]
-    public void In_the_panel_waiting_stays_waiting_on_either_side()
+    public void In_the_panel_a_waiting_parent_takes_its_subtasks_into_the_pinned_block()
     {
         var parent = Task("Parent", status: TaskStatus.WaitingOnYou);
         var child = Task("Child", parent.Id);
@@ -118,8 +120,23 @@ public class SubtaskOrderTests
 
         var (nested, moved) = TaskViews.UnderParents(groups);
 
-        Assert.Equal(["Asking", "Parent"], Titles(nested.Single(g => g.Kind == TaskGroupKind.WaitingOnYou).Tasks));
-        Assert.Equal(["Child"], Titles(nested.Single(g => g.Kind == TaskGroupKind.IV).Tasks));
+        Assert.Equal(["Parent", "Asking", "Child"], Titles(nested.Single(g => g.Kind == TaskGroupKind.WaitingOnYou).Tasks));
+        Assert.DoesNotContain(nested, g => g.Kind == TaskGroupKind.IV);
+        Assert.Equal([askingChild.Id, child.Id], moved.OrderBy(id => id == child.Id));
+    }
+
+    // A question stays findable: a subtask waiting on Petre is not drawn under a plain parent, below every other question.
+    [Fact]
+    public void In_the_panel_a_waiting_subtask_of_a_plain_parent_stays_in_the_pinned_block()
+    {
+        var parent = Task("Parent");
+        var askingChild = Task("Asking", parent.Id, TaskStatus.WaitingOnYou);
+        var groups = new[] { new TaskGroup(TaskGroupKind.WaitingOnYou, [askingChild]), new TaskGroup(TaskGroupKind.IV, [parent]) };
+
+        var (nested, moved) = TaskViews.UnderParents(groups);
+
+        Assert.Equal(["Asking"], Titles(nested.Single(g => g.Kind == TaskGroupKind.WaitingOnYou).Tasks));
+        Assert.Equal(["Parent"], Titles(nested.Single(g => g.Kind == TaskGroupKind.IV).Tasks));
         Assert.Empty(moved);
     }
 
@@ -158,6 +175,22 @@ public class SubtaskOrderTests
         Assert.Equal([TaskGroupKind.WaitingOnYou, TaskGroupKind.IV], folded.Select(g => g.Kind));
         Assert.Equal(["Asking"], Titles(folded[0].Tasks));
         Assert.Equal(["Parent", "Orphan"], Titles(folded[1].Tasks));
+    }
+
+    // Task f41d7857: a question nested under a parent that waits on you too is drawn under it in the pinned block, and
+    // folding still never hides it; a plain subtask under that parent folds as any other.
+    [Fact]
+    public void Unticked_a_question_nested_under_a_waiting_parent_stays_on_show()
+    {
+        var parent = Task("Parent", status: TaskStatus.WaitingOnYou);
+        var asking = Task("Asking", parent.Id, TaskStatus.WaitingOnYou);
+        var plain = Task("Plain", parent.Id);
+        var groups = new[] { new TaskGroup(TaskGroupKind.WaitingOnYou, [parent, asking]), new TaskGroup(TaskGroupKind.IV, [plain]) };
+        var (under, nested) = TaskViews.UnderParents(groups);
+
+        var folded = TaskViews.FoldSubtasks(under, nested);
+
+        Assert.Equal(["Parent", "Asking"], Titles(Assert.Single(folded).Tasks));
     }
 
     // The Matrix draws no subtask under its parent, so the rule is said in its own terms: an open subtask whose parent is

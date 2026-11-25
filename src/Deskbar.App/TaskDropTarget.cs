@@ -8,8 +8,8 @@ namespace Deskbar.App;
 //
 // The pointer is over a line (the nearest one, between lines): over its top half the task goes just BEFORE it, over
 // its bottom half just AFTER it, in that line's quadrant, so a drop among another quadrant's lines takes that
-// quadrant's flags (TaskBoard.Place sets them). Waiting on you, its questions and its Done tasks, is pinned: nothing drops above or among its lines; a
-// drop on one goes to the TOP of `pinnedTo`, the dragged task's own quadrant on the bar and in the List, the cell's
+// quadrant's flags (TaskBoard.Place sets them). Waiting on you, its questions and its Done tasks, is pinned: no other
+// line drops above or among its lines; a drop on one goes to the TOP of `pinnedTo`, the dragged task's own quadrant on the bar and in the List, the cell's
 // quadrant in the Matrix. It never takes the quadrant of whatever line happens to sit under the block (review of
 // 4fc4441..a1acd60, item 4: a plain task dragged to the top quietly became important and urgent). A caption of an empty place (the window's Matrix cell with no line) is given as an
 // `Empty` area: a drop inside it goes to the top of that quadrant.
@@ -19,13 +19,37 @@ namespace Deskbar.App;
 // (Placed.TakesChild, which the caller works out from TaskBoard.ParentCandidates) is split in three bands: over its
 // middle half the drop makes the dragged task its subtask (Drop.Into), over its top or bottom quarter the drop reorders
 // as above. The bands are the way file trees and Todoist tell "into" from "beside", and they keep a reorder a reorder
-// on every line that cannot take a child (a subtask, a pinned task waiting on Petre or Done, the dragged task itself, any line while a
-// task with subtasks of its own is dragged).
+// on every line that cannot take a child (a subtask, the dragged task itself, any line while a task with subtasks of
+// its own is dragged).
+//
+// A PINNED LINE IS DRAGGED TOO (task f41d7857, Petre: "drag and drop of tasks waiting on me doesn't work, neither
+// moving them into each-other as subtasks. it should"). It takes a child like any line, and it can be nested into any
+// line that takes one. Otherwise it moves within its own part of the pinned block, the questions or the Done tasks
+// (the questions stay above the Done tasks, task eefb986a): before or after the line of its part under the pointer;
+// above its part, before the part's first line; anywhere below it, after the part's last line. Such a drop is said in
+// `pinnedTo`, the dragged task's own quadrant, which TaskBoard.Place reads as a place in its part. The window's Matrix
+// adds the other cells as areas, so a pinned task dropped on one takes that cell's flags.
 internal static class TaskDropTarget
 {
-    /// <summary>A line on show: its task, its quadrant, whether it waits on Petre, and its box in the drag's coordinates.</summary>
+    /// <summary>
+    /// The parts of the pinned block a line can be in (task f41d7857): none (a line in a quadrant), the questions waiting
+    /// on Petre, or the Done tasks under them.
+    /// </summary>
+    internal enum Part { None, Questions, Done }
+
+    /// <summary>The part of the pinned block a task of this status is in.</summary>
+    internal static Part PartOf(TaskStatus status) =>
+        status switch { TaskStatus.WaitingOnYou => Part.Questions, TaskStatus.Done => Part.Done, _ => Part.None };
+
+    /// <summary>
+    /// A line on show: its task, its quadrant, whether it is pinned (waiting on Petre or Done), and its box in the drag's
+    /// coordinates.
+    /// </summary>
     internal sealed record Placed(Guid Id, Quadrant Quadrant, bool Waiting, Rect Bounds)
     {
+        /// <summary>Which part of the pinned block the line is in, for a pinned line dragged among them (see the header).</summary>
+        public Part Pinned { get; init; }
+
         /// <summary>Whether a drop on this line's middle makes the dragged task its subtask (see the header).</summary>
         public bool TakesChild { get; init; }
 
@@ -79,20 +103,41 @@ internal static class TaskDropTarget
         public Rect IntoBounds { get; init; }
     }
 
-    /// <summary>The drop for a pointer at <paramref name="at"/>, or none when no line or area can answer.</summary>
-    internal static Drop? At(IReadOnlyList<Placed> lines, IReadOnlyList<Area> areas, Quadrant pinnedTo, Point at)
+    /// <summary>
+    /// The drop for a pointer at <paramref name="at"/>, or none when no line or area can answer. <paramref name="dragged"/>
+    /// is the part of the pinned block the dragged task is in, so a pinned one moves within its part (see the header).
+    /// </summary>
+    internal static Drop? At(IReadOnlyList<Placed> lines, IReadOnlyList<Area> areas, Quadrant pinnedTo, Point at, Part dragged = Part.None)
     {
         if (areas.FirstOrDefault(a => a.Bounds.Contains(at)) is { } area)
             return new Drop(area.Quadrant, TaskPlace.Top, area.Bounds.Top);
         if (lines.Count == 0) return null;
 
         var nearest = lines.OrderBy(p => Distance(p.Bounds, at.Y)).First();
-        if (nearest.Waiting) return new Drop(pinnedTo, TaskPlace.Top, TopOf(lines, pinnedTo));
+        // Into before anything else, so a pinned line takes a child like any other line.
         if (nearest.TakesChild && InMiddle(nearest.Bounds, at.Y))
             return new Drop(nearest.Quadrant, TaskPlace.Top, nearest.Bounds.Top) { Into = nearest.Id, IntoBounds = nearest.Bounds };
-        return at.Y < nearest.Bounds.Top + nearest.Bounds.Height / 2
-            ? new Drop(nearest.Quadrant, TaskPlace.Before(nearest.Id), nearest.Bounds.Top)
-            : new Drop(nearest.Quadrant, TaskPlace.After(nearest.Id), nearest.BlockBottom ?? nearest.Bounds.Bottom);
+        if (dragged != Part.None) return InPart(lines, nearest, dragged, pinnedTo, at);
+        if (nearest.Waiting) return new Drop(pinnedTo, TaskPlace.Top, TopOf(lines, pinnedTo));
+        return Beside(nearest, nearest.Quadrant, at);
+    }
+
+    // Just before the line (pointer over its top half) or just after it and the block it heads (bottom half).
+    static Drop Beside(Placed line, Quadrant quadrant, Point at) =>
+        at.Y < line.Bounds.Top + line.Bounds.Height / 2
+            ? new Drop(quadrant, TaskPlace.Before(line.Id), line.Bounds.Top)
+            : new Drop(quadrant, TaskPlace.After(line.Id), line.BlockBottom ?? line.Bounds.Bottom);
+
+    // A pinned task's place in its part of the pinned block, said in its own quadrant (`pinnedTo`), which TaskBoard.Place
+    // reads as a place in that part: beside the line of its part under the pointer; above the part, before its first
+    // line; below it, after its last line. None when no line of its part is on show to say where the part is.
+    static Drop? InPart(IReadOnlyList<Placed> lines, Placed nearest, Part dragged, Quadrant pinnedTo, Point at)
+    {
+        if (nearest.Pinned == dragged) return Beside(nearest, pinnedTo, at);
+        var part = lines.Where(p => p.Pinned == dragged).OrderBy(p => p.Bounds.Top).ToList();
+        return part.Count == 0 ? null
+            : at.Y < part[0].Bounds.Top ? new Drop(pinnedTo, TaskPlace.Before(part[0].Id), part[0].Bounds.Top)
+            : new Drop(pinnedTo, TaskPlace.After(part[^1].Id), part[^1].BlockBottom ?? part[^1].Bounds.Bottom);
     }
 
     // Where the top of `quadrant` is among the lines on show, so the drop line is drawn where the task will land (review

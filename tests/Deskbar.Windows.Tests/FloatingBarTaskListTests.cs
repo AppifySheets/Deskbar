@@ -2149,26 +2149,94 @@ public class FloatingBarTaskListTests
         Assert.Equal(["n1", "n2", "n3"], t.Tasks.Board.Pile().Select(x => x.Title));
     });
 
-    // Waiting on you lines are pinned: a press on one arms no drag, and nothing drops above them (a drop on one lands
-    // under the block, at the top of the first group below it).
+    // Task f41d7857 ("drag and drop of tasks waiting on me doesn't work ... it should"): a waiting line is dragged within
+    // the Waiting on you block, and anywhere below the block it lands at the block's foot, since the block stays on top
+    // until answered. Nothing else drops above the block (a drop on its edge lands at the top of the task's quadrant).
     [Fact]
-    public void Waiting_lines_cannot_be_dragged_and_nothing_drops_above_them() => StaThread.Run(() =>
+    public void Waiting_lines_are_dragged_within_their_block_and_nothing_drops_above_it() => StaThread.Run(() =>
+    {
+        using var t = DragBar(4);
+        var n4 = t.Tasks.Board.Tasks.Single(x => x.Title == "n4").Id;
+        var n3 = t.Tasks.Board.Tasks.Single(x => x.Title == "n3").Id;
+        t.Tasks.SetStatus(n4, Deskbar.Core.Tasks.TaskStatus.WaitingOnYou);
+        t.Tasks.SetStatus(n3, Deskbar.Core.Tasks.TaskStatus.WaitingOnYou);
+        Settle(t);
+        Assert.Equal(["n3", "n4", "n2", "n1"], t.Lines.Select(TitleOf));
+
+        // Within the block: n3 after n4, on n4's bottom edge.
+        Drag(t, t.Lines[0], In(t, t.Lines[1], 0.9));
+        Settle(t);
+        Assert.Equal(["n4", "n3", "n2", "n1"], t.Lines.Select(TitleOf));
+
+        // Below the block: n4 goes to its foot, not among the plain lines, and keeps its flags.
+        Drag(t, t.Lines[0], In(t, t.Lines[3], 0.9));
+        Settle(t);
+        Assert.Equal(["n3", "n4", "n2", "n1"], t.Lines.Select(TitleOf));
+        Assert.Equal(Deskbar.Core.Tasks.TaskStatus.WaitingOnYou, t.Tasks.Board.Tasks.Single(x => x.Id == n4).Status);
+
+        // A plain line dropped on the block's top edge goes to the top of its own quadrant.
+        Drag(t, t.Lines[3], In(t, t.Lines[0], 0.1));
+
+        Assert.Equal(["n3", "n4", "n1", "n2"], t.Tasks.Board.Pile().Select(x => x.Title));
+    });
+
+    // Task f41d7857 ("neither moving them into each-other as subtasks. it should"): a waiting line takes a subtask
+    // dropped on its middle, and draws it under itself in the pinned block; a waiting line dropped on a plain line's
+    // middle becomes its subtask and stays in the pinned block, where a question is found.
+    [Fact]
+    public void Waiting_lines_nest_and_take_subtasks() => StaThread.Run(() =>
     {
         using var t = DragBar(3);
         var n3 = t.Tasks.Board.Tasks.Single(x => x.Title == "n3").Id;
+        var n2 = t.Tasks.Board.Tasks.Single(x => x.Title == "n2").Id;
         t.Tasks.SetStatus(n3, Deskbar.Core.Tasks.TaskStatus.WaitingOnYou);
+        t.Tasks.SetStatus(n2, Deskbar.Core.Tasks.TaskStatus.WaitingOnYou);
         Settle(t);
-        Assert.Equal(["n3", "n2", "n1"], t.Lines.Select(TitleOf));
+        Assert.Equal(["n2", "n3", "n1"], t.Lines.Select(TitleOf));
 
-        var start = In(t, t.Lines[0], 0.5);
-        t.Bar.TaskDragPress(n3, start);
-        t.Bar.TaskDragMove(new Point(start.X, start.Y + 30));
-        Assert.False(t.Bar.TaskDragging);
-        t.Bar.TaskDragRelease();
+        // The plain n1 into the waiting n3: drawn right under it, in the block.
+        Drag(t, t.Lines[2], In(t, t.Lines[1], 0.5));
+        Settle(t);
+        Assert.Equal(Maybe.From(n3), t.Tasks.Board.Tasks.Single(x => x.Title == "n1").ParentId);
+        Assert.Equal(["n2", "n3", "n1"], t.Lines.Select(TitleOf));
+        Assert.Equal("waiting", ((TaskLine)t.Lines[2].Tag).GroupKey);
 
-        Drag(t, t.Lines[2], In(t, t.Lines[0], 0.2));
+        // The waiting n2 into the waiting n3 (whose subtask n1 is drawn under it): both under n3.
+        Drag(t, t.Lines[0], In(t, t.Lines[1], 0.5));
+        Settle(t);
+        Assert.Equal(Maybe.From(n3), t.Tasks.Board.Tasks.Single(x => x.Id == n2).ParentId);
+        Assert.Equal("n3", TitleOf(t.Lines[0]));
+        Assert.Equal(["n1", "n2"], t.Lines.Skip(1).Select(TitleOf).OrderBy(x => x));
+    });
 
-        Assert.Equal(["n3", "n1", "n2"], t.Tasks.Board.Pile().Select(x => x.Title));
+    // Done lines sit in the pinned block under the questions (task eefb986a) and are dragged among themselves too (task
+    // f41d7857): never above a question, and to the foot of the done lines when let go below them.
+    [Fact]
+    public void Done_lines_are_dragged_among_the_done_lines_under_the_questions() => StaThread.Run(() =>
+    {
+        using var t = DragBar(4);
+        var id = new Func<string, Guid>(title => t.Tasks.Board.Tasks.Single(x => x.Title == title).Id);
+        t.Tasks.SetStatus(id("n1"), Deskbar.Core.Tasks.TaskStatus.Done);
+        t.Tasks.SetStatus(id("n2"), Deskbar.Core.Tasks.TaskStatus.Done);
+        t.Tasks.SetStatus(id("n3"), Deskbar.Core.Tasks.TaskStatus.WaitingOnYou);
+        Settle(t);
+        Assert.Equal(["n3", "n2", "n1", "n4"], t.Lines.Select(TitleOf));
+
+        // n1 above n2, on n2's top edge.
+        Drag(t, t.Lines[2], In(t, t.Lines[1], 0.1));
+        Settle(t);
+        Assert.Equal(["n3", "n1", "n2", "n4"], t.Lines.Select(TitleOf));
+
+        // n2 onto the question's top edge: it goes to the top of the done lines, under the question.
+        Drag(t, t.Lines[2], In(t, t.Lines[0], 0.1));
+        Settle(t);
+        Assert.Equal(["n3", "n2", "n1", "n4"], t.Lines.Select(TitleOf));
+
+        // n2 below everything: the foot of the done lines.
+        Drag(t, t.Lines[1], In(t, t.Lines[3], 0.9));
+        Settle(t);
+        Assert.Equal(["n3", "n1", "n2", "n4"], t.Lines.Select(TitleOf));
+        Assert.Equal(Deskbar.Core.Tasks.TaskStatus.Done, t.Tasks.Board.Tasks.Single(x => x.Title == "n2").Status);
     });
 
     // Lost capture (another window took the mouse) calls the drag off: nothing moves.
@@ -2205,7 +2273,8 @@ public class FloatingBarTaskListTests
         Settle(t);
         Assert.Equal(["n3", "n2", "n1"], t.Lines.Select(TitleOf));
 
-        Drag(t, t.Lines[2], In(t, t.Lines[0], 0.5));
+        // On the waiting line's top edge: its middle would make n1 its subtask (task f41d7857).
+        Drag(t, t.Lines[2], In(t, t.Lines[0], 0.1));
 
         var n1 = t.Tasks.Board.Tasks.Single(x => x.Title == "n1");
         Assert.False(n1.Important || n1.Urgent);
@@ -2369,7 +2438,8 @@ public class FloatingBarTaskListTests
         var start = In(t, t.Lines[2], 0.5);
         t.Bar.TaskDragPress(((TaskLine)t.Lines[2].Tag).Id, start);
         t.Bar.TaskDragMove(new Point(start.X, start.Y - 8));
-        t.Bar.TaskDragMove(In(t, t.Lines[0], 0.5));
+        // The top edge: the middle of a waiting line now takes the task as its subtask (task f41d7857).
+        t.Bar.TaskDragMove(In(t, t.Lines[0], 0.1));
 
         Assert.Equal(TaskPlace.Top, t.Bar.TaskDropShown!.Place);
         Assert.Equal(landing, t.Bar.TaskDropShown!.LineY, 1);

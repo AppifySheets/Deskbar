@@ -117,7 +117,10 @@ public sealed class JsonTaskStore(string baseDirectory, Action<string>? trace = 
         Guid? ParentId = null,
         // TaskItem.SnoozedUntil (task 6da8d7eb, snoozing): when a snoozed task comes back, or null. Read tolerantly like
         // HandedBack, so a wrong-typed value reads as awake rather than failing the whole file. Still version 2.
-        [property: JsonConverter(typeof(TolerantTimeConverter))] DateTimeOffset? SnoozedUntil = null);
+        [property: JsonConverter(typeof(TolerantTimeConverter))] DateTimeOffset? SnoozedUntil = null,
+        // TaskItem.Pin (task f41d7857, the pinned block's own order): null in a file written before it existed,
+        // which reads as the latest raised on top (FallbackPin), the block's order until then. Still version 2.
+        double? Pin = null);
 
     // The assignee (Ruling 57): kind by name ("me", "claude", "colleague"), plus the id and name a colleague needs.
     sealed record AssigneeDto(string? Kind, string? Id, string? Name);
@@ -212,7 +215,8 @@ public sealed class JsonTaskStore(string baseDirectory, Action<string>? trace = 
             t.Adopted,
             t.HandedBack.HasValue ? t.HandedBack.Value.ToUniversalTime() : null,
             t.ParentId.HasValue ? t.ParentId.Value : null,
-            t.SnoozedUntil.HasValue ? t.SnoozedUntil.Value.ToUniversalTime() : null);
+            t.SnoozedUntil.HasValue ? t.SnoozedUntil.Value.ToUniversalTime() : null,
+            t.Pin);
 
     static TaskItem FromDto(TaskDto d) =>
         new(d.Id, d.Title ?? "",
@@ -242,7 +246,13 @@ public sealed class JsonTaskStore(string baseDirectory, Action<string>? trace = 
             HandedBack = d.HandedBack is { } handed ? handed.ToUniversalTime() : Maybe<DateTimeOffset>.None,
             ParentId = d.ParentId is { } parent ? parent : Maybe<Guid>.None,
             SnoozedUntil = d.SnoozedUntil is { } snoozed ? snoozed.ToUniversalTime() : Maybe<DateTimeOffset>.None,
+            Pin = d.Pin ?? FallbackPin(d.Raised ?? d.Created),
         };
+
+    // A pin for a task saved before pins existed: the later raised, the higher (smaller is higher), so the pinned block
+    // keeps the latest-first order it had and the first save writes it down. A task joining the block goes one above the
+    // smallest pin of its part (TaskBoard.TopPin), so it lands on top of these too.
+    static double FallbackPin(DateTimeOffset raised) => -raised.ToUnixTimeMilliseconds();
 
     // The rank a task saved before ranks existed gets, so the tasks keep the order the bar showed them in then:
     // Waiting on you first, then Done, then the rest, each group the latest raised first. Smaller is higher, so the
