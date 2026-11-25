@@ -91,6 +91,11 @@ public sealed partial class RemoteControl
         // A session's own forms carry --session (RemoteControl.ClaudeHook.cs); everything below is the user's or a
         // script's. `task comment` is both: with --session it comments on the session's own task, without it on an id.
         var (args, session) = SplitSession(words);
+        // The manager session (docs/superpowers/specs/2026-11-25-manager-session-design.md) is the session started in its
+        // own folder, told by `--from`. An empty manager folder (no manager in this copy) matches nothing. It coordinates
+        // and never finishes a task: close, delete and the done/closed statuses are refused before anything is looked up.
+        var byManager = ManagerSession.IsManager(Folder(from), taskSessions?.ManagerFolder ?? "", LongPath);
+        if (byManager && FinishesATask(args)) return ControlReply.Fail(ManagerSession.Refusal);
         if (session is not null)
             return string.IsNullOrWhiteSpace(session)
                 ? ControlReply.Fail("--session needs the session's id")
@@ -129,6 +134,10 @@ public sealed partial class RemoteControl
                 .Match(w => TaskChange(service, id, t => service.MoveTo(t.Id, w)), ControlReply.Fail),
             ["comment", var id, var markdown] => TaskChange(service, id, t => service.Comment(t.Id, Maybe<string>.None, markdown)),
             // The same command from inside a Claude session (ControlArguments.WithCaller): stored as usual, wakes no one.
+            // From the manager's folder it is the manager's own comment, stored under its author and woken on, even though
+            // the client marked it --from-claude (the manager is a Claude session too).
+            ["comment", var id, var markdown, ControlArguments.FromClaude] when byManager =>
+                TaskChange(service, id, t => service.Comment(t.Id, TaskComment.ManagerAuthor, markdown)),
             ["comment", var id, var markdown, ControlArguments.FromClaude] =>
                 TaskChange(service, id, t => service.Comment(t.Id, Maybe<string>.None, markdown, wakes: false)),
             ["delete", var id] => TaskDelete(service, id),
@@ -221,6 +230,15 @@ public sealed partial class RemoteControl
     static string StatusName(TaskStatus status) => StatusNames.First(n => n.Status == status).Name;
 
     // The four names `status` takes; closed and anything else are refused before the task is looked up.
+    // The forms that finish a task, which the manager may not run. `status ... closed` is refused by ParseStatus for
+    // everyone; for the manager it gets the manager's refusal too, so the answer is the same however it is spelled.
+    static bool FinishesATask(string[] args) => args switch
+    {
+        ["close", _] or ["close", _, "--stop-claude"] or ["delete", _] => true,
+        ["status", _, var status] => status.Trim().ToLowerInvariant() is "done" or "closed",
+        _ => false,
+    };
+
     static Result<TaskStatus> ParseStatus(string name) =>
         name.Trim().ToLowerInvariant() switch
         {
@@ -300,7 +318,7 @@ public sealed partial class RemoteControl
             ? (object)new
             {
                 id = c.Id,
-                by = c.BySession ? "claude" : c.ByDeskbar ? "deskbar" : "you",
+                by = c.BySession ? "claude" : c.ByDeskbar ? "deskbar" : c.ByManager ? "manager" : "you",
                 at = c.At,
                 settled = c.Settled.HasValue ? (DateTimeOffset?)c.Settled.Value : null,
                 markdown = Expanded(c.Markdown),
@@ -308,7 +326,7 @@ public sealed partial class RemoteControl
             : new
             {
                 id = c.Id,
-                by = c.BySession ? "claude" : c.ByDeskbar ? "deskbar" : "you",
+                by = c.BySession ? "claude" : c.ByDeskbar ? "deskbar" : c.ByManager ? "manager" : "you",
                 at = c.At,
                 settled = c.Settled.HasValue ? (DateTimeOffset?)c.Settled.Value : null,
             }).ToArray(),
@@ -527,6 +545,12 @@ public sealed record TaskSessionCommands(
     /// Transcript; the default knows nothing, so every live session reads as idle.
     /// </summary>
     public Func<string, Maybe<bool>> Busy { get; init; } = _ => Maybe<bool>.None;
+
+    /// <summary>
+    /// The manager session's folder (ManagerSession.FolderIn), which tells a call from the manager by its `--from`. An init
+    /// property for the same reason as Transcript; "" means no manager, and matches no caller.
+    /// </summary>
+    public string ManagerFolder { get; init; } = "";
 
     /// <summary>
     /// `task close <id> --stop-claude` (task 37cd7081): closes a task Claude is still working on and stops its background

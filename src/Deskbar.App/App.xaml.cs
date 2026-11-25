@@ -1686,6 +1686,8 @@ public partial class App : Application
             {
                 // `task close --stop-claude` (task 37cd7081), the twin of the ticks' "Stop Claude and close".
                 StopAndClose = task => claudeActions?.StopAndClose(task) ?? Result.Failure(ClaudeActionsNotReady),
+                // The manager session's folder, so a call from it is refused close, delete and done (manager session design).
+                ManagerFolder = Core.Tasks.ManagerSession.FolderIn(AppPaths.NewStateDir),
                 // Subtasks: the family text a session reads names each session's transcript file, found the way the
                 // keeper finds it (worktree project folders included). Read when a command arrives, like the actions.
                 Transcript = session => claudeSessions?.TranscriptOf(session) ?? Maybe<string>.None,

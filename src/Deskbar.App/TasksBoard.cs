@@ -1214,9 +1214,9 @@ public sealed class TasksBoard : IDisposable
     {
         var at = comment.At.ToLocalTime();
         var today = now().ToLocalTime().Date == at.Date;
-        // Three authors: a session ("Claude"), Deskbar itself (its resume, stop and failure lines) and Petre ("you").
+        // Four authors: a session ("Claude"), the manager ("Manager"), Deskbar itself (its resume, stop and failure lines) and Petre ("you").
         // Only his own can be edited, so Deskbar's line no longer offers him an Edit as if he had written it.
-        return new TaskCommentView(comment.Id, comment.BySession ? "Claude" : comment.ByDeskbar ? "Deskbar" : "you", comment.BySession,
+        return new TaskCommentView(comment.Id, comment.BySession ? "Claude" : comment.ByDeskbar ? "Deskbar" : comment.ByManager ? "Manager" : "you", comment.BySession,
             today ? at.ToString("HH:mm") : at.ToString("d MMM HH:mm"), comment.Markdown)
         {
             Settled = comment.Settled.HasValue,

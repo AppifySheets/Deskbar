@@ -63,7 +63,7 @@ sealed class CommentWaker : IDisposable
     async Task<System.Reactive.Unit> Deliver(Guid taskId, TaskComment comment, IReadOnlyCollection<ClaudeAgent> listed)
     {
         if (tasks.Board.Tasks.FirstOrDefault(t => t.Id == taskId) is not { Sessions.Count: > 0 } task) return System.Reactive.Unit.Default;
-        var message = SessionBriefing.Commented(task, tasks.ExpandImages(comment.Markdown));
+        var message = SessionBriefing.Commented(task, tasks.ExpandImages(comment.Markdown), comment.ByManager);
         switch (CommentWake.Plan(task, listed.ToList(), hasTranscript, inbox.Lapsed))
         {
             case WakePlan.Inbox(var sessionId):

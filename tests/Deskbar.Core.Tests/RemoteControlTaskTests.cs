@@ -263,6 +263,102 @@ public class RemoteControlTaskTests
         Assert.Equal(["from Petre", "from a session"], Only.Comments.Select(c => c.Markdown));
     }
 
+    // The manager session (docs/superpowers/specs/2026-11-25-manager-session-design.md) is told by --from its own folder.
+    const string ManagerDir = @"C:\State\manager";
+
+    ControlReply RunAsManager(WorkspaceManager manager, params string[] args) =>
+        new RemoteControl(manager, tasks: tasks, goals: goals, taskSessions: new TaskSessionCommands(_ => Result.Success(), _ => [], (_, _) => Result.Success(), (_, _) => Result.Success())
+        {
+            ManagerFolder = ManagerDir,
+        }).Execute([.. args, "--from", ManagerDir]);
+
+    [Fact]
+    public void Manager_comment_is_stored_as_the_managers_and_wakes()
+    {
+        var manager = Started();
+        var id = Prefix(Added(manager));
+        var heard = new List<TaskComment>();
+        using var _ = tasks.Commented.Subscribe(c => heard.Add(c.Comment));
+
+        Assert.Equal(ControlReply.Ok, RunAsManager(manager, "task", "comment", id, "please rebase", "--from-claude").ExitCode);
+
+        Assert.Equal(["please rebase"], heard.Select(c => c.Markdown));
+        Assert.True(Only.Comments.Single().ByManager);
+        Assert.False(Only.Comments.Single().BySession);
+        Assert.Equal("manager", Json(Run(manager, "task", "show", id)).GetProperty("thread")[0].GetProperty("by").GetString());
+    }
+
+    [Fact]
+    public void A_sessions_comment_from_elsewhere_still_wakes_no_one()
+    {
+        var manager = Started();
+        var id = Prefix(Added(manager));
+        var heard = new List<string>();
+        using var _ = tasks.Commented.Subscribe(c => heard.Add(c.Comment.Markdown));
+
+        Assert.Equal(ControlReply.Ok, Run(manager, "task", "comment", id, "from a session", "--from-claude", "--from", @"C:\repos\other").ExitCode);
+
+        Assert.Empty(heard);
+        Assert.Equal("you", Json(Run(manager, "task", "show", id)).GetProperty("thread")[0].GetProperty("by").GetString());
+    }
+
+    [Theory]
+    [InlineData("close")]
+    [InlineData("delete")]
+    public void Manager_may_not_close_or_delete(string verb)
+    {
+        var manager = Started();
+        var id = Prefix(Added(manager));
+        var before = tasks.Board;
+
+        AssertRefusedAndUnchanged(RunAsManager(manager, "task", verb, id), before);
+        Assert.Equal(ManagerSession.Refusal, RunAsManager(manager, "task", verb, id).Output.Trim());
+    }
+
+    [Fact]
+    public void Manager_may_not_close_and_stop_claude()
+    {
+        var manager = Started();
+        var id = Prefix(Added(manager));
+        var before = tasks.Board;
+
+        AssertRefusedAndUnchanged(RunAsManager(manager, "task", "close", id, "--stop-claude"), before);
+    }
+
+    [Theory]
+    [InlineData("done")]
+    [InlineData("closed")]
+    public void Manager_may_not_finish_a_task(string status)
+    {
+        var manager = Started();
+        var id = Prefix(Added(manager));
+        var before = tasks.Board;
+
+        var reply = RunAsManager(manager, "task", "status", id, status);
+
+        AssertRefusedAndUnchanged(reply, before);
+        Assert.Equal(ManagerSession.Refusal, reply.Output.Trim());
+    }
+
+    [Fact]
+    public void The_user_may_still_close_from_elsewhere()
+    {
+        var manager = Started();
+        var id = Prefix(Added(manager));
+
+        Assert.Equal(ControlReply.Ok, Run(manager, "task", "close", id, "--from", @"C:\repos\other").ExitCode);
+        Assert.Equal(TaskStatus.Closed, Only.Status);
+    }
+
+    [Fact]
+    public void With_no_manager_folder_nobody_is_the_manager()
+    {
+        var manager = Started();
+        var id = Prefix(Added(manager));
+
+        Assert.Equal(ControlReply.Ok, Run(manager, "task", "close", id, "--from", @"C:\State\manager").ExitCode);
+    }
+
     [Fact]
     public void WithCaller_marks_a_comment_run_inside_a_claude_session()
     {

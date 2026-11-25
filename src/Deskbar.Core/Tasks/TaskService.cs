@@ -191,7 +191,8 @@ public sealed class TaskService(ITaskStore store, Func<DateTimeOffset> now, Func
 
     // A COMMENT WAKES ITS SESSION (docs/superpowers/plans/2026-11-24-comment-wakes-session.md): Petre's own new comment
     // (no session) is announced on Commented once it is saved, and the app's CommentWaker hands it to the task's Claude
-    // session. `wakes` false is his form of the command run from inside a Claude session (`task comment <id>` there carries
+    // session. The manager's comment (TaskComment.ManagerAuthor) is announced too: it exists to hand a session work, and
+    // the app's CommentWaker words it differently (SessionBriefing.Commented, byManager). `wakes` false is his form of the command run from inside a Claude session (`task comment <id>` there carries
     // --from-claude): stored as his, announced to no one, so one session cannot wake another. A session's comment and
     // Deskbar's own lines (Note) are never announced.
     public Result Comment(Guid id, Maybe<string> sessionId, string markdown, bool wakes = true)
@@ -200,7 +201,7 @@ public sealed class TaskService(ITaskStore store, Func<DateTimeOffset> now, Func
         return Apply(Board.Comment(id, sessionId, markdown, now(), commentId))
             .Tap(() =>
             {
-                if (sessionId.HasValue || !wakes) return;
+                if ((sessionId.HasValue && sessionId.Value != TaskComment.ManagerAuthor) || !wakes) return;
                 Board.Tasks.SelectMany(t => t.Comments).TryFirst(c => c.Id == commentId).Tap(comment => commented.OnNext((id, comment)));
             });
     }

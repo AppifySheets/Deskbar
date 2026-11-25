@@ -53,8 +53,15 @@ public static class SessionBriefing
     /// The comment whole, image paths already absolute (TaskService.ExpandImages), so a picture in it can be read at once;
     /// and for a Done task the same rule a prompt gets: more work reopens it, a question about the work leaves it done.
     /// </summary>
-    public static string Commented(TaskItem task, string expandedMarkdown) =>
-        $"Deskbar: the user commented on your task {task.Id.ToString()[..8]} \"{Cut(task.Title)}\":\n\n{expandedMarkdown.Trim()}\n"
+    // `byManager` (manager session design): the comment is the manager's, so it is not the user's words. Only what follows
+    // ManagerSession.QuoteMarker is the user's, quoted verbatim, and counts as the user's own comment (it can settle a
+    // question). The rest is a request: do the routine part, and ask the user for anything that needs their approval.
+    public static string Commented(TaskItem task, string expandedMarkdown, bool byManager = false) =>
+        (byManager
+            ? $"Deskbar: the manager (the session coordinating the user's tasks) commented on your task {task.Id.ToString()[..8]} \"{Cut(task.Title)}\":\n\n{expandedMarkdown.Trim()}\n\n"
+              + $"Only the words after \"{ManagerSession.QuoteMarker}\" are the user's; take those as the user's own comment, so they can settle your question. "
+              + $"Everything else is the manager's request, not the user's word: do the routine part, and for anything that needs the user's approval (a merge, anything destructive, a design choice) ask the user with {Shim} task ask.\n"
+            : $"Deskbar: the user commented on your task {task.Id.ToString()[..8]} \"{Cut(task.Title)}\":\n\n{expandedMarkdown.Trim()}\n")
         // An expanded image line is `![image](<C:\...>)` (TaskImages.Expand); its angle brackets are how it is told apart.
         + (System.Text.RegularExpressions.Regex.IsMatch(expandedMarkdown, @"!\[[^\]\n]*\]\(<[^>\n]+>\)")
             ? "\nRead each image path above with your Read tool.\n" : "")

@@ -69,7 +69,7 @@ public sealed record StatusChange(DateTimeOffset At, TaskStatus From, TaskStatus
 
 /// <summary>
 /// One comment in a task's thread, as markdown. <see cref="SessionId"/> names the Claude session that wrote it;
-/// none means Petre wrote it, and <see cref="DeskbarAuthor"/> means Deskbar itself did (a resume, a stop, a failure).
+/// none means Petre wrote it, <see cref="DeskbarAuthor"/> means Deskbar itself did (a resume, a stop, a failure), and <see cref="ManagerAuthor"/> means the manager session did.
 /// </summary>
 public sealed record TaskComment(Guid Id, Maybe<string> SessionId, DateTimeOffset At, string Markdown)
 {
@@ -85,8 +85,20 @@ public sealed record TaskComment(Guid Id, Maybe<string> SessionId, DateTimeOffse
     /// <summary>Deskbar wrote it: no Edit (it is not Petre's), and no session can settle or own it.</summary>
     public bool ByDeskbar => SessionId.HasValue && SessionId.Value == DeskbarAuthor;
 
-    /// <summary>A Claude session wrote it.</summary>
-    public bool BySession => SessionId.HasValue && !ByDeskbar;
+    /// <summary>
+    /// The author id of the manager session's comments (docs/superpowers/specs/2026-11-25-manager-session-design.md).
+    /// The manager's `task comment` runs inside a Claude session, so the client marks it --from-claude and it used to be
+    /// stored as the user's, with nothing to tell the two apart. A reserved value in the session id's place, like
+    /// <see cref="DeskbarAuthor"/>: it is not a GUID, so no real session can have it, and an old Deskbar reads it as a
+    /// session's comment, which is nearer the truth than the user's.
+    /// </summary>
+    public const string ManagerAuthor = "manager";
+
+    /// <summary>The manager session wrote it: not the user's (no Edit), not a task session's (it settles no question).</summary>
+    public bool ByManager => SessionId.HasValue && SessionId.Value == ManagerAuthor;
+
+    /// <summary>A task's Claude session wrote it (not Deskbar, not the manager).</summary>
+    public bool BySession => SessionId.HasValue && !ByDeskbar && !ByManager;
 
     // The openings of every line Deskbar has written into a thread (ClaudeSessions and ClaudeTaskActions). A file
     // saved before DeskbarAuthor existed has these with no author; Attributed gives them back to Deskbar on load.

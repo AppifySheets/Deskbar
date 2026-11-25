@@ -22,6 +22,19 @@ public sealed class SessionBriefingTests
     static readonly string[] Dashes = ["\u2014", "\u2013"];
 
     [Fact]
+    public void Commented_by_manager_says_only_the_quoted_words_are_the_users()
+    {
+        var text = SessionBriefing.Commented(Task("Fix the bar"), "Merge it.\n\nThe user says: yes, merge", byManager: true);
+
+        Assert.Contains("the manager", text);
+        Assert.Contains("The user says:", text);
+        Assert.Contains("task ask", text);
+        Assert.DoesNotContain("the user commented", text);
+        Assert.DoesNotContain(Dashes, text.Contains);
+        Assert.Contains("the user commented", SessionBriefing.Commented(Task("Fix the bar"), "hi"));
+    }
+
+    [Fact]
     public void A_new_session_is_told_its_id_the_offered_tasks_and_how_to_join_or_create()
     {
         var offered = new[] { Task("Tasks board"), Task("Dishwasher tablets", TaskStatus.Backlog) };
