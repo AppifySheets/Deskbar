@@ -711,20 +711,78 @@ public class RemoteControlClaudeHookTests
     public void Help_lists_task_answered() =>
         Assert.Contains(ControlUsage.All, c => c.Verb == "task" && c.Arguments.StartsWith("answered --session", StringComparison.Ordinal));
 
-    // Petre closed the task: the session is told on its next prompt, and that new work needs a new task.
+    // Petre closed the task under a live session: its next prompt is told so, and that `task join` reopens it when the
+    // message carries on with that work (task 327e3cd0), or `task new` for anything else. The prompt itself reopens
+    // nothing; the join does.
     [Fact]
-    public void A_closed_task_tells_the_session_to_start_a_new_one()
+    public void A_closed_task_tells_the_session_it_can_join_it_again_or_start_a_new_one()
+    {
+        var manager = Started();
+        Editor(manager, 0x10, "TaskSpaces", "Deskbar");
+        Said(manager, "s1", Repo, "new", "Tasks board");
+        var id = Titled("Tasks board").Id;
+        Assert.True(tasks.Close(id, stoppingClaude: true).IsSuccess);
+
+        var line = Hooked(manager, "UserPromptSubmit");
+
+        Assert.Contains("closed", line);
+        Assert.Contains($"task join {id.ToString()[..8]} --session s1", line);
+        Assert.Contains("task new - --session s1", line);
+        Assert.Equal(TaskStatus.Closed, Titled("Tasks board").Status);
+
+        Assert.Equal(ControlReply.Ok, Said(manager, "s1", Repo, "join", id.ToString()[..8]).ExitCode);
+
+        Assert.Equal(TaskStatus.InProgress, Titled("Tasks board").Status);
+        Assert.Single(tasks.Board.Tasks);
+    }
+
+    // Task 327e3cd0: Petre closed the task, then resumed its session to keep talking about the same subject. The resume
+    // reopens the task and puts the session back on it, and the briefing says so, instead of offering nothing and
+    // leaving the session to make a duplicate.
+    [Fact]
+    public void A_resumed_session_reopens_its_closed_task()
+    {
+        var manager = Started();
+        Editor(manager, 0x10, "TaskSpaces", "Deskbar");
+        Said(manager, "s1", Repo, "new", "Tasks board");
+        Said(manager, "s1", Repo, "done");
+        Assert.True(tasks.Close(Titled("Tasks board").Id, stoppingClaude: true).IsSuccess);
+        Hooked(manager, "SessionEnd");
+
+        var briefing = Hooked(manager, "SessionStart", source: "resume");
+
+        var task = Titled("Tasks board");
+        Assert.Equal(TaskStatus.InProgress, task.Status);
+        Assert.True(task.HasLiveSession);
+        Assert.True(task.Assignee.IsClaude);
+        Assert.Contains("resuming this session reopened it", briefing);
+        Assert.Contains("Tasks board", briefing);
+        Assert.DoesNotContain("no open tasks", briefing);
+        Assert.DoesNotContain("closed your task", Hooked(manager, "UserPromptSubmit"));
+        Assert.Single(tasks.Board.Tasks);
+    }
+
+    // Only a resume reopens: a compact is the same session carrying on, so a task closed under it stays closed and its
+    // prompt line still offers the choice. A resume of a session that moved on to an open task rejoins that one.
+    [Fact]
+    public void A_compact_leaves_a_closed_task_closed_and_a_later_open_task_wins_a_resume()
     {
         var manager = Started();
         Editor(manager, 0x10, "TaskSpaces", "Deskbar");
         Said(manager, "s1", Repo, "new", "Tasks board");
         Assert.True(tasks.Close(Titled("Tasks board").Id, stoppingClaude: true).IsSuccess);
 
-        var line = Hooked(manager, "UserPromptSubmit");
+        var compacted = Hooked(manager, "SessionStart", source: "compact");
 
-        Assert.Contains("closed", line);
-        Assert.Contains("task new - --session s1", line);
         Assert.Equal(TaskStatus.Closed, Titled("Tasks board").Status);
+        Assert.DoesNotContain("reopened", compacted);
+
+        Said(manager, "s1", Repo, "new", "Store listing");
+        Hooked(manager, "SessionEnd");
+        Hooked(manager, "SessionStart", source: "resume");
+
+        Assert.Equal(TaskStatus.Closed, Titled("Tasks board").Status);
+        Assert.True(Titled("Store listing").HasLiveSession);
     }
 
     // Review focus 5: a session in a folder no VS Code window shows makes a task on no workspace, still Claude's.

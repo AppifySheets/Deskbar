@@ -176,6 +176,53 @@ public class TaskBoardTests
         Assert.Equal("The task is closed.", board.Join(id1, Session("s1"), clock).Error);
     }
 
+    // Task 327e3cd0: a session that worked on a task the user then closed may join it again, and the join reopens it, In
+    // progress, Claude's and back at the top of its quadrant. Without this the session made a duplicate task. Another
+    // session is still refused: a closed task is not up for grabs, only its own session may carry on with it.
+    [Fact]
+    public void A_session_joining_its_own_closed_task_reopens_it()
+    {
+        var closed = Claudes(TaskBoard.Empty, id1, ws).Close(id1, clock, stoppingClaude: true).Value.SessionEnded("s1", clock);
+        Later();
+
+        var joined = Get(closed.Join(id1, Session("s1"), clock).Value, id1);
+
+        Assert.Equal(TaskStatus.InProgress, joined.Status);
+        Assert.True(joined.IsOpen);
+        Assert.True(joined.HasLiveSession);
+        Assert.True(joined.Assignee.IsClaude);
+        Assert.Single(joined.Sessions);
+        Assert.Equal("The task is closed.", closed.Join(id1, Session("s2"), clock).Error);
+    }
+
+    // A session /clear replaced handed its task to the session that followed it (Ruling 19), so it is not the task's
+    // session any more and cannot reopen it.
+    [Fact]
+    public void A_replaced_session_cannot_reopen_its_closed_task()
+    {
+        var closed = Claudes(TaskBoard.Empty, id1, ws).SessionCleared("s1", clock).Close(id1, clock).Value;
+
+        Assert.Equal("The task is closed.", closed.Join(id1, Session("s1"), clock).Error);
+    }
+
+    // What a resumed session's SessionStart asks: the task it was on last, when the user has closed it. An open task the
+    // session joined later wins, and a replaced entry does not count.
+    [Fact]
+    public void The_closed_task_a_session_was_on_last_is_found()
+    {
+        var board = Claudes(TaskBoard.Empty, id1, ws).Close(id1, clock, stoppingClaude: true).Value.SessionEnded("s1", clock);
+
+        Assert.Equal(id1, board.ClosedLastTaskOf("s1").Value.Id);
+        Assert.True(board.ClosedLastTaskOf("s2").HasNoValue);
+
+        Later();
+        var moved = Claudes(board, id2, ws).SessionEnded("s1", clock);
+        Assert.True(moved.ClosedLastTaskOf("s1").HasNoValue);
+
+        var cleared = Claudes(TaskBoard.Empty, id3, ws).SessionCleared("s1", clock).Close(id3, clock).Value;
+        Assert.True(cleared.ClosedLastTaskOf("s1").HasNoValue);
+    }
+
     [Fact]
     public void Asking_waits_on_you_and_answering_resumes()
     {

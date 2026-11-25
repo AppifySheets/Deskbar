@@ -151,10 +151,24 @@ public sealed partial class RemoteControl
     // keeps it) rejoins as a fresh entry, which drops the mark, so the keeper may resume it again later. A session with
     // no task at all that starts with source "clear" takes the place of the session cleared in its folder within the
     // last minute (TaskService.JoinAfterClear), so the task Petre was working on follows him into the fresh conversation.
+    //
+    // A RESUME ON A CLOSED TASK REOPENS IT (task 327e3cd0, Petre's call, and the one exception to Ruling 34). A closed
+    // task has left the list, so a session resumed on it had no task at all: the briefing said there was nothing to join
+    // and its first prompt said new work needed a new task, and the session made a duplicate of the task Petre had just
+    // resumed it to carry on with. So when a session with no open task resumes (source "resume") and the task it was on
+    // LAST is closed (TaskBoard.ClosedLastTaskOf), it joins it, which reopens it (TaskBoard.Join): In progress, Claude's,
+    // back at the top of its quadrant, and the briefing says so. Only "resume": a compact or a /clear is the same session
+    // carrying on, and a session started fresh has a new id. Deskbar's own resumes never land here by accident: the keeper
+    // resumes open tasks only, and a comment that resumes a closed task's session is Petre talking to it.
     string SessionStarted(TaskService service, ClaudeHookEvent hook, string? folder)
     {
         var current = service.Board.TaskOf(hook.SessionId);
-        if (current.HasNoValue || current.Value.Sessions.Any(s => s.Id == hook.SessionId && s.Replaced))
+        var resumed = hook.Source.Map(s => s == "resume").GetValueOrDefault(false);
+        var reopened = current.HasNoValue && resumed
+            && service.Board.ClosedLastTaskOf(hook.SessionId)
+                .Map(t => service.Join(t.Id, service.NewSession(hook.SessionId, folder ?? "")).IsSuccess)
+                .GetValueOrDefault(false);
+        if (!reopened && (current.HasNoValue || current.Value.Sessions.Any(s => s.Id == hook.SessionId && s.Replaced)))
             service.Board.LastTaskOf(hook.SessionId).Tap(t => service.Rejoin(t.Id, service.NewSession(hook.SessionId, folder ?? "")));
         if (service.Board.LastTaskOf(hook.SessionId).HasNoValue && hook.Source.Map(s => s == "clear").GetValueOrDefault(false) && folder is not null)
             service.JoinAfterClear(hook.SessionId, folder, stored => FolderPath.Same(stored, folder, LongPath));
@@ -163,7 +177,7 @@ public sealed partial class RemoteControl
         // A session coming back to a subtask (or a parent) reads its family again: siblings moved on while it was away.
         var family = own.Bind(t => FamilyOf(service, t)).GetValueOrDefault("");
         // The own task's description images are listed with absolute paths (images in tasks, TaskService.ExpandImages).
-        return SessionBriefing.Start(hook, own, offered, service.ExpandImages, family);
+        return SessionBriefing.Start(hook, own, offered, service.ExpandImages, family, reopened);
     }
 
     // UserPromptSubmit (Ruling 49): a prompt NO LONGER settles a question. A task Waiting on the user stays waiting, and
