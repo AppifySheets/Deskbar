@@ -533,8 +533,10 @@ counts as you. Click again to bring its window forward; the next day a click end
 On a day you have opened it, Deskbar also wakes the manager when something needs a look: a Claude task handed back to
 you because its session stopped without asking or finishing, or a question that has waited on you for two hours. New
 questions come along with those but never wake it alone, and it is woken at most once every half hour, never in the
-middle of a turn. On a wake it nudges each stopped session once with a comment, then lists what waits on you, oldest
-first, with a suggested answer for each. A dot on the Manager button says it has news; opening the manager clears it.
+middle of a turn. On a wake it nudges each stopped session once with a comment. It does not repeat what the bar
+already shows, such as a task's question or a pull request to merge; it tells you only what no single task shows, like
+two sessions doing the same work or one decision holding up several tasks. A dot on the Manager button says it has
+news; opening the manager clears it.
 
 When the manager needs a decision from you, its question shows as a violet line at the top of the bar's task list and
 of the tasks panel, above every task's question. Click it to open the manager; your reply clears it.

@@ -233,8 +233,23 @@ public class ManagerSessionTests
         Assert.Contains("\"Deskbar wake.\"", text);
         Assert.Contains($"{Shim} task comment <id> -) to wake its session", text);
         Assert.Contains("A task marked AGAIN gets no comment", text);
-        Assert.Contains("oldest and most blocking first, each with your suggested answer", text);
         Assert.DoesNotContain("Nothing runs on a timer", text);
+    }
+
+    // Task 6a87df67: "manager doesn't have to tell me each merge and needs you now", "tasks do it themselves already on
+    // the bar". The briefing and the first message ask only for what the bar cannot show, and no longer for a list of
+    // what waits on the user.
+    [Fact]
+    public void Briefing_and_first_message_leave_out_what_the_bar_already_shows()
+    {
+        var text = ManagerSession.Briefing(Shim);
+
+        Assert.Contains("Never repeat them to the user", text);
+        Assert.Contains("Report only what the bar cannot show", text);
+        Assert.DoesNotContain("what waits on the user, oldest", text);
+        Assert.DoesNotContain("Say what needs the user now", text);
+        Assert.Contains("only what the bar does not show", ManagerSession.FirstMessage);
+        Assert.DoesNotContain("What needs me now", ManagerSession.FirstMessage);
     }
 
     // Task f171bca6: the manager's own window (violet icon and ring, glow, pinned to every desktop) is the Windows Terminal
