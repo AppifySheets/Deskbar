@@ -4378,10 +4378,14 @@ public class TasksBoardTests
         var more = ButtonNamed(line, "More");
         var moreLeft = more.TranslatePoint(new Point(0, 0), strip).X;
         var moreRight = more.TranslatePoint(new Point(more.ActualWidth, 0), line).X;
-        Console.WriteLine($"MEASURED {width}: {shown} of 7 shown in {strip.ActualWidth:0.##} DIP, More at {moreLeft:0.##}, ends at {moreRight:0.##} of {line.ActualWidth:0.##}");
-        // Measured: 7 at 800, 6 at 460, 1 at 360 (this line has a comment count, which takes a little of the room).
+        Console.WriteLine($"MEASURED {width}: {shown} of 8 shown in {strip.ActualWidth:0.##} DIP, More at {moreLeft:0.##}, ends at {moreRight:0.##} of {line.ActualWidth:0.##}");
+        // Measured: 8 at 800 (the eighth, Reevaluate, an empty slot on this task in progress), 6 at 460, 1 at 360 (this
+        // line has a comment count, which takes a little of the room).
         Assert.True(shown >= (width >= Wide ? 7 : width >= TasksPanelLayout.DefaultWidth ? 5 : 1), $"{width}: only {shown} shown");
         Assert.Equal(shown * 22, moreLeft, 0.5);
+        // A full line shows all seven, and "⋯" right after Delete: Reevaluate's slot, a gap on a task in progress, is not
+        // left blank before it (task 3dd07539's review).
+        if (width >= Wide) Assert.Equal(7, shown);
         Assert.True(moreRight <= line.ActualWidth + 0.5, $"\"⋯\" ends at {moreRight:0.##}, past the line's {line.ActualWidth:0.##}");
         // Edit is first; a button left off sits past the strip's edge, clipped.
         Assert.Equal("Edit", AutomationProperties.GetName(strip.Children[0]));
