@@ -32,9 +32,9 @@ namespace Deskbar.App;
 //     that workspace, and the chips still looked "not started". Open is the answer to that, and a click on an open
 //     chip opens the link again, as before. The outline stays (solid) so the chip still reads as a bookmark;
 //   * a link's chip carries a small light dot at the bottom right, so a web page reads apart from a program;
-//   * the row's first chip carries a 1 DIP divider at its own left edge, INSIDE its cell, so the divider costs no
-//     width the wrap would have to know about. Drawn only when windows precede it in the lane: a row holding only
-//     chips has nothing to divide them from.
+//   * the row's first chip carries a divider, a 2 DIP bar snapped to device pixels, at its own left edge and drawn
+//     into the gap before it, so the divider costs no width the wrap would have to know about. Drawn only when
+//     windows precede it in the lane: a row holding only chips has nothing to divide them from.
 //
 // A click switches to the workspace and starts the bookmark (BookmarkOpener.Open, the same call `deskbar.cmd
 // bookmark open` makes). A middle-drag on a chip moves the bar like a middle-drag anywhere else (the bar's own
@@ -132,18 +132,30 @@ public partial class FloatingBar
         // The cell: a window icon's footprint (IconCellWidth wide, the icon plus its 2 DIP each side), the divider
         // standing at its left edge. The window icon before it ends 2 DIP short of this cell and the chip's face starts
         // 2 DIP in, so there is a 4 DIP gap; the divider is laid out at the cell's edge and drawn 1 DIP further left
-        // (a render offset, which costs no width the wrap would have to know about), so it stands in the middle of the
-        // gap rather than against the dashed outline, where it read as part of it.
+        // (a render offset, which costs no width the wrap would have to know about), so it covers the middle 2 DIP of
+        // the gap and stands clear of both the window's artwork and the dashed outline.
+        //
+        // 2 DIP wide and SNAPPED, because the 1 DIP line before it never reached the screen as a line. Measured
+        // (BookmarkDividerPixelTests, rendered at the bar's default 0.9 scale): the bar's scale is a LayoutTransform on
+        // the root, so 1 DIP is 0.9 px starting at a fractional x, and the line was smeared over two device pixels at
+        // about a third and two thirds of its strength, 0x46 and 0x89 against the 0xC8 it was given, the dimmer half
+        // against the window's artwork, where it read as the icon's own frame. Under the bar's idle fade that is next
+        // to nothing, which is what Petre saw: no bar at all between the Edge icon and the first chip. Nothing clipped or
+        // covered it; the pixels were there, too faint and too spread out. SnapsToDevicePixels puts the bar's edges on
+        // whole pixels, so it lands as one full-strength column (0xCD measured) with a dark column either side, and
+        // the 2 DIP keep it at least a pixel wide at any scale the bar allows, where a snapped 1 DIP line at 0.9 can
+        // round to nothing.
         var cell = new Grid { Width = IconCellWidth, Height = size + 4 };
         cell.Children.Add(face);
         if (divider)
             cell.Children.Add(new Border
             {
-                Width = 1,
+                Width = 2,
                 Background = ChipDivider,
                 HorizontalAlignment = HorizontalAlignment.Left,
                 Margin = new Thickness(0, 1, 0, 1),
                 RenderTransform = new TranslateTransform(-1, 0),
+                SnapsToDevicePixels = true,
                 IsHitTestVisible = false,
             });
 
