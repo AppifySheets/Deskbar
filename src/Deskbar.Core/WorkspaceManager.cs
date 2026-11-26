@@ -3274,6 +3274,14 @@ public sealed class WorkspaceManager(
                 .Tap(() => { if (on) WorkspaceOf(window).Tap(workspace => RosterAdd(info, workspace.Id)); })
             : Result.Failure("Window no longer exists.");
 
+    // The bookmark a window's menu can offer ("Bookmark this in <workspace>"), or none. Never for Deskbar's own
+    // windows (IsOurs, which is private, hence the place) and never for a window the manager does not know, because
+    // the snapshot it holds is what the rule reads. `appId` is the window's AppUserModelID, read by the caller.
+    public Maybe<Bookmark> BookmarkFor(WindowHandle window, string? appId, IBookmarkSources sources) =>
+        knownWindows.TryGetValue(window, out var info) && !IsOurs(window)
+            ? BookmarkCandidates.FromWindow(info, appId, sources)
+            : Maybe<Bookmark>.None;
+
     // "Split <app> windows last" for one app, from a window's icon menu or `deskbar.cmd split-last` (AppState.SplitLastApps
     // has Petre's words and the spec). Keyed on the window's process name, so ticking it on one VS Code window covers
     // every VS Code window, now and after a restart. Refused for Deskbar's own windows, which are never tiles.
