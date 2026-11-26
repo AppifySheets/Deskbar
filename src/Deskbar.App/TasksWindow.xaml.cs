@@ -1152,10 +1152,11 @@ public partial class TasksWindow : Window
     // is not the line's double-click (IsTheLinesOwn stops at a Button). On a Claude task's line, full or slim, in the
     // action column (Reopen's, which a closed task alone uses, and a closed task has no button); none in a Matrix line,
     // whose menu has the item. Quiet like the comments and "⋯": half strength until the line is hovered or selected.
-    // Segoe's "OpenInNewWindow" U+E8A7, in both icon fonts.
+    // Its picture is the Claude spark in orange, the mark Start Claude has in plain ink in this same column (task
+    // 5e02e99f, ClaudeMark in TasksWindow.LineButtons.cs): one picture, the colour says whether there is a session.
     Button? OpenClaudeButton(TaskRowView row) =>
         OpensClaude(row)
-            ? Small(new TextBlock { Text = "", FontFamily = IconFont, FontSize = 12, Foreground = Ink, VerticalAlignment = VerticalAlignment.Center },
+            ? Small(ClaudeMark(hasSession: true),
                 OpenClaudeText, () => Actions?.Go(row.Id), "Open Claude: go to its session without opening the task")
             : null;
 

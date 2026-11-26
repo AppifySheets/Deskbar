@@ -4,6 +4,7 @@ using System.Windows;
 using System.Windows.Automation;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
+using System.Windows.Media;
 using Deskbar.Core.Tasks;
 
 namespace Deskbar.App;
@@ -128,13 +129,63 @@ public partial class TasksWindow
     }
 
     // START CLAUDE ON THE LINE: the action column's button on a task no Claude session has joined, where a Claude task has
-    // Open Claude (OpenClaudeButton). The "⋯" menu has the same pair, one or the other (task b6f068b1). Segoe's "Play",
-    // U+E768, in both icon fonts.
+    // Open Claude (OpenClaudeButton). The "⋯" menu has the same pair, one or the other (task b6f068b1). It wears the
+    // same mark as Open Claude, in the plain ink (ClaudeMark below).
     Button? StartClaudeButton(TaskRowView row) =>
         StartsClaude(row) && Actions?.StartClaude is { } start
-            ? Small(new TextBlock { Text = "", FontFamily = IconFont, FontSize = 12, Foreground = Ink, VerticalAlignment = VerticalAlignment.Center },
+            ? Small(ClaudeMark(hasSession: false),
                 StartClaudeText, () => start(row.Id), "Start Claude on this: a background session with the task as its first message")
             : null;
+
+    // ONE MARK FOR BOTH CLAUDE BUTTONS, TOLD APART BY COLOUR (task 5e02e99f; Petre, on the line's Open Claude icon, an
+    // arrow leaving a box, and the play triangle a task without a session had in the same column: "this and another icon,
+    // both opening claude", then "keep them on the same spot, give them claude icon and differentiate by color",
+    // "whether it has a claude session or not"). The two were different pictures for what he reads as one thing, and the
+    // arrow also looked like "Open in window" two slots along. So the column has one picture, a spark of twelve rays:
+    //   * orange (ClaudeSessionInk) on a task that has a session: the button is Open Claude and goes to it;
+    //   * the plain ink every other icon button has, on a task with none: the button is Start Claude on this.
+    // The name and the tooltip still say which of the two it is. The spark is drawn here, a stroked path, because the
+    // icon fonts have no such glyph; it is a spark of our own, not Anthropic's artwork.
+    internal const string ClaudeMarkTag = "claude-mark";
+
+    /// <summary>The mark's colour on a task that has a Claude session (Open Claude). Internal for the tests.</summary>
+    internal static readonly Brush ClaudeSessionInk = Frozen(0xFF, 0xD9, 0x77, 0x57);
+
+    /// <summary>The mark's colour on a task with no session yet (Start Claude on this): the other icon buttons' ink.</summary>
+    internal static Brush ClaudeNoSessionInk => Ink;
+
+    // Twelve rays about the centre of a 12 DIP box, every 30 degrees, long and short in turn and a little uneven, so it
+    // reads as a hand-drawn spark and not as a gear or a loading wheel. Frozen: one geometry for every line.
+    static readonly Geometry ClaudeSpark = Spark();
+
+    static Geometry Spark()
+    {
+        double[] reach = [5.6, 4.3, 5.2, 4.6, 5.6, 4.2, 5.3, 4.5, 5.6, 4.3, 5.1, 4.6];
+        const double centre = 6, hub = 1.5;
+        var spark = new StreamGeometry();
+        using (var draw = spark.Open())
+            reach.Select((length, i) => (length, angle: (i * 30 - 90) * Math.PI / 180)).ToList().ForEach(ray =>
+            {
+                draw.BeginFigure(new Point(centre + hub * Math.Cos(ray.angle), centre + hub * Math.Sin(ray.angle)), isFilled: false, isClosed: false);
+                draw.LineTo(new Point(centre + ray.length * Math.Cos(ray.angle), centre + ray.length * Math.Sin(ray.angle)), isStroked: true, isSmoothJoin: false);
+            });
+        spark.Freeze();
+        return spark;
+    }
+
+    System.Windows.Shapes.Path ClaudeMark(bool hasSession) => new()
+    {
+        Tag = ClaudeMarkTag,
+        Data = ClaudeSpark,
+        Width = 12,
+        Height = 12,
+        Stroke = hasSession ? ClaudeSessionInk : ClaudeNoSessionInk,
+        StrokeThickness = 1.3,
+        StrokeStartLineCap = PenLineCap.Round,
+        StrokeEndLineCap = PenLineCap.Round,
+        SnapsToDevicePixels = false,
+        VerticalAlignment = VerticalAlignment.Center,
+    };
 
     // Whether a line has the Start Claude button: an open task no session has joined, while Deskbar can start one.
     bool StartsClaude(TaskRowView row) =>

@@ -1300,8 +1300,9 @@ with the panel at its narrowest, where the line has room for Edit only: there th
 
 (Task 59b8f613.) The tasks panel open, a Claude task and a note in the list.
 
-LB1. At the default width (460 DIP) a slim line's strip reads, after the comments: Open Claude (or, on the note, a play
-     button, Start Claude on this), then Edit, Open in window, Add subtask, Assign to, Related to, Move to (measured: six
+LB1. At the default width (460 DIP) a slim line's strip reads, after the comments: the Claude spark (task 5e02e99f:
+     orange on a Claude task, where it is Open Claude; plain on the note, where it is Start Claude on this; the same
+     picture at the same x on both), then Edit, Open in window, Add subtask, Assign to, Related to, Move to (measured: six
      on a line with a comment count), then ⋯. Each sits at the same x on every line; a closed task leaves the Edit, Open
      in window and Add subtask slots empty.
 LB2. Narrow the panel to its narrowest: only Edit (and Open in window on a line with no comments) is left before ⋯, and

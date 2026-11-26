@@ -486,8 +486,10 @@ finished: a done task gets a green tick (a hollow green ring while what it merge
 on this" on a note's menu to hand it to a new Claude session.
 
 In the tasks panel the menu's actions are also small buttons on the line itself, before its "⋯": Edit, Open in
-window, Add subtask, Assign to, Related to, Move to and Delete, as many as the panel's width has room for, and a
-note's line has a play button that starts Claude on it. "⋯" still has them all.
+window, Add subtask, Assign to, Related to, Move to and Delete, as many as the panel's width has room for. Before
+them every open task's line has one Claude button, a small spark: orange on a task that has a Claude session,
+where it opens that session, and plain on a task that has none, where it starts Claude on it. "⋯" still has
+them all.
 
 A task can have subtasks, one level deep. Pick "Add subtask…" on a task's menu or its "+" button on the line, or
 "Add subtask" in the row of buttons at the top of its open thread in the tasks panel when the line has no room for

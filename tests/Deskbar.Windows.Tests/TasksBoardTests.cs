@@ -4177,6 +4177,9 @@ public class TasksBoardTests
         Assert.Equal([id], t.WentTo);
         Assert.False(t.Window.ThreadShown(id));
         Assert.Equal("Open Claude: go to its session without opening the task", ButtonNamed(LineOf(t.Window, id), "Open Claude").ToolTip);
+        // Task 5e02e99f: its picture is the Claude spark in the session's orange.
+        var mark = Inside(ButtonNamed(LineOf(t.Window, id), "Open Claude")).OfType<System.Windows.Shapes.Path>().Single(p => TasksWindow.ClaudeMarkTag.Equals(p.Tag));
+        Assert.Same(TasksWindow.ClaudeSessionInk, mark.Stroke);
         Assert.DoesNotContain(Inside(LineOf(t.Window, note)).OfType<Button>(), b => AutomationProperties.GetName(b) == "Open Claude");
 
         t.Controller.Filter(TaskFilter.Closed);
@@ -4409,6 +4412,10 @@ public class TasksBoardTests
 
         Click(LineButton(TasksWindow.StartClaudeText));
         Assert.Equal([id], started);
+        // Task 5e02e99f: the same spark Open Claude has, in the plain ink, since this task has no session.
+        var mark = Inside(LineButton(TasksWindow.StartClaudeText)).OfType<System.Windows.Shapes.Path>().Single(p => TasksWindow.ClaudeMarkTag.Equals(p.Tag));
+        Assert.Same(TasksWindow.ClaudeNoSessionInk, mark.Stroke);
+        Assert.NotSame(TasksWindow.ClaudeSessionInk, mark.Stroke);
 
         Click(LineButton("Edit"));
         Assert.NotNull(t.Window.Editor);
