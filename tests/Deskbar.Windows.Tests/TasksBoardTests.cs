@@ -1171,9 +1171,77 @@ public class TasksBoardTests
         var id = t.Tasks.AddNote("note", t.Gepha).Value.Id;
         t.Controller.Show();
         DoubleClick(t.Window, id); // a double-click goes (Ruling 54)
+        // The release a real double-click ends with: the press armed a drag, which holds every redraw until it (#48).
+        var line = LineOf(t.Window, id);
+        line.RaiseEvent(ButtonArgs(UIElement.PreviewMouseUpEvent));
+        line.RaiseEvent(ButtonArgs(UIElement.MouseUpEvent));
 
         Assert.True(t.Window.IsOpen);
-        Assert.Equal("That workspace has no desktop.", t.Window.Problem);
+        // On the line it is about (task 41f08dba), not on the panel's problem line at the top.
+        Assert.Null(t.Window.Problem);
+        Assert.Equal("That workspace has no desktop.", LineProblemOf(t.Window, id));
+    });
+
+    // The words of the refusal drawn under a line's title (TaskRowView.Problem), or null for a line without one.
+    static string? LineProblemOf(TasksWindow window, Guid id) =>
+        Inside(LineOf(window, id)).OfType<TextBlock>().SingleOrDefault(b => Equals(b.Tag, TasksWindow.ProblemTag))?.Text;
+
+    // Task 41f08dba (Petre: "show error on the task, not at the top of the bar"): a parent with an open subtask refuses to
+    // close, and the refusal shows on the parent's own line, no other line and not the panel's top line. The next action
+    // that works takes it away.
+    [Fact]
+    public void A_refused_close_says_why_on_the_tasks_own_line() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var parent = t.Tasks.AddNote("Ship the release", t.Gepha).Value.Id;
+        var child = t.Tasks.AddNote("Write the notes", t.Gepha, parent: parent).Value.Id;
+        t.Controller.Show();
+
+        Assert.True(t.Controller.Close(parent).IsFailure);
+
+        Assert.Null(t.Window.Problem);
+        Assert.Equal(TaskViews.CloseSubtasksFirst(1), LineProblemOf(t.Window, parent));
+        Assert.Null(LineProblemOf(t.Window, child));
+
+        Assert.True(t.Controller.SetFlag(child, TaskFlag.Important, true).IsSuccess);
+
+        Assert.Null(LineProblemOf(t.Window, parent));
+        Assert.Null(t.Window.Problem);
+    });
+
+    // A refusal on a task the panel shows no line for (filtered out here) still shows somewhere: on the problem line at
+    // the top, as every refusal did before task 41f08dba.
+    [Fact]
+    public void A_refusal_on_a_task_without_a_line_on_show_goes_to_the_top() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var parent = t.Tasks.AddNote("Ship the release", t.Gepha).Value.Id;
+        t.Tasks.AddNote("Write the notes", t.Gepha, parent: parent);
+        t.Controller.Show();
+        t.Controller.Filter(TaskFilter.WaitingOnYou);
+
+        Assert.True(t.Controller.Close(parent).IsFailure);
+
+        Assert.Equal(TaskViews.CloseSubtasksFirst(1), t.Window.Problem);
+    });
+
+    // A task window shows a refusal on its own task, and only its own: another task's window stays clear.
+    [Fact]
+    public void A_refusal_on_a_task_shows_in_its_own_window_only() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var parent = t.Tasks.AddNote("Ship the release", t.Gepha).Value.Id;
+        var child = t.Tasks.AddNote("Write the notes", t.Gepha, parent: parent).Value.Id;
+        t.Controller.Show();
+        Assert.True(t.Controller.OpenWindow(parent).IsSuccess);
+        Assert.True(t.Controller.OpenWindow(child).IsSuccess);
+
+        Assert.True(t.Controller.Close(parent).IsFailure);
+
+        Assert.Equal(TaskViews.CloseSubtasksFirst(1), t.Controller.WindowOf(parent)!.ProblemText.Text);
+        Assert.Equal("", t.Controller.WindowOf(child)!.ProblemText.Text);
+        t.Controller.WindowOf(parent)!.CloseForGood();
+        t.Controller.WindowOf(child)?.CloseForGood();
     });
 
     // The bar's #77 lesson: a redraw under an open menu pulls the rows out from under it. A change that arrives while

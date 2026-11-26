@@ -592,7 +592,7 @@ public partial class TasksWindow : Window
             string.Join('\u0002', view.Cells.Select(c => $"{c.Header}:" + string.Join('\u0003', c.Rows.Select(r =>
                 $"{r.Id}|{r.Title}|{r.Detail}|{r.Description}|{r.Status}|{r.Claudes}|{r.Assignee.Id}|{PlaceSignature(r.Place)}|{r.CommentCount}|{r.Expanded}|{r.Closing}|{r.Important}|{r.Urgent}|{r.ParentTitle}|{r.ParentId}|{r.SubtaskCount}|{r.ClaudeWorking}|" +
                 // The ring or the disc and its tooltip line (task 8470d176): GitHub's answer changes nothing else on a line.
-                $"{r.Delivery.Stage}|{r.Delivery.Note}|" +
+                $"{r.Delivery.Stage}|{r.Delivery.Note}|{r.Problem}|" +
                 SubtasksSignature(r) + "|" +
                 string.Join('\u0004', r.Comments.Select(c => $"{c.Id}{c.Author}{c.When}{c.Markdown}{c.Settled}")))))),
             string.Join('\u0002', view.Groups.Select(g => $"{g.Header}:" + string.Join('\u0003', g.Rows.Select(ListRowSignature)))));
@@ -603,7 +603,7 @@ public partial class TasksWindow : Window
         $"{r.Id}|{r.Title}|{r.Detail}|{r.Description}|{r.Status}|{r.Claudes}|{r.Assignee.Id}|{r.Sessions}|{r.SessionCount}|{r.LiveCount}|{PlaceSignature(r.Place)}|{r.CommentCount}|" +
         $"{r.Expanded}|{r.Closing}|{r.Important}|{r.Urgent}|{r.WorkingCount}|{r.ParentTitle}|{r.ParentId}|{r.SubtaskCount}|{r.ClaudeWorking}|{r.Nested}|" +
         // The ring or the disc, the chip's word and the tooltip line (task 8470d176): GitHub's answer changes nothing else.
-        $"{r.Delivery.Stage}|{r.Delivery.Note}|" +
+        $"{r.Delivery.Stage}|{r.Delivery.Note}|{r.Problem}|" +
         SubtasksSignature(r) + "|" +
         string.Join('\u0004', r.SessionList.Select(s => $"{s.Id}{s.Joined}{s.State}")) + "|" +
         // Task links: the thread's link lines, and the status words of a closed duplicate.
@@ -1464,6 +1464,11 @@ public partial class TasksWindow : Window
         var below = new StackPanel { Margin = new Thickness(2, 0, 4, 0) };
         // The caps around an open line's description and question (Capped), for the "Show all in window" link under them.
         var caps = new List<HeightCap>();
+        // THE REFUSAL FIRST (task 41f08dba; Petre: "show error on the task, not at the top of the bar"): why the last action
+        // on this task did not happen ("Close its open subtask first"), orange like the panel's problem line it replaces
+        // for an action on a task, right under the title so it reads as this line's answer. It goes once the next action
+        // works (TasksBoard.Report).
+        if (row.Problem is { Length: > 0 } problem) below.Children.Add(ProblemOf(problem));
         if (renaming == row.Id)
         {
             renameBox = RenameBox(row);
@@ -1692,6 +1697,23 @@ public partial class TasksWindow : Window
     // The line's detail (question or status line), so a test can find it and read how it is cut.
     internal const string DetailTag = "task-detail";
 
+    // A line's refusal (TaskRowView.Problem), so a test can find it on the line.
+    internal const string ProblemTag = "task-problem";
+
+    // The refusal under a line's title (task 41f08dba): the panel's problem line's orange (#FFA726, ProblemText in the
+    // XAML) at the line's detail size, wrapped, never cut, since it is short and is the one thing to read on the line.
+    static TextBlock ProblemOf(string problem) => new()
+    {
+        Tag = ProblemTag,
+        Text = problem,
+        FontSize = 11,
+        Foreground = ProblemInk,
+        TextWrapping = TextWrapping.Wrap,
+        Margin = new Thickness(0, 1, 0, 1),
+    };
+
+    static readonly Brush ProblemInk = Frozen(0xFF, 0xFF, 0xA7, 0x26);
+
     // THE DESCRIPTION'S PREVIEW on a closed line: its first line without markdown markers (TaskViews.PlainFirstLine, the
     // same text the bar shows for it), dim like the description, one line ending in an ellipsis. A TextBlock takes no
     // focus and passes its clicks to the line, so a click on it opens the line like a click anywhere else on it.
@@ -1833,6 +1855,9 @@ public partial class TasksWindow : Window
         // thread, and the name is a button that opens the parent (TasksBoard.OpenParent).
         if (!inParent && row.ParentId is { } parentId && row.ParentTitle is { } parentTitle && Actions?.OpenParent is { } openParent)
             panel.Children.Add(ParentEntry(parentId, parentTitle, openParent));
+        // A SUBTASK OPENED IN PLACE SHOWS ITS REFUSAL (task 41f08dba): it has no line of its own for TextOf to draw it on,
+        // and TasksBoard counts it as drawn (RowDraws), so its thread says it, first, or the refusal would show nowhere.
+        if (inParent && row.Problem is { Length: > 0 } problem) panel.Children.Add(ProblemOf(problem));
         // A SUBTASK OPENED IN PLACE SHOWS ITS DESCRIPTION (task b2ff3fb7; Petre, of a subtask whose two screenshots were
         // nowhere to be seen once it sat under another task: "subtask may have lost its image after being moved into
         // another task"). A task's description and its pictures are drawn by its LINE (TextOf), under the title. This

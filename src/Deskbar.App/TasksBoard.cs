@@ -135,6 +135,12 @@ public sealed class TasksBoard : IDisposable
     // Whether the Stats view shows in place of the List or the Matrix (task 521d2b07, TasksWindow.Stats.cs). Not
     // remembered: a fresh open starts on the List or the Matrix, whichever AppState.TasksMatrix says, as before.
     bool statsShown;
+    // THE REFUSAL ON A TASK'S OWN LINE (task 41f08dba; Petre: "show error on the task, not at the top of the bar"). The
+    // last action's refusal, when the action was on one task (Report's `task`): that task and the words. Its line draws
+    // them under its title (TaskRowView.Problem) and its window on its problem line, where the panel's problem line at the
+    // top was easy to miss and did not say which line it meant. Null when the last action worked, was on no task, or the
+    // refusal went to the panel's top line because the task has no line on show there (see Report).
+    (Guid Task, string Text)? lineProblem;
     // Set by Shutdown, which runs once (see there).
     bool shutDown;
 
@@ -275,7 +281,7 @@ public sealed class TasksBoard : IDisposable
             // in place, task 0eb943d8) and the task window's "Show in the tasks panel": both ask for that very task, so it
             // is let past a filter that hides it (task b0526e18), as "Subtask of" lets a parent through.
             ShowTask = ShowTaskPastFilters,
-            SetParent = (id, parent) => Report(tasks.SetParent(id, parent)).IsSuccess,
+            SetParent = (id, parent) => Report(tasks.SetParent(id, parent), id).IsSuccess,
             NestTargets = id => tasks.Board.ParentCandidates(id).Select(t => t.Id).ToHashSet(),
             Snooze = (id, choice) => Snooze(id, choice),
             Wake = id => Wake(id),
@@ -292,11 +298,11 @@ public sealed class TasksBoard : IDisposable
             // Task links: the picker's candidates, and what a pick, a cross or the menu does.
             LinkCandidates = (id, typed, duplicate) => tasks.Board.LinkCandidates(id, typed, duplicate).Take(LinkChoicesShown)
                 .Select(t => LinkView(t, duplicate ? TaskLinkKind.DuplicateOf : TaskLinkKind.Related)).ToArray(),
-            MarkDuplicate = (id, of) => Report(tasks.MarkDuplicate(id, of)).IsSuccess,
-            Relate = (id, other) => Report(tasks.Relate(id, other)).IsSuccess,
-            Unrelate = (id, other) => Report(tasks.Unrelate(id, other)),
+            MarkDuplicate = (id, of) => Report(tasks.MarkDuplicate(id, of), id).IsSuccess,
+            Relate = (id, other) => Report(tasks.Relate(id, other), id).IsSuccess,
+            Unrelate = (id, other) => Report(tasks.Unrelate(id, other), id),
             // "Mark deployed" on a Done line (task 8470d176, phase 2): Petre saw it running, so the ring fills.
-            MarkDeployed = id => Report(tasks.MarkDeployed(id, TaskService.MarkedByHand)),
+            MarkDeployed = id => Report(tasks.MarkDeployed(id, TaskService.MarkedByHand), id),
         };
 
         // Taken before the subscriptions below exist, so the first StateChanged pulse is compared with this state
@@ -458,6 +464,7 @@ public sealed class TasksBoard : IDisposable
         statsShown = false;
         expanded.Clear();
         window.ShowProblem(null);
+        lineProblem = null;
         window.PaintSelection(selection.Current);
         window.Present(View());
         window.Open();
@@ -584,8 +591,8 @@ public sealed class TasksBoard : IDisposable
     //
     // HOW THEY STAY CURRENT. Every redraw of the board (a task changed, a session list arrived, a workspace renamed)
     // redraws each open task window from the board as it is, whether or not the panel is open, and the window skips a
-    // redraw that would draw the same thing. A task that is deleted closes its window. A refusal shows on the panel's
-    // problem line and on each task window's.
+    // redraw that would draw the same thing. A task that is deleted closes its window. A refusal on a task shows on
+    // its line in the panel and in its own window only; one on no task on the panel's problem line and every window's
 
     /// <summary>
     /// "Open in window" on a line's menu (the panel's and the bar's), the thread's button and `task open <id>`: the task
@@ -834,7 +841,7 @@ public sealed class TasksBoard : IDisposable
 
         var target = tasks.Board.Tasks.TryFirst(t => t.Id == id).Bind(t => t.WorkspaceId);
         var elsewhere = target.HasValue && manager.CurrentWorkspaceId.Map(current => current != target.Value).GetValueOrDefault(true);
-        if (elsewhere) Report(manager.Switch(target.Value));
+        if (elsewhere) Report(manager.Switch(target.Value), id);
         OpenUri(uri);
     }
 
@@ -885,9 +892,9 @@ public sealed class TasksBoard : IDisposable
         if (!task.Value.IsClaudes && task.Value.WorkspaceId.HasNoValue)
         {
             ToggleThread(id);
-            return Report(Result.Success());
+            return Report(Result.Success(), id);
         }
-        return Report(goTo(task.Value));
+        return Report(goTo(task.Value), id);
     }
 
     /// <summary>
@@ -900,7 +907,7 @@ public sealed class TasksBoard : IDisposable
         var task = tasks.Board.Tasks.TryFirst(t => t.Id == id);
         if (task.HasNoValue) return Report(Result.Failure($"No task with id {id}"));
         selection.Select(id);
-        return Report(openSession(task.Value, sessionId));
+        return Report(openSession(task.Value, sessionId), id);
     }
 
     /// <summary>
@@ -910,7 +917,7 @@ public sealed class TasksBoard : IDisposable
     /// </summary>
     public Result Close(Guid id, bool stopClaude = false)
     {
-        if (tasks.Board.Tasks.FirstOrDefault(t => t.Id == id) is not { IsOpen: true } task) return Report(tasks.Close(id));
+        if (tasks.Board.Tasks.FirstOrDefault(t => t.Id == id) is not { IsOpen: true } task) return Report(tasks.Close(id), id);
         if (!stopClaude && TaskBoard.ClaudeStillWorking(task))
         {
             window.OpenStopClaudeMenu(id);
@@ -925,7 +932,7 @@ public sealed class TasksBoard : IDisposable
         var closed = !stopClaude ? tasks.Close(id)
             : stopClaudeAndClose is { } stop ? stop(task)
             : tasks.Close(id, stoppingClaude: true);
-        return Report(closed.TapError(_ => Forget(id)));
+        return Report(closed.TapError(_ => Forget(id)), id);
     }
 
     /// <summary>
@@ -941,14 +948,14 @@ public sealed class TasksBoard : IDisposable
         if (back.IsSuccess && pending.Selected) selection.Select(id);
         // SetStatus pulses Changed, which redraws; a refusal (the task is gone) still needs the line taken away.
         if (back.IsFailure) Refresh();
-        return Report(back);
+        return Report(back, id);
     }
 
-    public Result Reopen(Guid id) => Report(tasks.Reopen(id));
+    public Result Reopen(Guid id) => Report(tasks.Reopen(id), id);
 
-    public Result SetStatus(Guid id, TaskStatus status) => Report(tasks.SetStatus(id, status));
+    public Result SetStatus(Guid id, TaskStatus status) => Report(tasks.SetStatus(id, status), id);
 
-    public Result Rename(Guid id, string title) => Report(tasks.Rename(id, title));
+    public Result Rename(Guid id, string title) => Report(tasks.Rename(id, title), id);
 
     /// <summary>
     /// Edit in the window (Ruling 58): the title and the description together. The title first: a refused one (empty) stops
@@ -958,47 +965,47 @@ public sealed class TasksBoard : IDisposable
     public Result Edit(Guid id, string title, string description) =>
         Report(tasks.Board.Tasks.TryFirst(t => t.Id == id).Match(
             task => (title.Trim() == task.Title ? Result.Success() : tasks.Rename(id, title)).Bind(() => tasks.Describe(id, description)),
-            () => Result.Failure($"No task with id {id}")));
+            () => Result.Failure($"No task with id {id}")), id);
 
     /// <summary>One of HIS comments rewritten (Ruling 58); a session's is refused by the board.</summary>
-    public Result EditComment(Guid comment, string markdown) => Report(tasks.EditComment(comment, markdown));
+    public Result EditComment(Guid comment, string markdown) => Report(tasks.EditComment(comment, markdown), TaskOfComment(comment));
 
     /// <summary>Ruling 62: Petre settles any comment from its button (or brings a settled one back); kept either way.</summary>
-    public Result SettleComment(Guid comment, bool settle) => Report(tasks.SettleComment(comment, settle));
+    public Result SettleComment(Guid comment, bool settle) => Report(tasks.SettleComment(comment, settle), TaskOfComment(comment));
 
-    public Result MoveTo(Guid id, Maybe<Guid> workspace) => Report(tasks.MoveTo(id, workspace));
+    public Result MoveTo(Guid id, Maybe<Guid> workspace) => Report(tasks.MoveTo(id, workspace), id);
 
     /// <summary>
     /// The "Assign to" menu (Ruling 57): hands the task to Petre or to Claude. Only here and in `task assign`, never on
     /// the bar. Nothing else about the task changes, so its line keeps its place.
     /// </summary>
-    public Result Assign(Guid id, Assignee who) => Report(tasks.Assign(id, who));
+    public Result Assign(Guid id, Assignee who) => Report(tasks.Assign(id, who), id);
 
     /// <summary>A toggle on a line: the flag on or off; the task goes to the top of the quadrant it lands in.</summary>
-    public Result SetFlag(Guid id, TaskFlag flag, bool on) => Report(tasks.SetFlag(id, flag, on));
+    public Result SetFlag(Guid id, TaskFlag flag, bool on) => Report(tasks.SetFlag(id, flag, on), id);
 
     // SNOOZE (task 6da8d7eb; TaskSnooze.cs has the four lengths): the line's snooze button and its "⋯" menu. The end is
     // worked out on the LOCAL clock, so "Tomorrow" and "Monday" mean 09:00 where Petre is; the service stores it as an
     // instant. A refusal (a task waiting on him, a closed one) shows on the problem line like any other.
     public Result Snooze(Guid id, SnoozeChoice choice) =>
-        Report(tasks.Snooze(id, TaskSnooze.Until(choice, now().ToLocalTime(), TimeZoneInfo.Local.GetUtcOffset)));
+        Report(tasks.Snooze(id, TaskSnooze.Until(choice, now().ToLocalTime(), TimeZoneInfo.Local.GetUtcOffset)), id);
 
-    public Result Wake(Guid id) => Report(tasks.Wake(id));
+    public Result Wake(Guid id) => Report(tasks.Wake(id), id);
 
     /// <summary>A drop: the task goes to that place in that quadrant, taking its flags (TaskBoard.Place).</summary>
-    public Result Place(Guid id, Quadrant quadrant, TaskPlace place) => Report(tasks.Place(id, quadrant, place));
+    public Result Place(Guid id, Quadrant quadrant, TaskPlace place) => Report(tasks.Place(id, quadrant, place), id);
 
     /// <summary>
     /// The "Goal" menu: links the task to an open goal, or (none) unlinks it, through GoalService.LinkTask. Flags, rank
     /// and status stay as they are, so the line does not move.
     /// </summary>
     public Result SetGoal(Guid id, Maybe<Guid> goal) =>
-        Report(goals is { } service ? service.LinkTask(id, goal) : Result.Failure("Goals are not available"));
+        Report(goals is { } service ? service.LinkTask(id, goal) : Result.Failure("Goals are not available"), id);
 
     public Result Delete(Guid id)
     {
         expanded.Remove(id);
-        return Report(tasks.Delete(id));
+        return Report(tasks.Delete(id), id);
     }
 
     /// <summary>
@@ -1057,7 +1064,7 @@ public sealed class TasksBoard : IDisposable
                 LetPastFilters(task.Id);
                 ShowAdded(task.Id);
             })
-            .Bind(_ => Result.Success()));
+            .Bind(_ => Result.Success()), lineId);
 
     // THE TASK JUST ADDED IS HIGHLIGHTED, as the bar's add box does it (task ee75f046, Petre's "yes" to option 3 of the
     // mockup; TaskGlow has the rest). The add's pulse has already redrawn the panel (tasks.Changed runs Refresh inline).
@@ -1076,7 +1083,7 @@ public sealed class TasksBoard : IDisposable
     public Result Comment(Guid id, string markdown)
     {
         expanded.Add(id);
-        return Report(tasks.Comment(id, Maybe<string>.None, markdown));
+        return Report(tasks.Comment(id, Maybe<string>.None, markdown), id);
     }
 
     public void Dispose()
@@ -1345,6 +1352,8 @@ public sealed class TasksBoard : IDisposable
         // Whether its menu offers "Mark deployed": merged, and a pull request outside this build's repository not
         // reported yet (task 8470d176, phase 2; TaskService.CanMarkDeployed).
         CanMarkDeployed = tasks.CanMarkDeployed(task),
+        // The last action's refusal when it was on this task (task 41f08dba, see lineProblem): drawn under the title.
+        Problem = lineProblem is { } refused && refused.Task == task.Id ? refused.Text : null,
         // Null for no goal and for a link to a goal that no longer exists, which reads as no goal everywhere.
         Goal = goals?.GoalOf(task).Map(ChoiceOf).GetValueOrDefault(),
         // Only an open thread shows them, and an ended one's state looks on disk for its transcript (see the header).
@@ -1463,13 +1472,47 @@ public sealed class TasksBoard : IDisposable
         _ => "Nothing closed.",
     };
 
-    // The problem line follows the last action: its refusal, or nothing once one works.
-    Result Report(Result result)
+    // THE PROBLEM FOLLOWS THE LAST ACTION: its refusal, or nothing once one works. WHERE it shows depends on what the
+    // action was on (task 41f08dba; Petre, of "Close its open subtask first" at the top of the panel: "show error on the
+    // task, not at the top of the bar"):
+    //   - on one task (`task`, a task that still exists): on that task's line in the panel, under its title, and on that
+    //     task's window's problem line. Other task windows show nothing, since the refusal is not theirs.
+    //   - on no task (the add box's note, the manager, the Matrix switch), or on a task whose line the panel is not
+    //     showing (filtered out, folded under its parent, the Stats view): on the panel's problem line at the top, as
+    //     every refusal did before, so it is never shown nowhere. Task windows show it too in that case, as before.
+    // A refusal on the line redraws the panel when it comes or goes, since a refusal changes nothing on the board and so
+    // pulses no redraw of its own.
+    Result Report(Result result, Guid? task = null)
     {
-        window.ShowProblem(result.IsFailure ? result.Error : null);
-        taskWindows.Values.ToList().ForEach(w => w.ShowProblem(result.IsFailure ? result.Error : null));
+        var refused = result.IsFailure && task is { } id && tasks.Board.Tasks.Any(t => t.Id == id)
+            ? ((Guid Task, string Text)?)(id, result.Error)
+            : null;
+        // On the line only where the panel draws that line; otherwise the top line, so the refusal is seen somewhere. A
+        // closed panel draws nothing yet: the refusal waits on the line for nothing (OpenFresh clears it) and shows in the
+        // task's window, where the action came from.
+        var onLine = refused is { } r && (!window.IsOpen || Draws(View(), r.Task));
+        var before = lineProblem;
+        lineProblem = onLine ? refused : null;
+        if (before != lineProblem) Refresh();
+        var top = result.IsFailure && !onLine ? result.Error : null;
+        window.ShowProblem(top);
+        taskWindows.ToList().ForEach(pair => pair.Value.ShowProblem(top ?? (refused is { } own && own.Task == pair.Key ? own.Text : null)));
         return result;
     }
+
+    // The task a comment is on, for a comment's Edit and Settle: their refusal shows on that task's line. Null for a
+    // comment no task has (gone meanwhile), whose refusal goes to the top line.
+    Guid? TaskOfComment(Guid comment) =>
+        tasks.Board.Tasks.FirstOrDefault(t => t.Comments.Any(c => c.Id == comment))?.Id;
+
+    // Whether the panel's view draws the task's line: a line of the List or of the Matrix (whichever is shown), or a
+    // subtask drawn in place inside an open thread (SubtaskView.Row). The Stats view draws no line.
+    static bool Draws(TasksView view, Guid id) =>
+        view.Stats is null
+        && (view.Matrix ? view.Cells.SelectMany(c => c.Rows) : view.Groups.SelectMany(g => g.Rows)).Any(row => RowDraws(row, id));
+
+    static bool RowDraws(TaskRowView row, Guid id) =>
+        row.Id == id || row.Subtasks.Any(sub => sub.Row is { } inPlace && RowDraws(inPlace, id));
 }
 
 // What the window draws, resolved here so the window never looks anything up.
@@ -1613,6 +1656,12 @@ internal sealed record TaskRowView(Guid Id, string Title, string Detail, TaskSta
 
     /// <summary>The task's links while its thread is open (task links), for the thread's list; empty while closed.</summary>
     public IReadOnlyList<TaskLinkView> Links { get; init; } = [];
+
+    /// <summary>
+    /// Why the last action on this task was refused (task 41f08dba, TasksBoard.lineProblem), or null: drawn in orange
+    /// right under the title, so the refusal sits on the line it is about rather than at the top of the panel.
+    /// </summary>
+    public string? Problem { get; init; }
 }
 
 /// <summary>How a linked task stands to the task whose thread lists it (task links).</summary>
