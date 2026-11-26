@@ -79,6 +79,7 @@ public class FloatingBarBookmarksTests
             Top = -32000,
             BookmarkOpener = new BookmarkOpener(harness.Manager, (started ?? new Started()).Starts, () => new HashSet<string>()),
             ClipboardText = clipboard ?? (() => null),
+            BookmarkSources = new FakeSources(),
             // As in App.xaml.cs: setting the opener does not redraw, TimeToday's init (after it) does, and that redraw
             // is the first one drawn with the opener (so a running program's chip is hidden).
             TimeToday = _ => TimeSpan.Zero,
@@ -86,6 +87,119 @@ public class FloatingBarBookmarksTests
         bar.Show();
         return new BarUnderTest(bar);
     }
+
+    // Disk and shell lookups that answer nothing: a drop of a link, or a .txt, never reaches them.
+    sealed class FakeSources : IBookmarkSources
+    {
+        public Maybe<ShortcutTarget> ResolveShortcut(string lnkPath) => Maybe<ShortcutTarget>.None;
+        public string? DescribeExe(string exePath) => null;
+        public string? NameOfApp(string appId) => null;
+        public string? ReadText(string path) => null;
+    }
+
+    // A DragEventArgs cannot be built by hand (its constructor is internal), so reflection makes one and the event is
+    // raised on the row container exactly as OLE would raise it.
+    static string Drag(BarUnderTest bar, string workspace, IDataObject data, RoutedEvent kind)
+    {
+        var container = RowNamed(bar.Rows, workspace);
+        var args = (DragEventArgs)typeof(DragEventArgs)
+            .GetConstructors(System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)
+            .Single()
+            .Invoke([data, DragDropKeyStates.None, DragDropEffects.Copy | DragDropEffects.Link | DragDropEffects.Move, container, new Point(5, 5)]);
+        args.RoutedEvent = kind;
+        container.RaiseEvent(args);
+        return args.Effects.ToString();
+    }
+
+    static DataObject LinkDrag(string url)
+    {
+        var data = new DataObject();
+        data.SetData("UniformResourceLocatorW", url + "\0");
+        data.SetData("FileGroupDescriptorW", BookmarkDropDataTests.Descriptor("Portainer.url"));
+        return data;
+    }
+
+    [Fact]
+    public void Dropping_a_link_on_a_row_adds_it_there() => StaThread.Run(() =>
+    {
+        var harness = Harness.Build();
+        using var bar = ShowBar(harness);
+
+        var effects = Drag(bar, "Sparrow", LinkDrag("https://portainer.local:9443/"), DragDrop.DragOverEvent);
+        Drag(bar, "Sparrow", LinkDrag("https://portainer.local:9443/"), DragDrop.DropEvent);
+
+        Assert.NotEqual("None", effects);
+        var added = harness.Manager.State.Workspaces.Single(w => w.Name == "Sparrow").Bookmarks.Single();
+        Assert.Equal("Portainer", added.Name);
+        Assert.Equal("https://portainer.local:9443/", added.Target);
+    });
+
+    [Fact]
+    public void The_readout_says_where_the_bookmark_goes() => StaThread.Run(() =>
+    {
+        var harness = Harness.Build();
+        using var bar = ShowBar(harness);
+
+        Drag(bar, "Sparrow", LinkDrag("https://portainer.local:9443/"), DragDrop.DragOverEvent);
+
+        Assert.Equal("→ bookmark in Sparrow", bar.Bar.ReadoutText);
+    });
+
+    [Fact]
+    public void A_refused_drop_says_why_and_adds_nothing() => StaThread.Run(() =>
+    {
+        var harness = Harness.Build();
+        using var bar = ShowBar(harness);
+        var data = new DataObject();
+        data.SetData(DataFormats.FileDrop, new[] { @"C:\notes.txt" });
+
+        // No Drop is raised: with the effect None OLE never delivers one, and a refusal that did reach Drop would go to
+        // Report, which is a modal MessageBox and would block this test.
+        var effects = Drag(bar, "Sparrow", data, DragDrop.DragOverEvent);
+
+        Assert.Equal("None", effects);
+        Assert.StartsWith("can't bookmark: ", bar.Bar.ReadoutText);
+        Assert.Empty(harness.Manager.State.Workspaces.Single(w => w.Name == "Sparrow").Bookmarks);
+    });
+
+    [Fact]
+    public void A_window_drag_still_takes_the_old_path() => StaThread.Run(() =>
+    {
+        var harness = Harness.Build();
+        using var bar = ShowBar(harness);
+        var data = new DataObject();
+        data.SetData("Deskbar.DraggedWindow", new DraggedWindow(harness.First.Handle, "workspace:other"));
+
+        var effects = Drag(bar, "Sparrow", data, DragDrop.DragOverEvent);
+
+        Assert.Equal("Move", effects);
+        Assert.Equal("→ move to Sparrow", bar.Bar.ReadoutText);
+    });
+
+    [Fact]
+    public void The_window_menu_offers_bookmark_for_a_desktop_app() => StaThread.Run(() =>
+    {
+        var harness = Harness.Build();
+        using var bar = ShowBar(harness);
+        var icon = Buttons(RowNamed(bar.Rows, "Sparrow")).Single(b => b.Tag is "icon");
+
+        var menu = FloatingBar.MenuOf(icon)!;
+        Click(Item(menu, "Bookmark in this workspace"));
+
+        var added = harness.Manager.State.Workspaces.Single(w => w.Name == "Sparrow").Bookmarks.Single();
+        Assert.Equal(BookmarkKind.Program, added.Kind);
+        Assert.Equal(@"C:\beeper.exe", added.Target);
+    });
+
+    [Fact]
+    public void The_window_menu_has_no_bookmark_item_for_an_explorer_window() => StaThread.Run(() =>
+    {
+        var harness = Harness.Build(extraWorkspace: true);
+        using var bar = ShowBar(harness);
+        var icon = Buttons(RowNamed(bar.Rows, "Archive")).Single(b => b.Tag is "icon");
+
+        Assert.DoesNotContain("Bookmark in this workspace", Headers(FloatingBar.MenuOf(icon)!));
+    });
 
     [Fact]
     public void A_workspace_shows_its_bookmarks_after_its_windows() => StaThread.Run(() =>
