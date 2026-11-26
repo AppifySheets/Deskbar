@@ -240,7 +240,8 @@ public sealed class TasksBoard : IDisposable
         Func<TaskItem, IReadOnlyList<SessionView>>? sessionsOf = null, Action<Guid>? startClaude = null,
         Func<TaskItem, string, Result>? openSession = null, IObservable<System.Reactive.Unit>? sessionsChanged = null,
         Func<TaskItem, int>? workingOf = null, Func<TaskItem, Result>? stopClaudeAndClose = null, Func<bool>? knowsActivity = null,
-        Func<TaskItem, bool>? opensSession = null)
+        Func<TaskItem, bool>? opensSession = null,
+        Func<Maybe<Guid>, Maybe<Guid>, Task<IReadOnlyList<SkillChoice>>>? workspaceSkills = null)
     {
         this.workingOf = workingOf ?? (_ => 0);
         this.knowsActivity = knowsActivity ?? (workingOf is null ? () => false : () => true);
@@ -299,6 +300,8 @@ public sealed class TasksBoard : IDisposable
             FilterClaude: FilterClaude)
         {
             StartClaude = startClaude,
+            // The add box's "/" list of Claude Code skills (task 3a872301, SkillCompletion): none, no list.
+            WorkspaceSkills = workspaceSkills,
             // The add box's Start Claude button (task 3c40dec9): none, as StartClaude, while Claude cannot be started.
             AddNoteAndStartClaude = startClaude is { } start
                 ? (title, workspace, quadrant, describe) => AddNoteAndStartClaude(start, title, workspace, quadrant, describe)
@@ -2020,6 +2023,12 @@ internal sealed record TasksWindowActions(
 {
     /// <summary>"Start Claude on this" (Task 9): the line menu's item and the thread's button. None, neither shows.</summary>
     public Action<Guid>? StartClaude { get; init; }
+
+    /// <summary>
+    /// The add box's "/" list (task 3a872301, SkillCompletion): the Claude Code skills of the folders a task on a
+    /// workspace (under a parent) would start in. None, typing "/" lists nothing.
+    /// </summary>
+    public Func<Maybe<Guid>, Maybe<Guid>, Task<IReadOnlyList<SkillChoice>>>? WorkspaceSkills { get; init; }
 
     /// <summary>
     /// The add box's Start Claude button and Ctrl+Enter (task 3c40dec9): AddNote's note, then "Start Claude on this" on

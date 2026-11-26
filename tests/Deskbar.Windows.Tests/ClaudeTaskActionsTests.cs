@@ -61,6 +61,8 @@ public class ClaudeTaskActionsTests
         public Func<TaskSession, bool> Transcript { get; set; } = _ => true;
         public Maybe<nint> Editor { get; set; } = Maybe<nint>.None;
         public IReadOnlyList<string> EditorNames { get; set; } = [];
+        // The skills Claude Code last listed per folder (task 3a872301); none for a folder never asked.
+        public Func<string, Maybe<IReadOnlyList<string>>> Kept { get; set; } = _ => Maybe<IReadOnlyList<string>>.None;
 
         public ClaudeTaskActions Actions { get; }
 
@@ -107,6 +109,7 @@ public class ClaudeTaskActionsTests
                     return Installs;
                 },
                 ClaudeInstalled = () => Installed,
+                SkillsKept = folder => Kept(folder),
                 Tell = Told.Add,
                 Forget = Forgotten.Add,
                 Stop = shortId =>
@@ -718,6 +721,63 @@ public class ClaudeTaskActionsTests
         Assert.Equal([RemoteControl.ClosedTaskRefusal], rig.Told);
         Assert.Equal(RemoteControl.ClosedTaskRefusal, started.Error);
         Assert.Empty(rig.Asked);
+        Assert.Empty(rig.Starts);
+    });
+
+    // Task 3a872301: a task titled with a skill ("/refresh-pr 245") starts where that skill is. Two candidate folders come
+    // from two tasks' sessions on Sparrow; SkillsKept says what Claude Code last listed in each.
+    const string SkillFolderA = @"C:\repos\A";
+    const string SkillFolderB = @"E:\work\B";
+
+    static Maybe<IReadOnlyList<string>> Skills(params string[] names) => Maybe.From<IReadOnlyList<string>>(names);
+
+    static TaskItem SkillRig(Rig rig)
+    {
+        rig.Tasks.Create("A", rig.Sparrow, new TaskSession("s-a", SkillFolderA, DateTimeOffset.UnixEpoch, Maybe<DateTimeOffset>.None));
+        rig.Tasks.Create("B", rig.Sparrow, new TaskSession("s-b", SkillFolderB, DateTimeOffset.UnixEpoch, Maybe<DateTimeOffset>.None));
+        rig.Listed();
+        return rig.Tasks.AddNote("/refresh-pr 245", rig.Sparrow).Value;
+    }
+
+    [Fact]
+    public void A_skill_task_starts_at_once_in_the_one_folder_that_has_the_skill() => StaThread.Run(() =>
+    {
+        using var rig = new Rig();
+        rig.Kept = folder => folder == SkillFolderA ? Skills("humanizer") : Skills("humanizer", "refresh-pr");
+        var task = SkillRig(rig);
+
+        Assert.Null(rig.Actions.Offer(task.Id));
+        rig.Settle();
+
+        Assert.Equal([("/refresh-pr 245", SkillFolderB)], rig.Starts);
+    });
+
+    [Fact]
+    public void A_skill_task_with_no_kept_lists_offers_every_folder() => StaThread.Run(() =>
+    {
+        using var rig = new Rig();
+        var task = SkillRig(rig);
+
+        var menu = rig.Actions.Offer(task.Id);
+
+        Assert.NotNull(menu);
+        Assert.Equal([SkillFolderA, SkillFolderB, "-", ClaudeTaskActions.ChooseFolderItem],
+            menu.Items.Cast<object>().Select(i => i is MenuItem { Header: TextBlock text } ? text.Text : "-"));
+        Assert.Empty(rig.Starts);
+    });
+
+    [Fact]
+    public void A_skill_task_keeps_every_folder_when_none_has_the_skill() => StaThread.Run(() =>
+    {
+        using var rig = new Rig();
+        rig.Kept = _ => Skills("humanizer");
+        var task = SkillRig(rig);
+
+        var menu = rig.Actions.Offer(task.Id);
+
+        Assert.NotNull(menu);
+        Assert.Equal([SkillFolderA, SkillFolderB, "-", ClaudeTaskActions.ChooseFolderItem],
+            menu.Items.Cast<object>().Select(i => i is MenuItem { Header: TextBlock text } ? text.Text : "-"));
         Assert.Empty(rig.Starts);
     });
 

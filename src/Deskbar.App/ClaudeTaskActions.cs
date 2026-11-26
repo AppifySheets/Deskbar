@@ -349,6 +349,26 @@ public sealed class ClaudeTaskActions : IDisposable
         ClaudeStart.Folders(task, tasks.Board, ClaudeStart.EditorRepos(seams.EditorFolderNames(task.WorkspaceId), tasks.Board));
 
     /// <summary>
+    /// The folders a task not added yet would start in, on <paramref name="workspace"/> under <paramref name="parent"/>
+    /// (ClaudeStart.NewTaskFolders): what the add box lists the skills of (task 3a872301).
+    /// </summary>
+    public IReadOnlyList<string> NewTaskFolders(Maybe<Guid> workspace, Maybe<Guid> parent) =>
+        ClaudeStart.NewTaskFolders(workspace, parent, tasks.Board,
+            ClaudeStart.EditorRepos(seams.EditorFolderNames(workspace), tasks.Board));
+
+    // A TASK TITLED WITH A SKILL STARTS WHERE THAT SKILL IS (task 3a872301). "/refresh-pr 245" is a project's skill, and
+    // a session started in another of the workspace's repos would not have it. So the folders Claude Code is known NOT
+    // to have that skill in (SkillCatalog, from the add box's lists) are dropped; a folder never asked stays, since it
+    // may well have it. When that would leave none (the skill is gone everywhere), the folders stay as they were, and
+    // the session says it does not know the skill.
+    IReadOnlyList<string> SkillFolders(TaskItem task, IReadOnlyList<string> folders) =>
+        ClaudeSkills.SkillOf(task.Title) is { HasValue: true } skill
+        && folders.Where(folder => seams.SkillsKept(folder).Map(skills => skills.Contains(skill.Value)).GetValueOrDefault(true)).ToList()
+            is { Count: > 0 } having
+            ? having
+            : folders;
+
+    /// <summary>
     /// "Stop Claude and close" (see the header): closes the task past the live-session refusal, then stops each of its
     /// running background sessions. The close is the answer; each stop lands in the task's thread later.
     /// </summary>
@@ -410,7 +430,7 @@ public sealed class ClaudeTaskActions : IDisposable
         }
         if (HasRunningSession(task) && !seams.Confirm(AnotherSessionQuestion)) return null;
 
-        var folders = Folders(task);
+        var folders = SkillFolders(task, Folders(task));
         if (folders is [var only])
         {
             Told(Start(task, only));
@@ -610,6 +630,12 @@ public sealed record ClaudeTaskSeams(
 
     /// <summary>Windows' folder picker; none when cancelled.</summary>
     public Func<Maybe<string>> PickFolder { get; init; } = () => Maybe<string>.None;
+
+    /// <summary>
+    /// The skills Claude Code last listed for a folder (SkillCatalog.Kept), for a task titled with a skill (task
+    /// 3a872301); none for a folder never asked, which is the default.
+    /// </summary>
+    public Func<string, Maybe<IReadOnlyList<string>>> SkillsKept { get; init; } = _ => Maybe<IReadOnlyList<string>>.None;
 
     /// <summary>The untrusted folder's message with its Yes/No question; yes opens the terminal.</summary>
     public Func<string, bool> OfferTrustTerminal { get; init; } = _ => false;

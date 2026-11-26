@@ -77,6 +77,49 @@ public class ClaudeStartTests
             ClaudeStart.FirstMessage(Task(taskId, "Fix the bar", Maybe<Guid>.None, "   ")));
     }
 
+    // Task 3a872301: a title that starts with a skill opens the message, so the session runs it; the join lines
+    // follow and reach the skill as its arguments (measured with /humanizer).
+    [Fact]
+    public void A_title_that_starts_with_a_skill_opens_the_first_message()
+    {
+        var task = Task(taskId, "/refresh-pr 245", Maybe<Guid>.None);
+
+        Assert.Equal(
+            $"/refresh-pr 245\n\nDeskbar task {taskId}: /refresh-pr 245\nJoin this task (deskbar task join {taskId}) and start on it.",
+            ClaudeStart.FirstMessage(task, runsSkill: true));
+    }
+
+    [Fact]
+    public void A_title_that_only_looks_like_a_path_is_not_a_skill()
+    {
+        var message = ClaudeStart.FirstMessage(Task(taskId, "/etc/hosts is wrong", Maybe<Guid>.None), runsSkill: true);
+
+        Assert.StartsWith($"Deskbar task {taskId}: /etc/hosts is wrong", message);
+    }
+
+    [Fact]
+    public void A_long_skill_title_still_fits_1000_characters_with_its_join_line()
+    {
+        var message = ClaudeStart.FirstMessage(Task(taskId, "/summary " + new string('x', 3000), Maybe<Guid>.None, new string('y', 500)), runsSkill: true);
+
+        Assert.True(message.Length <= 1000);
+        Assert.StartsWith("/summary xxx", message);
+        Assert.EndsWith($"\nJoin this task (deskbar task join {taskId}) and start on it.", message);
+    }
+
+    [Fact]
+    public void A_task_not_added_yet_offers_its_workspaces_repos_then_its_editors()
+    {
+        var workspace = Guid.NewGuid();
+        var board = Board(
+            Task(Guid.NewGuid(), "older", workspace, "", Session("a", @"E:\repos\Old", 1)),
+            Task(Guid.NewGuid(), "newer", workspace, "", Session("b", @"E:\repos\New\.claude\worktrees\topic", 5)),
+            Task(Guid.NewGuid(), "elsewhere", Guid.NewGuid(), "", Session("c", @"E:\repos\Other", 9)));
+
+        Assert.Equal([@"E:\repos\New", @"E:\repos\Old", @"E:\repos\Editor"],
+            ClaudeStart.NewTaskFolders(workspace, Maybe<Guid>.None, board, [@"E:\repos\Editor", @"E:\repos\old"]));
+    }
+
     [Fact]
     public void The_first_message_is_cut_to_1000_characters()
     {

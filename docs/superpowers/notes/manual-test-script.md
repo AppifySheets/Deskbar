@@ -1497,6 +1497,16 @@ AS3. The tasks panel, + Add: the same play button sits after the toggles, before
      does the same. The box closes once the note is added.
 AS4. In a workspace whose tasks know several folders (or none), the button adds the note and opens the folder pick
      list at the pointer, as "Start Claude on this" does. Esc on the list leaves a plain note.
+AS5a. (Task 3a872301.) Type `/` in the bar's box on a workspace whose tasks know this repo. A list opens under the box
+     saying it is asking Claude Code, then, within a few seconds, the skills: `/refresh-pr` among them. Type `ref`: the
+     list narrows to the skills that start with or contain it. Down, then Tab: the box reads `/<that skill> ` with the
+     caret after the space. Type `245` and press Ctrl+Enter: the task "/refresh-pr 245" is added and a Claude session
+     starts on it whose first message runs /refresh-pr.
+AS5b. Type `/` again: the list now opens at once. Esc closes it and keeps the box's text; Esc again clears the box.
+     Type `/hum` and click /humanizer in the list: it goes into the box and the caret stays there.
+AS5c. On a workspace whose tasks know two repos, a repo's own skill shows that repo's name beside it, and starting a
+     task titled with it starts in that repo without the folder list.
+AS5d. The tasks panel, + Add: the same list under its box.
 AS5. The button on an empty box adds nothing and starts nothing. With Claude sessions off in Manage the note is
      still added, and the same refusal "Start Claude on this" gives says why no session started.
 
