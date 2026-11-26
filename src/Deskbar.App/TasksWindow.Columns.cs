@@ -63,7 +63,8 @@ public partial class TasksWindow
     //
     // The comments column is the glyph alone, or the glyph and its count (3 DIP apart, about 7 DIP a digit at 11 DIP),
     // as wide as the widest count on show. The action column is Reopen's width while a closed task is on show (full
-    // lines only), else Open Claude's glyph while a Claude task is, else nothing.
+    // lines only), else Open Claude's glyph while a Claude task is (two glyphs on a full line while one has Reevaluate
+    // beside it, ClaudeColumnFor), else nothing.
     const double ButtonBorder = 1;
     const double ButtonGlyph = 12;
     const double ButtonColumn = ButtonGlyph + 2 * 4 + 2 * ButtonBorder;
@@ -86,6 +87,9 @@ public partial class TasksWindow
     // widths in force: the saved ones, or the ones a divider drag is setting.
     GridLength commentsWidth = new(ButtonColumn);
     GridLength actionWidth = new(0);
+
+    // Whether this draw's slim lines lead their strip with a Reevaluate slot (SizeColumns; task 3dd07539).
+    bool reevaluateLeads;
     TaskColumnWidths columnWidths = TaskColumnWidths.Default;
 
     // Works out the button columns for the lines about to be drawn; the text columns follow the view unless a divider is
@@ -95,9 +99,14 @@ public partial class TasksWindow
         commentsWidth = new(CommentsColumnFor(shownRows));
         var full = !view.Slim && !view.Matrix;
         // Start Claude, on a task no session has joined, takes the same column as Open Claude (task 59b8f613).
-        // Reevaluate beside Open Claude (task 3dd07539) makes the column two buttons wide while any line on show has it.
-        actionWidth = new(full && shownRows.Any(r => r.Status == TaskStatus.Closed && !r.Closing) ? Math.Max(ReopenColumn, ClaudeColumnFor(shownRows))
-            : shownRows.Any(r => OpensClaude(r) || StartsClaude(r)) ? ClaudeColumnFor(shownRows)
+        // Reevaluate beside Open Claude (task 3dd07539): on a full line it makes this column two buttons wide while any
+        // line on show has it. A slim line has no room for that at the narrowest panel (its controls are fixed columns, and
+        // "⋯" was pushed past the line's end), so there Reevaluate leads the strip of the menu's actions instead, which
+        // starts right after this column and fits itself to the room left (reevaluateLeads, LineButtons).
+        var claudeColumn = full ? ClaudeColumnFor(shownRows) : OpenClaudeColumn;
+        reevaluateLeads = view is { Slim: true, Matrix: false } && shownRows.Any(ReevaluatesOnLine);
+        actionWidth = new(full && shownRows.Any(r => r.Status == TaskStatus.Closed && !r.Closing) ? Math.Max(ReopenColumn, claudeColumn)
+            : shownRows.Any(r => OpensClaude(r) || StartsClaude(r)) ? claudeColumn
             : 0);
         if (columnDrag is null) columnWidths = view.Columns;
     }

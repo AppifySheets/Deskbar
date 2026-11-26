@@ -2028,7 +2028,7 @@ internal sealed record TasksWindowActions(
     public Action<Guid>? MarkDeployed { get; init; }
 
     /// <summary>
-    /// "Reevaluate" in an open task's row of buttons at the top (task 3dd07539): TaskService.Reevaluate, which asks the task's
+    /// "Reevaluate", the icon after a Claude task's Claude icon (task 3dd07539): TaskService.Reevaluate, which asks the task's
     /// Claude session to check where the task stands and fix it. None, no button and no item.
     /// </summary>
     public Action<Guid>? Reevaluate { get; init; }

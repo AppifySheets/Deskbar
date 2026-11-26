@@ -4430,8 +4430,10 @@ public class TasksBoardTests
         // A full line shows all seven, and "⋯" right after Delete.
         if (width >= Wide) Assert.Equal(7, shown);
         Assert.True(moreRight <= line.ActualWidth + 0.5, $"\"⋯\" ends at {moreRight:0.##}, past the line's {line.ActualWidth:0.##}");
-        // Edit is first; a button left off sits past the strip's edge, clipped.
-        Assert.Equal("Edit", AutomationProperties.GetName(strip.Children[0]));
+        // Edit is first, after Reevaluate on a slim line of this Claude task (task 3dd07539: a slim strip leads with it); a
+        // button left off sits past the strip's edge, clipped.
+        Assert.Equal(width >= Wide ? ["Edit"] : [TasksWindow.ReevaluateText, "Edit"],
+            strip.Children.OfType<UIElement>().Take(width >= Wide ? 1 : 2).Select(AutomationProperties.GetName));
         // Numbered by slot, so an empty slot (an action that does not apply) cannot shift the count.
         strip.Children.OfType<UIElement>().Select((c, i) => (c, i)).Where(s => s.c is Button && !ReferenceEquals(s.c, more)).ToList().ForEach(s =>
             Assert.Equal(s.i < shown, s.c.TranslatePoint(new Point(0, 0), strip).X < strip.ActualWidth));
@@ -4531,11 +4533,13 @@ public class TasksBoardTests
             Assert.Equal(Visibility.Collapsed, row.Visibility);
         else
         {
-            // Exactly the row's buttons whose slot the line does not show: Open in window is slot 1, Add subtask slot 2.
+            // Exactly the row's buttons whose slot the line does not show. The slim strip leads with Reevaluate (slot 0,
+            // task 3dd07539), so Open in window is slot 2 and Add subtask slot 3.
             var shown = t.Window.LineButtonsShown(id)!.Value;
             Assert.True(shown < 3, $"the narrowest line shows {shown}, so the row would have nothing left to check");
             Assert.Equal(Visibility.Visible, row.Visibility);
-            Assert.Equal(new[] { "Open in window", "Add subtask" }.Where((_, i) => shown <= i + 1).ToList(), visible);
+            Assert.Equal(new[] { shown <= 2 ? "Open in window" : null, shown == 0 ? TasksWindow.ReevaluateText : null, shown <= 3 ? "Add subtask" : null }
+                .OfType<string>().ToList(), visible);
         }
     });
 
@@ -4648,10 +4652,19 @@ public class TasksBoardTests
         {
             t.Controller.ToggleThread(id);
             t.Window.UpdateLayout();
-            // Right after the Claude icon: the two share one panel in the action column, Open Claude first.
+            // Right after the Claude icon. A full line: the two share one panel in the action column, Open Claude first. A
+            // slim line: the first slot of the strip of the menu's actions, which starts right after that column.
             var icon = ButtonNamed(LineOf(t.Window, id), TasksWindow.ReevaluateText);
-            var pair = Assert.IsType<StackPanel>(icon.Parent);
-            Assert.Equal([TasksWindow.OpenClaudeText, TasksWindow.ReevaluateText], pair.Children.OfType<Button>().Select(AutomationProperties.GetName));
+            if (width >= Wide)
+                Assert.Equal([TasksWindow.OpenClaudeText, TasksWindow.ReevaluateText],
+                    Assert.IsType<StackPanel>(icon.Parent).Children.OfType<Button>().Select(AutomationProperties.GetName));
+            else
+                Assert.Same(icon, Assert.IsType<FitStrip>(icon.Parent).Children[0]);
+            var claude = ButtonNamed(LineOf(t.Window, id), TasksWindow.OpenClaudeText);
+            var claudeEnd = claude.TranslatePoint(new Point(claude.ActualWidth, 0), t.Window).X;
+            var iconStart = icon.TranslatePoint(new Point(0, 0), t.Window).X;
+            Console.WriteLine($"MEASURED {width}: Claude icon ends at {claudeEnd:0.##}, Reevaluate starts at {iconStart:0.##}");
+            Assert.InRange(iconStart - claudeEnd, -0.5, 4);
             Assert.Null(RowButton());
             var menu = t.Window.OpenMenuFor(id);
             Assert.DoesNotContain(TasksWindow.ReevaluateText, MenuWords(menu));

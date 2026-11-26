@@ -47,9 +47,11 @@ public partial class TasksWindow
     // REEVALUATE IS AN ICON ON THE LINE, RIGHT AFTER THE CLAUDE ICON (task 3dd07539). Petre first said, of the "⋯" menu's
     // item, "move it as a button at the top"; put in the open thread's row of buttons, it stood alone on a row of its own
     // (the line's strip already covers that row's other buttons), and he picked "a refresh icon right after the orange
-    // Claude icon, on every Claude task". So it shares the action column with Open Claude on every line that has Open
-    // Claude (ReevaluateButton, the column twice as wide while one is on show). The thread's row keeps a copy only where
-    // the line cannot show it: a Matrix line (no action column) and a line being edited (FollowLine). The panel's "⋯" menu
+    // Claude icon, on every Claude task". On a full line it shares the action column with Open Claude (ReevaluateButton,
+    // the column twice as wide while one is on show); on a slim line it is the first slot of the strip of the menu's
+    // actions, which starts right after that column, so the narrowest panel gives up Edit rather than push "⋯" off the line
+    // (SizeColumns, FitStrip.Lead). The thread's row keeps a copy only where the line does not show it: a Matrix line (no
+    // action column), a line being edited, a slim strip too narrow for it (FollowLine). The panel's "⋯" menu
     // has no item; the bar's menu keeps one, since a bar line has neither.
     /// <summary>The words of the line's icon, the thread row's button and the bar menu's item (TaskService.Reevaluate).</summary>
     internal const string ReevaluateText = "Reevaluate";
@@ -117,9 +119,14 @@ public partial class TasksWindow
             IconButton(live, "", MoveToText, "Move it to another workspace", button => OpenMoveMenu(row.Id, row.Place.Workspace, button)),
             IconButton(live, "", DeleteText, "Delete it, after one more click", button => OpenDeleteMenu(row.Id, button)),
         };
-        var strip = new FitStrip(ButtonColumn) { Tag = LineButtonsTag, VerticalAlignment = VerticalAlignment.Center };
+        // On a slim board with a Reevaluate on show, every line's strip leads with its slot (task 3dd07539, SizeColumns): the
+        // icon right after the Claude icon on a Claude line, a gap on the others so their buttons keep one x. Given up last,
+        // as the first slot is.
+        var lead = reevaluateLeads ? 1 : 0;
+        var strip = new FitStrip(ButtonColumn) { Tag = LineButtonsTag, VerticalAlignment = VerticalAlignment.Center, Lead = lead };
         // An empty element holds a slot the action does not apply to, so the next button stays at its own x.
-        slots.Select(button => (UIElement?)button ?? FitStrip.Gap()).ToList().ForEach(slot => strip.Children.Add(slot));
+        (lead == 1 ? slots.Prepend(ReevaluateButton(row)) : slots)
+            .Select(button => (UIElement?)button ?? FitStrip.Gap()).ToList().ForEach(slot => strip.Children.Add(slot));
         strip.Children.Add(more);
         lineButtons[row.Id] = strip;
         return strip;
@@ -246,12 +253,13 @@ public partial class TasksWindow
         var editing = renaming == row.Id;
         bool OnLine(Button button, int fitted) => AutomationProperties.GetName(button) switch
         {
-            OpenInWindowText => fitted > OpenInWindowSlot && strip.Children[OpenInWindowSlot] is Button,
-            ThreadAddSubtaskText => fitted > AddSubtaskSlot && strip.Children[AddSubtaskSlot] is Button,
+            OpenInWindowText => fitted > strip.Lead + OpenInWindowSlot && strip.Children[strip.Lead + OpenInWindowSlot] is Button,
+            ThreadAddSubtaskText => fitted > strip.Lead + AddSubtaskSlot && strip.Children[strip.Lead + AddSubtaskSlot] is Button,
             OpenClaudeText => !editing,
             StartClaudeText => !editing && StartsClaude(row),
-            // The line has Reevaluate beside Open Claude (ReevaluateButton), so the row leaves it out, as it does Open Claude.
-            ReevaluateText => !editing,
+            // The line has Reevaluate beside Open Claude: on a full line in the action column, always on show, so the row
+            // leaves it out as it does Open Claude; on a slim line as its strip's first slot, while the strip shows it.
+            ReevaluateText => strip.Lead == 0 ? !editing : fitted > 0 && strip.Children[0] is Button,
             _ => false,
         };
         strip.Fitted.Subscribe(fitted =>
@@ -284,6 +292,9 @@ internal sealed class FitStrip : Panel
         slot = slotWidth;
         ClipToBounds = true;
     }
+
+    /// <summary>How many slots come before the menu's actions (a slim line's Reevaluate, task 3dd07539): 0 or 1.</summary>
+    public int Lead { get; init; }
 
     /// <summary>How many of the leading children show now, and each change after.</summary>
     public IObservable<int> Fitted => fitted.DistinctUntilChanged();

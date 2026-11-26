@@ -938,7 +938,8 @@ public partial class TasksWindow : Window
         var openClaude = compactLines ? null : OpenClaudeButton(row) ?? StartClaudeButton(row);
         // Reevaluate (task 3dd07539) right after Open Claude, in the same column: Petre's pick, "a refresh icon right after
         // the orange Claude icon, on every Claude task" (TasksWindow.LineButtons.cs, ReevaluateButton).
-        var reevaluate = compactLines ? null : ReevaluateButton(row);
+        // On a full line only: a slim line has it as the first slot of its strip, right after this column (SizeColumns).
+        var reevaluate = full ? ReevaluateButton(row) : null;
         UIElement? claudeButtons = reevaluate is null || openClaude is null ? openClaude
             : new StackPanel { Orientation = Orientation.Horizontal, Children = { openClaude, reevaluate } };
         Control(At(Part.Action), (full ? ActionOf(row) : null) ?? claudeButtons);
@@ -955,7 +956,7 @@ public partial class TasksWindow : Window
         // are the menu's actions beside "⋯". A line in its undo window keeps its own dimming (above): its quiet buttons are
         // not brightened by a hover or a selection (review minor).
         var quiet = row.Closing ? Array.Empty<UIElement>()
-            : new UIElement?[] { comments, more, openClaude }.OfType<UIElement>().Concat(flags?.Children.OfType<UIElement>() ?? [])
+            : new UIElement?[] { comments, more, openClaude, reevaluate }.OfType<UIElement>().Concat(flags?.Children.OfType<UIElement>() ?? [])
                 .Concat(lineActions?.Children.OfType<Button>().Where(button => !ReferenceEquals(button, more)) ?? []).ToArray();
         Quieten(quiet, loud: false);
 
