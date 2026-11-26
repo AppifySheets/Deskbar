@@ -103,6 +103,24 @@ The panel is narrow on purpose, which makes a long task hard to read and harder 
 - Claude sessions on a task are told to put the task's link at the top of everything they make for it that you open outside Deskbar: pull requests, issues, published pages and mockups, documents and reports. Each of them leads back to its task.
 - `deskbar.cmd task link <id>` prints the same markdown link.
 
+## The Inbox
+
+**Inbox**, before **List** in the view switch, shows the same tasks as the List in three tabs, with a task opened as a page inside the panel, the way a chat app opens a chat. Nothing is taken away: List, Matrix and Stats are one click away and look as before. The panel remembers the Inbox once you pick it, and **List** or **Matrix** leave it. While the Inbox shows, the panel is a darker blue-black, the view switch moves to a row at the bottom with the **Manager** button at its right end, and the toolbar's rows give way to the Inbox's own header:
+
+- **Tasks** with the search button (the same search box, under the header; Ctrl+F too), **+ New** (the same add box) and the x that closes the panel.
+- Three buttons, each with its count: **Needs you** (the questions, the tasks handed back because their session went quiet, then the finished ones), **Claude** (working now, then idle under a dashed line, then the ones stopped on the usage limit) and **Notes** (the four quadrants as **Do first**, **Plan**, **Quick ones** and **Someday**, each with Covey's words after it). Every task the List shows is in exactly one of them. A subtask stays under its parent.
+- **This workspace | Everywhere**, the same switch as the **Current workspace** box, kept across restarts. **Filter** at the right folds out a sheet with all the List's filters (status, the Claude switch, Subtasks, the workspace, assignee and goal menus), and says how many are on ("Filter · 2"). It stays open until you click **Filter** again.
+
+While the search box has text, or **Closed** or **Snoozed** is the status filter, the tabs step aside and the Inbox lists the matches in one list, with the three buttons dimmed. A task's id or a pull request's number finds it as in the List.
+
+Each line has the task's state as a shape in a rounded square: a speech bubble with "?" when it asks you, a triangle with "!" when it went quiet or could not be restarted, a filled disc with a tick when it is finished, a ring with a tick when it is finished but its change is not running here yet, a turning arc while Claude works, a pause sign when its session is idle or ended, a clock when it is stopped on the usage limit, and an empty box for a note no session ever worked on. A note's box closes it, with the usual six seconds of Undo. Then come the title (two rows at most, bold when it needs you or is important, italic when urgent, the whole title in the tooltip), the workspace chip (click it to move the task), one line of text (the question, else the status line, else the first line of the description), and at the right how long the state has lasted ("34m", "2h3m", amber when it needs you) with small marks under it: important, urgent, a pull request, the subtasks, a link and the comments. Point at a line for its buttons: **Open Claude** (or **Start Claude on this**), **Reevaluate**, **Open in window**, **Snooze**, **Close task** (on a task Claude still works on it offers **Stop Claude and close** first) and the ⋯ menu, the List's whole menu, which a right-click opens too. Double-click a line to go to its workspace and session. Lines drag as in the List: within a quadrant to reorder, onto another quadrant's lines to take its flags, onto a line's middle to make a subtask. F2 edits the selected line's title and description in place.
+
+Click a line to open its page. The top row has the back arrow (Esc does the same), the state mark, the title and the ⋯ menu; under them the state in words ("Waits for your answer", "Claude is working", "Finished. Check it and close"), the workspace chip and the task's pull requests as links. Then the description in full with its pictures, the question in a bubble with an amber edge while the task waits (or the status line, its links clickable), the subtasks, and the task's whole thread: its buttons, the sessions, the links, the comments as a chat, and the comment box, which takes pictures as in the List. A short page sits at the bottom of the panel, as a chat does; a long one opens at its end. A finished task's page ends with **Close task** and **Not done yet…**, which puts the keyboard in the comment box. A subtask opens its own page, and back returns to its parent's. The page stays until you leave it: back, Esc, another task, closing the task or another view. The manager's question line stays above it.
+
+A click on a task on the bar, a task in Stats, a task link or **Open parent** switches to the task's tab and opens its page. A Claude task's terminal coming to the front selects its task as before, but never changes the tab or the page.
+
+The Inbox's first version leaves out the full-width table the List draws from 850 DIP: its lines are the same at every width.
+
 ## Stats
 
 **Stats**, after **List** and **Matrix** at the top right of the tasks panel, shows how the work is going. It is there at every width. While Stats is on, **List** shows too, even on a narrow panel, as the way back. **Matrix** goes back as well where the panel is wide enough for it. The search box and the filter chips step aside while Stats shows, because Stats counts every task, whatever the filters say. The panel opens on the List or the Matrix again the next time, so Stats is not remembered.
@@ -177,7 +195,7 @@ $ts = "$env:APPDATA\Deskbar\deskbar.cmd"
 & $ts task repeat 3f2a "every 1h"           # make it recurring; "daily 09:00", "weekdays 09:00", "weekly monday 09:00"
 & $ts task repeat 3f2a off                   # end the job
 & $ts task order 3f2a top                   # or end, or a place in its quadrant counting from 1
-& $ts tasks-window matrix                   # or list
+& $ts tasks-window matrix                   # or list, or inbox
 ```
 
 `task list` gives each task's `important` and `urgent` flags, its `quadrant` ("I" to "IV") and its `order`, its place in that quadrant counting from 1 (null while it waits on you or is done, since it is pinned on top until you answer or close it).
@@ -198,7 +216,7 @@ The full set:
 - `task flag <id> important|urgent on|off`, the toggles' twin; the task moves to the top of the quadrant it lands in
 - `task order <id> top|end|<n>`, the drag's twin, within the task's own quadrant; a task waiting on you or done moves among the questions or the done tasks on top
 - `tasks-window show` and `tasks-window hide`, to open or bring forward the tasks panel, or close it
-- `tasks-window list` and `tasks-window matrix`, to switch the panel's view (remembered)
+- `tasks-window inbox`, `tasks-window list` and `tasks-window matrix`, to switch the panel's view (remembered); list and matrix leave the [Inbox](#the-inbox)
 - `tasks-window stats`, to open the panel on its [Stats](#stats) view (not remembered)
 - `task stats [--days <n>]`, the Stats view's numbers as JSON: `openNow`, `addedLast7Days`, `finishedLast7Days`, `medianHoursToFinish` (null when nothing finished), `estimated`, and `days`, one per local day (14 by default, today last), each with its `date`, `openAtEnd`, and the tasks `added` and `finished` that day (`id`, `title`, `status`)
 - `task assign <id> me|claude`, the **Assign to** menu's twin; `task list` gives each task's `assignee`, `me` or `claude`

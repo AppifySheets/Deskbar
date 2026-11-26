@@ -387,6 +387,16 @@ written for the floating window and now describe the panel; 64a to 64n cover wha
     whole text stays readable on top of the bar, and does not slip under it after a second. Do the same on one of
     the bar's own buttons whose hover text reaches onto a screen strip or the panel. Then click the taskbar twice:
     the bar still comes back over it within a second.
+64r. The Inbox (task 740a2231). With a question, a done task, a Claude task working and one idle, and notes in two
+    quadrants: click "Inbox" in the toolbar. The panel turns blue-black, the header shows three buttons with counts
+    ("Needs you", "Claude", "Notes") and the view switch is at the bottom. Each tab lists its lines under captions; the
+    three counts add up to the List's lines. Click a line: its page opens over the list, scrolled to its end; Esc goes
+    back to the same scroll place. Point at a line: its buttons show; the ⋯ and a right-click open the List's menu.
+    Click a note's box: it closes with Undo. Click "Filter": the List's chips fold out under the header; pick "Done" and
+    the button reads "Filter · 1". Type in the search (Ctrl+F): one list of matches, the buttons dimmed. Click a task on
+    the bar: the panel switches to its tab and opens its page. Bring a Claude task's terminal to the front: the tab and
+    the page stay. Quit and start Deskbar: the panel comes back on the Inbox. `$ts tasks-window list` goes back to the
+    List, `$ts tasks-window inbox` to the Inbox.
 
 ## Claude sessions and their tasks
 
