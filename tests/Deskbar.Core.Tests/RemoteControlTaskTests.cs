@@ -1572,6 +1572,21 @@ public class RemoteControlTaskTests
         Assert.True(Only.Repeat.HasValue);
     }
 
+    // Ending a repeat between runs makes the task Done, so the manager, who may not finish anything, may not do it.
+    [Fact]
+    public void Manager_may_not_end_a_repeat_by_id()
+    {
+        var manager = Started();
+        var id = Prefix(Added(manager));
+        Repeated(manager, "task", "repeat", id, "daily", "09:00", "--folder", RepoDir);
+        var before = tasks.Board;
+
+        var reply = RunAsManager(manager, "task", "repeat", id, "off");
+
+        AssertRefusedAndUnchanged(reply, before);
+        Assert.Equal(ManagerSession.Refusal, reply.Output.Trim());
+    }
+
     [Fact]
     public void Overview_names_the_repeat()
     {

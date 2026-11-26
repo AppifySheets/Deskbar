@@ -389,7 +389,7 @@ public sealed partial class RemoteControl
     //                                           a Claude session started on it at once unless --no-start (task fa056b2f)
     //   task repeat <schedule>|off [--model <m>] [--folder <p>] --session <sid>
     //                                           the session's own task repeats (recurring tasks spec, task 0b78269e)
-    //   task family --session <sid>           the family and linked tasks of the session's own task (subtasks spec)
+    //   task family --session <sid>             the family and linked tasks of the session's own task (subtasks spec)
 //   task pr <url> --session <sid>           a pull request the session opened some other way than `gh pr create`, on its
 //                                           own task (task e7aa49b1; the hook records `gh pr create` by itself)
     //   task deployed <note> --session <sid>    the session's own task's change was seen running where its app is deployed,

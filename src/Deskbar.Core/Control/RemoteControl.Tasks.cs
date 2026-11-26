@@ -307,6 +307,9 @@ public sealed partial class RemoteControl
     {
         ["close", _] or ["close", _, "--stop-claude"] or ["delete", _] => true,
         ["status", _, var status] => status.Trim().ToLowerInvariant() is "done" or "closed",
+        // `repeat <id> off` ends a task that is between runs as Done (TaskService.ClearRepeat), so it finishes one. The
+        // manager cannot tell whether a task is between runs, so it is refused for every task (recurring tasks, 0b78269e).
+        ["repeat", _, var off] => off.Trim().Equals("off", StringComparison.OrdinalIgnoreCase),
         _ => false,
     };
 
