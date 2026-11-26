@@ -370,6 +370,7 @@ public partial class ManageWindow : Window
     {
         ClaudeResume.IsEnabled = manager.State.ClaudeTasksInEffect;
         ClaudeResume.IsChecked = manager.State.ClaudeResumeInEffect;
+        ShowClaudePermissions();
     }
 
     // ClaudeSessions reads the setting before every resume, so turning it off drops whatever was waiting its turn.

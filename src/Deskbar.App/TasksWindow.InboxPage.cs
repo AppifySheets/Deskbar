@@ -199,7 +199,7 @@ public partial class TasksWindow
     // Part of the redraw signature: the page's stack and the task's PR links (which no other signature reads).
     string InboxPageSignature(TasksView view) =>
         inboxPage is not { } id ? ""
-        : $"|page{id}|{string.Join(',', inboxPageStack)}|" + string.Join(',', AllRows(view).Where(r => r.Id == id).SelectMany(r => r.PullRequests).Select(p => p.Key));
+        : $"|page{id}|{string.Join(',', inboxPageStack)}|" + string.Join(',', AllRows(view).Where(r => r.Id == id).SelectMany(r => r.PullRequests).Select(p => p.Key)) + PermissionSignature(id);
 
     // The page over the list while one is open, or the list; a page whose task no longer has its thread open (closed,
     // deleted, folded by a filter or from elsewhere) is left, back to the list.
@@ -241,6 +241,7 @@ public partial class TasksWindow
             DockPanel.SetDock(bottom, Dock.Bottom);
             dock.Children.Add(bottom);
         }
+        if (PermissionCards(row) is { } cards) { DockPanel.SetDock(cards, Dock.Bottom); dock.Children.Add(cards); }
         // A CHAT READS FROM THE BOTTOM UP (the PM's fix 1 after checkpoint 1). A body shorter than the page sits at its
         // bottom, so the comment box is at the bottom edge and the empty room is on top; a longer one scrolls. The
         // scroller arranges its content at least as tall as the view, so the body's own bottom alignment does it.
@@ -287,6 +288,7 @@ public partial class TasksWindow
         InboxMark.UsageLimit => "Stopped on the usage limit",
         InboxMark.Closed => "Closed",
         InboxMark.Snoozed => "Snoozed",
+        InboxMark.AsksPermission => "Waits for your yes or no",
         _ => "A note. No Claude on it yet",
     };
 
@@ -327,7 +329,7 @@ public partial class TasksWindow
         });
 
         var second = new WrapPanel { Margin = new Thickness(36, 6, 0, 0) };
-        var words = Text(PageStateWords(row, mark), 12, mark is InboxMark.Asks or InboxMark.WentQuiet ? InboxLook.Amber : InboxLook.Ink2,
+        var words = Text(PageStateWords(row, mark), 12, mark is InboxMark.Asks or InboxMark.WentQuiet or InboxMark.AsksPermission ? InboxLook.Amber : InboxLook.Ink2,
             FontWeights.SemiBold, new Thickness(0, 0, 10, 4));
         AutomationProperties.SetName(words, "State");
         second.Children.Add(words);

@@ -15,7 +15,7 @@ namespace Deskbar.Windows.Tests;
 // Inbox is the chosen view the window shows the very page the panel shows for the task. Built over the same harness as
 // TaskDetailWindowTests (a real TaskService on an in-memory store, the panel behind a TasksPanelRig). The task windows
 // are real windows, so run these on the hidden desktop (scripts/test-hidden.ps1).
-public class TaskDetailWindowInboxTests
+public partial class TaskDetailWindowInboxTests
 {
     sealed class MemoryStore : ITaskStore
     {

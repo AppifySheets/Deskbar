@@ -374,6 +374,7 @@ public sealed partial class TasksBoard : IDisposable
             Reevaluate = id => Report(tasks.Reevaluate(id), id),
             ShowInbox = ShowInbox,
             OpenPage = OpenPage,
+            PermissionsOf = PermissionsOf, AnswerPermission = AnswerPermission,
         };
 
         // Taken before the subscriptions below exist, so the first StateChanged pulse is compared with this state
