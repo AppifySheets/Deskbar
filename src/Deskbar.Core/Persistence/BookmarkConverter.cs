@@ -29,11 +29,14 @@ public sealed class BookmarkConverter : JsonConverter<Bookmark>
         using var entry = JsonDocument.ParseValue(ref reader);
         try
         {
+            // The two optional extras only cost THEMSELVES when they are wrong: a screen below 1, a colour that is not
+            // #RRGGBB, or a screen on a link (as BookmarkRules.Check would store it) is cleared, and the bookmark loads.
             return entry.RootElement.Deserialize<Entry>(options) is { } e
-                   && new Bookmark(e.Id, e.Name, e.Kind, e.Target, e.Arguments, e.WorkingDirectory, e.Screen, e.Color) is var bookmark
+                   && new Bookmark(e.Id, e.Name, e.Kind, e.Target, e.Arguments, e.WorkingDirectory,
+                       e.Screen is > 0 && e.Kind != BookmarkKind.Link ? e.Screen : null,
+                       e.Color is { } colour && BookmarkRules.IsColour(colour) ? colour : null) is var bookmark
                    && Acceptable(bookmark)
-                // A link that a hand edit gave a screen loads without one, as BookmarkRules.Check would store it.
-                ? bookmark.Kind == BookmarkKind.Link ? bookmark with { Screen = null } : bookmark
+                ? bookmark
                 : null;
         }
         // What System.Text.Json raises for a value of the wrong shape (an unknown enum name, a wrong token).

@@ -55,19 +55,22 @@ public sealed class BookmarkColourTests : IDisposable
     }
 
     [Fact]
-    public void A_hand_edited_colour_that_is_not_hex_costs_only_that_bookmark()
+    public void A_hand_edited_colour_or_screen_that_is_wrong_costs_only_that_field()
     {
         Directory.CreateDirectory(dir);
         File.WriteAllText(Path.Combine(dir, "state.json"), $$$"""
             {"Workspaces":[{"Id":"{{{Guid.NewGuid()}}}","Name":"Work","DesktopId":null,"Bookmarks":[
-                {"Id":"{{{Guid.NewGuid()}}}","Name":"Bad","Kind":"Program","Target":"C:\\t\\a.exe","Color":"red"},
-                {"Id":"{{{Guid.NewGuid()}}}","Name":"Good","Kind":"Program","Target":"C:\\t\\b.exe","Color":"#ABCDEF"}]}],
+                {"Id":"{{{Guid.NewGuid()}}}","Name":"Bad","Kind":"Program","Target":"C:\\t\\a.exe","Color":"red","Screen":0},
+                {"Id":"{{{Guid.NewGuid()}}}","Name":"Good","Kind":"Program","Target":"C:\\t\\b.exe","Color":"#ABCDEF","Screen":2}]}],
              "WorkspaceRules":[],"RenameRules":[],"Inventory":{}}
             """);
 
         var loaded = new JsonPersistenceStore(dir).Load().Value.Workspaces[0].Bookmarks;
 
-        Assert.Equal("Good", Assert.Single(loaded).Name);
+        Assert.Equal(["Bad", "Good"], loaded.Select(b => b.Name));
+        Assert.Null(loaded[0].Color);
+        Assert.Null(loaded[0].Screen);
+        Assert.Equal(("#ABCDEF", 2), (loaded[1].Color, loaded[1].Screen));
     }
 
     [Fact]

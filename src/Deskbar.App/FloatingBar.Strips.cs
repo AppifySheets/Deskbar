@@ -160,11 +160,14 @@ public partial class FloatingBar
         // (ChipLayout.OnStrip), the others on every strip. An unnamed desktop has no bookmarks. Fresh buttons per strip,
         // since an element has one parent.
         IReadOnlyList<Core.Bookmarks.Bookmark> chips = workspace is null ? [] : ShowingBookmarks()(workspace.Workspace);
+        // Numbered over the whole row's chips, as the row numbers them, so a chip wears the same band on both.
+        var ordinals = ChipOrdinals(chips);
         strips.ToList().ForEach(strip =>
             strip.SetTabs(name, accent, rows.Where(row => OnStrip(row, strip)).Select(row => StripTab(name, row, accent)).ToList(),
                 jumps.Select(jump => JumpButton(jump, overview)).ToList(),
                 chips.Where(chip => Core.Bookmarks.ChipLayout.OnStrip(chip, numbers[strip].HasValue ? numbers[strip].Value : null, known))
-                    .Select(chip => (FrameworkElement)ChipButton(workspace!.Workspace.Id, chip, divider: false, onStrip: true))
+                    .Select(chip => (FrameworkElement)ChipButton(workspace!.Workspace.Id, chip, divider: false, onStrip: true,
+                        ordinal: ordinals.TryGetValue(chip.Id, out var ordinal) ? ordinal : null))
                     .ToList()));
     }
 

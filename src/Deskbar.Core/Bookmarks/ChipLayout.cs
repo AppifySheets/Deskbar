@@ -47,6 +47,29 @@ public static class ChipLayout
     // Whether the strip of screen `stripScreen` shows a chip (part A of the second PR, Petre's call in the brief): a chip
     // that remembers a screen shows only on that screen's strip; one without, or whose screen has no strip now, shows
     // on every strip. `stripScreens` is every strip's screen number, so the second case can be told from the first.
+    // THE ORDINAL BAND FOR CHIPS THAT LOOK ALIKE (Petre: "when i have the same icon twice in the bar, automatically give
+    // another a different color", then "or maybe an underline ... like with running apps that are repeated on the same
+    // workspace"). Two Portainer bookmarks on two hosts both show the Portainer logo; the windows' answer to the same
+    // problem is the ordinal colour band (OverviewBuilder.Ordinals), so chips get exactly that, scoped the same way: ONE
+    // ROW's chips at a time, as a window's ordinal is counted within its own group.
+    //
+    // `artworkOf` is the fingerprint of the picture each chip draws (the app's IconCache fingerprint, or the letter
+    // tile's letter and fill), null while it is not known. Chips that share a key with any other chip of the row form a
+    // family; the members WITHOUT a colour of their own are numbered 1, 2, ... in bar order (the order given), and that
+    // number picks the band's colour as a window's ordinal does. A chip with its own colour already stands apart, so it
+    // gets no number and does not use one up. A chip whose picture is unique, or not known yet, gets none. Worked out
+    // on every rebuild and never saved.
+    public static IReadOnlyDictionary<Guid, int> Ordinals(IReadOnlyList<Bookmark> chips, Func<Bookmark, string?> artworkOf) =>
+        chips
+            .Select(chip => (Chip: chip, Key: artworkOf(chip)))
+            .Where(x => x.Key is not null)
+            .GroupBy(x => x.Key!, StringComparer.Ordinal)
+            .Where(family => family.Count() > 1)
+            .SelectMany(family => family
+                .Where(x => x.Chip.Color is null)
+                .Select((x, index) => (x.Chip.Id, Ordinal: index + 1)))
+            .ToDictionary(x => x.Id, x => x.Ordinal);
+
     public static bool OnStrip(Bookmark chip, int? stripScreen, IReadOnlySet<int> stripScreens) =>
         chip.Screen is not { } screen || !stripScreens.Contains(screen) || stripScreen == screen;
 }

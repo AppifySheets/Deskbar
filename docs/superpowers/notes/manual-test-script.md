@@ -1706,8 +1706,10 @@ BM15. In a workspace with a link chip and a RustDesk chip, look at both strips: 
 BM16. Drag the RustDesk chip into the second screen's half of its own row: the half lights up and the readout says
      "→ put on screen 2". Drop: the chip moves to the second screen's part of the row, and on the strips it is now only
      on screen 2's strip. `deskbar.cmd bookmark list <workspace>` shows `"screen": 2`.
-BM17. Click the RustDesk chip with RustDesk closed: its window opens on screen 2. A quick click on a chip that slips a few
-     pixels still opens it rather than moving it.
+BM17. Click the RustDesk chip with RustDesk closed: its window opens on screen 2, and stays there even if RustDesk puts
+     itself back where it was last time (with tracing on, a `drifted ... moving it back` line says when that happened).
+     A quick click on a chip that slips a few pixels still opens it rather than moving it, and so does a chip dragged
+     away and dropped back on itself: a drag that ends where it began is a click.
 BM18. Drag the link chip into the other screen's half of its own row: the readout says a link keeps its browser's screen,
      and the drop changes nothing.
 BM19. Drag the link chip onto another workspace's row: the readout says "→ move to <workspace>", and the drop moves the
@@ -1719,3 +1721,11 @@ BM20. `deskbar.cmd bookmark move <workspace> RustDesk --any-screen`: the chip go
 BM21. Right-click a chip and pick Colour, then a swatch: the chip's outline and a small bar under its icon take the
      colour; the icon itself (a letter tile included) does not change. Custom… opens Windows' colour picker. Default
      clears it. `deskbar.cmd bookmark color <workspace> RustDesk #2E86DE` does the same, and `list` shows the colour.
+     Open a coloured link: its open backing is a tint of its colour; an open link with no colour has the faint white one.
+BM22. Bookmark two Portainer instances (100.65.0.11 and 100.65.0.8) in one workspace: both chips show the Portainer
+     logo, and each wears the small coloured underline that repeated windows wear (sky, then amber), with no other
+     change. Give one of them a colour: it keeps its own colour and the other loses its underline. A chip whose icon is
+     unique in its row has no underline. Restart Deskbar: the same underlines come back, and state.json holds none.
+BM23. Bookmark a Store app or a PWA, drag its chip to screen 2 and click it with the app closed: its window opens on
+     screen 2, also when the app names its window a moment after showing it. Open the same app by hand ten seconds or more
+     after the click: that window stays where it opens.

@@ -500,6 +500,53 @@ public class FloatingBarBookmarksTests
         Assert.Same(before, Picture(chip).Source);
     });
 
+    // "let's make it the color i set": an open chip's backing is a tint of its own colour; with none, the faint white lift.
+    [Fact]
+    public void An_open_chip_with_a_colour_sits_on_a_tint_of_it() => StaThread.Run(() =>
+    {
+        var harness = Harness.Build();
+        var alpha = Added(harness, "Sparrow", Link("https://alpha.org/", "Alpha"));
+        Assert.True(harness.Manager.SetBookmarkColor(Id(harness, "Sparrow"), alpha.Id, "#2E86DE").IsSuccess);
+        var receiver = new System.Reactive.Subjects.Subject<LinkWindow>();
+        using var bar = ShowBar(harness, links: new LinkWindows(
+            _ => System.Reactive.Linq.Observable.Take(receiver, 1), _ => true, System.Reactive.Linq.Observable.Never<WindowHandle>()));
+
+        Chips(bar.Rows).Single().RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent));
+        receiver.OnNext(new LinkWindow(new WindowHandle(0x123), 1));
+        bar.Bar.Dispatcher.Invoke(() => { }, System.Windows.Threading.DispatcherPriority.ContextIdle);
+
+        var backing = Face(Chips(bar.Rows).Single()).Children.OfType<Border>().Single(b => b.Width is double.NaN);
+        Assert.Equal(Color.FromArgb(0x60, 0x2E, 0x86, 0xDE), ((SolidColorBrush)backing.Background).Color);
+    });
+
+    // "when i have the same icon twice in the bar ... like with running apps that are repeated on the same workspace":
+    // chips of one row drawn with the same picture wear the windows' ordinal band, in its palette, and nothing else. A
+    // unique picture gets none, and a chip with its own colour keeps its own band and uses up no number.
+    [Fact]
+    public void Chips_with_the_same_picture_wear_the_ordinal_band_and_nothing_else() => StaThread.Run(() =>
+    {
+        var harness = Harness.Build();
+        // Same host, same first letter: the same letter tile, so the same picture.
+        Added(harness, "Sparrow", Link("https://portainer.local/a", "Portainer A"));
+        var own = Added(harness, "Sparrow", Link("https://portainer.local/c", "Portainer C"));
+        Added(harness, "Sparrow", Link("https://portainer.local/b", "Portainer B"));
+        Added(harness, "Sparrow", Link("https://github.com/", "GitHub"));
+        Assert.True(harness.Manager.SetBookmarkColor(Id(harness, "Sparrow"), own.Id, "#2E86DE").IsSuccess);
+        using var bar = ShowBar(harness);
+        Button Chip(string name) => Chips(RowNamed(bar.Rows, "Sparrow")).Single(c => AutomationProperties.GetName(c) == name);
+        IReadOnlyList<Border> Ordinal(string name) =>
+            Descendants(Chip(name)).OfType<Border>().Where(b => b.Tag is FloatingBar.ChipOrdinalTag).ToList();
+        var restingOutline = ((SolidColorBrush)Outline(Chip("GitHub")).Stroke).Color;
+
+        Assert.Equal(Color.FromRgb(0x4F, 0xC3, 0xF7), ((SolidColorBrush)Assert.Single(Ordinal("Portainer A")).Background).Color);
+        Assert.Equal(Color.FromRgb(0xFF, 0xB7, 0x4D), ((SolidColorBrush)Assert.Single(Ordinal("Portainer B")).Background).Color);
+        Assert.Empty(Ordinal("Portainer C"));
+        Assert.Single(Bands(Chip("Portainer C")));
+        Assert.Empty(Ordinal("GitHub"));
+        // The band only: the outline stays the resting one.
+        Assert.Equal(restingOutline, ((SolidColorBrush)Outline(Chip("Portainer A")).Stroke).Color);
+    });
+
     // The Colour submenu is the workspace picker (#97): the palette strip and Custom…, then Default, which clears.
     [Fact]
     public void The_colour_submenu_is_the_palette_custom_and_default() => StaThread.Run(() =>

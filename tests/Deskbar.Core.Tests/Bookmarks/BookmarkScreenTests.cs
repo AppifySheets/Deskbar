@@ -15,6 +15,8 @@ public sealed class BookmarkScreenTests
     readonly FakeStore store = new();
     readonly FakeScreenLayout screens = new();
     readonly Dictionary<WindowHandle, string> appIdOf = [];
+    // The manager's clock, moved by hand for the screen watch and the app start's lifetime.
+    DateTimeOffset time = new(2026, 11, 26, 12, 0, 0, TimeSpan.Zero);
 
     static readonly MonitorBounds Left = new(-1920, 0, 0, 1080);
     static readonly MonitorBounds Right = new(0, 0, 1920, 1080);
@@ -34,7 +36,7 @@ public sealed class BookmarkScreenTests
         work = new Workspace(Guid.NewGuid(), "Work", workDesktop.Id);
         store.Stored = AppState.Empty with { Workspaces = [home, work] };
         screens.Facts = ScreenFacts.Empty with { MonitorPlacement = new Dictionary<int, MonitorBounds> { [1] = Left, [2] = Right } };
-        manager = new WorkspaceManager(desktops, monitor, new FakeTitles(), store, screenLayout: screens);
+        manager = new WorkspaceManager(desktops, monitor, new FakeTitles(), store, () => time, screenLayout: screens);
         Assert.True(manager.Start().IsSuccess);
         opener = new BookmarkOpener(manager,
             new BookmarkStarts((_, _, _) => Result.Success<int?>(5000), _ => Result.Success(), _ => Result.Success()),
@@ -220,6 +222,59 @@ public sealed class BookmarkScreenTests
         var window = Appears(0x30, "ms-teams", @"C:\Program Files\WindowsApps\MSTeams_25.1.0.0_x64__8wekyb3d8bbwe\ms-teams.exe", 7000);
 
         Assert.True(OnRight(window.Handle));
+    }
+
+    // Review of the second PR: an app that restores its own saved bounds after showing undoes the move, so the window is
+    // watched for a moment and moved back; after the watch, a move is the user's and stays.
+    [Fact]
+    public void A_started_window_that_drifts_off_its_screen_is_moved_back_for_a_moment()
+    {
+        var tool = Added(work, Program() with { Screen = 2 });
+        Assert.True(opener.Open(work.Id, tool.Id).IsSuccess);
+        var window = Appears(0x10, "tool", @"C:\apps\tool.exe");
+        Assert.True(OnRight(window.Handle));
+
+        // The app puts itself back where it was last time.
+        screens.Rects[window.Handle] = new WindowRect(-1500, 100, -500, 700);
+        time += TimeSpan.FromSeconds(2);
+        manager.ResyncActiveWindow();
+        Assert.True(OnRight(window.Handle));
+
+        time += WorkspaceManager.ScreenWatch;
+        screens.Rects[window.Handle] = new WindowRect(-1500, 100, -500, 700);
+        manager.ResyncActiveWindow();
+        Assert.False(OnRight(window.Handle));
+    }
+
+    // An app's window may take its app id after it appears: asked again on the tick, it is still placed.
+    [Fact]
+    public void An_app_window_that_takes_its_app_id_late_is_placed_on_the_tick()
+    {
+        var chat = Added(work, App() with { Screen = 2 });
+        Assert.True(opener.Open(work.Id, chat.Id).IsSuccess);
+        var app = Appears(0x21, "ApplicationFrameHost", @"C:\Windows\System32\ApplicationFrameHost.exe", 6001);
+        Assert.False(OnRight(app.Handle));
+
+        appIdOf[app.Handle] = "Contoso.Chat_abc!App";
+        time += TimeSpan.FromSeconds(1);
+        manager.ResyncActiveWindow();
+
+        Assert.True(OnRight(app.Handle));
+    }
+
+    // An app start that never matched lapses, so a window of that app opened by hand later is left alone.
+    [Fact]
+    public void A_lapsed_app_start_claims_no_later_window()
+    {
+        var chat = Added(work, App() with { Screen = 2 });
+        Assert.True(opener.Open(work.Id, chat.Id).IsSuccess);
+
+        time += WorkspaceManager.AppExpectationLifetime + TimeSpan.FromSeconds(1);
+        appIdOf[new WindowHandle(0x21)] = "Contoso.Chat_abc!App";
+        var byHand = Appears(0x21, "ApplicationFrameHost", @"C:\Windows\System32\ApplicationFrameHost.exe", 6001);
+        manager.ResyncActiveWindow();
+
+        Assert.False(OnRight(byHand.Handle));
     }
 
     [Fact]
