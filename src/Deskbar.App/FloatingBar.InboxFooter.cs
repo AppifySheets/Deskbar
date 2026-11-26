@@ -120,7 +120,7 @@ public partial class FloatingBar
         var button = TaskButton(name, content, press, ignoredWhen: TaskClickIgnored);
         button.Template = InboxFooterButtonTemplate;
         button.Background = InboxFooterFill;
-        button.Padding = new Thickness(8, 4, 8, 4);
+        button.Padding = new Thickness(6, 4, 6, 4);
         button.HorizontalAlignment = HorizontalAlignment.Stretch;
         button.Margin = new Thickness(0, 0, 0, 0);
         return button;

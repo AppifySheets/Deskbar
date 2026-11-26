@@ -160,11 +160,15 @@ public partial class FloatingBar
     UIElement InboxBarChip(TaskLine line)
     {
         var name = line.WorkspaceName ?? "";
-        var content = new StackPanel { Orientation = Orientation.Horizontal };
-        content.Children.Add(new System.Windows.Shapes.Ellipse
+        // A DockPanel, not a horizontal StackPanel: a StackPanel gives the name all the width it wants, so a long name was
+        // cut off at the line's edge with no "…"; docked after the dot it gets the room the line has, and trims.
+        var content = new DockPanel { LastChildFill = true };
+        var dot = new System.Windows.Shapes.Ellipse
         {
             Width = 6, Height = 6, Fill = line.Colour ?? InboxLook.Ink2, Margin = new Thickness(0, 0, 4, 0), VerticalAlignment = VerticalAlignment.Center,
-        });
+        };
+        DockPanel.SetDock(dot, Dock.Left);
+        content.Children.Add(dot);
         content.Children.Add(new TextBlock { Text = name, FontSize = Text(8.5), Foreground = InboxLook.Ink2, TextTrimming = TextTrimming.CharacterEllipsis });
         var pill = new Border
         {

@@ -590,4 +590,21 @@ public partial class FloatingBarTaskListTests
         };
         Assert.All(pairs, p => Assert.True(Contrast(p.Ink, p.Back) >= 4.5, $"{p.Name}: {Contrast(p.Ink, p.Back):0.00}"));
     }
+
+    // A long workspace name trims inside a line's chip, with "…", and never runs past the line's edge.
+    [Fact]
+    public void A_long_workspace_name_trims_inside_the_lines_chip() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var gepha = t.Gepha;
+        Assert.True(t.Harness.Manager.RenameWorkspace(gepha, "Customer onboarding portal for the northern region").IsSuccess);
+        var id = t.Tasks.AddNote("Book the dentist", gepha).Value.Id;
+        InboxLook(t);
+        t.Bar.UpdateLayout();
+
+        var line = LineFor(t, id);
+        var name = Inside(line).OfType<TextBlock>().Single(b => b.Text.StartsWith("Customer onboarding"));
+        Assert.Equal(TextTrimming.CharacterEllipsis, name.TextTrimming);
+        Assert.True(name.TranslatePoint(new Point(name.ActualWidth, 0), line).X <= line.ActualWidth + 0.5);
+    });
 }
