@@ -55,8 +55,13 @@ public static class RunningChanges
         if (task.Status != TaskStatus.Done) return TaskDelivery.None;
         var links = Watched(task);
         var reported = task.Deployed.Select(d => d.Key).ToHashSet();
-        // An other-repository pull request that was reported deployed runs, whatever GitHub said or did not say.
-        bool Reported(PullRequestLink link) => !build.Builds(link) && reported.Contains(link.Key);
+        // An other-repository pull request that was reported deployed runs, unless GitHub says it is still OPEN: a
+        // session's report stamps every recorded pull request (TaskBoard.MarkDeployed), and a second one, open or in an
+        // app the session never checked, must not fill the disc with it. Unknown (gh missing, not asked yet) trusts the
+        // report: the session looked at the running app, which is more than Deskbar can.
+        bool Reported(PullRequestLink link) =>
+            !build.Builds(link) && reported.Contains(link.Key)
+            && !(facts.TryGetValue(link.Key, out var fact) && fact.State == PullRequestState.Open);
         if (links.Count == 0 || links.Any(l => !Reported(l) && !facts.ContainsKey(l.Key))) return TaskDelivery.None;
         // Closed without a merge: never shipped, never will, so it neither holds the ring nor earns the disc.
         var shipped = links.Where(l => !(facts.TryGetValue(l.Key, out var fact) && fact.State == PullRequestState.Closed)).ToArray();
@@ -94,8 +99,9 @@ public static class RunningChanges
 
     /// <summary>
     /// The pull requests the watch should ask GitHub about now: those of Done tasks (Watched), each once, that have no
-    /// settled answer yet, leaving out a pull request of another repository that was reported deployed (the report
-    /// decides it, so GitHub's word is not needed). Only an open one is ever asked again, since it can still merge. A
+    /// settled answer yet, a reported one included: a report does not fill a pull request GitHub says is still open
+    /// (Of), so its state is still wanted, and asked once it costs one gh call. Only an open one is ever asked again,
+    /// since it can still merge. A
     /// merged or closed one is settled for good: whether the running build holds a merge cannot change until Deskbar
     /// restarts, and a restart starts the watch afresh with nothing known; for another repository, what is left to know
     /// after the merge is the report, which arrives on the board, not from GitHub.
@@ -103,7 +109,7 @@ public static class RunningChanges
     public static IReadOnlyList<PullRequestLink> ToLook(TaskBoard board, RunningBuild build, IReadOnlyDictionary<string, PullRequestArrival> facts) =>
         board.Tasks
             .Where(t => t.Status == TaskStatus.Done)
-            .SelectMany(t => Watched(t).Where(l => build.Builds(l) || t.Deployed.All(d => d.Key != l.Key)))
+            .SelectMany(Watched)
             .DistinctBy(l => l.Key)
             .Where(l => !facts.TryGetValue(l.Key, out var f) || !f.Settled)
             .ToArray();

@@ -389,7 +389,7 @@ public static class SessionBriefing
         // for a hook's context (SessionBriefingTests), and it was within about 80 of that before this line. The longer
         // form, with an example note, is in the skill's "Your task" section (ClaudeSkill.YourTask). A few other lines
         // below were tightened to make the room, keeping every rule they state (about 55 characters are left).
-        $"For an app deployed outside Deskbar, its tick is a hollow ring until you see the merge running there (logs, health page) and run {Shim} task deployed - --session {sessionId}, the evidence on stdin, before task done (or say in the status line the check is the user's).",
+        $"For an app deployed outside Deskbar, its tick is a hollow ring until you see the merge running there (logs, health page) and run {Shim} task deployed - --session {sessionId}, the evidence on stdin (or \"nothing to deploy\"), before task done (or say in the status line the check is the user's).",
         // AN OPEN PULL REQUEST STAYS ON TOP OF ITS BASE (task 6e4dc116, Petre: "still conflicting; you should keep rebasing
         // open prs", then "make that a deskbar level change"). Other sessions merge all day, so a pull request waiting on
         // the user falls behind its base or starts to conflict while it waits, and the merge he comes to do is blocked or

@@ -267,13 +267,28 @@ public sealed class RunningChangesTests
     }
 
     [Fact]
-    public void A_pull_request_elsewhere_reported_deployed_is_not_looked_at()
+    public void A_pull_request_elsewhere_reported_deployed_is_still_asked_until_it_settles()
     {
         var (board, id) = Board(TaskStatus.Done, Pr573, Elsewhere);
         var reported = board.MarkDeployed(id, Portal, Made).Value;
 
-        // The Deskbar one still is: the running build decides it, not the report.
-        Assert.Equal([Pr573.Key], RunningChanges.ToLook(reported, Build, Facts()).Select(l => l.Key));
+        // A report does not fill an open pull request (review of phase 2), so its state is still wanted until it settles.
+        Assert.Equal([Pr573.Key, Elsewhere.Key], RunningChanges.ToLook(reported, Build, Facts()).Select(l => l.Key));
+        Assert.Equal([Pr573.Key], RunningChanges.ToLook(reported, Build, Facts((Elsewhere, MergedElsewhere))).Select(l => l.Key));
+    }
+
+    [Fact]
+    public void A_report_does_not_fill_a_pull_request_that_is_still_open()
+    {
+        // The session checked the backend (537) and reported; the frontend (540) is still open, stamped by the same report.
+        var frontend = new PullRequestLink("AppifySheets", "iam.ge", 540);
+        var task = Reported(Portal, Elsewhere, frontend);
+
+        var delivery = RunningChanges.Of(task, Build, Facts((Elsewhere, MergedElsewhere), (frontend, Open)));
+
+        Assert.Equal(DeliveryStage.Open, delivery.Stage);
+        Assert.Contains("iam.ge #540 is not merged yet.", delivery.Note);
+        Assert.Equal(DeliveryStage.Running, RunningChanges.Of(task, Build, Facts((Elsewhere, MergedElsewhere), (frontend, MergedElsewhere))).Stage);
     }
 
     // --- reading gh and the version ------------------------------------------------------------------------------------
@@ -437,14 +452,15 @@ public sealed class RunningChangesTests
     }
 
     [Fact]
-    public void A_task_decided_by_its_report_alone_asks_nothing_and_still_shows_its_note()
+    public void A_reported_task_shows_its_note_even_when_GitHub_cannot_be_asked()
     {
         var (board, id) = Board(TaskStatus.Done, Elsewhere);
         using var watch = new Watch(board.MarkDeployed(id, Portal, Made).Value);
 
+        // The fake GitHub has no answer for it: the look fails, and an unknown state trusts the report.
         watch.Clock.AdvanceBy(TimeSpan.FromSeconds(1).Ticks);
 
-        Assert.Empty(watch.Looked);
+        Assert.Equal([Elsewhere.Key], watch.Looked);
         Assert.Equal(new TaskDelivery(DeliveryStage.Running, $"Deployed: {Portal}"), watch.Delivery);
     }
 
