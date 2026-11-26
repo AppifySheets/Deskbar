@@ -3250,6 +3250,7 @@ public partial class TasksWindow : Window
         var delete = Item(DeleteText).WithIcon(TaskMenuIcons.Delete);
         delete.Items.Add(Item("Delete for good", () => Actions?.Delete(id)));
         menu.Items.Add(delete);
+        ShapeWindowMenu(menu, row);
         OpenMenu(menu);
         return menu;
     }
