@@ -120,14 +120,15 @@ public partial class TasksBoardTests
         var stepping = true;
         using var r = PermissionPage(clickClock: () => stepping ? now = now.AddSeconds(1) : now);
         stepping = false;
+        // The session asks again: its newer question takes the first card's place (one card per session).
         var slot = Ask(r, "a new question");
 
         now += TimeSpan.FromMilliseconds(200);
-        Click(ButtonNamed(Cards(r)[1], TasksWindow.AllowText));
+        Click(ButtonNamed(Cards(r).Single(), TasksWindow.AllowText));
         Assert.Null(AnswerIn(r, slot));
 
         now += TasksWindow.ArmTime;
-        Click(ButtonNamed(Cards(r)[1], TasksWindow.AllowText));
+        Click(ButtonNamed(Cards(r).Single(), TasksWindow.AllowText));
         Assert.EndsWith(" allow\n", AnswerIn(r, slot));
     });
 
@@ -173,20 +174,24 @@ public partial class TasksBoardTests
         Assert.Equal(string.Join('\n', lines), Shown().Text);
     });
 
-    // Two questions at once: two cards, the oldest first; and one that ended before the click says so and writes nothing.
+    // ONE CARD PER SESSION (the review's L5): the session asks again (the first question was answered in the terminal), so
+    // the newer question takes the old card's place; a click on the old card, still drawn, writes nothing and says to
+    // answer in the terminal, and the new card answers the new question.
     [Fact]
-    public void Two_questions_show_two_cards_and_a_click_too_late_writes_nothing() => StaThread.Run(() =>
+    public void A_newer_question_replaces_the_card_and_the_old_cards_click_writes_nothing() => StaThread.Run(() =>
     {
         using var r = PermissionPage("first");
+        var first = r.Desk.All.Single().Slot;
+        var allowFirst = ButtonNamed(Cards(r).Single(), TasksWindow.AllowText);
         var second = Ask(r, "second");
 
-        Assert.Equal(2, Cards(r).Count);
-        var allowSecond = ButtonNamed(Cards(r)[1], TasksWindow.AllowText);
-        // The second question ends (the session moved on) while its card is still drawn.
-        r.Desk.Forget("s1");
-        Click(allowSecond);
+        Assert.Single(Cards(r));
+        Click(allowFirst);
 
-        Assert.Null(AnswerIn(r, second));
+        Assert.Null(AnswerIn(r, first));
+        Assert.False(Directory.Exists(Path.Combine(r.Box, first)));
         Assert.Contains(Inside(r.Board.Window.InboxPageContent!).OfType<TextBlock>(), b => b.Text.Contains("Answer it in the terminal"));
-    });
-}
+
+        Click(ButtonNamed(Cards(r).Single(), TasksWindow.DenyText));
+        Assert.EndsWith(" deny\n", AnswerIn(r, second));
+    });}

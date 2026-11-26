@@ -267,19 +267,28 @@ static class ClaudeSkill
     //
     //   1. Makes its SLOT, claude-permission\req-<n>-<n> beside the shim, with `mkdir` (atomic), retried with new numbers
     //      when another hook has that name (the waiter's I1: %RANDOM% is seeded by the second).
-    //   2. Calls Deskbar ONCE, `deskbar.cmd claude-permission --slot <name>` with stdin passed through, and reads the code
-    //      from the reply with `for /f`. No code (Deskbar not running, or the question stays in the terminal) ends it at
-    //      once, printing nothing. The reply file goes straight after: the code lives on in this process only.
+    //   2. Calls Deskbar ONCE, `deskbar.cmd claude-permission --slot <name>` with stdin passed through, and takes the code
+    //      STRAIGHT FROM THE CALL'S OUTPUT into a variable, `for /f` over the call itself: it never touches the disk (the
+    //      review's M1: a reply file, however briefly it lived, could be read by a file watcher, which could then write a
+    //      valid answer). Anything but 32 hex digits counts as no code. No code (Deskbar not running, or the question
+    //      stays in the terminal) ends it at once, printing nothing.
     //   3. Every second: a slot that is gone (Deskbar dropped the question: the session moved on, the setting went off,
     //      Deskbar exited or restarted) ends it, printing nothing. An answer file is read ONCE and the slot removed; then
     //      it prints a fixed line only for exactly one line "<its code> allow|deny|edits", the rule of
     //      PermissionAnswer.LineFor, and nothing for anything else. Its own deadline, `seconds` ticks of a second or
     //      more, ends it printing nothing.
     //
-    // NOTHING READ FROM A FILE IS EVER PARSED BY cmd: the answer's line is set from a FOR variable (substituted after the
-    // line is parsed) with delayed expansion off, and compared with !line! under delayed expansion (expanded after the IF
-    // is parsed), so quotes, & or | in a planted file are text, never a command or a second comparison. The lines it
-    // prints are literals of this script. Every path but those three ends in `exit /b 0` with nothing on stdout: Claude
+    // NOTHING READ IS EVER PARSED BY cmd: the reply's code and the answer's line are each set from a FOR variable
+    // (substituted after the line is parsed) with delayed expansion off, and checked and compared as !code! and !line!
+    // under delayed expansion (expanded after the IF is parsed), so quotes, & or | in either are text, never a command or a
+    // second comparison. The lines it prints are literals of this script.
+    //
+    // WHERE THE CODE IS, AND THE BOUNDARY. The code is never in a file before the click (the answer file Deskbar writes at
+    // the click carries it, once), never on a command line (it is compared inside this cmd, and the slot's name is
+    // %RANDOM%, not the code), and never in a trace (the reply is not traced, ControlArguments.ForTrace). It does live in
+    // this cmd's environment, and so in the environment of the `ping` it starts for each tick. A process of the same user
+    // that can read another process's memory or environment can therefore still learn it and answer; Deskbar does not
+    // defend against that, as it does not defend the user's own settings.json from such a process. Every path but those three ends in `exit /b 0` with nothing on stdout: Claude
     // Code then keeps its own dialog (and never sees exit 2, which is not a decision on this event anyway).
     //
     // A late answer is harmless by construction: when the user answered in the terminal first, Claude Code has its
@@ -301,11 +310,24 @@ static class ClaudeSkill
         "@set \"name=req-%RANDOM%-%RANDOM%\"",
         "@set \"slot=%box%\\%name%\"",
         "@mkdir \"%slot%\" >nul 2>&1 || goto pick",
-        $"@if defined CLAUDE_PROJECT_DIR ({call} --from \"%CLAUDE_PROJECT_DIR%\" > \"%slot%\\{Core.Tasks.PermissionDesk.ReplyFile}\" 2>nul) else ({call} > \"%slot%\\{Core.Tasks.PermissionDesk.ReplyFile}\" 2>nul)",
         "@set \"code=\"",
-        $"@for /f \"usebackq tokens=1\" %%a in (\"%slot%\\{Core.Tasks.PermissionDesk.ReplyFile}\") do @set \"code=%%a\"",
-        $"@del \"%slot%\\{Core.Tasks.PermissionDesk.ReplyFile}\" >nul 2>&1",
+        "@if defined CLAUDE_PROJECT_DIR goto from",
+        $"@for /f \"usebackq tokens=1\" %%a in (`{call} 2^>nul`) do @if not defined code set \"code=%%a\"",
+        "@goto called",
+        ":from",
+        $"@for /f \"usebackq tokens=1\" %%a in (`{call} --from \"%CLAUDE_PROJECT_DIR%\" 2^>nul`) do @if not defined code set \"code=%%a\"",
+        ":called",
         "@if not defined code goto done",
+        // The code is 32 hex digits or nothing counts (PermissionAnswer.Code). Checked inside a setlocal of its own, so
+        // delayed expansion never touches a path that holds a "!", and only the verdict leaves it.
+        "@setlocal EnableDelayedExpansion",
+        "@set \"ok=\"",
+        "@if not \"!code:~31,1!\"==\"\" if \"!code:~32!\"==\"\" set \"ok=1\"",
+        "@set \"rest=x!code!\"",
+        "@for %%h in (0 1 2 3 4 5 6 7 8 9 a b c d e f) do @set \"rest=!rest:%%h=!\"",
+        "@if not \"!rest!\"==\"x\" set \"ok=\"",
+        "@endlocal & set \"ok=%ok%\"",
+        "@if not defined ok goto done",
         $"@set /a left={seconds ?? Core.Tasks.PermissionDesk.ScriptSeconds}",
         ":wait",
         "@if not exist \"%slot%\" exit /b 0",
