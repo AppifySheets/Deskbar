@@ -27,6 +27,7 @@ sealed class CommentWaker : IDisposable
     readonly TaskService tasks;
     readonly IObservable<IReadOnlyCollection<ClaudeAgent>> live;
     readonly Func<TaskSession, bool> hasTranscript;
+    readonly Func<TaskSession, bool> endedOnApiError;
     readonly CommentInbox inbox;
     readonly Func<Guid, TaskSession, string, Task<Result>> resumeWith;
     readonly Func<string, Task<Result>> stop;
@@ -34,12 +35,13 @@ sealed class CommentWaker : IDisposable
     readonly IDisposable subscription;
 
     public CommentWaker(TaskService tasks, Func<bool> enabled, IObservable<IReadOnlyCollection<ClaudeAgent>> live, Func<TaskSession, bool> hasTranscript,
-        CommentInbox inbox, Func<Guid, TaskSession, string, Task<Result>> resumeWith, Func<string, Task<Result>> stop,
+        Func<TaskSession, bool> endedOnApiError, CommentInbox inbox, Func<Guid, TaskSession, string, Task<Result>> resumeWith, Func<string, Task<Result>> stop,
         Action<string>? trace = null)
     {
         this.tasks = tasks;
         this.live = live;
         this.hasTranscript = hasTranscript;
+        this.endedOnApiError = endedOnApiError;
         this.inbox = inbox;
         this.resumeWith = resumeWith;
         this.stop = stop;
@@ -64,7 +66,17 @@ sealed class CommentWaker : IDisposable
     {
         if (tasks.Board.Tasks.FirstOrDefault(t => t.Id == taskId) is not { Sessions.Count: > 0 } task) return System.Reactive.Unit.Default;
         var message = SessionBriefing.Commented(task, tasks.ExpandImages(comment.Markdown), comment.ByManager);
-        switch (CommentWake.Plan(task, listed.ToList(), hasTranscript, inbox.Lapsed))
+        // A WAITER CAN BE GONE WHILE ITS GEN FILE SAYS IT IS ALIVE (task daeaa26c). A turn that ends on an API error, the
+        // usage limit above all, runs no Stop hook, so no waiter is started after it, and the one before it may be the
+        // very waiter whose comment woke the session for that turn. The gen file still names that waiter, good for a
+        // month, so the comment went into an inbox nobody read (session 152ba85d, 2026-11-26: two of the manager's
+        // comments waited there for an hour, until Petre typed in its window). So a session whose last turn ended on an
+        // API error counts as lapsed: a background one is stopped and resumed with the comment, and anything else gets
+        // the inbox as before. Woken before a usage limit resets, the turn hits the limit again, but the comment is then
+        // in the conversation, and the keeper resumes the session once the limit resets (SessionKeeper's header).
+        bool Lapsed(string sessionId) =>
+            inbox.Lapsed(sessionId) || task.Sessions.Any(session => session.Id == sessionId && endedOnApiError(session));
+        switch (CommentWake.Plan(task, listed.ToList(), hasTranscript, Lapsed))
         {
             case WakePlan.Inbox(var sessionId):
                 Into(taskId, sessionId, message);

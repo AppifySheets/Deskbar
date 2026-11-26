@@ -1915,7 +1915,7 @@ public partial class App : Application
         if (runningChangeWatch is null && ClickTrace.On)
             ClickTrace.Write($"running changes: no watch, the version {UpdateService.RunningVersion} names no commit");
 
-        commentWaker = new CommentWaker(tasks!, () => manager.State.ClaudeTasksInEffect, claudeSessions.Live, claudeSessions.Resumable, commentInbox,
+        commentWaker = new CommentWaker(tasks!, () => manager.State.ClaudeTasksInEffect, claudeSessions.Live, claudeSessions.Resumable, claudeSessions.EndedOnApiError, commentInbox,
             claudeSessions.ResumeWith, claudeSessions.StopNow, ClickTrace.On ? ClickTrace.Write : null);
 
         // ...and what a click on a task does with those sessions (ClaudeTaskActions, Task 9): the double-click's session

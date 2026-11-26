@@ -104,4 +104,47 @@ public class ClaudeTranscriptTests
         // Garbage after a finished turn is skipped, not read as the last entry.
         Assert.False(ClaudeTranscript.WasCutOff([Prompt, EndTurn, "{broken"]));
     }
+
+    // TASK daeaa26c. The usage-limit entry as Claude Code wrote it on 2026-11-25 for session 152ba85d (cut down to the
+    // fields read): an assistant entry of its own, isApiErrorMessage, the reset moment in apiErrorParams as unix seconds.
+    const string LimitHit = """{"type":"assistant","isSidechain":false,"timestamp":"2026-11-25T18:22:10.188Z","message":{"model":"<synthetic>","role":"assistant","stop_reason":"stop_sequence","content":[{"type":"text","text":"You've hit your weekly limit · resets 6am (Asia/Tbilisi)"}]},"apiError":"usage_limit_reached","apiErrorParams":{"rate_limit_info":{"status":"rejected","resetsAt":1795658400,"rateLimitType":"seven_day"}},"quotaLimits":{"status":"rejected","resetsAt":1795658400},"error":"rate_limit","isApiErrorMessage":true,"apiErrorStatus":429}""";
+    const string LimitHitQuotaOnly = """{"type":"assistant","message":{"role":"assistant","stop_reason":"stop_sequence","content":[{"type":"text","text":"limit"}]},"quotaLimits":{"resetsAt":1795658400},"isApiErrorMessage":true}""";
+    const string ServerError = """{"type":"assistant","message":{"role":"assistant","stop_reason":"stop_sequence","content":[{"type":"text","text":"API Error: overloaded"}]},"error":"server_error","isApiErrorMessage":true}""";
+    const string PrLink = """{"type":"pr-link"}""";
+
+    static readonly DateTimeOffset SixAmTbilisi = new(2026, 11, 26, 2, 0, 0, TimeSpan.Zero);
+
+    [Fact]
+    public void A_turn_that_died_on_the_usage_limit_names_the_reset_moment()
+    {
+        var error = ClaudeTranscript.LastTurnError([Prompt, ToolUse, ToolResult, LimitHit, PrLink, Cost]);
+
+        Assert.True(error.HasValue);
+        Assert.Equal(SixAmTbilisi, error.Value.ResetsAt.Value);
+        // It is still cut off, so a resume tells it to continue.
+        Assert.True(ClaudeTranscript.WasCutOff([Prompt, LimitHit, PrLink]));
+    }
+
+    [Fact]
+    public void The_reset_moment_is_also_read_from_quota_limits() =>
+        Assert.Equal(SixAmTbilisi, ClaudeTranscript.LastTurnError([Prompt, LimitHitQuotaOnly]).Value.ResetsAt.Value);
+
+    [Fact]
+    public void Another_api_error_ends_the_turn_on_an_error_with_no_reset()
+    {
+        var error = ClaudeTranscript.LastTurnError([Prompt, ServerError]);
+
+        Assert.True(error.HasValue);
+        Assert.False(error.Value.ResetsAt.HasValue);
+    }
+
+    // The comment that woke 152ba85d hit the limit again; a reply that finished after an error makes it history.
+    [Fact]
+    public void Only_the_last_turn_decides()
+    {
+        Assert.False(ClaudeTranscript.LastTurnError([Prompt, LimitHit, Prompt, EndTurn]).HasValue);
+        Assert.True(ClaudeTranscript.LastTurnError([Prompt, LimitHit, Prompt, LimitHit]).HasValue);
+        Assert.False(ClaudeTranscript.LastTurnError([Prompt, ToolUse]).HasValue);
+        Assert.False(ClaudeTranscript.LastTurnError([]).HasValue);
+    }
 }

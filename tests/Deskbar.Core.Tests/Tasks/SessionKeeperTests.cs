@@ -439,4 +439,86 @@ public class SessionKeeperTests
 
         Assert.Equal("old", Assert.Single(Stops([task], [Background("old")])).Agent.SessionId);
     }
+
+    // --- task daeaa26c: a session stopped on a usage limit -------------------------------------------------------------
+
+    static IReadOnlyList<KeeperStep> PlanLimited(
+        IEnumerable<TaskItem> tasks, DateTimeOffset resetsAt, IReadOnlyCollection<ClaudeAgent>? live = null, ResumeLedger? ledger = null) =>
+        SessionKeeper.Plan(new TaskBoard(tasks.ToList()), live ?? Array.Empty<ClaudeAgent>(), ledger ?? ResumeLedger.Empty,
+            _ => true, _ => true, Now, limitedUntil: _ => resetsAt);
+
+    static ClaudeAgent BackgroundAgent(string sessionId, bool busy = false) =>
+        new(sessionId, sessionId[..2], @"E:\repos\X", true, busy, "");
+
+    [Fact]
+    public void A_session_not_listed_waits_for_its_usage_limit_to_reset() =>
+        Assert.Empty(PlanLimited([Task(TaskStatus.InProgress, 5, Session("s1"))], Now.AddHours(3)));
+
+    [Fact]
+    public void Within_the_margin_after_the_reset_it_still_waits() =>
+        Assert.Empty(PlanLimited([Task(TaskStatus.InProgress, 5, Session("s1"))], Now - SessionKeeper.LimitMargin + TimeSpan.FromSeconds(1)));
+
+    [Fact]
+    public void Once_the_limit_has_reset_a_session_not_listed_is_resumed_with_the_continue_message()
+    {
+        var step = Assert.IsType<KeeperStep.Resume>(Assert.Single(PlanLimited([Task(TaskStatus.InProgress, 5, Session("s1"))], Now.AddHours(-1))));
+
+        Assert.True(step.SendContinue);
+        Assert.True(step.AfterLimit);
+        Assert.False(step.StopFirst.HasValue);
+    }
+
+    // The case of session 152ba85d: listed, idle, in the background, and nothing ever woke it.
+    [Fact]
+    public void Once_the_limit_has_reset_a_listed_idle_background_session_is_stopped_and_resumed()
+    {
+        var task = Task(TaskStatus.InProgress, 5, Session("s1"));
+
+        var step = Assert.IsType<KeeperStep.Resume>(Assert.Single(PlanLimited([task], Now.AddHours(-1), [BackgroundAgent("s1")])));
+
+        Assert.Equal(task.Id, step.TaskId);
+        Assert.Equal("s1", step.StopFirst.Value);
+        Assert.True(step.SendContinue);
+        Assert.True(step.AfterLimit);
+    }
+
+    [Fact]
+    public void A_listed_session_is_not_restarted_before_the_reset() =>
+        Assert.Empty(PlanLimited([Task(TaskStatus.InProgress, 5, Session("s1"))], Now.AddHours(1), [BackgroundAgent("s1")]));
+
+    [Fact]
+    public void A_listed_session_not_stopped_on_a_limit_is_still_left_alone() =>
+        Assert.Empty(SessionKeeper.Plan(new TaskBoard([Task(TaskStatus.InProgress, 5, Session("s1"))]), [BackgroundAgent("s1")],
+            ResumeLedger.Empty, _ => true, _ => true, Now, limitedUntil: _ => Maybe<DateTimeOffset>.None));
+
+    [Fact]
+    public void A_busy_or_interactive_listed_session_is_never_restarted()
+    {
+        var task = Task(TaskStatus.InProgress, 5, Session("s1"));
+
+        Assert.Empty(PlanLimited([task], Now.AddHours(-1), [BackgroundAgent("s1", busy: true)]));
+        Assert.Empty(PlanLimited([task], Now.AddHours(-1), [Agent("s1")]));
+    }
+
+    [Theory]
+    [InlineData(TaskStatus.Done)]
+    [InlineData(TaskStatus.Closed)]
+    public void A_finished_tasks_limited_session_is_not_restarted(TaskStatus status) =>
+        Assert.Empty(PlanLimited([Task(status, 5, Session("s1"))], Now.AddHours(-1), [BackgroundAgent("s1")]));
+
+    // Only the latest session, and only when it is the listed one: an older listed one beside it is not touched.
+    [Fact]
+    public void An_older_listed_session_is_not_restarted() =>
+        Assert.Empty(PlanLimited([Task(TaskStatus.InProgress, 5, Session("old", 120), Session("new", 10))], Now.AddHours(-1), [BackgroundAgent("old")]));
+
+    [Fact]
+    public void A_restart_keeps_the_grace_and_the_loop_guard()
+    {
+        var task = Task(TaskStatus.InProgress, 5, Session("s1"));
+        var justNow = ResumeLedger.Empty.Record("s1", Now.AddSeconds(-5));
+        var three = ResumeLedger.Empty.Record("s1", Now.AddMinutes(-8)).Record("s1", Now.AddMinutes(-5)).Record("s1", Now.AddMinutes(-2));
+
+        Assert.Empty(PlanLimited([task], Now.AddHours(-1), [BackgroundAgent("s1")], justNow));
+        Assert.IsType<KeeperStep.GiveUp>(Assert.Single(PlanLimited([task], Now.AddHours(-1), [BackgroundAgent("s1")], three)));
+    }
 }

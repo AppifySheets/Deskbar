@@ -183,6 +183,10 @@ public sealed class ClaudeSessions : IDisposable
     // acted (ForgetAnswered).
     ImmutableHashSet<string> givenUp = ImmutableHashSet<string>.Empty;
 
+    // The usage-limit stops already said in their task's thread (NoteLimits), by session and the limit's reset moment, so
+    // each is said once a run; a limit hit again after a wake has a new reset moment and is said again.
+    ImmutableHashSet<(string SessionId, DateTimeOffset ResetsAt)> limitNoted = ImmutableHashSet<(string, DateTimeOffset)>.Empty;
+
     // Sessions Start launched whose full id is not yet known, by short id, with the task and folder they belong to. A
     // list that shows one (Start's own search or a poll) joins it to its task.
     ImmutableDictionary<string, StartClaim> claims = ImmutableDictionary<string, StartClaim>.Empty;
@@ -578,9 +582,13 @@ public sealed class ClaudeSessions : IDisposable
                 _ => false,
                 scheduler.Now,
                 // Ruling 18: no step for a session missing less than SessionKeeper.Settle.
-                AbsentSince)
+                AbsentSince,
+                // Task daeaa26c: a session stopped on a usage limit waits for the reset, then is woken (a listed one is
+                // stopped first). Read from the transcript's tail, cached until the file changes (LastTurnError).
+                resuming ? LimitedUntil : null)
             .ToList()
             .ForEach(step => Take(step, resuming));
+        NoteLimits(listed, now, resuming);
 
         // Job 5: finished tasks' idle sessions are stopped. Asked after the keeper's steps, on the same board and list.
         idleSince = listed.Where(agent => !agent.Busy).Select(agent => agent.SessionId).Distinct()
@@ -637,11 +645,55 @@ public sealed class ClaudeSessions : IDisposable
                     .Tap(() => LatestSessionOf(giveUp.TaskId).Tap(id => givenUp = givenUp.Add(id)))
                     .TapError(e => trace?.Invoke($"claude sessions: give-up not asked on {giveUp.TaskId}: {e}"));
                 break;
-            case KeeperStep.Resume resume when resuming && !Queued(resume.Session.Id):
+            // A restart (StopFirst) never while a window of Deskbar's is attached to the task: `claude stop` would close it
+            // under Petre (measured 2026-11-25), and with the window open he sees the limit's message and can type himself.
+            case KeeperStep.Resume resume when resuming && !Queued(resume.Session.Id) && !(resume.StopFirst.HasValue && WindowOpenOn(resume.TaskId)):
                 queue = queue.Enqueue(resume);
                 break;
         }
     }
+
+    bool WindowOpenOn(Guid taskId) =>
+        tasks.Board.Tasks.TryFirst(t => t.Id == taskId).Map(windowOpen).GetValueOrDefault(false);
+
+    // SHOWN AS STOPPED (task daeaa26c). A session whose turn died on the usage limit is still listed, idle, and its hooks
+    // never said it ended, so the board went on showing it live with its last status line ("PR 574 open, CI running")
+    // for the eight hours until the limit reset. Once per stop, the open task's thread gets a line saying it stopped and
+    // when the limit resets, and its status line, which the bar shows, says the same until the session writes its own
+    // again after it wakes. A status line already saying exactly that is the same stop said before a Deskbar restart,
+    // so nothing is repeated.
+    void NoteLimits(IReadOnlyCollection<ClaudeAgent> listed, DateTimeOffset now, bool resuming) =>
+        tasks.Board.Tasks
+            .Where(task => task.IsClaudes && task.Status is TaskStatus.Backlog or TaskStatus.InProgress or TaskStatus.WaitingOnYou)
+            .Where(task => !SessionKeeper.GivenUp(task))
+            .Select(task => (Task: task, Session: LatestSession(task)))
+            .Where(pair => pair.Session is { HasValue: true, Value.Replaced: false })
+            .Select(pair => (pair.Task, Session: pair.Session.Value, ResetsAt: LimitedUntil(pair.Session.Value)))
+            .Where(item => item.ResetsAt.HasValue && now < SessionKeeper.WakeAfterLimit(item.ResetsAt.Value))
+            .Where(item => !limitNoted.Contains((item.Session.Id, item.ResetsAt.Value)))
+            .ToList()
+            .ForEach(item =>
+            {
+                limitNoted = limitNoted.Add((item.Session.Id, item.ResetsAt.Value));
+                var when = Clock(item.ResetsAt.Value, now);
+                var status = $"Stopped on the usage limit until {when}";
+                if (item.Task.StatusLine == status) return;
+                // An interactive session (a VS Code panel, a terminal) cannot be restarted from outside (SessionKeeper's
+                // header), so its line says what Petre can do instead of promising a wake.
+                var interactive = listed.Any(agent => agent.SessionId == item.Session.Id && !agent.Background);
+                Say(item.Task.Id,
+                    interactive ? $"Stopped on the usage limit, which resets at {when}. It runs in a window Deskbar cannot restart, so type in it once the limit has reset."
+                    : resuming ? $"Stopped on the usage limit. Deskbar resumes it once the limit resets at {when}."
+                    : $"Stopped on the usage limit, which resets at {when}.");
+                tasks.SetStatusLine(item.Task.Id, status)
+                    .TapError(e => trace?.Invoke($"claude sessions: no status line on {item.Task.Id}: {e}"));
+            });
+
+    // A reset moment as the bar says a time: "06:00" today, "Thu 06:00" on another day, in this machine's time zone.
+    static string Clock(DateTimeOffset at, DateTimeOffset now) =>
+        at.ToLocalTime() is var local && local.Date == now.ToLocalTime().Date
+            ? local.ToString("HH:mm", System.Globalization.CultureInfo.InvariantCulture)
+            : local.ToString("ddd HH:mm", System.Globalization.CultureInfo.InvariantCulture);
 
     TimeSpan ListedFor(string sessionId) =>
         firstSeen.TryGetValue(sessionId, out var seen) ? scheduler.Now - seen : TimeSpan.Zero;
@@ -698,7 +750,9 @@ public sealed class ClaudeSessions : IDisposable
     void Rechecked(KeeperStep.Resume resume, Result<IReadOnlyList<ClaudeAgent>> fresh)
     {
         if (fresh.IsFailure) Dropped(resume, $"the list could not be read: {fresh.Error}", wholeQueue: true);
-        else if (fresh.Value.Any(agent => agent.SessionId == resume.Session.Id)) Dropped(resume, "the list shows it again", wholeQueue: false);
+        // A restart (StopFirst) expects its session listed; only one that is working again is left alone.
+        else if (resume.StopFirst.HasNoValue && fresh.Value.Any(agent => agent.SessionId == resume.Session.Id)) Dropped(resume, "the list shows it again", wholeQueue: false);
+        else if (resume.StopFirst.HasValue && fresh.Value.Any(agent => agent.SessionId == resume.Session.Id && agent.Busy)) Dropped(resume, "it is working again", wholeQueue: false);
         else if (!StillWanted(resume)) Dropped(resume, "no longer wanted", wholeQueue: false);
         else Wake(resume);
     }
@@ -724,14 +778,20 @@ public sealed class ClaudeSessions : IDisposable
             {
                 // Read here, on `background`, for the reason given in Heard.
                 var cutOff = CutOff(session);
-                return (CutOff: cutOff, Result: await cli.Run(ResumeArguments(session.Id, cutOff), session.Folder, LaunchTimeout));
+                // A restart (task daeaa26c): the listed session is stopped first, since resuming one that runs starts a
+                // copy. A stop that fails is no resume either, for the same reason; the ledger already counts it, so the
+                // grace and the loop guard space out the next try.
+                if (resume.StopFirst.HasValue && await cli.Run(["stop", resume.StopFirst.Value], null, LaunchTimeout) is { IsFailure: true } stop)
+                    return (CutOff: cutOff, Result: Result.Failure<string>(stop.Error), Stopped: false);
+                return (CutOff: cutOff, Result: await cli.Run(ResumeArguments(session.Id, cutOff), session.Folder, LaunchTimeout), Stopped: true);
             })
             .Subscribe(
                 answer =>
                 {
                     // The queue is freed BEFORE the answer is acted on, so nothing Answered does can leave it stuck.
                     Settled(session.Id);
-                    Answered(resume.TaskId, session.Id, answer.CutOff, answer.Result);
+                    if (answer.Stopped) Answered(resume.TaskId, session.Id, answer.CutOff, answer.Result, resume.AfterLimit);
+                    else trace?.Invoke($"claude sessions: restart of {session.Id} not made, its stop failed: {answer.Result.Error}");
                     Drain();
                 },
                 error =>
@@ -779,11 +839,15 @@ public sealed class ClaudeSessions : IDisposable
         && tasks.Board.Tasks.TryFirst(t => t.Id == resume.TaskId)
             .Map(t => t.Status is TaskStatus.Backlog or TaskStatus.InProgress or TaskStatus.WaitingOnYou
                 && !SessionKeeper.GivenUp(t)
-                && LatestSession(t).Map(s => s.Id == resume.Session.Id).GetValueOrDefault(false))
+                && LatestSession(t).Map(s => s.Id == resume.Session.Id).GetValueOrDefault(false)
+                // A restart: still no window on it, and still stopped on the limit (Petre may have typed in it since).
+                && (resume.StopFirst.HasNoValue || (!windowOpen(t) && LimitedUntil(resume.Session).HasValue)))
             .GetValueOrDefault(false)
-        && lastLive.All(agent => agent.SessionId != resume.Session.Id);
+        && (resume.StopFirst.HasValue
+            ? lastLive.All(agent => agent.SessionId != resume.Session.Id || !agent.Busy)
+            : lastLive.All(agent => agent.SessionId != resume.Session.Id));
 
-    void Answered(Guid taskId, string sessionId, bool cutOff, Result<string> result)
+    void Answered(Guid taskId, string sessionId, bool cutOff, Result<string> result, bool afterLimit = false)
     {
         // Kept for a click within the grace (WakeNow), so it hands this back instead of looking for a session that never started.
         failedWith = result.IsSuccess ? failedWith.Remove(sessionId) : failedWith.SetItem(sessionId, result.Error);
@@ -791,7 +855,8 @@ public sealed class ClaudeSessions : IDisposable
         {
             // The thread's header already names Deskbar and the time (task aa42794f, "too much bla bla"), so the line
             // says only what happened.
-            Say(taskId, cutOff ? "Resumed. Its last turn was cut off, so it was told to continue." : "Resumed.");
+            Say(taskId, afterLimit ? "Resumed, since the usage limit it stopped on has reset. It was told to continue."
+                : cutOff ? "Resumed. Its last turn was cut off, so it was told to continue." : "Resumed.");
             return;
         }
 
@@ -866,6 +931,53 @@ public sealed class ClaudeSessions : IDisposable
         {
             return [];
         }
+    }
+
+    // WHETHER THE LAST TURN DIED ON AN API ERROR (ClaudeTranscript.LastTurnError, task daeaa26c). Asked on every poll for
+    // each open task's latest session (the keeper, NoteLimits) and for each comment (CommentWaker), so it reads only the
+    // transcript's last TailBytes, and remembers the answer per file until the file's length or write time changes. The
+    // last user or assistant entry always lies in the tail unless it is itself longer than the tail; then the tail holds
+    // no whole entry at all and the answer is "no error", the side that changes nothing. Unreadable is "no error" too.
+    const int TailBytes = 256 * 1024;
+
+    readonly System.Collections.Concurrent.ConcurrentDictionary<string, (long Length, DateTime Written, Maybe<TurnError> Error)> turnErrors = new();
+
+    public Maybe<TurnError> LastTurnError(TaskSession session)
+    {
+        try
+        {
+            if (TranscriptOf(session).GetValueOrDefault() is not { } path) return Maybe<TurnError>.None;
+            var file = new FileInfo(path);
+            if (turnErrors.TryGetValue(path, out var known) && known.Length == file.Length && known.Written == file.LastWriteTimeUtc) return known.Error;
+            var error = ClaudeTranscript.LastTurnError(Tail(path));
+            turnErrors[path] = (file.Length, file.LastWriteTimeUtc, error);
+            return error;
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            return Maybe<TurnError>.None;
+        }
+    }
+
+    /// <summary>The moment the usage limit the session's last turn died on resets; None when it did not die on one.</summary>
+    public Maybe<DateTimeOffset> LimitedUntil(TaskSession session) => LastTurnError(session).Bind(error => error.ResetsAt);
+
+    /// <summary>
+    /// The session's last turn ended on an API error, so no Stop hook ran and no comment waiter can be alive for it
+    /// (CommentWaker treats its waiter as lapsed).
+    /// </summary>
+    public bool EndedOnApiError(TaskSession session) => LastTurnError(session).HasValue;
+
+    // The file's last TailBytes as lines. A tail that starts inside the file starts inside a line (maybe inside a
+    // character), so that first piece is dropped: it is not a whole entry.
+    static IReadOnlyList<string> Tail(string path)
+    {
+        using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+        var start = Math.Max(0, stream.Length - TailBytes);
+        stream.Seek(start, SeekOrigin.Begin);
+        using var reader = new StreamReader(stream);
+        var lines = reader.ReadToEnd().Split('\n');
+        return start > 0 ? lines.Skip(1).ToList() : lines;
     }
 
     // Shared for reading and writing, since nothing promises Claude Code has let go of the file. An unreadable file is

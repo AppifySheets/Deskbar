@@ -1114,4 +1114,60 @@ public class ClaudeSessionsTests
         rig.RunTo(TimeSpan.FromMinutes(11) + Seconds(15));
         Assert.Equal(2, rig.Cli.Stops.Count);
     }
+
+    // TASK daeaa26c, session 152ba85d: its turn died on the weekly limit and it stayed listed, idle, in the background,
+    // "live" on the board, until Petre opened its window hours after the reset. Now the thread and the status line say it
+    // stopped, and once the limit has reset it is stopped (a bare resume of a listed session starts a copy) and resumed
+    // with the continue message.
+    [Fact]
+    public void A_listed_session_stopped_on_the_usage_limit_is_shown_stopped_and_restarted_after_the_reset()
+    {
+        using var rig = new Rig();
+        var (taskId, sessionId) = rig.Running("limits");
+        var resetsAt = Origin + TimeSpan.FromHours(1);
+        var path = ClaudeTranscript.PathOf(rig.Home, @"E:\repos\Work", sessionId);
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        File.WriteAllLines(path,
+        [
+            """{"type":"user","message":{"role":"user","content":"start"}}""",
+            "{\"type\":\"assistant\",\"isApiErrorMessage\":true,\"apiError\":\"usage_limit_reached\",\"apiErrorParams\":{\"rate_limit_info\":{\"resetsAt\":"
+                + resetsAt.ToUnixTimeSeconds() + "}},\"message\":{\"role\":\"assistant\",\"stop_reason\":\"stop_sequence\",\"content\":[{\"type\":\"text\",\"text\":\"You've hit your weekly limit\"}]}}",
+        ]);
+        rig.Begin();
+
+        rig.RunTo(TimeSpan.FromMinutes(30));
+        Assert.Empty(rig.Cli.Stops);
+        Assert.Empty(rig.Cli.Resumes);
+        Assert.StartsWith("Stopped on the usage limit until ", rig.Task(taskId).StatusLine);
+        Assert.Single(rig.Task(taskId).Comments, c => c.ByDeskbar && c.Markdown.StartsWith("Stopped on the usage limit. Deskbar resumes it", StringComparison.Ordinal));
+
+        rig.RunTo(TimeSpan.FromHours(1) + SessionKeeper.LimitMargin + TimeSpan.FromMinutes(1));
+        Assert.Equal(["stop", sessionId[..8]], Assert.Single(rig.Cli.Stops).Arguments);
+        var resume = Assert.Single(rig.Cli.Resumes);
+        Assert.Equal(["--bg", "--resume", sessionId, ContinueText], resume.Arguments);
+        Assert.Contains(rig.Task(taskId).Comments, c => c.ByDeskbar && c.Markdown.StartsWith("Resumed, since the usage limit", StringComparison.Ordinal));
+    }
+
+    // With a window of Deskbar's on the task, `claude stop` would close it under Petre: the restart waits for it to close.
+    [Fact]
+    public void A_limited_session_with_its_window_open_is_not_restarted()
+    {
+        using var rig = new Rig();
+        var (_, sessionId) = rig.Running("limits");
+        var path = ClaudeTranscript.PathOf(rig.Home, @"E:\repos\Work", sessionId);
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        File.WriteAllLines(path,
+        [
+            """{"type":"user","message":{"role":"user","content":"start"}}""",
+            "{\"type\":\"assistant\",\"isApiErrorMessage\":true,\"apiErrorParams\":{\"rate_limit_info\":{\"resetsAt\":"
+                + (Origin - TimeSpan.FromHours(1)).ToUnixTimeSeconds() + "}},\"message\":{\"role\":\"assistant\",\"stop_reason\":\"stop_sequence\"}}",
+        ]);
+        rig.WindowOpen = _ => true;
+        rig.Begin();
+
+        rig.RunTo(TimeSpan.FromMinutes(5));
+
+        Assert.Empty(rig.Cli.Stops);
+        Assert.Empty(rig.Cli.Resumes);
+    }
 }
