@@ -5,7 +5,8 @@ namespace Deskbar.App;
 
 // WHAT THE BAR STANDS ON, band by band. Three layers lie behind the bar's content, and the Root itself is transparent:
 //
-//   TopSurface    from the bar's top edge to the bottom of the pinned row (Start, search, pinned apps): flat.
+//   TopSurface    from the bar's top edge to the bottom of the pinned row (Start, search, pinned apps): painted as the
+//                 rows band is (flat until task d52ca36e; PaintBand).
 //   RowsSurface   from there to the top of the footer, behind the workspace rows: see-through by default.
 //   FootSurface   from the footer (stats, tray, clock) to the bar's bottom edge: flat.
 //
@@ -13,7 +14,8 @@ namespace Deskbar.App;
 // grain texture, then "this and the top shouldn't be grained", so the grain went behind the rows only. Then, shown
 // the bar over his own wallpaper at four strengths: "let's take that instead, 85%". So the rows band keeps 85% of the
 // bar's flat colour and lets 15% of the desktop through (BarSurface.SeeThrough), and the top and the footer, which are
-// the taskbar's half of the bar, stay solid.
+// the taskbar's half of the bar, stayed solid. Then, 2026-11-26, of the flat top: "i want to make this like the rest of
+// the bar" (Deskbar task d52ca36e), so the top now wears the band's paint, frost and all. The footer stays solid.
 //
 // Active rows stay solid through the fade's plate (FloatingBar.Recency.cs): a workspace row used lately covers the
 // band with an opaque plate of BarSurface.Base that wears away as the row ages, so an idle row turns see-through
@@ -66,6 +68,10 @@ public partial class FloatingBar
             : frostSource is { Floating: true } && frosted ? BarSurface.FrostVeil
             : frostSource is { } source && frosted ? BarSurface.FrostVeilFrom(source.FromLeft, source.Ease)
             : BarSurface.SeeThrough;
+        // The top (Start, search, pinned apps) wears the band's own paint, so the bar reads as one surface from its top
+        // edge down to the footer (Deskbar task d52ca36e, Petre: "i want to make this like the rest of the bar"). The
+        // eased veil is relative to its box, and the top is as wide as the band, so the two ramps line up.
+        TopSurface.Background = RowsSurface.Background;
         FrostSurface.Visibility = frosted ? Visibility.Visible : Visibility.Collapsed;
     }
 
@@ -103,6 +109,16 @@ public partial class FloatingBar
         if (layer.Margin == margin && Math.Abs(layer.Height - height) < 0.05) return;
         layer.Margin = margin;
         layer.Height = height;
+    }
+
+    // The bar's corners: round floating, square docked. The top and foot layers follow the Root, the frost does by its
+    // binding (FloatingBar.xaml). They used to keep 8 DIP corners docked too, which never showed while the top was flat
+    // over a flat bar, but over a frost the top's corner would leave a sliver of unveiled picture in each top corner.
+    void SetCorners(double radius)
+    {
+        Root.CornerRadius = new CornerRadius(radius);
+        TopSurface.CornerRadius = new CornerRadius(radius, radius, 0, 0);
+        FootSurface.CornerRadius = new CornerRadius(0, 0, radius, radius);
     }
 
     // A flat patch of "bar" for drawing with a DrawingContext (the arrange drag's gap and hint). The Root is

@@ -1015,7 +1015,7 @@ public partial class FloatingBar : Window
         dockedEdge = null;
         if (wasAcross) Dispatcher.BeginInvoke(Rebuild);
         fullScreenAppOpen = false;
-        Root.CornerRadius = new CornerRadius(8);
+        SetCorners(8);
         BarContent.Margin = new Thickness(0);
 
         // Back to following its content in height; the width stays the one chosen. Put back from chosenWidth, because
@@ -1087,7 +1087,7 @@ public partial class FloatingBar : Window
             dockedEdge = edge;
             anchorRight = null;
             anchorBottom = null;
-            Root.CornerRadius = new CornerRadius(0);
+            SetCorners(0);
             // An edge dock is one screen's height: no seam inset (see SeamSpan).
             BarContent.Margin = new Thickness(0);
 
@@ -1146,7 +1146,7 @@ public partial class FloatingBar : Window
         dockedEdge = "seam";
         anchorRight = null;
         anchorBottom = null;
-        Root.CornerRadius = new CornerRadius(0);
+        SetCorners(0);
         SizeToContent = SizeToContent.Manual;
 
         // From the left strip's outer edge to the right strip's, and as tall as BOTH strips together, with the
@@ -2619,6 +2619,11 @@ public partial class FloatingBar : Window
         if (StripsAlone)
         {
             if (fresh) FillStripsAlone(queried.Value);
+            // The strips' frost (FloatingBar.StripFrost.cs) rides on the bar's frost check, which a full rebuild
+            // schedules through ApplySurfaceSetting below. A minimized bar never gets there and has no moves of its
+            // own, so without this a new strip, or Manage's see-through box or blur slider, would wait for the
+            // one-minute watch.
+            ScheduleFrost();
             return;
         }
 

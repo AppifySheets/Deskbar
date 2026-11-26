@@ -651,8 +651,30 @@ public class ScreenStripTests
         Assert.True(strip.Topmost);
         Assert.NotEqual(0, NativeMethods.GetWindowLongPtr(hwnd, NativeMethods.GWL_EXSTYLE) & (nint)NativeMethods.WS_EX_TOOLWINDOW);
         // The bar's own flat surface, the very brush, so a strip can never drift from the bar's background
-        // (BarSurface). Solid: only the band behind the workspace rows is see-through (FloatingBar.Surface.cs).
+        // (BarSurface). Flat until the bar hands it a frost (the next test).
         Assert.Same(Deskbar.App.BarSurface.Solid, strip.Background);
+        strip.Close();
+    });
+
+    // The strip's frost (Deskbar task d52ca36e, "and the top bar too"): the frosted wallpaper is the window's background
+    // and the band's veil is the content's, as on the bar's rows; taken off, both go back to the flat base. The content
+    // never goes transparent, so the free space past the last tab still takes a right-click.
+    [Fact]
+    public void A_frost_goes_under_the_bands_veil_and_comes_off_flat() => StaThread.Run(() =>
+    {
+        var strip = Strip();
+        var root = Assert.IsType<Border>(strip.Content);
+        var frost = new SolidColorBrush(Colors.Teal);
+        frost.Freeze();
+
+        strip.ShowFrost(null, frost);
+        Assert.Same(frost, strip.Background);
+        Assert.Same(Deskbar.App.BarSurface.FrostVeil, root.Background);
+
+        strip.ShowFrost(null, null);
+        Assert.Same(Deskbar.App.BarSurface.Solid, strip.Background);
+        Assert.Same(Deskbar.App.BarSurface.Solid, root.Background);
+        Assert.Null(strip.FrostSource);
         strip.Close();
     });
 }
