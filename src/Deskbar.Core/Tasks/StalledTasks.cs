@@ -35,7 +35,7 @@ namespace Deskbar.Core.Tasks;
 // that its session was waiting on HIM, when it was as often waiting on CI, a background job or another session. So a
 // quiet task's session is asked first (TaskService.StalledNudges, delivered on a comment's roads by the app's
 // CommentWaker, SessionBriefing.StalledNudge): ask the user if the next move is theirs, say what it waits on in the
-// status line if it is something else, `task done` if its pull request merged. Any change to the task after the ask is
+// status line if it is something else, `task done` once its merged change is deployed (SessionBriefing's order). Any change to the task after the ask is
 // the answer, and the 15-minute clock starts again from it. Only a session that says nothing within Answer is taken to be
 // waiting on Petre. Waking up and stopping without a word is not an answer: busy after the ask holds the hand-back off
 // while it lasts, and does not cancel it. A session that cannot be reached at all is handed back at once
