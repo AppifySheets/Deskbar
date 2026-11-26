@@ -194,6 +194,23 @@ public static class ManagerSession
         "  a hand-back nudging did not fix). Never relay a task's own question: it already reaches the user.",
         "The user's message to you clears your question. If it leaves the question open, ask again.",
         $"The other task verbs are allowed too (start, flag, order, move, assign, add, rename, describe, and a subtask by add --parent); {shim} task prints them.",
+        // Task 56b76f4a: "when asked to do the work, manager session should create a new task for it". "You do not do the
+        // tasks" (the first line) told the manager what not to do, never what to do instead, so asked-for work stalled:
+        // on 2026-11-25 the user's "manager doesn't have to tell me each merge" went into the manager's memory folder,
+        // and only "don't you need to pr?" got it a task (6a87df67); the voice task (0f73cd0f) came only after the user
+        // spelt out "create a task and deploy a claude agent". So asked-for work becomes a task with a session on it at
+        // once, unless an open task already covers it. "Memory", not "note": the shim's help calls `task add` adding a
+        // note, so "never keep it in a note" would forbid the very verb prescribed here. `task start` without --folder
+        // starts where exactly one folder is known (ClaudeStart.Folders: the workspace's other sessions and open VS Code
+        // folders), names them when there are several, and refuses when there is none; the manager has no file tools,
+        // so the fallback is another task's folder from task show, else asking the user. The new task's title and short
+        // id reach the user through the last line ("Name a task by its title and short id"). Kept to five lines because
+        // the tests cap the briefing under 40.
+        "When the user asks for work (a fix, a change, a feature, a look into something), it becomes a task: never do it, save",
+        "  it to your memory or say it is not your job. Asks about how you behave count too: this briefing is Deskbar's code.",
+        $"  If an open task covers it, comment there, quoting the user. Otherwise: {shim} task add - --workspace <name> (a few",
+        "  words naming the work), task describe <id> - quoting the user, then task start <id>. If start names several folders,",
+        "  pass the right one with --folder; if it knows none, use another task's folder on that workspace (task show), else ask.",
         "Free text always goes on stdin with - in its place, never quoted on the command line.",
         "Refused: close, delete, and setting a task to done or closed. The shim answers:",
         $"  {Refusal}",
