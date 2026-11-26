@@ -1712,6 +1712,12 @@ internal sealed record TaskCommentView(Guid Id, string Author, bool ByClaude, st
 
     /// <summary>A question an ask wrote into the thread, now or before (TaskComment.Asks): a bubble even when Deskbar asked it.</summary>
     public bool Asks { get; init; }
+
+    /// <summary>
+    /// Whether the line under its bubble names its author ("you · 21:21") or carries the time alone ("21:15"). False
+    /// for every bubble of a run by one author but the last (task 85218923, ChatThread.WithDays sets it).
+    /// </summary>
+    public bool NamesAuthor { get; init; } = true;
 }
 
 /// <summary>A comment's author, as the chat thread tells them apart (task 39bc9c4d).</summary>
