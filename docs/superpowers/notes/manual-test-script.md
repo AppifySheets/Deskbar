@@ -1503,7 +1503,8 @@ AS5a. (Task 3a872301.) Type `/` in the bar's box on a workspace whose tasks know
      caret after the space. Type `245` and press Ctrl+Enter: the task "/refresh-pr 245" is added and a Claude session
      starts on it whose first message runs /refresh-pr.
 AS5b. Type `/` again: the list now opens at once. Esc closes it and keeps the box's text; Esc again clears the box.
-     Type `/hum` and click /humanizer in the list: it goes into the box and the caret stays there.
+     Click a skill in the list: it goes into the box and the caret stays there. User-wide skills (/humanizer,
+     /summary), plugins' (superpowers:...) and Claude Code's own (/simplify) are not in the list.
 AS5c. On a workspace whose tasks know two repos, a repo's own skill shows that repo's name beside it, and starting a
      task titled with it starts in that repo without the folder list.
 AS5d. The tasks panel, + Add: the same list under its box.

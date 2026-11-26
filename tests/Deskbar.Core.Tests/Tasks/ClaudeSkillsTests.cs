@@ -75,6 +75,13 @@ public class ClaudeSkillsTests
             new ChoiceComparer());
     }
 
+    // Petre: "i only want custom skills, like those /iam". What Claude Code lists at home is not a repo's own.
+    [Fact]
+    public void A_repos_own_skills_are_those_not_listed_at_home() =>
+        Assert.Equal(["iam-check-data", "iam-deploy-staging"],
+            ClaudeSkills.Own(["humanizer", "iam-check-data", "superpowers:brainstorming", "simplify", "iam-deploy-staging"],
+                ["humanizer", "superpowers:brainstorming", "simplify", "summary"]));
+
     [Fact]
     public void With_one_folder_nothing_is_named() =>
         Assert.All(ClaudeSkills.Merge([(@"E:\repos\TaskSpaces", ["humanizer", "refresh-pr"])]), s => Assert.Empty(s.Folders));

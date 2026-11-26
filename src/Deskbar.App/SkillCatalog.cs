@@ -33,18 +33,24 @@ sealed class SkillCatalog
     static string Key(string folder) => folder.TrimEnd('\\', '/');
 
     /// <summary>
-    /// The skills of these folders merged (ClaudeSkills.Merge): kept answers at once, the others once Claude has
-    /// listed them. A folder that cannot be read is left out; none readable gives an empty list.
+    /// The skills of these folders' OWN, merged (ClaudeSkills.Own, ClaudeSkills.Merge): kept answers at once, the
+    /// others once Claude has listed them. A folder that cannot be read is left out; none readable gives an empty list.
     /// </summary>
+    //
+    // ONLY THE REPO'S OWN SKILLS (Petre, trying the first build: "i only want custom skills, like those /iam not all
+    // skills that are available"; /iam-check-data and /iam-deploy-staging are personalized-health's .claude/skills).
+    // Claude Code lists, in any folder, the user's ~/.claude/skills, every plugin's and its own bundled ones besides the
+    // repo's, over a hundred here. Asked in the user's home folder it lists all of those and nothing of any repo's, so
+    // a repo's own skills are what it lists there and not at home. Both lists still come from Claude Code: nothing is
+    // read from skill folders. When the home folder cannot be asked, nothing is taken away rather than guessed at.
     public async Task<IReadOnlyList<SkillChoice>> For(IReadOnlyList<string> folders)
     {
-        // A workspace with no folder known yet (no task session there, no VS Code window) still has the user's own,
-        // the plugins' and Claude Code's skills, so the user's home folder is asked instead (review of task 3a872301).
-        var asked = folders.Count > 0 ? folders : [Environment.GetFolderPath(Environment.SpecialFolder.UserProfile)];
-        var answers = await Task.WhenAll(asked.Select(async folder => (folder, skills: await Of(folder))));
+        var home = Of(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile));
+        var answers = await Task.WhenAll(folders.Select(async folder => (folder, skills: await Of(folder))));
+        var everywhere = (await home).GetValueOrDefault([]);
         return ClaudeSkills.Merge(answers
             .Where(a => a.skills.HasValue)
-            .Select(a => (a.folder, a.skills.Value))
+            .Select(a => (a.folder, ClaudeSkills.Own(a.skills.Value, everywhere)))
             .ToList());
     }
 

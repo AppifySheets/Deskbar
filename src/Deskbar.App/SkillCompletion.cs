@@ -170,7 +170,7 @@ sealed class SkillCompletion
         if (shown.Count == 0)
         {
             rows.Children.Add(Note(all.Count == 0
-                ? "Claude Code listed no skills here (is it installed?)"
+                ? "No skills of this workspace's own repos (their .claude/skills)"
                 : $"No skill matches /{query}"));
             return;
         }

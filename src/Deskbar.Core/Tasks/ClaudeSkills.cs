@@ -116,6 +116,13 @@ public static class ClaudeSkills
         : 3;
 
     /// <summary>
+    /// A repo's own skills: those Claude Code lists in its folder and not in the user's home folder, where it lists the
+    /// user's, the plugins' and its own bundled ones but none of a repo's (SkillCatalog.For says why only these show).
+    /// </summary>
+    public static IReadOnlyList<string> Own(IReadOnlyList<string> inFolder, IReadOnlyList<string> everywhere) =>
+        inFolder.Except(everywhere, StringComparer.Ordinal).ToList();
+
+    /// <summary>
     /// One list out of each folder's: a skill every folder has (the user's, a plugin's, Claude Code's) once and plainly,
     /// a skill only some folders have (a project's) with those folders, so the box can say which repo it comes from and a
     /// start can go there. Folders whose probe failed are left out by the caller, not passed here.
