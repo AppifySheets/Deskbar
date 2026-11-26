@@ -366,7 +366,8 @@ static class ClaudeSkill
         - Report the deploy. For a change to an app deployed somewhere other than Deskbar itself, a done task's tick
           stays a hollow ring until the deploy is reported: after the merge, check that the deployed app runs the
           version carrying it (its logs, health page or deploy output) and run `deskbar.cmd task deployed - --session
-          <id>` with that evidence on stdin ("2026.11.25.39-3749d21 in the portal logs"). Deskbar checks its own
+          <id>` with that evidence on stdin ("2026.11.25.39-3749d21 in the portal logs"). A change with nothing to
+          deploy (a library, docs, a script) reports that instead ("nothing to deploy: library"). Deskbar checks its own
           repository by itself. `task done` stops your idle session, so when the deploy follows within your session,
           report it first; otherwise say in the status line that checking the deploy is the user's step.
         - Subtasks. A task can have subtasks, one level deep. When you join one, the join reply's `family` names the

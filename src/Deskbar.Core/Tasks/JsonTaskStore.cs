@@ -405,7 +405,6 @@ public sealed class JsonTaskStore(string baseDirectory, Action<string>? trace = 
         }
     }
 
-    // A time written as a string that parses, or absent.
     // The `deployed` array (task 8470d176, phase 2, TaskItem.Deployed): anything that is not an array reads as absent,
     // and an entry that is not an object with a string key, a date-time string at and a string note is skipped, so one
     // hand-edited entry never fails the whole file. The key is kept lower case, as PullRequestLink.Key makes it.
@@ -451,6 +450,7 @@ public sealed class JsonTaskStore(string baseDirectory, Action<string>? trace = 
         }
     }
 
+    // A time written as a string that parses, or absent.
     sealed class TolerantTimeConverter : JsonConverter<DateTimeOffset?>
     {
         public override DateTimeOffset? Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)

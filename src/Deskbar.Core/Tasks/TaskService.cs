@@ -186,7 +186,9 @@ public sealed class TaskService(ITaskStore store, Func<DateTimeOffset> now, Func
     public bool CanMarkDeployed(TaskItem task) =>
         runningBuild.HasValue
         && DeliveryOf(task).Stage == DeliveryStage.Merged
-        && task.PullRequests.Any(p => !runningBuild.Value.Builds(p) && task.Deployed.All(d => d.Key != p.Key));
+        && task.PullRequests.Any(p => !runningBuild.Value.Builds(p) && task.Deployed.All(d => d.Key != p.Key)
+            // Merged by GitHub's word: an unreported one closed without a merge would be stamped and change nothing.
+            && arrivals.TryGetValue(p.Key, out var arrival) && arrival.State == PullRequestState.Merged);
 
     /// <summary>
     /// What GitHub said about the recorded pull requests against <paramref name="build"/>, keyed by
