@@ -6,7 +6,7 @@ using Deskbar.Core.Tasks;
 namespace Deskbar.Windows.Tests;
 
 // A bar line whose session waits on a permission question (Allow / Deny from a task's page; FloatingBar.Permission.cs):
-// in the Inbox look it wears the shield and its quiet second line says what is asked; the line goes back once the
+// in the Inbox look it wears the shield and its tooltip says what is asked; the line goes back once the
 // question is answered. The bar shows; it never answers.
 public partial class FloatingBarTaskListTests
 {
@@ -28,7 +28,8 @@ public partial class FloatingBarTaskListTests
             t.Bar.UpdateLayout();
 
             Assert.Equal("Asks permission", MarkOf(LineFor(t, k.Asking)));
-            Assert.Contains(Inside(LineFor(t, k.Asking)).OfType<TextBlock>(), b => Equals(b.Tag, FloatingBar.InboxBarTextTag) && b.Text == "Asks permission: Bash");
+            // Said in the tooltip, above the line's own text: the bar's lines have no second line.
+            Assert.StartsWith("Asks permission: Bash\n", $"{((System.Windows.Controls.Border)LineFor(t, k.Asking).Content).ToolTip}");
             // Nothing on the line can answer it.
             Assert.DoesNotContain(Inside(LineFor(t, k.Asking)).OfType<Button>(), b =>
                 System.Windows.Automation.AutomationProperties.GetName(b) is TasksWindow.AllowText or TasksWindow.DenyText);
