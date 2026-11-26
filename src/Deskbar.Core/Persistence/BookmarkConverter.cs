@@ -17,10 +17,9 @@ public sealed class BookmarkConverter : JsonConverter<Bookmark>
     // The entry's shape on disk. A type of its own, so (de)serializing it does not come back to this converter.
     sealed record Entry(Guid Id, string Name, BookmarkKind Kind, string Target, string? Arguments = null, string? WorkingDirectory = null);
 
-    // Whether a parsed bookmark is usable. The one place the bookmark rules plug into loading (Task 2 replaces this
-    // body with BookmarkRules.Check); until then a bookmark needs a name, a target and a defined kind.
-    static bool Acceptable(Bookmark b) =>
-        !string.IsNullOrWhiteSpace(b.Name) && !string.IsNullOrWhiteSpace(b.Target) && Enum.IsDefined(b.Kind);
+    // Whether a parsed bookmark is usable: exactly what the manager would have accepted, so a hand-edited file cannot
+    // hold what the menu refuses. A Name or Link target that only needs trimming is accepted as it stands.
+    static bool Acceptable(Bookmark b) => BookmarkRules.Check(b).IsSuccess;
 
     public override Bookmark? Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
     {

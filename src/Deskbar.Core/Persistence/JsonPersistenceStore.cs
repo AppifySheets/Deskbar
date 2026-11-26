@@ -86,8 +86,11 @@ public sealed class JsonPersistenceStore(string baseDirectory, Action<string>? t
                     .ToValueList(),
             TileSizes = [],
             // A bookmark BookmarkConverter could not read arrives as null; drop it (the rest of the list stays).
-            // Cannot throw: `?? []` covers a workspace built in code with a null list.
-            Bookmarks = (w.Bookmarks ?? []).Where(b => b is not null).ToValueList(),
+            // Cannot throw: `?? []` covers a workspace built in code with a null list. A second bookmark carrying an id
+            // already seen in the same workspace is dropped too (a hand-edited or copy-pasted file): rename and remove
+            // address a bookmark by id, so two with one id could not be told apart. The first one wins, order is kept.
+            Bookmarks = (w.Bookmarks ?? []).Where(b => b is not null)
+                .GroupBy(b => b.Id).Select(g => g.First()).ToValueList(),
         };
     }
 
