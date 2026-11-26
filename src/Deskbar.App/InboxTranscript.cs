@@ -12,7 +12,9 @@ namespace Deskbar.App;
 //     Pause and Resume cover the panel being hidden and shown again with its page still open.
 //   * THE READ IS OFF THE UI THREAD, one at a time (the reader keeps state and is not thread safe), about every two
 //     seconds: after a read has finished the next is scheduled, so a slow disk can never stack reads. The result comes back
-//     to the UI thread, where it is dropped if the page has moved on meanwhile (a generation number).
+//     to the UI thread, where it is dropped if its reader was let go meanwhile (the page left, another session). A read that
+//     ends after a Pause is kept, not dropped: the reader has moved its position past those lines, so a dropped result would
+//     never be read again. No second read starts on a reader until its first has ended (readerBusy).
 //   * AN IDLE POLL IS CHEAP: ClaudeChatReader answers at once when the file's length has not changed, and a session that
 //     has ended is read once and then only looked at again for the state to change (a resume makes it live).
 //   * NOTHING FROM A TRANSCRIPT IS WRITTEN ANYWHERE: no cache file, no trace line. The items live in this object's memory
@@ -35,8 +37,11 @@ internal sealed class InboxTranscript
     readonly Action changed;
     IDisposable? waiting;
     Func<string, ChatUpdate>? reader;
-    int generation;
-    bool inFlight, paused, readOnce;
+    // Whether a read is running on `reader` right now. It is cleared only by that read's own end, never by Stop, Pause or Resume:
+    // the reader keeps state and is not thread safe, so no second read may start on it while one is out, however the page
+    // came and went meanwhile (tester finding L4).
+    bool readerBusy;
+    bool paused, readOnce;
 
     /// <param name="sourceOf">Which transcript a task's page reads (TasksWindowActions.TranscriptOf); UI thread.</param>
     /// <param name="newReader">A new reader, whose Read is called off the UI thread, one call at a time.</param>
@@ -68,7 +73,7 @@ internal sealed class InboxTranscript
     internal int Reads { get; private set; }
 
     /// <summary>Whether a timer is waiting or a read is running: something of this object is alive.</summary>
-    internal bool Alive => waiting is not null || inFlight;
+    internal bool Alive => waiting is not null || readerBusy;
 
     /// <summary>
     /// The page of <paramref name="task"/> is drawn. The same task again (the page was rebuilt) changes nothing; another
@@ -86,14 +91,15 @@ internal sealed class InboxTranscript
     /// <summary>The page is gone: no timer, no read, and the items forgotten.</summary>
     public void Stop()
     {
-        generation++;
         waiting?.Dispose();
         waiting = null;
         Task = null;
         Source = ChatSource.Nothing;
         Latest = null;
+        // The reader is let go: a read still out on it ends into nothing (its result is dropped, Tick), and the next page
+        // gets a reader of its own.
         reader = null;
-        inFlight = false;
+        readerBusy = false;
         readOnce = false;
     }
 
@@ -101,10 +107,8 @@ internal sealed class InboxTranscript
     public void Pause()
     {
         if (Task is null) return;
-        generation++;
         waiting?.Dispose();
         waiting = null;
-        inFlight = false;
         paused = true;
     }
 
@@ -132,21 +136,20 @@ internal sealed class InboxTranscript
                 reader = null;
                 Latest = null;
                 readOnce = false;
-                generation++;
-                inFlight = false;
+                readerBusy = false;
             }
             Source = source;
             changed();
         }
-        if (source.Path is null || source.Kind == ChatSourceKind.None || source.Kind == ChatSourceKind.Expired || inFlight
+        if (source.Path is null || source.Kind == ChatSourceKind.None || source.Kind == ChatSourceKind.Expired || readerBusy
             || source is { Kind: ChatSourceKind.Ended } && readOnce)
         {
             Schedule();
             return;
         }
         reader ??= MakeReader();
-        var (read, path, mine) = (reader, source.Path, generation);
-        inFlight = true;
+        var (read, path) = (reader, source.Path);
+        readerBusy = true;
         Reads++;
         run(() =>
         {
@@ -154,8 +157,9 @@ internal sealed class InboxTranscript
             catch (Exception) { return null; }
         }, update =>
         {
-            if (mine != generation) return;
-            inFlight = false;
+            // A read on a reader that was let go (the page left, another session): nothing to do with what is shown now.
+            if (!ReferenceEquals(read, reader)) return;
+            readerBusy = false;
             readOnce = true;
             if (update is not null)
             {
@@ -176,6 +180,8 @@ internal sealed class InboxTranscript
     void Schedule()
     {
         if (Task is null || paused) return;
+        // One timer at most: a read that ends after a Resume must not leave the Resume's own timer running beside its.
+        waiting?.Dispose();
         waiting = timer(Every, Tick);
     }
 }
