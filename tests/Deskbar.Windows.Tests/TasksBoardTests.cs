@@ -5568,7 +5568,8 @@ public class TasksBoardTests
     // happened. Task 0eb943d8 then found the fix's answer, a line of its own under the parent's whole thread, wrong
     // ("before clicking, after clicking"; "let subtasks stay where they are, expand their current place"). Now the
     // subtask opens where it is listed: its own thread, with its comment box, right under its entry in the parent's
-    // thread. A second click folds it. No line of its own, no second "Subtask of" or "Add subtask".
+    // thread. A second click folds it. No line of its own and no second "Subtask of"; since task 249a1e8a its thread has
+    // its own "Add subtask" (a sibling), beside the parent's.
     [Fact]
     public void A_folded_subtask_opens_in_place_in_its_parents_thread() => StaThread.Run(() =>
     {
@@ -5592,7 +5593,7 @@ public class TasksBoardTests
         Assert.NotNull(t.Window.CommentBoxOf(child));
         Assert.True(HasButtonNamed(t.Window, "Subtask Write the notes"));
         Assert.False(HasButtonNamed(t.Window, "Parent Ship the release"));
-        Assert.Single(Inside(t.Window).OfType<Button>(), b => AutomationProperties.GetName(b) == "Add subtask");
+        Assert.Equal(2, Inside(t.Window).OfType<Button>().Count(b => AutomationProperties.GetName(b) == "Add subtask"));
 
         // A comment on it while it is open redraws it in place.
         t.Tasks.Comment(child, Maybe<string>.None, "second pass done");
@@ -5601,6 +5602,43 @@ public class TasksBoardTests
         Click(ButtonNamed(t.Window, "Subtask Write the notes"));
         Assert.False(t.Window.ThreadShown(child));
         Assert.True(t.Window.ThreadShown(parent));
+    });
+
+    // Task 249a1e8a (Petre: "subtasks should get all buttons like the parents do; they are regular tasks, upgrade them"):
+    // a subtask folded into its parent's open thread is a full line there, with the toggles, the comments and "⋯" a line
+    // has, each acting on the subtask. Its click opens its thread in place and picks nothing, so it stays in the thread.
+    [Fact]
+    public void A_subtask_in_its_parents_thread_is_a_full_line_with_its_buttons() => StaThread.Run(() =>
+    {
+        var selection = new TaskSelection();
+        using var t = Build(selection: selection);
+        var parent = t.Tasks.AddNote("Ship the release", t.Gepha).Value.Id;
+        var child = t.Tasks.AddNote("Write the notes", t.Gepha, Quadrant.IV, parent).Value.Id;
+        t.Controller.Show();
+        Click(ButtonNamed(t.Window, "Subtasks"));
+        t.Controller.ToggleThread(parent);
+
+        var line = ButtonNamed(t.Window, "Subtask Write the notes");
+        Assert.Equal(child, line.Tag);
+        Assert.True(HasButtonNamed(line, "More"));
+        Assert.True(HasButtonNamed(line, "Comments"));
+        Assert.True(HasButtonNamed(line, "Close Write the notes"));
+
+        // Its toggle flags the subtask, not the parent.
+        Click(ButtonNamed(line, "Important"));
+        Assert.True(t.Tasks.Board.Tasks.Single(x => x.Id == child).Important);
+        Assert.False(t.Tasks.Board.Tasks.Single(x => x.Id == parent).Important);
+
+        // Its menu is the subtask's own: the window finds its row although no group lists it.
+        // Closed again, since an open menu holds the redraws back.
+        var menu = t.Window.OpenMenuFor(child);
+        Assert.NotEmpty(menu.Items);
+        menu.IsOpen = false;
+
+        Click(ButtonNamed(t.Window, "Subtask Write the notes"));
+        Assert.True(t.Window.ThreadShown(child));
+        Assert.Equal([parent], t.Window.Keys);
+        Assert.False(selection.Current.HasValue);
     });
 
     // Task 0eb943d8 (Petre: "it shows up twice", "clicking the one above takes me to the one below"): with "Subtasks"

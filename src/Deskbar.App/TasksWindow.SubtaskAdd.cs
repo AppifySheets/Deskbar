@@ -68,8 +68,11 @@ public partial class TasksWindow
         subtaskImages.Clear();
         focusSubtaskBox = true;
         subtaskCaret = 0;
-        var row = latest?.Groups.SelectMany(g => g.Rows).FirstOrDefault(r => r.Id == lineId);
-        if (row is { Expanded: false } && Actions?.ShowTask is { } show) show(lineId);
+        var row = RowFor(lineId);
+        // A subtask's line in its parent's thread (task 249a1e8a) opens its thread in place, as its click does: showing it
+        // would pick it, and a picked subtask leaves the thread for a line of its own.
+        if (row is { Expanded: false } && InParentThread(lineId)) Actions?.ToggleThread(lineId);
+        else if (row is { Expanded: false } && Actions?.ShowTask is { } show) show(lineId);
         else if (latest is not null) Draw(latest);
     }
 
@@ -217,7 +220,7 @@ public partial class TasksWindow
             : pictures.Length == 0 ? _ => Result.Success(body)
             : id => TaskImageFiles.Save(StateDir, id, pictures, Now()).Map(saved => TaskImages.Join(body, saved));
         ClearSubtaskBox();
-        if (add(lineId, title, describe)) return true;
+        if (add(lineId, title, describe, InParentThread(lineId))) return true;
         subtaskUnder = lineId;
         subtaskTyped = text;
         subtaskImages.AddRange(pictures);

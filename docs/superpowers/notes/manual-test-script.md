@@ -1295,6 +1295,25 @@ LB4. Open a task's thread at the default width: its row of buttons is gone, sinc
      the narrowest panel the row is back with Open in window and Add subtask.
 LB5. The buttons are quiet like ⋯ until the pointer is on the line, and a press on one does not open the task.
 
+## Subtasks in a parent's thread are full lines
+
+(Task 249a1e8a.) The tasks panel open with "Subtasks" unticked, and a parent with two open subtasks, one of them a
+Claude task with a comment.
+
+SL1. Open the parent's thread: each subtask is a full line inside it, starting with "↳", with the toggles, the snooze
+     moon, the comment count, Open Claude (or Start Claude on this), the menu's buttons as far as they fit, the age and
+     the workspace chip, the same as the parent's line. They are quiet until the pointer is on the line.
+SL2. Click a subtask's line: its thread opens right under it, inside the parent's thread, and the subtask stays there
+     (it does not jump to a line of its own). Click it again: the thread folds.
+SL3. On a subtask's line, press the important toggle, the snooze moon, Edit, Assign to and ⋯: each acts on the
+     subtask, not on the parent, and a right-click on the line opens the subtask's menu.
+SL4. Open a subtask's thread and press its Add subtask: the box opens under its row; Enter adds a sibling, which shows
+     in the parent's thread and opens there.
+SL5. Drag a subtask's line out of the parent's thread: it is freed and lands where it was dropped. A drag that stays
+     inside the parent's line and thread changes nothing.
+SL6. A subtask that has a line of its own elsewhere (one waiting on you, in the pinned block) is still the short
+     "↳ title" entry in the parent's thread, and clicking it goes to that line.
+
 ## Done when running
 
 Task 8470d176. A Done task whose pull request is in this repository shows a hollow green ring until the Deskbar you

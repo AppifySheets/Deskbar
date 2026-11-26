@@ -146,7 +146,7 @@ public partial class TasksWindow
         cell.Rows.ToList().ForEach(row =>
         {
             closing[row.Id] = row.Closing;
-            lines.Children.Add(Line(row, view));
+            lines.Children.Add(Line(row));
             if (row.Expanded) lines.Children.Add(Thread(row));
         });
         var body = new DockPanel();

@@ -57,7 +57,7 @@ public partial class TasksWindow
         linking = (id, duplicate);
         linkTyped = "";
         focusLinkBox = true;
-        var row = latest?.Groups.SelectMany(g => g.Rows).FirstOrDefault(r => r.Id == id);
+        var row = RowFor(id);
         if (row is { Expanded: false } && Actions?.ShowTask is { } show) show(id);
         else if (latest is not null) Draw(latest);
     }

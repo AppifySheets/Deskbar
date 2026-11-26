@@ -522,11 +522,15 @@ public partial class TasksWindow : Window
         // their own, and the Matrix never shows on a panel that narrow anyway. The squares' column is as wide as the line
         // with the most squares needs, the same on every line so the chip after it sits at one x.
         slimLines = view.Slim && !view.Matrix;
-        slimSquaresWidth = SquaresColumn(shownRows.Select(r => r.SessionCount).DefaultIfEmpty(0).Max());
+        // The subtasks drawn as lines in an open parent's thread (task 249a1e8a) share these columns, so they count too:
+        // a closed subtask's Reopen, a folded Claude subtask's squares or a subtask with ten comments would otherwise be
+        // clipped by columns sized for the top-level lines alone (review of this change).
+        var linedRows = shownRows.Concat(ThreadLines(shownRows)).ToArray();
+        slimSquaresWidth = SquaresColumn(linedRows.Select(r => r.SessionCount).DefaultIfEmpty(0).Max());
         // The button columns as narrow as the lines on show need, and the text columns' widths (TasksWindow.Columns.cs).
         // The Open Claude column (task 7f61af2e) is there while any line shown has the button, zero on a board without
         // one, so a list of notes gives its title the room, as the squares' column does.
-        SizeColumns(view, shownRows);
+        SizeColumns(view, linedRows);
         fullGrids.Clear();
         fullGrids.Add(ColumnHeader);
         if (view.Matrix) DrawMatrix(view);
@@ -537,7 +541,7 @@ public partial class TasksWindow : Window
                 group.Rows.ToList().ForEach(row =>
                 {
                     closing[row.Id] = row.Closing;
-                    Rows.Children.Add(Line(row, view));
+                    Rows.Children.Add(Line(row));
                     if (row.Expanded) Rows.Children.Add(Thread(row));
                 });
             });
@@ -758,7 +762,18 @@ public partial class TasksWindow : Window
 
     // One line: a button across the window, so a click anywhere on it goes to the task; the small buttons inside it
     // mark their Click handled, so the line does not also act on them.
-    Button Line(TaskRowView row, TasksView view)
+    //
+    // `inThreadOf`: the parent whose open thread this line is drawn in (task 249a1e8a; Petre: "subtasks should get all
+    // buttons like the parents do; they are regular tasks, upgrade them"). A subtask listed in its parent's thread used to
+    // be a bare "↳ title · status" entry (SubtaskEntry) with a tick and nothing else, so its toggles, comments, Open Claude
+    // and menu were out of reach. It is now this same line, built the same way, with three differences, each so it stays
+    // where it is drawn (task 0eb943d8, Petre: "let subtasks stay where they are, expand their current place"):
+    //   the click   opens or folds its thread in place under it (Actions.ToggleThread) rather than picking it, since a
+    //               picked task never folds (TaskViews.FoldSubtasks) and would jump out of the thread onto a line of its own;
+    //   the drag    is the thread entry's (dragEntries, task f64d06ae): out of the thread frees it, inside it does nothing,
+    //               and it is no drop target, as a nested line is not;
+    //   the margin  sits inside the thread's frame, which already gives the inset.
+    Button Line(TaskRowView row, Guid? inThreadOf = null)
     {
         // ONE COLUMN LAYOUT FOR EVERY LINE (Petre's screenshot: each line sized a column to its own content, so the chip,
         // the comments and "…" sat at a different x on every line, and a long title pushed the chip off the window).
@@ -782,7 +797,9 @@ public partial class TasksWindow : Window
         var tucked = slimLines;
         var controls = tucked ? SlimControls(columns) : grid;
         void Control(int column, UIElement? part) => Cell(controls, tucked ? column - FirstControlColumn : column, part);
-        var left = LeftOf(row);
+        // A subtask's line in its parent's thread names its tick after the subtask ("Close <title>"), as its entry's tick
+        // was named, so it is told apart from the parent line's plain "Close".
+        var left = LeftOf(row, inThreadOf is null ? null : FloatingBar.FirstLine(row.Title));
         // On a slim line the tick stays beside the title's first line while a long title wraps under it.
         if (tucked && left is FrameworkElement tick) tick.VerticalAlignment = VerticalAlignment.Top;
         Cell(grid, At(Part.Tick), left);
@@ -887,7 +904,9 @@ public partial class TasksWindow : Window
             Background = row.Status == TaskStatus.WaitingOnYou && !row.Closing ? AskTint : TileFill,
             // The gap above each tile, and an inset from the panel's sides so the rounded corners show. A Matrix line
             // (compact) sits in a cell that already has its own inset, so it keeps the full width of the cell.
-            Margin = new Thickness(compactLines ? 0 : TileInset, TileGap, compactLines ? 0 : TileInset, 0),
+            // A subtask's line in its parent's thread (inThreadOf) is inside the thread's frame, which has its own padding.
+            Margin = inThreadOf is not null ? new Thickness(0, 0, 0, TileGap)
+                : new Thickness(compactLines ? 0 : TileInset, TileGap, compactLines ? 0 : TileInset, 0),
             HorizontalContentAlignment = HorizontalAlignment.Stretch,
             // EXPLICIT: the app runs under ThemeMode="System" (App.xaml), whose Fluent Button style sets HorizontalAlignment to
             // Left. A line left to the default shrank to its own content, so every line had its own width and the columns
@@ -899,7 +918,9 @@ public partial class TasksWindow : Window
             // A slim line's tooltip also carries the age and the assignee its line has no room for (SlimTip).
             ToolTip = slimLines ? SlimTip(row, row.Closing ? LineTip(row) : row.Title) : LineTip(row),
         };
-        AutomationProperties.SetName(line, row.Title);
+        // A subtask's line in its parent's thread keeps the name its entry had there, "Subtask <title>", so a screen reader
+        // still hears what it is and the tests still find it apart from a line of its own.
+        AutomationProperties.SetName(line, inThreadOf is null ? row.Title : $"Subtask {FloatingBar.FirstLine(row.Title)}");
         line.MouseEnter += (_, _) => Quieten(quiet, loud: true);
         line.MouseLeave += (_, _) => Quieten(quiet, loud: Picked(row.Id));
         // The click guard, as on the line's buttons (ClickIgnored); and the press that may become a drag of the line
@@ -920,11 +941,19 @@ public partial class TasksWindow : Window
                 return;
             }
             pressClicks = e.ClickCount;
-            DragPress(row.Id, DragMouse.Position(e, DragSurface));
+            DragPress(row.Id, DragMouse.Position(e, DragSurface), fromThread: inThreadOf is not null);
         };
         // A subtask drawn under its parent is dragged (out, to free it) but is no drop target (review of #467, finding 2).
-        dragLines[row.Id] = (row.Quadrant, row.Status.IsPinned() && !row.Closing, row.Closing || row.Status == TaskStatus.Closed, row.Nested,
-            row.Closing ? TaskDropTarget.Part.None : TaskDropTarget.PartOf(row.Status));
+        // One drawn in its parent's thread (inThreadOf) drags as the thread's entry did (task f64d06ae): kept with the
+        // parent whose thread it is in, and armed only while it is open and not in its undo window.
+        if (inThreadOf is { } threadParent)
+        {
+            if (row.Status != TaskStatus.Closed && !row.Closing)
+                dragEntries[row.Id] = (line, threadParent, row.Quadrant, TaskDropTarget.PartOf(row.Status));
+        }
+        else
+            dragLines[row.Id] = (row.Quadrant, row.Status.IsPinned() && !row.Closing, row.Closing || row.Status == TaskStatus.Closed, row.Nested,
+                row.Closing ? TaskDropTarget.Part.None : TaskDropTarget.PartOf(row.Status));
         // A right-click anywhere on the line opens its menu at the pointer, Edit first (Ruling 44, OpenMenuFor).
         line.PreviewMouseRightButtonUp += (_, e) =>
         {
@@ -936,8 +965,10 @@ public partial class TasksWindow : Window
         {
             // A line just closed picks nothing; Undo is the one thing on it to press. A line being renamed neither.
             if (ClickIgnored() || row.Closing || renaming == row.Id) return;
-            // A single click picks the task and opens its thread; it goes nowhere (Ruling 54).
-            Actions?.Pick(row.Id);
+            // A single click picks the task and opens its thread; it goes nowhere (Ruling 54). A subtask's line in its
+            // parent's thread opens or folds its thread in place instead (see inThreadOf above).
+            if (inThreadOf is not null) Actions?.ToggleThread(row.Id);
+            else Actions?.Pick(row.Id);
         };
         return line;
     }
@@ -1218,7 +1249,7 @@ public partial class TasksWindow : Window
     // clock, so "Tomorrow, Thu 09:00" names the right day.
     List<object> SnoozeItems(Guid id)
     {
-        var row = latest?.Groups.SelectMany(g => g.Rows).FirstOrDefault(r => r.Id == id);
+        var row = RowFor(id);
         var now = Now().ToLocalTime();
         var items = new List<object>();
         if (row?.SnoozedUntil is { } until)
@@ -1401,10 +1432,10 @@ public partial class TasksWindow : Window
     // The tick box of a note or a Claude task (Ruling 40, and the Done follow-up: all lines look alike), or Undo on a line
     // just closed. A Claude line has no badge here (Ruling 42, Petre: "don't say
     // claude"): the orange edge at the line's start is its mark.
-    UIElement LeftOf(TaskRowView row) =>
+    UIElement LeftOf(TaskRowView row, string? title = null) =>
         // A parent with open subtasks is refused by the board (task 842e1ba4); the tip says so before the click, and the
         // click's refusal shows on the problem line (TasksBoard.Close reports it).
-        TickOf(row.Id, row.Status, row.Closing, TaskViews.TickTip(row.Claudes, row.SubtaskCount, row.ClaudeWorking));
+        TickOf(row.Id, row.Status, row.Closing, TaskViews.TickTip(row.Claudes, row.SubtaskCount, row.ClaudeWorking), title);
 
     // The tick box itself, or Undo while the task is in its undo window, or nothing once it is closed: a line's (LeftOf)
     // and a subtask entry's in its parent's thread (SubtaskEntry, task 0eb943d8: "how do i close subtasks?").
@@ -1791,8 +1822,8 @@ public partial class TasksWindow : Window
     //
     // IN PLACE (task 0eb943d8, Petre: "let subtasks stay where they are, expand their current place"): a subtask listed in
     // its parent's open thread opens there, its own thread drawn right under its entry (`inParent`), indented in a frame
-    // of its own. That thread leaves out "Subtask of" (the parent is the thread around it) and "Add subtask" (the
-    // parent's own is in the row at the top of the parent's thread and adds the same sibling).
+    // of its own. That thread leaves out "Subtask of" (the parent is the thread around it). Since task 249a1e8a the entry
+    // is a full line and its thread keeps the whole row of buttons, Add subtask included, which adds a sibling.
     UIElement Thread(TaskRowView row, bool inParent = false)
     {
         var panel = new StackPanel();
@@ -1804,28 +1835,22 @@ public partial class TasksWindow : Window
             panel.Children.Add(ParentEntry(parentId, parentTitle, openParent));
         // A SUBTASK OPENED IN PLACE SHOWS ITS DESCRIPTION (task b2ff3fb7; Petre, of a subtask whose two screenshots were
         // nowhere to be seen once it sat under another task: "subtask may have lost its image after being moved into
-        // another task"). Nothing was lost: a task's description and its pictures are drawn by its LINE (TextOf), under
-        // the title, and a subtask open in its parent's thread has no line, only its entry and this thread. So the
-        // thread draws them itself, first, as the line would: the text capped with "Show all in window" under it when
-        // cut, then the pictures as thumbnails. A thread under a line of its own leaves them to that line.
-        if (inParent && row.Description.Length > 0)
-        {
-            var caps = new List<HeightCap>();
-            var parts = TaskImages.Split(row.Description);
-            if (parts.Text.Length > 0) panel.Children.Add(Capped(DescriptionBlock(row), caps));
-            if (TaskImageRow.Of(StateDir, parts.Images, OpenImage) is { } pictures) panel.Children.Add(pictures);
-            if (caps.Count > 0 && Actions?.OpenWindow is { } openWindow) panel.Children.Add(ShowAllLink(row.Id, caps, openWindow));
-        }
+        // another task"). A task's description and its pictures are drawn by its LINE (TextOf), under the title. This
+        // thread drew them itself while a subtask in its parent's thread had only a bare entry; since task 249a1e8a that
+        // subtask has a full line right above its thread (Line with inThreadOf), which draws them, so nothing here does.
+        //
         // THE THREAD'S ACTIONS ARE ONE ROW OF BUTTONS AT ITS TOP (task 1c17b7d6; Petre, on a screenshot of an open thread
         // that stacked "Open in window", the session line's "Open" and "Add subtask" on three lines: "open a window, open
         // claude and add subtasks to be buttons at the top"). ThreadActions builds the row; the subtask box, when "Add
         // subtask" was pressed, opens right under it, so it still appears where Petre clicked (task 0eb943d8).
-        var addsSubtask = !inParent && Actions?.SubtaskParent is not null && row.Status != TaskStatus.Closed && !row.Closing;
+        // A subtask's thread in its parent's has the row in full too (task 249a1e8a, "all buttons like the parents do"):
+        // its Add subtask adds a sibling, as its line's menu always has, since subtasks are one level deep.
+        var addsSubtask = Actions?.SubtaskParent is not null && row.Status != TaskStatus.Closed && !row.Closing;
         var (actions, hasOpenClaude) = ThreadActions(row, addsSubtask);
         if (actions.Children.Count > 0) panel.Children.Add(actions);
-        // The buttons the line right above already shows leave the row (task 59b8f613, FollowLine). Not in a subtask's
-        // thread drawn inside its parent's: the line with its buttons may be far up the list, or not drawn at all.
-        if (!inParent && lineButtons.TryGetValue(row.Id, out var lineStrip)) FollowLine(actions, row, lineStrip);
+        // The buttons the line right above already shows leave the row (task 59b8f613, FollowLine). A subtask's thread in
+        // its parent's has its own line right above it as well now (task 249a1e8a), so it follows that line too.
+        if (lineButtons.TryGetValue(row.Id, out var lineStrip)) FollowLine(actions, row, lineStrip);
         if (addsSubtask && subtaskUnder == row.Id) panel.Children.Add(SubtaskBox(row.Id));
         // The session lines stay as the record of who worked on the task. With Open Claude in the row above and the task
         // having ONE session in all, that line's own Open would be the same click twice, so it is left off. With two or
@@ -1834,11 +1859,18 @@ public partial class TasksWindow : Window
         var onlySession = hasOpenClaude && row.SessionList.Count == 1;
         row.SessionList.ToList().ForEach(session => panel.Children.Add(SessionLine(row.Id, session, withOpen: !onlySession)));
         // SUBTASKS IN THE THREAD (follow-up: Petre's screenshot of an open parent that said "2 subtasks" and showed none).
-        // Each is a button that opens or folds that subtask's own thread right under it, in place (task 0eb943d8).
+        // Each is a full line (task 249a1e8a, Line with inThreadOf) whose click opens or folds that subtask's own thread
+        // right under it, in place (task 0eb943d8). One with a line of its own elsewhere in the view keeps the short
+        // entry, which goes to that line: drawing the line twice would draw its thread twice too.
         row.Subtasks.ToList().ForEach(sub =>
         {
-            panel.Children.Add(SubtaskEntry(sub, row.Id));
-            if (sub.Row is { } open) panel.Children.Add(Thread(open, inParent: true));
+            if (sub is { HasLine: false, Row: { } subRow })
+            {
+                closing[subRow.Id] = subRow.Closing;
+                panel.Children.Add(Line(subRow, inThreadOf: row.Id));
+                if (subRow.Expanded) panel.Children.Add(Thread(subRow, inParent: true));
+            }
+            else panel.Children.Add(SubtaskEntry(sub, row.Id));
         });
         // TASK LINKS (docs/superpowers/specs/2026-11-25-task-links-design.md): what the task duplicates, its duplicates and
         // its related tasks, each a button that shows that task, then the link picker while "Duplicate of…" or "Related
@@ -2026,7 +2058,7 @@ public partial class TasksWindow : Window
         }, new Thickness(4, 1, 4, 1));
         entry.Background = Brushes.Transparent;
         entry.HorizontalAlignment = HorizontalAlignment.Left;
-        entry.ToolTip = sub.HasLine ? "Show this subtask" : sub.Row is null ? "Open this subtask here" : "Fold this subtask";
+        entry.ToolTip = sub.HasLine ? "Show this subtask" : sub.Row is not { Expanded: true } ? "Open this subtask here" : "Fold this subtask";
         // DRAGGED OUT OF THE THREAD (task f64d06ae, TasksWindow.Drag.cs's dragEntries): a press on the entry arms a drag as
         // a press on a line does, so an open subtask can be dragged out of its parent, or onto another task. A press
         // that stays a click is still the entry's Click above. A closed one, or one in its undo window, arms nothing.
@@ -2218,7 +2250,7 @@ public partial class TasksWindow : Window
     /// </summary>
     internal void BeginEditComment(Guid commentId)
     {
-        var shown = (latest?.Groups.SelectMany(g => g.Rows) ?? []).Concat(latest?.Cells.SelectMany(c => c.Rows) ?? [])
+        var shown = AllRows(latest)
             .SelectMany(r => r.Comments).FirstOrDefault(c => c.Id == commentId);
         if (shown is null || !shown.Editable) return;
         editingComment = commentId;
@@ -2461,7 +2493,7 @@ public partial class TasksWindow : Window
     {
         renaming = id;
         // Images in tasks: the description's pictures are the editor's kept ones, and nothing is pasted yet.
-        StartEditorPictures(latest?.Groups.SelectMany(g => g.Rows).FirstOrDefault(r => r.Id == id)?.Description ?? "");
+        StartEditorPictures(RowFor(id)?.Description ?? "");
         if (latest is not null) Draw(latest);
     }
 
@@ -2526,9 +2558,32 @@ public partial class TasksWindow : Window
     // EDIT FIRST (Ruling 44; Petre: "task rightclick should let me edit it first, first option"). The same menu opens
     // from "⋯" and from a right-click anywhere on the line (`atPointer`: at the pointer instead of under "⋯"), and its
     // first item is Edit, the in-place editor (BeginRename). Edit took the place of the old "Rename…", which did the same.
+    // EVERY ROW DRAWN AS A LINE, BY ID (task 249a1e8a): the List's lines, the Matrix's, and the subtasks drawn as lines in
+    // a parent's open thread, which no group or cell lists. The menu, Edit, the snooze and goal menus, Assign to, the link
+    // picker, the subtask box and a comment's Edit look a task up here, so each works on a subtask's line in a thread as it
+    // does on any other line. A subtask with a line of its own carries no row in its parent's thread (SubtaskView.Row), so
+    // no task is found twice.
+    // Only the half on show: the view carries the List's groups and the Matrix's cells alike, and the two can disagree on
+    // whether a subtask folds into its parent (one in the Claude working group keeps its own line in the List), so
+    // reading both could find a subtask in a thread the List never draws (review of this change).
+    static IEnumerable<TaskRowView> AllRows(TasksView? view) =>
+        view is null ? [] : DrawnRows(view).SelectMany(r => ThreadLines([r]).Prepend(r));
+
+    static IEnumerable<TaskRowView> DrawnRows(TasksView view) =>
+        view.Matrix ? view.Cells.SelectMany(c => c.Rows) : view.Groups.SelectMany(g => g.Rows);
+
+    // The subtasks the given lines' open threads draw as lines of their own (Thread: no line elsewhere, a row to draw).
+    static IEnumerable<TaskRowView> ThreadLines(IEnumerable<TaskRowView> lines) =>
+        lines.SelectMany(r => r.Subtasks.Where(s => !s.HasLine).Select(s => s.Row).OfType<TaskRowView>());
+
+    TaskRowView? RowFor(Guid id) => AllRows(latest).FirstOrDefault(r => r.Id == id);
+
+    // Whether the task is drawn as a subtask's line inside its parent's open thread (task 249a1e8a, Line's inThreadOf).
+    bool InParentThread(Guid id) => latest is { } view && ThreadLines(DrawnRows(view)).Any(sub => sub.Id == id);
+
     internal ContextMenu OpenMenuFor(Guid id, bool atPointer = false)
     {
-        var row = latest?.Groups.SelectMany(g => g.Rows).FirstOrDefault(r => r.Id == id);
+        var row = RowFor(id);
         var menu = atPointer
             ? OwnMenus.AtPointer(this) // this window as its target, for its screen's scaling
             : new ContextMenu { PlacementTarget = menuButtons.GetValueOrDefault(id), Placement = PlacementMode.Bottom };
@@ -2700,7 +2755,7 @@ public partial class TasksWindow : Window
     /// </summary>
     internal ContextMenu OpenGoalMenu(Guid id)
     {
-        var row = latest?.Groups.SelectMany(g => g.Rows).FirstOrDefault(r => r.Id == id);
+        var row = RowFor(id);
         var menu = new ContextMenu { PlacementTarget = menuButtons.GetValueOrDefault(id), Placement = PlacementMode.Bottom };
         GoalItems(id, row?.Goal).ForEach(item => menu.Items.Add(item));
         OpenMenu(menu);

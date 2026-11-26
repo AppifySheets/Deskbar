@@ -132,7 +132,7 @@ public partial class TasksWindow
     // Me and Claude, the task's own ticked (Ruling 57). The "⋯" menu's submenu and the line's button share them.
     List<MenuItem> AssignItems(Guid id)
     {
-        var assignee = latest?.Groups.SelectMany(g => g.Rows).FirstOrDefault(r => r.Id == id)?.Assignee;
+        var assignee = RowFor(id)?.Assignee;
         return new[] { Assignee.Me, Assignee.Claude }.Select(who =>
         {
             var item = Item(who.Name, () => Actions?.Assign(id, who));

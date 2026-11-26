@@ -270,7 +270,7 @@ public sealed class TasksBoard : IDisposable
             OpenSession = openSession is null ? null : (id, session) => OpenSession(id, session),
             SubtaskParent = id => tasks.Board.SubtaskParentFor(id)
                 .Match(p => new SubtaskParentView(p.Id, p.Title, p.WorkspaceId), () => (SubtaskParentView?)null),
-            AddSubtaskHere = (lineId, title, describe) => AddSubtaskInThread(lineId, title, describe).IsSuccess,
+            AddSubtaskHere = (lineId, title, describe, inParentThread) => AddSubtaskInThread(lineId, title, describe, inParentThread).IsSuccess,
             // A subtask in its parent's thread that has a line of its own elsewhere (SubtaskView.HasLine; one without opens
             // in place, task 0eb943d8) and the task window's "Show in the tasks panel": both ask for that very task, so it
             // is let past a filter that hides it (task b0526e18), as "Subtask of" lets a parent through.
@@ -1010,7 +1010,7 @@ public sealed class TasksBoard : IDisposable
     /// subtask is drawn right under its parent, so it opens in the space the thread took, and it is picked, glows and is
     /// scrolled to, as any task just added is (ShowAdded).
     /// </summary>
-    public Result AddSubtaskInThread(Guid lineId, string title, Func<Guid, Result<string>>? describe) =>
+    public Result AddSubtaskInThread(Guid lineId, string title, Func<Guid, Result<string>>? describe, bool inParentThread = false) =>
         Report(tasks.Board.SubtaskParentFor(lineId).ToResult("That task is gone")
             .Bind(parent => describe is null
                 ? tasks.AddNote(title, parent.WorkspaceId, Quadrant.IV, parent.Id)
@@ -1025,7 +1025,12 @@ public sealed class TasksBoard : IDisposable
                 // task), which is the move Petre did not want. Not for a sibling added from a subtask's own line: its
                 // parent may be filtered out, with no thread on show to hold the new one (review), so that takes the
                 // line path below, which lets it past the filters and picks it.
-                if (PanelState.HideSubtasks && task.ParentId.Map(p => p == lineId).GetValueOrDefault(false))
+                // ADDED FROM A SUBTASK'S THREAD INSIDE ITS PARENT'S (task 249a1e8a, `inParentThread`): the subtask line in
+                // the parent's thread has Add subtask now, which adds a sibling (subtasks are one level deep). The parent's
+                // thread is on show, so the sibling stays in it too and opens there, and the thread the box was in folds,
+                // as the thread a box was in does below.
+                if (PanelState.HideSubtasks && inParentThread) expanded.Remove(lineId);
+                if (PanelState.HideSubtasks && (inParentThread || task.ParentId.Map(p => p == lineId).GetValueOrDefault(false)))
                 {
                     Refresh();
                     return;
@@ -1340,12 +1345,16 @@ public sealed class TasksBoard : IDisposable
         ClaudeWorking = TaskBoard.ClaudeStillWorking(task),
         // An open thread lists the task's subtasks (follow-up: an open parent showed none of them).
         Subtasks = open
-            // A subtask whose own thread is open carries its row, thread filled in, so the parent's thread can open it in
-            // place, under its entry (task 0eb943d8, Petre: "let subtasks stay where they are, expand their current
-            // place"). Subtasks are one level deep, so this never nests further.
+            // EVERY SUBTASK CARRIES ITS WHOLE ROW (task 249a1e8a; Petre, on a screenshot of a parent's thread where the
+            // subtask was a bare "↳ title · status" entry: "subtasks should get all buttons like the parents do; they are
+            // regular tasks, upgrade them"). The parent's thread draws it as a full line from this row, with the toggles,
+            // the comments, Open Claude and the menu's buttons a line has, and its thread, filled in while it is open, in
+            // place under that line (task 0eb943d8, Petre: "let subtasks stay where they are, expand their current
+            // place"). Nested, so the line shows "↳" without the parent's name: the parent is the thread around it.
+            // Subtasks are one level deep and the subtask's row is built with inPlace off, so this never nests further.
             ? tasks.Board.Family(task.Id).Map(f => f.Subtasks.Select(c => new SubtaskView(c.Id, FloatingBar.FirstLine(c.Title), c.Status, c.StatusLine)
                     {
-                        Row = inPlace && c.Id != task.Id && expanded.Contains(c.Id) ? RowOf(c, open: true, inPlace: false) : null,
+                        Row = inPlace && c.Id != task.Id ? RowOf(c, open: expanded.Contains(c.Id), inPlace: false) with { Nested = true } : null,
                         // Its tick in the thread (task 0eb943d8, "how do i close subtasks?"): Undo while its close can be
                         // undone, and the tip a line's tick would have.
                         Closing = pendingCloses.ContainsKey(c.Id),
@@ -1737,7 +1746,9 @@ internal sealed record TasksWindowActions(
     /// that title and, when given, that description (pictures included), then opens it where the thread was
     /// (TasksBoard.AddSubtaskInThread); whether it worked.
     /// </summary>
-    public Func<Guid, string, Func<Guid, Result<string>>?, bool>? AddSubtaskHere { get; init; }
+    /// <remarks>The last flag says the box was in a subtask's thread drawn inside its parent's open thread (task 249a1e8a),
+    /// where the new sibling opens in place as well.</remarks>
+    public Func<Guid, string, Func<Guid, Result<string>>?, bool, bool>? AddSubtaskHere { get; init; }
 
     /// <summary>
     /// Shows one task: picked, its thread open, scrolled into view, past any filter that hides it
@@ -1819,8 +1830,9 @@ internal sealed record TaskDetailView(TaskRowView Row, IReadOnlyList<WorkspaceCh
 internal sealed record SubtaskView(Guid Id, string Title, TaskStatus Status, string StatusLine)
 {
     /// <summary>
-    /// The subtask's own row with its thread filled in while that thread is open, else null (task 0eb943d8): the parent's
-    /// thread draws it in place, under the subtask's entry.
+    /// The subtask's own row (task 249a1e8a), its thread filled in while that thread is open (task 0eb943d8): the parent's
+    /// thread draws it as a full line, and its thread in place under that line. Null when the subtask has a line of its
+    /// own elsewhere in the view (HasLine), and for a hand-edited file where a task is its own parent.
     /// </summary>
     public TaskRowView? Row { get; init; }
 
