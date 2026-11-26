@@ -52,9 +52,11 @@ public static class PermissionDisplay
         var rest = request.Fields.Where(f => !ReferenceEquals(f, says)).ToList();
         var main = rest.FirstOrDefault(f => mains.Contains(f.Name)) ?? (mains.Length == 0 ? rest.FirstOrDefault() : null);
         var parts = (main is null ? rest : [main, .. rest.Where(f => !ReferenceEquals(f, main))])
-            .Select(f => new PermissionPart(f.Name, Visible(f.Value), ReferenceEquals(f, main)))
+            // The field's NAME is marked too (the review's L2): an MCP tool's input names its own fields, so a name can carry a
+            // direction override or a line break as well as a value can.
+            .Select(f => new PermissionPart(OneLine(f.Name), Visible(f.Value), ReferenceEquals(f, main)))
             .ToList();
-        return new PermissionText(Visible(request.Tool), Visible(request.Folder), parts,
+        return new PermissionText(OneLine(request.Tool), OneLine(request.Folder), parts,
             says is null ? null : Visible(says.Value));
     }
 
@@ -85,6 +87,10 @@ public static class PermissionDisplay
     }
 
     static string Mark(int codePoint) => $"⟨U+{codePoint:X4}⟩";
+
+    // A name, a tool or a folder is one line: a line break in it is marked too, so it cannot draw a line of its own that
+    // passes for something else.
+    static string OneLine(string text) => Visible(text).Replace("\n", Mark('\n'));
 
     static bool Hidden(int codePoint, UnicodeCategory category) =>
         category is UnicodeCategory.Control or UnicodeCategory.Format or UnicodeCategory.LineSeparator or UnicodeCategory.ParagraphSeparator
