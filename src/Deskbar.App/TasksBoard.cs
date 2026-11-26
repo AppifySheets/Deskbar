@@ -55,8 +55,9 @@ namespace Deskbar.App;
 //
 // THE THREAD'S SESSIONS (Task 9, spec "Task history"). An open thread lists the task's sessions, newest first, each with
 // when it joined and whether it is working, idle, ended or expired (`sessionsOf`, the App's ClaudeTaskActions.SessionsOf
-// over the latest `claude agents --json`), with Open on each but an expired one, and under them the button that starts
-// a new one. Only an open thread's list is made, since an ended session's state needs its transcript looked up on disk;
+// over the latest `claude agents --json`), with Open on each but an expired one. The button that starts a new one is in
+// the row at the thread's top, and only where Open Claude is not (TasksWindow.ThreadActions, task 5e02e99f). Only an
+// open thread's list is made, since an ended session's state needs its transcript looked up on disk;
 // `sessionsChanged` (each new list) redraws, and the window redraws only when a state it shows changed.
 //
 // WHEN IT REDRAWS. On every TaskService.Changed and WorkspaceManager.StateChanged while the window is open (a workspace
@@ -1480,11 +1481,30 @@ internal sealed record TaskRowView(Guid Id, string Title, string Detail, TaskSta
     /// <summary>
     /// Whether one of the listed sessions is still running, working or idle (task 9b6275bc; Petre, on a thread that
     /// showed an idle session's Open and the start button under it: "do i need start claude on this when there's an
-    /// open session?"). While one is, the thread and the task's window leave "Start Claude on this" out: the session's
-    /// Open is the way in, and a second session beside a running one is rarely meant (`deskbar task start` still does
-    /// it). Once every session has ended or expired the button is back, for a fresh start.
+    /// open session?"). While one is, the task's window (TaskDetailWindow) leaves "Start Claude on this" out: the
+    /// session's Open is the way in, and a second session beside a running one is rarely meant (`deskbar task start`
+    /// still does it). Once every session has ended or expired the window's button is back, for a fresh start. The
+    /// thread in the tasks panel no longer reads this: it goes by HasSessionToOpen below, which keeps the start button
+    /// away for an ended session too (task 5e02e99f).
     /// </summary>
     public bool HasOpenSession => SessionList.Any(s => s.State is SessionState.Working or SessionState.Idle);
+
+    /// <summary>
+    /// Whether "Open Claude" has a session it can open (task 5e02e99f): the session it goes to, a running one first and
+    /// else the newest, is anything but expired. An ended one counts, since Open Claude resumes it. False for a task with
+    /// no session and for one whose session to go to has lost its transcript, and those are the two cases where the
+    /// thread offers "Start Claude on this" instead: the thread's row of buttons has ONE Claude button, never both
+    /// (TasksWindow.ThreadActions).
+    /// </summary>
+    //
+    // NEARLY TaskViews.SessionToGoTo's order, not the same one. That sorts by the hooks' word (TaskSession.IsLive), this
+    // by the listed state, which is all a SessionView carries. The two agree once TaskBoard.Reconcile has ended the
+    // sessions the list no longer shows, which every readable poll does. In the one poll between, on a task with two or
+    // more sessions, the button can be judged on a different session than the click goes to; each session line has its
+    // own Open then (two or more sessions), so there is a way round, and the next poll puts it right.
+    public bool HasSessionToOpen =>
+        (SessionList.FirstOrDefault(s => s.State is SessionState.Working or SessionState.Idle) ?? SessionList.FirstOrDefault())
+            is { State: not SessionState.Expired };
 
     /// <summary>
     /// How many of the task's live sessions Claude is working in right now (tasks panel plan, Task 8): the first that many

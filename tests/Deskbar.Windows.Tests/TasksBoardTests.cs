@@ -3829,7 +3829,7 @@ public class TasksBoardTests
     // "Open Claude" right after Edit, going where the double-click goes (goTo) once the menu has closed, without picking
     // the task or opening its thread. A note's menu has no such item.
     // Task b6f068b1 (Petre: "open claude and start claude , no need for both"): the menu has ONE Claude item, so a Claude
-    // task's has no "Start Claude on this" (its thread has the button once no session of it is running) and a note's has no
+    // task's has no "Start Claude on this" (nor has its thread, task 5e02e99f) and a note's has no
     // "Open Claude".
     [Fact]
     public void Open_Claude_on_the_window_menu_goes_without_opening_the_thread() => StaThread.Run(() =>
@@ -3856,14 +3856,14 @@ public class TasksBoardTests
         noteMenu.IsOpen = false;
 
         // Task 9b6275bc (Petre: "do i need start claude on this when there's an open session?"): while the task's session
-        // is running, its thread lists the session and has no start button under it. Once the session has ended the
-        // button is back, for a fresh one. (The line's Open button needs the openSession seam, which this rig leaves
-        // out, so the line itself is what is looked for.)
+        // is running, its thread lists the session and has no start button. Task 5e02e99f: nor once the session has
+        // ended, since Open Claude resumes it (One_Claude_button_in_the_thread has the rest). (The line's Open button
+        // needs the openSession seam, which this rig leaves out, so the line itself is what is looked for.)
         t.Controller.ToggleThread(id);
         Assert.Contains(Inside(t.Window).OfType<DockPanel>(), d => "session-line".Equals(d.Tag));
         Assert.False(HasButton(t.Window, "Start Claude on this"));
         t.Tasks.SessionEnded("s1");
-        Assert.True(HasButton(t.Window, "Start Claude on this"));
+        Assert.False(HasButton(t.Window, "Start Claude on this"));
     });
 
     // Task 7f61af2e (Petre: "add a button on the task in the tasklist for it too"): a Claude task's line, full and slim,
@@ -4023,6 +4023,44 @@ public class TasksBoardTests
         Assert.Equal(["Open in window", "Start Claude on this"], Words(row));
         var thread = (StackPanel)row.Parent;
         Assert.True(Inside(thread.Children[1]).Contains(t.Window.SubtaskBoxShown));
+    });
+
+    // Task 5e02e99f (Petre, on a done task's thread whose row read Open in window, Open Claude, Start Claude on this, Add
+    // subtask: "open claude and start claude on this, seems excessive"): the row has ONE Claude button. Open Claude while
+    // there is a session it can open, running or ended (it resumes an ended one); "Start Claude on this" only once the
+    // session it would go to has expired, when Open Claude would do nothing.
+    [Fact]
+    public void One_Claude_button_in_the_thread() => StaThread.Run(() =>
+    {
+        var state = SessionState.Working;
+        var changed = new System.Reactive.Subjects.Subject<System.Reactive.Unit>();
+        using var t = Build(
+            startClaude: _ => { },
+            openSession: (_, _) => Result.Success(),
+            sessionsOf: task => TaskViews.SessionList(task, Maybe<IReadOnlyCollection<ClaudeAgent>>.None, _ => true)
+                .Select(v => v with { State = state }).ToList(),
+            sessionsChanged: changed);
+        var id = t.Tasks.Create("Tasks redesign", t.Gepha, Session("s1")).Value.Id;
+        t.Controller.Show();
+        t.Controller.ToggleThread(id);
+
+        IEnumerable<string?> Words() => Inside(t.Window).OfType<WrapPanel>().Single(p => TasksWindow.ThreadActionsTag.Equals(p.Tag))
+            .Children.OfType<Button>().Select(AutomationProperties.GetName);
+        void Becomes(SessionState next)
+        {
+            state = next;
+            changed.OnNext(System.Reactive.Unit.Default);
+        }
+
+        Assert.Equal(["Open in window", "Open Claude", "Add subtask"], Words());
+        Becomes(SessionState.Idle);
+        Assert.Equal(["Open in window", "Open Claude", "Add subtask"], Words());
+        // Ended: Open Claude resumes it, so no second button beside it (the screenshot's case).
+        Becomes(SessionState.Ended);
+        Assert.Equal(["Open in window", "Open Claude", "Add subtask"], Words());
+        // Expired: nothing left to open, so the start button stands in Open Claude's place.
+        Becomes(SessionState.Expired);
+        Assert.Equal(["Open in window", "Start Claude on this", "Add subtask"], Words());
     });
 
     static bool HasButton(object scope, string name) => Inside(scope).OfType<Button>().Any(b => AutomationProperties.GetName(b) == name);
