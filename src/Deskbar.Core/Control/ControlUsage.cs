@@ -248,6 +248,19 @@ public static class ControlUsage
             new("delete", "<workspace> [--close-windows]", "Delete workspace…; refuses while windows are open unless --close-windows"),
             new("switch", "<workspace>", "go to that workspace, as clicking its row does"),
         ]),
+        new("Bookmark chip menu", [
+            new("bookmark", "list [<workspace>]",
+                "every bookmark as JSON (or one workspace's): workspace, id, name, kind, target, arguments, workingDirectory,\n"
+                + "      running (a running one shows no chip)"),
+            new("bookmark", "add <workspace> --url <url> | --program <path> [--cwd <folder>] [-- <args>] | --app <id> [--name <name>]",
+                "add a bookmark chip to the workspace's row: --url is the twin of the row menu's \"Bookmark link from\n"
+                + "      clipboard\" and of dropping a link on the row; --program and --app are the twins of a drop and of\n"
+                + "      a window's \"Bookmark this\". A name that is not given comes from the target; a duplicate is refused"),
+            new("bookmark", "rename <workspace> <name|id> --name <name>", "Rename…"),
+            new("bookmark", "remove <workspace> <name|id>", "Remove"),
+            new("bookmark", "open <workspace> <name|id>", "Open: switch to the workspace and start the bookmark"),
+            new("bookmark", "open-all <workspace>", "Open all bookmarks: every chip showing, in order, one switch"),
+        ]),
         new("Group menu", [
             new("group-create", "<group name> <first workspace>", "New group…"),
             new("group-join", "<workspace> <group>", "Move into group (joins at the bottom)"),

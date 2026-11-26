@@ -1,0 +1,188 @@
+using System.Text.Json;
+using CSharpFunctionalExtensions;
+using Deskbar.Core.Abstractions;
+using Deskbar.Core.Bookmarks;
+using Deskbar.Core.Control;
+using Deskbar.Core.Domain;
+using Deskbar.Core.Persistence;
+
+namespace Deskbar.Core.Tests.Control;
+
+// The `bookmark` pipe commands: the remote twins of the bookmark chip menu and the row menu's bookmark items.
+public sealed class RemoteControlBookmarkTests
+{
+    readonly FakeDesktops desktops = new();
+    readonly FakeStore store = new();
+    readonly List<string> calls = [];
+    readonly WorkspaceManager manager;
+    readonly RemoteControl control;
+    readonly RemoteControl withoutOpener;
+    readonly Workspace work;
+
+    public RemoteControlBookmarkTests()
+    {
+        var home = new DesktopInfo(Guid.NewGuid(), "Home");
+        var workDesktop = new DesktopInfo(Guid.NewGuid(), "Work");
+        desktops.Desktops.AddRange([home, workDesktop]);
+        desktops.CurrentDesktopId = home.Id;
+        work = new Workspace(Guid.NewGuid(), "Work", workDesktop.Id);
+        store.Stored = AppState.Empty with { Workspaces = [new Workspace(Guid.NewGuid(), "Home", home.Id), work] };
+        manager = new WorkspaceManager(desktops, new FakeMonitor(), new FakeTitles(), store);
+        Assert.True(manager.Start().IsSuccess);
+
+        var starts = new BookmarkStarts(
+            Program: (exe, args, folder) => { calls.Add($"program {exe} [{args}]"); return Result.Success<int?>(7); },
+            App: id => { calls.Add($"app {id}"); return Result.Success(); },
+            Link: url => { calls.Add($"link {url}"); return Result.Success(); });
+        control = new RemoteControl(manager, bookmarks: new BookmarkOpener(manager, starts, () => new HashSet<string>()));
+        withoutOpener = new RemoteControl(manager);
+    }
+
+    static JsonElement Parsed(ControlReply reply)
+    {
+        Assert.Equal(ControlReply.Ok, reply.ExitCode);
+        return JsonDocument.Parse(reply.Output).RootElement;
+    }
+
+    JsonElement Listed(string workspace = "Work") => Parsed(control.Execute(["bookmark", "list", workspace]));
+
+    [Fact]
+    public void Add_url_list_rename_remove_round_trip()
+    {
+        var added = Parsed(control.Execute(["bookmark", "add", "Work", "--url", "https://example.com/a"]));
+        Assert.Equal("example.com", added.GetProperty("name").GetString());
+        Assert.Equal("link", added.GetProperty("kind").GetString());
+
+        var listed = Listed();
+        Assert.Equal(1, listed.GetArrayLength());
+        Assert.Equal("Work", listed[0].GetProperty("workspace").GetString());
+        Assert.False(listed[0].GetProperty("running").GetBoolean());
+
+        Assert.Equal("Docs", Parsed(control.Execute(["bookmark", "rename", "Work", "example.com", "--name", " Docs "]))
+            .GetProperty("name").GetString());
+        Assert.Equal("Docs", manager.State.Workspaces.First(w => w.Id == work.Id).Bookmarks.Single().Name);
+
+        Parsed(control.Execute(["bookmark", "remove", "work", "docs"]));
+        Assert.Equal(0, Listed().GetArrayLength());
+    }
+
+    [Fact]
+    public void Add_program_joins_the_arguments_after_the_separator()
+    {
+        var added = Parsed(control.Execute(
+            ["bookmark", "add", "Work", "--program", @"C:\RustDesk\rustdesk.exe", "--cwd", @"C:\RustDesk", "--", "--connect", "a b"]));
+
+        Assert.Equal("program", added.GetProperty("kind").GetString());
+        Assert.Equal("rustdesk", added.GetProperty("name").GetString());
+        Assert.Equal("--connect \"a b\"", added.GetProperty("arguments").GetString());
+        Assert.Equal(@"C:\RustDesk", added.GetProperty("workingDirectory").GetString());
+    }
+
+    [Fact]
+    public void Add_app_takes_the_id_and_an_optional_name()
+    {
+        var added = Parsed(control.Execute(["bookmark", "add", "Work", "--app", "Contoso.App_abc!App", "--name", "Contoso"]));
+
+        Assert.Equal("app", added.GetProperty("kind").GetString());
+        Assert.Equal("Contoso", added.GetProperty("name").GetString());
+        Assert.Equal("Contoso.App_abc!App", added.GetProperty("target").GetString());
+    }
+
+    [Fact]
+    public void Add_with_two_kinds_or_none_prints_the_usage_line()
+    {
+        foreach (var args in new[]
+                 {
+                     new[] { "bookmark", "add", "Work" },
+                     ["bookmark", "add", "Work", "--url", "https://a.example", "--app", "x"],
+                     ["bookmark", "add", "Work", "--url", "https://a.example", "--", "x"],
+                 })
+        {
+            var reply = control.Execute(args);
+            Assert.Equal(ControlReply.Failed, reply.ExitCode);
+            Assert.Contains("usage: deskbar.cmd bookmark add <workspace>", reply.Output);
+        }
+    }
+
+    [Fact]
+    public void A_duplicate_add_is_refused()
+    {
+        Parsed(control.Execute(["bookmark", "add", "Work", "--url", "https://example.com/a"]));
+
+        Assert.Equal(ControlReply.Failed, control.Execute(["bookmark", "add", "Work", "--url", "https://EXAMPLE.com/a"]).ExitCode);
+    }
+
+    [Fact]
+    public void An_unsafe_url_is_refused()
+    {
+        Assert.Equal(ControlReply.Failed, control.Execute(["bookmark", "add", "Work", "--url", "javascript:alert(1)"]).ExitCode);
+        Assert.Equal(0, Listed().GetArrayLength());
+    }
+
+    [Fact]
+    public void An_ambiguous_name_is_refused_and_lists_both_ids()
+    {
+        var first = new Bookmark(Guid.NewGuid(), "Docs", BookmarkKind.Link, "https://a.example/");
+        var second = new Bookmark(Guid.NewGuid(), "docs", BookmarkKind.Link, "https://b.example/");
+        Assert.True(manager.AddBookmark(work.Id, first).IsSuccess);
+        Assert.True(manager.AddBookmark(work.Id, second).IsSuccess);
+
+        var reply = control.Execute(["bookmark", "remove", "Work", "DOCS"]);
+
+        Assert.Equal(ControlReply.Failed, reply.ExitCode);
+        Assert.Contains($"Two bookmarks in Work are named 'DOCS': {first.Id}, {second.Id}. Name one by its id.", reply.Output);
+        // Nothing was removed, and the id names one unambiguously.
+        Assert.Equal(2, Listed().GetArrayLength());
+        Parsed(control.Execute(["bookmark", "remove", "Work", second.Id.ToString()]));
+        Assert.Equal(1, Listed().GetArrayLength());
+    }
+
+    [Fact]
+    public void Open_switches_and_starts_through_the_opener()
+    {
+        Parsed(control.Execute(["bookmark", "add", "Work", "--url", "https://example.com/a", "--name", "Site"]));
+
+        Parsed(control.Execute(["bookmark", "open", "Work", "site"]));
+
+        Assert.Equal(["link https://example.com/a"], calls);
+        Assert.Equal([work.DesktopId!.Value], desktops.Switches);
+    }
+
+    [Fact]
+    public void Open_all_reports_what_it_opened()
+    {
+        Parsed(control.Execute(["bookmark", "add", "Work", "--url", "https://example.com/a", "--name", "Site"]));
+        Parsed(control.Execute(["bookmark", "add", "Work", "--app", "Contoso.App_abc!App", "--name", "Contoso"]));
+
+        var reply = Parsed(control.Execute(["bookmark", "open-all", "Work"]));
+
+        Assert.Equal(["Site", "Contoso"], reply.GetProperty("opened").EnumerateArray().Select(e => e.GetString()).ToList());
+        Assert.Equal(["link https://example.com/a", "app Contoso.App_abc!App"], calls);
+    }
+
+    [Fact]
+    public void Open_without_an_opener_is_refused()
+    {
+        Parsed(withoutOpener.Execute(["bookmark", "add", "Work", "--url", "https://example.com/a", "--name", "Site"]));
+
+        var open = withoutOpener.Execute(["bookmark", "open", "Work", "Site"]);
+        var openAll = withoutOpener.Execute(["bookmark", "open-all", "Work"]);
+
+        Assert.Equal(ControlReply.Failed, open.ExitCode);
+        Assert.Equal("This copy of Deskbar cannot open bookmarks.", open.Output);
+        Assert.Equal("This copy of Deskbar cannot open bookmarks.", openAll.Output);
+        // list still works and reports nothing as running.
+        Assert.False(Parsed(withoutOpener.Execute(["bookmark", "list"]))[0].GetProperty("running").GetBoolean());
+    }
+
+    // Ruling P6: C runtime quoting, as CommandLineToArgvW reads it back.
+    [Theory]
+    [InlineData(new[] { "a b", "c" }, "\"a b\" c")]
+    [InlineData(new[] { "x\"y" }, "\"x\\\"y\"")]
+    [InlineData(new[] { @"C:\dir\" }, @"C:\dir\")]
+    [InlineData(new[] { "" }, "\"\"")]
+    [InlineData(new[] { @"C:\my dir\" }, "\"C:\\my dir\\\\\"")]
+    [InlineData(new[] { "a\\\"b" }, "\"a\\\\\\\"b\"")]
+    public void Join_quotes_like_the_c_runtime(string[] arguments, string expected) =>
+        Assert.Equal(expected, BookmarkArguments.Join(arguments));
+}

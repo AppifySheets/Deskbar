@@ -1,5 +1,6 @@
 using System.Text.Json;
 using CSharpFunctionalExtensions;
+using Deskbar.Core.Bookmarks;
 using Deskbar.Core.Domain;
 using Deskbar.Core.Goals;
 using Deskbar.Core.Tasks;
@@ -93,7 +94,11 @@ public sealed partial class RemoteControl(WorkspaceManager manager, Func<bool, R
     Func<TaskItem, Result>? openTaskWindow = null,
     // `tasks-window stats` (task 521d2b07): the tasks panel opened on its Stats view, the twin of the toolbar's Stats
     // switch. The panel is the app's, so the app hands in how; left null, `tasks-window stats` refuses.
-    Func<Result>? showTasksStats = null)
+    Func<Result>? showTasksStats = null,
+    // `bookmark open` and `open-all` (RemoteControl.Bookmarks.cs), and the `running` flag of `bookmark list`: the same
+    // BookmarkOpener the bar's chips click through. Starting programs is the app's business, so the app hands it in; left
+    // null, open and open-all refuse and `list` reports nothing as running.
+    BookmarkOpener? bookmarks = null)
 {
     // `longPath` turns an 8.3 short path into its long form (GetLongPathNameW, LongPath on the Windows side), for
     // FolderPath. Left null, a path is taken as it is, which is all a test that names long paths needs.
@@ -132,6 +137,8 @@ public sealed partial class RemoteControl(WorkspaceManager manager, Func<bool, R
         ("task", _) => Task(rest),
         ("tasks-window", [var state]) => TasksWindow(state),
         ("goal", _) => Goal(rest),
+        // Bookmarks (RemoteControl.Bookmarks.cs); BookmarkArguments prints the usage lines for a malformed one.
+        ("bookmark", _) => BookmarkCommand(rest),
         // A bare `tasks-window` (or one with too many words) gets its own usage line, not the whole usage.
         ("tasks-window", _) => ControlReply.Fail(ControlUsage.LineFor("tasks-window")),
 
