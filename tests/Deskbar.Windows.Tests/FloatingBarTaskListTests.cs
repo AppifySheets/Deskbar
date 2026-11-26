@@ -20,7 +20,7 @@ namespace Deskbar.Windows.Tests;
 // FloatingBarRebuildTests) with a real TaskService on an in-memory store, so every change goes through the same
 // service the App hands the bar. No Claude task can be made from the app yet, so Claude's tasks come from
 // TaskService.Create with a session, the way a session's `task create` will make them.
-public class FloatingBarTaskListTests
+public partial class FloatingBarTaskListTests
 {
     // Keeps nothing: the board in memory is the service's own, and these tests read it there.
     sealed class MemoryStore : ITaskStore
