@@ -407,16 +407,91 @@ public sealed record TaskBoard(IReadOnlyList<TaskItem> Tasks)
     /// The open task whose session was cleared (<see cref="SessionCleared"/>) within <see cref="ClearedWithin"/> before
     /// <paramref name="now"/> in a folder <paramref name="inFolder"/> accepts, the latest clear first: where a session
     /// that starts with source "clear" there belongs. The caller compares folders (RemoteControl normalises both sides,
-    /// FolderPath.Same), so this needs no file system.
+    /// FolderPath.Same), so this needs no file system. A session a settings switch replaced (<see cref="TaskSession.ReplacedBy"/>)
+    /// is not a /clear: its task already has the copy, so a /clear in some other session in that folder within the
+    /// minute must not join it.
     /// </summary>
     public Maybe<TaskItem> ClearedTaskIn(Func<string, bool> inFolder, DateTimeOffset now) =>
         Tasks.Where(t => t.IsOpen)
             .SelectMany(t => t.Sessions
-                .Where(s => s.ReplacedAt.HasValue && s.ReplacedAt.Value <= now && now - s.ReplacedAt.Value <= ClearedWithin && inFolder(s.Folder))
+                .Where(s => s.ReplacedAt.HasValue && s.ReplacedBy.HasNoValue && s.ReplacedAt.Value <= now && now - s.ReplacedAt.Value <= ClearedWithin && inFolder(s.Folder))
                 .Select(s => (Task: t, At: s.ReplacedAt.Value)))
             .OrderByDescending(x => x.At)
             .Select(x => x.Task)
             .TryFirst();
+
+    // --- the session's model, effort and permission mode (SettingsSwitch) -------------------------------------------
+    //
+    // These only STORE. Nothing here starts, stops or resumes a session: the app reads SettingsSwitch.Plan and Recover
+    // and runs the steps, and tells the board what happened through these. A closed task refuses all of them, as it
+    // refuses a session joining: no session works on a closed task, so there is nothing to switch.
+
+    /// <summary>
+    /// The user picked the model, effort and permission mode for the task's session (<see cref="TaskItem.Wanted"/>). The
+    /// same pick again returns this same board. His own act, so an adopted task is kept (Ruling 11b, as Describe).
+    /// </summary>
+    public Result<TaskBoard> Want(Guid id, SessionSettings wanted, DateTimeOffset now) =>
+        Tasks.FirstOrDefault(t => t.Id == id) is { IsOpen: true } task && task.Wanted.HasValue && task.Wanted.Value == wanted
+            ? this
+            : ChangeOpen(id, t => t with { Wanted = wanted, UpdatedAt = now, Adopted = false });
+
+    /// <summary>
+    /// The user took his pick back (the picker's Cancel while it waits for a pause): the task has no pick, so nothing is
+    /// switched and later starts go back to the setting. A switch already under way is not touched (it is the app's to
+    /// finish or give up). No pick returns this same board.
+    /// </summary>
+    public Result<TaskBoard> Unwant(Guid id, DateTimeOffset now) =>
+        Tasks.FirstOrDefault(t => t.Id == id) is { IsOpen: true, Wanted.HasNoValue: true }
+            ? this
+            : ChangeOpen(id, t => t with { Wanted = Maybe<SessionSettings>.None, UpdatedAt = now });
+
+    /// <summary>
+    /// A switch begins (<see cref="TaskItem.Switching"/>), stored BEFORE the copy is started so a Deskbar that closes
+    /// halfway can finish it (SettingsSwitch.Recover). Refused while another is under way on the task, and for a session
+    /// that is not the task's.
+    /// </summary>
+    public Result<TaskBoard> SwitchStarted(Guid id, PendingSwitch pending, DateTimeOffset now) =>
+        Lookup(id).Bind(task =>
+            task.Switching.HasValue ? Result.Failure<TaskBoard>("A switch is already under way on this task.")
+            : task.Sessions.All(s => s.Id != pending.FromSession) ? Result.Failure<TaskBoard>($"Session {pending.FromSession} is not on this task.")
+            : ChangeOpen(id, t => t with { Switching = pending, UpdatedAt = now }));
+
+    /// <summary>Claude named the copy (the short id `claude --bg` printed): kept on the switch under way.</summary>
+    public Result<TaskBoard> SwitchCopyNamed(Guid id, string shortId, DateTimeOffset now) =>
+        Lookup(id).Bind(task => task.Switching is { HasValue: true } pending
+            ? ChangeOpen(id, t => t with { Switching = pending.Value with { CopyShortId = shortId }, UpdatedAt = now })
+            : Result.Failure<TaskBoard>("No switch is under way on this task."));
+
+    /// <summary>
+    /// The copy runs: it joins the task with what it was launched with (<see cref="TaskSession.LaunchedWith"/>), and the
+    /// session it copied is ended and marked replaced by it (<see cref="TaskSession.ReplacedAt"/> and
+    /// <see cref="TaskSession.ReplacedBy"/>), so the keeper never wakes it, no comment goes to it, and the list does not
+    /// bring it back while it waits for its stop. The switch under way is cleared. The task KEEPS ITS STATUS, as
+    /// Rejoin keeps it (Ruling 34): changing the model is not more work, so a Done task stays Done and a waiting one waits.
+    /// The copy leaves any other task it got onto meanwhile (an adoption, WithoutSessionElsewhere), as a join does.
+    /// </summary>
+    public Result<TaskBoard> SessionSwitched(Guid id, string fromSessionId, TaskSession copy, DateTimeOffset now) =>
+        Lookup(id).Bind(task => task.Sessions.All(s => s.Id != fromSessionId)
+                ? Result.Failure<TaskBoard>($"Session {fromSessionId} is not on this task.")
+                : ChangeOpen(id, t => t with
+                {
+                    Sessions = WithSession(t.Sessions.Select(s => s.Id == fromSessionId
+                        ? s with { Ended = s.Ended.HasValue ? s.Ended : now, ReplacedAt = now, ReplacedBy = copy.Id }
+                        : s).ToArray(), copy),
+                    Switching = Maybe<PendingSwitch>.None,
+                    UpdatedAt = now,
+                }))
+            .Map(joined => joined.WithoutSessionElsewhere(copy.Id, id, now));
+
+    /// <summary>
+    /// The switch is given up: the copy failed to start, failed at once, or never appeared. The original was never
+    /// stopped, so it goes on as it was; the pick goes too (<see cref="TaskItem.Wanted"/>), so the picker shows what the
+    /// session really runs on instead of a pick that did not take. No switch and no pick returns this same board.
+    /// </summary>
+    public Result<TaskBoard> SwitchAbandoned(Guid id, DateTimeOffset now) =>
+        Tasks.FirstOrDefault(t => t.Id == id) is { IsOpen: true, Switching.HasNoValue: true, Wanted.HasNoValue: true }
+            ? this
+            : ChangeOpen(id, t => t with { Switching = Maybe<PendingSwitch>.None, Wanted = Maybe<SessionSettings>.None, UpdatedAt = now });
 
     /// <summary>
     /// Makes the board agree with Claude Code's own list of live sessions (`claude agents --json`, ClaudeAgents), which
@@ -424,7 +499,10 @@ public sealed record TaskBoard(IReadOnlyList<TaskItem> Tasks)
     /// session sends it at the end of every turn while the list still shows the session.
     ///   * END: every live session entry whose id the list does not show is marked ended now.
     ///   * REVIVE: for an id the list shows, the LATEST entry (by Joined, across all tasks) that had ended is live again.
-    ///     Older entries of that id stay as they were, so one session is live on one task only.
+    ///     Older entries of that id stay as they were, so one session is live on one task only. An entry a settings
+    ///     switch replaced (<see cref="TaskSession.ReplacedBy"/>) is never revived: the original is still listed in the
+    ///     moments between its copy joining the task and its stop (SettingsSwitch: copy first, stop second), or longer
+    ///     when the stop failed, and it must not come back as a live session of the task beside its copy.
     /// Only sessions change, never a task's status, and a task's UpdatedAt moves only when one of its sessions did, so a
     /// poll that finds nothing returns this same board and the caller saves nothing. Tasks without sessions (Petre's
     /// notes) are not touched. The caller must not pass an unreadable list as an empty one: an empty list here means
@@ -435,7 +513,7 @@ public sealed record TaskBoard(IReadOnlyList<TaskItem> Tasks)
         var listed = live.Select(a => a.SessionId).ToHashSet();
         var latest = Tasks
             .SelectMany(t => t.Sessions.Select(s => (Task: t.Id, Session: s)))
-            .Where(x => listed.Contains(x.Session.Id))
+            .Where(x => listed.Contains(x.Session.Id) && x.Session.ReplacedBy.HasNoValue)
             .GroupBy(x => x.Session.Id)
             .Select(g => (Task: g.OrderByDescending(x => x.Session.Joined).First().Task, Session: g.Key))
             .ToHashSet();
