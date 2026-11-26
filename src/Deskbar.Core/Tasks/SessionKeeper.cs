@@ -174,11 +174,19 @@ public static class SessionKeeper
     //     on a session stopped while idle, was gone 2 to 4 seconds after the stop). The conversation is kept, and opening
     //     the task again resumes it, so the stop loses nothing. Still only once idle for StopAfter: a turn in flight
     //     finishes first.
+    //     "Idle" for a CLOSED task means its turn is over (ClaudeAgent.TurnOver, <paramref name="turnOverSince"/>), not
+    //     that the list says idle (task 607af1db). A session that ended its turn with a background job still running,
+    //     a Monitor watching a pull request or a Bash left in the background, is listed busy until the job ends, and a
+    //     job that never ends kept a Closed task's session alive for good. The close is Petre's "finished with this",
+    //     so the job goes with the session. A DONE task's session still waits for the list to say idle: its job may be
+    //     the last of its work (a watch it means to see through), and when the job ends the session's next turn ends
+    //     idle and is stopped then.
     // A session on two finished tasks is named once, for the first.
     public static IReadOnlyList<KeeperStep.Stop> Stops(
         TaskBoard board,
         IReadOnlyCollection<ClaudeAgent> live,
         Func<string, DateTimeOffset> idleSince,
+        Func<string, DateTimeOffset> turnOverSince,
         Func<TaskItem, bool> windowOpen,
         DateTimeOffset now)
     {
@@ -188,9 +196,12 @@ public static class SessionKeeper
             .SelectMany(task => live
                 .Where(agent => task.Sessions.Any(session => session.Id == agent.SessionId))
                 .Select(agent => (Task: task, Agent: agent)))
-            .Where(pair => pair.Agent.Background && !pair.Agent.Busy)
+            .Where(pair => pair.Agent.Background)
             .Where(pair => !heldOpen.Contains(pair.Agent.SessionId))
-            .Where(pair => now - idleSince(pair.Agent.SessionId) >= StopAfter)
+            // Closed: its turn over for StopAfter, a background job of its own or not. Done: idle for StopAfter.
+            .Where(pair => pair.Task.Status == TaskStatus.Closed
+                ? pair.Agent.TurnOver && now - turnOverSince(pair.Agent.SessionId) >= StopAfter
+                : !pair.Agent.Busy && now - idleSince(pair.Agent.SessionId) >= StopAfter)
             .Where(pair => pair.Task.Status == TaskStatus.Closed || !windowOpen(pair.Task))
             .DistinctBy(pair => pair.Agent.SessionId)
             .Select(pair => new KeeperStep.Stop(pair.Task.Id, pair.Agent))

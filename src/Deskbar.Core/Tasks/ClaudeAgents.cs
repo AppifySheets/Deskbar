@@ -21,7 +21,9 @@ namespace Deskbar.Core.Tasks;
 //   Background kind == "background". A kind that is neither "interactive" nor "background" is still read, as not
 //              background, so a kind added by a later Claude Code is listed rather than refused.
 //   Busy       status == "busy". NOT proof of work: a session just resumed reports busy for up to 30 seconds while idle
-//              (measured), so callers apply a grace before trusting it.
+//              (measured), so callers apply a grace before trusting it. Nor of a turn in flight: a session whose turn
+//              ended with a background job of its own still running stays busy until the job ends (TurnOver).
+//   State      state: "working", "done" or "blocked" on a background row; what TurnOver reads.
 //   Name       name, or "" when the row has none.
 //
 // A finished background session (status "idle", state "done") is STILL listed, so presence in the list means "can be
@@ -37,6 +39,23 @@ public sealed record ClaudeAgent(string SessionId, Maybe<string> ShortId, string
     /// sessions in the manager's folder (ManagerSession.Next). An init property, so every agent built before it still is.
     /// </summary>
     public Maybe<DateTimeOffset> StartedAt { get; init; } = Maybe<DateTimeOffset>.None;
+
+    /// <summary>
+    /// state: "working", "done" or "blocked" on a background row, none on an interactive one (it has no such field). An
+    /// init property for the same reason as StartedAt.
+    /// </summary>
+    public Maybe<string> State { get; init; } = Maybe<string>.None;
+
+    /// <summary>
+    /// Whether its turn is over, even if the list calls it busy (task 607af1db). A background session whose turn has
+    /// ended while a job of its own runs on (a Bash started with run_in_background, a Monitor) is listed
+    /// status "busy" until that job ends, but its state is no longer "working" (measured 2026-11-26, CLI 2.1.332: a
+    /// probe that started `sleep 240` in the background and ended its turn read busy/working during the turn and
+    /// busy/done from the end of it until the sleep finished). So busy alone cannot tell a turn in flight from a
+    /// session that is only waiting on its own job; busy with a state of "done" or "blocked" is the second. A busy row
+    /// with no state (interactive) counts as working, since nothing says otherwise.
+    /// </summary>
+    public bool TurnOver => !Busy || State.Match(state => state is "done" or "blocked", () => false);
 }
 
 public static partial class ClaudeAgents
@@ -71,7 +90,7 @@ public static partial class ClaudeAgents
         row.ValueKind == JsonValueKind.Object && Text(row, "sessionId") is { HasValue: true } session
             ? new ClaudeAgent(session.Value, Text(row, "id"), Text(row, "cwd").GetValueOrDefault(""),
                 Text(row, "kind").GetValueOrDefault("") == "background", Text(row, "status").GetValueOrDefault("") == "busy",
-                Text(row, "name").GetValueOrDefault("")) { StartedAt = Started(row) }
+                Text(row, "name").GetValueOrDefault("")) { StartedAt = Started(row), State = Text(row, "state") }
             : Maybe<ClaudeAgent>.None;
 
     // startedAt as a moment, when it is a whole number of milliseconds a DateTimeOffset can hold; else none.
