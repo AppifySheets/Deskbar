@@ -181,6 +181,14 @@ public sealed class TaskService(ITaskStore store, Func<DateTimeOffset> now, Func
     /// </summary>
     public void WakeDue() => CommitIfChanged(Board.WakeDue(now()));
 
+    /// <summary>
+    /// What the recurring-task sweep should do now (RecurringRuns.Plan; task 0b78269e). Read only: the caller supplies the
+    /// two machine questions (is a session of the task listed, does the folder exist) and applies what comes back, so this
+    /// saves and pulses nothing.
+    /// </summary>
+    public IReadOnlyList<RunDecision> DueRuns(Func<TaskItem, bool> running, Func<string, bool> folderExists) =>
+        RecurringRuns.Plan(Board, now(), running, folderExists);
+
     /// <summary>The clock this service stamps changes with, for a caller that works out a snooze's end from it.</summary>
     public DateTimeOffset Now => now();
 
