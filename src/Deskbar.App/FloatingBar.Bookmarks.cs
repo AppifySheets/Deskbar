@@ -296,6 +296,8 @@ public partial class FloatingBar
 //
 //   * one FaviconFetcher for the app's life (it owns an HttpClient), handed in by the composition root;
 //   * an origin already stored is never fetched again;
+//   * <origin>/favicon.ico first, and only when that does not decode, the icon the bookmarked page declares on its own
+//     origin (FaviconFetcher.FetchDeclared; three requests at most, see Fetch below);
 //   * the bytes come back to the UI thread and are decoded THERE, BOUNDED (Decode): the header is read first and an
 //     image whose frames are all larger than 256 px is refused before a pixel is decoded, so a 256 KB PNG that
 //     declares 60000 x 60000 cannot expand to gigabytes. Then one frame, the one nearest 32 px, is decoded: at most
@@ -413,23 +415,33 @@ sealed class BookmarkIcons
 
     // On a pool thread; the answer, success or not, comes back through `toUi`. A faulted task (the fetcher never
     // throws, but a pool thread could still be refused) is a failure like any other.
-    void Fetch(Uri link, string key, Action arrived)
+    //
+    // TWO STAGES, in this order and no further (the privacy page lists exactly these): <origin>/favicon.ico first, and
+    // only when that gives nothing the UI thread can DECODE, the page's own declared icon (FaviconFetcher.FetchDeclared).
+    // The decode decides, not the fetch, because a 200 image/x-icon that WPF cannot read is no icon either, and the
+    // decode has to happen on the UI thread (see Decode), which is why the second stage is started from Take.
+    void Fetch(Uri link, string key, Action arrived, bool declared = false)
     {
         if (fetcher is not { } client) return;
-        Task.Run(() => client.Fetch(link, CancellationToken.None))
+        Task.Run(() => declared ? client.FetchDeclared(link, CancellationToken.None) : client.Fetch(link, CancellationToken.None))
             .ContinueWith(done =>
             {
                 var fetched = done.IsCompletedSuccessfully ? done.Result : Result.Failure<byte[]>("The fetch did not finish.");
-                toUi(() => Take(link, key, fetched, arrived));
+                toUi(() => Take(link, key, fetched, arrived, declared));
             }, TaskScheduler.Default);
     }
 
-    // Back on the UI thread: decode, and only then keep, save and redraw.
-    void Take(Uri link, string key, Result<byte[]> fetched, Action arrived)
+    // Back on the UI thread: decode, and only then keep, save and redraw. A first stage that gave nothing usable starts
+    // the second; a second stage that gave nothing leaves the letter tile until the next start.
+    void Take(Uri link, string key, Result<byte[]> fetched, Action arrived, bool declared)
     {
         var decoded = fetched.Bind(bytes => Decode(bytes).ToResult($"The answer is not an image WPF can read, or is over {MaxFaviconPixels} px.").Map(image => (Bytes: bytes, Image: image)));
-        if (ClickTrace.On) ClickTrace.Write($"bookmark favicon {key}: {(decoded.IsSuccess ? "ok" : decoded.Error)}");
-        if (decoded.IsFailure) return;
+        if (ClickTrace.On) ClickTrace.Write($"bookmark favicon {key}{(declared ? " (declared)" : "")}: {(decoded.IsSuccess ? "ok" : decoded.Error)}");
+        if (decoded.IsFailure)
+        {
+            if (!declared) Fetch(link, key, arrived, declared: true);
+            return;
+        }
 
         favicons[key] = decoded.Value.Image;
         // A failed save costs only the next start's fetch, so it is traced, not reported.

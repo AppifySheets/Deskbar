@@ -1692,3 +1692,7 @@ BM13. Give a workspace two link chips and have a browser window open on that wor
      the chip goes back to faded within a few seconds, and `list` says `"running": false`. Now, with no browser window on
      that workspace, use "Open all bookmarks": the browser opens a window there and both chips turn bright. Restart
      Deskbar: every link chip starts faded.
+BM14. Bookmark Portainer (which answers 404 for /favicon.ico and names its logo in the page), delete its file under
+     %APPDATA%\Deskbar\bookmark-icons and restart Deskbar with tracing on: the chip shows Portainer's logo after a moment,
+     and the trace has a `bookmark favicon` line that failed, then one marked `(declared)` that says ok. A site whose page
+     names an icon on another host keeps its letter tile.

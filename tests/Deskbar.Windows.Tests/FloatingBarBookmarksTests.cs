@@ -526,12 +526,57 @@ public sealed class BookmarkIconsTests : IDisposable
         var first = icons.For(Portainer, () => arrived++);
         Assert.True(posted.TryTake(out var work, TimeSpan.FromSeconds(10)));
         work!();
+        // The undecodable /favicon.ico starts the fallback: the page, which this server answers as image/x-icon too,
+        // so it is no web page and nothing further is asked.
+        Assert.True(posted.TryTake(out var fallback, TimeSpan.FromSeconds(10)));
+        fallback!();
 
         Assert.False(Stored);
         Assert.Equal(0, arrived);
-        // Tried for this run: the letter tile stays and no second request goes out.
+        // Tried for this run: the letter tile stays and no further request goes out.
         Assert.Same(first, icons.For(Portainer, () => arrived++));
-        Assert.Equal(1, server.Requests);
+        Assert.Equal(2, server.Requests);
+    });
+
+    // Portainer's case (option A, 2026-11-26): /favicon.ico answers 404 and the page names its logo in a <link>.
+    sealed class PortainerServer(byte[] logo) : HttpMessageHandler
+    {
+        public List<string> Paths { get; } = [];
+
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancel)
+        {
+            lock (Paths) Paths.Add(request.RequestUri!.PathAndQuery);
+            return Task.FromResult(request.RequestUri!.AbsolutePath switch
+            {
+                "/x" => new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent("""<head><link rel="icon" type="image/png" href="dist/logo.png"></head>""", System.Text.Encoding.UTF8, "text/html"),
+                },
+                "/dist/logo.png" => new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent(logo) { Headers = { { "Content-Type", "image/png" } } } },
+                _ => new HttpResponseMessage(HttpStatusCode.NotFound),
+            });
+        }
+    }
+
+    [Fact]
+    public void A_missing_favicon_falls_back_to_the_icon_the_page_declares() => StaThread.Run(() =>
+    {
+        var server = new PortainerServer(Png());
+        var icons = new BookmarkIcons(new FaviconStore(folder), new FaviconFetcher(server, TimeSpan.FromSeconds(5)), posted.Add);
+        var arrived = 0;
+
+        var tile = icons.For(Portainer, () => arrived++);
+        Assert.True(posted.TryTake(out var first, TimeSpan.FromSeconds(10)));
+        first!();
+        Assert.False(Stored);
+        Assert.True(posted.TryTake(out var second, TimeSpan.FromSeconds(10)));
+        second!();
+
+        Assert.Equal(["/favicon.ico", "/x", "/dist/logo.png"], server.Paths);
+        Assert.True(Stored);
+        Assert.Equal(1, arrived);
+        Assert.IsAssignableFrom<BitmapSource>(icons.For(Portainer, () => arrived++));
+        Assert.NotSame(tile, icons.For(Portainer, () => { }));
     });
 
     [Fact]
