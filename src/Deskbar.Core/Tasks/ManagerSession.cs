@@ -145,12 +145,18 @@ public static class ManagerSession
     //    and Artifact because it touches no repo and publishes nothing; SendMessage because it talks to sessions only
     //    through task comments, which the user can read. Every name was measured to be accepted by `claude --bg` 2.1.332
     //    and to take the tool off the session's list, deferred ones included (probe notes, "Final review probes").
+    //  * --remote-control "Deskbar manager" (task 1c9eefdf, and the voice ask in task 0f73cd0f): the manager is the one
+    //    session that shows up in the Claude phone app, so Petre can talk to it away from the desk, the phone keyboard's
+    //    mic included. Task sessions start with it held off (ClaudeStart.RemoteControlOff). It has to be this flag:
+    //    claude ignores remoteControlAtStartup true in a project's settings and in --settings (claude 2.1.332's code,
+    //    and a probe). A bare resume reattaches the bridge (probed in task 0f73cd0f), so a wake keeps it. Named after
+    //    the session so the phone's list reads "Deskbar manager" rather than the machine name.
     //  * `--` before the message, so the variadic --disallowedTools does not swallow it.
     // The briefing path and shim path are parameters: both come from the user's real expanded paths at runtime. The shim
     // is the form ManagerActions.ShimCommand chose, so a path with a space arrives as its 8.3 short form, or quoted.
     public static IReadOnlyList<string> StartArguments(string briefingPath, string shimPath) =>
     [
-        "--bg", "--model", "fable", "-n", Name, "--strict-mcp-config",
+        "--bg", "--model", "fable", "-n", Name, "--remote-control", Name, "--strict-mcp-config",
         "--permission-mode", "dontAsk",
         "--append-system-prompt-file", briefingPath,
         "--allowedTools", $"Bash({shimPath.Replace('\\', '/')} task:*)",

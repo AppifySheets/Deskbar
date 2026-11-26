@@ -53,13 +53,26 @@ public static class ClaudeStart
             ? given.Trim()
             : Result.Failure<string>($"'{given}' is not a model name. Give an alias such as opus, sonnet or fable, or a model's full name.");
 
+    // REMOTE CONTROL STAYS OFF FOR A TASK SESSION (task 1c9eefdf, Petre: "manager session should have remote control
+    // on; others should not"). Only the manager is meant to show up in the Claude phone app (ManagerSession.StartArguments
+    // turns it on there); a dozen task sessions in that list bury it. `claude` has no --no-remote-control, so the start
+    // hands it a settings layer that says false. Read from claude 2.1.332's own code and probed the same day:
+    //  * remoteControlAtStartup is looked up in policy, then --settings, then ~/.claude/settings.json, and a FALSE from
+    //    any of them always counts while a true from --settings does not (a probe with --settings true and the user's
+    //    file false got no bridge). So this false wins over a user-level true and over Anthropic's own default-on.
+    //  * Project and local settings files cannot turn it on, which is why the manager gets the --remote-control flag.
+    //  * It cannot be done on a RESUME: any flag on `claude --bg --resume` starts a forked copy under a new id (probed
+    //    again here), and a resumed session reattaches the Remote Control bridge it had before. A session started
+    //    with Remote Control on keeps it until its task is finished; only new starts are covered.
+    public const string RemoteControlOff = """{"remoteControlAtStartup":false}""";
+
     /// <summary>
-    /// The arguments of `claude` that start a background session on the task: always with <c>--model</c>, then the
-    /// first message. A plain `claude --bg --resume` keeps the model the session started with (measured: it wakes
-    /// "with its saved options"), so only the start names it.
+    /// The arguments of `claude` that start a background session on the task: always with <c>--model</c>, Remote Control
+    /// held off (<see cref="RemoteControlOff"/>), then the first message. A plain `claude --bg --resume` keeps the model
+    /// the session started with (measured: it wakes "with its saved options"), so only the start names it.
     /// </summary>
     public static IReadOnlyList<string> Arguments(TaskItem task, string model) =>
-        ["--bg", "--model", model, FirstMessage(task)];
+        ["--bg", "--model", model, "--settings", RemoteControlOff, FirstMessage(task)];
 
     /// <summary>
     /// Where to start the session, the likeliest first. A task that has had sessions starts at the REPO of its latest
