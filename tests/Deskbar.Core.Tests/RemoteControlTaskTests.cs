@@ -1129,7 +1129,7 @@ public class RemoteControlTaskTests
              // Task 521d2b07: the Stats view's numbers.
              "stats [--days <n>]",
              "overview", "show <id>",
-             "add <title>|- [--workspace <name>|none] [--important] [--urgent] [--parent <id>]", "close <id> [--stop-claude]", "reopen <id>",
+             "add <title>|- [--workspace <name>|none] [--important] [--urgent] [--parent <id>] [--session <session>]", "close <id> [--stop-claude]", "reopen <id>",
              "status <id> <backlog|in-progress|waiting|done>", "rename <id> <title>|-", "move <id> <workspace>|none",
              "comment <id> <markdown>|-", "delete <id>", "flag <id> important|urgent on|off", "order <id> top|end|<n>",
              // Task 9: going to a task, starting Claude on it and opening one of its sessions.

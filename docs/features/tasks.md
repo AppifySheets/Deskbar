@@ -178,7 +178,7 @@ A Claude Code session's own forms, each with `--session <id>` (see [Claude Code 
 
 - `task join <id>` and `task new <title>`, to take up a task or create one
 - `task status-line <text>`, `task ask <question>`, `task comment <markdown>`, `task answered` (its question is settled: back to in progress, the blink stops; nothing happens when the task is not waiting) and `task done`, on the session's own task
-- `task later <title>`, a note for later on the session's workspace
+- `task later <title>`, a note for later on the session's workspace, linked to the session's own task as related so it says where it came from (`task add ... --session <id>` does the same with `add`'s flags)
 - `task subtask <title>`, a subtask of the session's own task (a sibling when that is a subtask), assigned to Claude so the next session is offered it
 - `task family`, its own task's family and linked tasks, as its `task join` reply gave them
 - `task relate <id>` and `task unrelate <id>`, a related link from its own task; `task duplicate-of <id>`, its own task closes as a duplicate of another (the one way a session closes a task)

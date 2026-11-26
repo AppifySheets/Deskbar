@@ -851,6 +851,79 @@ public class RemoteControlClaudeHookTests
         Assert.Equal(IdOf(manager, "iam.ge"), Titled("Rename the guard").WorkspaceId.Value);
     }
 
+    // Task fa1e6a74: a note a session adds while it works says where it came from. `later` links it as related to the
+    // session's own task, stored on the note and read both ways, so the task lists the note too.
+    [Fact]
+    public void A_note_for_later_is_related_to_the_sessions_own_task()
+    {
+        var manager = Started();
+        var source = tasks.AddNote("Fix the strip", IdOf(manager, "iam.ge")).Value;
+        Said(manager, "s1", @"C:\scratch\probe", "join", source.Id.ToString());
+
+        Assert.Equal(ControlReply.Ok, Said(manager, "s1", @"C:\scratch\probe", "later", "Rename the guard").ExitCode);
+
+        var note = Titled("Rename the guard");
+        Assert.Equal([source.Id], note.Related);
+        Assert.Contains(tasks.Board.RelatedOf(source.Id), t => t.Id == note.Id);
+    }
+
+    // A session with no open task has nothing to link to: `later` still adds the plain note, as before.
+    [Fact]
+    public void A_note_for_later_from_a_session_without_a_task_is_a_plain_note()
+    {
+        var manager = Started();
+
+        Assert.Equal(ControlReply.Ok, Said(manager, "s1", Repo, "later", "Rename the guard").ExitCode);
+
+        Assert.Empty(Titled("Rename the guard").Related);
+    }
+
+    // `task add` with --session is `later` with the script form's flags: the note keeps its flags and workspace and is
+    // related to the session's own task.
+    [Fact]
+    public void A_task_added_with_a_session_is_related_to_the_sessions_own_task()
+    {
+        var manager = Started();
+        var source = tasks.AddNote("Fix the strip", IdOf(manager, "iam.ge")).Value;
+        Said(manager, "s1", Repo, "join", source.Id.ToString());
+
+        Assert.Equal(ControlReply.Ok, Said(manager, "s1", Repo, "add", "Exempt the dev host", "--workspace", "Deskbar", "--important").ExitCode);
+
+        var note = Titled("Exempt the dev host");
+        Assert.Equal([source.Id], note.Related);
+        Assert.Equal(IdOf(manager, "Deskbar"), note.WorkspaceId.Value);
+        Assert.True(note.Important);
+    }
+
+    // A subtask of the session's own task already says where it came from on its parent line: no related link on top.
+    [Fact]
+    public void A_task_added_with_a_session_under_its_own_task_is_not_also_related()
+    {
+        var manager = Started();
+        var source = tasks.AddNote("Fix the strip", IdOf(manager, "iam.ge")).Value;
+        Said(manager, "s1", Repo, "join", source.Id.ToString());
+
+        Assert.Equal(ControlReply.Ok, Said(manager, "s1", Repo, "add", "Rename the guard", "--parent", source.Id.ToString()).ExitCode);
+
+        var note = Titled("Rename the guard");
+        Assert.Equal(source.Id, note.ParentId.Value);
+        Assert.Empty(note.Related);
+    }
+
+    // The script form, without --session, has no source task and links nothing.
+    [Fact]
+    public void A_task_added_without_a_session_is_not_related()
+    {
+        var manager = Started();
+        var source = tasks.AddNote("Fix the strip", IdOf(manager, "iam.ge")).Value;
+        Said(manager, "s1", Repo, "join", source.Id.ToString());
+
+        Assert.Equal(ControlReply.Ok, Ran(manager, "task", "add", "Rename the guard", "--workspace", "Deskbar", "--from", Repo).ExitCode);
+
+        Assert.Empty(Titled("Rename the guard").Related);
+        Assert.Empty(tasks.Board.RelatedOf(source.Id));
+    }
+
     // The VS Code window still comes first: the repo's history only fills in when no window answers.
     [Fact]
     public void The_vs_code_window_still_beats_the_repos_history()

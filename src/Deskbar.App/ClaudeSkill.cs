@@ -354,7 +354,8 @@ static class ClaudeSkill
           group") and mark it done; the user closes the task once they have tried it and it works. Never close or
           delete a task: only the user closes one. A message from the user leaves a done task done; when it gives you more work on it,
           run `deskbar.cmd task join <task id> --session <id>` to put it back in progress. A follow-up for later is
-          `deskbar.cmd task later - --session <id>`, its title on stdin, a note on your workspace.
+          `deskbar.cmd task later - --session <id>`, its title on stdin, a note on your workspace
+          linked to your task as related, so it says where it came from.
         - Subtasks. A task can have subtasks, one level deep. When you join one, the join reply's `family` names the
           parent, the siblings and their sessions with transcript files: read the end of the parent session's
           transcript before you start, and stay clear of what the siblings are doing. `deskbar.cmd task family

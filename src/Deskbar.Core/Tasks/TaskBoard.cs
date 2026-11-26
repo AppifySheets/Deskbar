@@ -65,6 +65,23 @@ public sealed record TaskBoard(IReadOnlyList<TaskItem> Tasks)
             .Bind(added => added.Board.WithParentReopened(added.Task.Id, now).Map(board => (board, added.Task)));
 
     /// <summary>
+    /// A note a session adds while it works (`task later`, `task add --session`), linked as related to the task the
+    /// session is on (task fa1e6a74, Petre: "when adding tasks, include the source task as it related to this task").
+    /// A GPH session left three follow-up notes that said nothing about where they came from, so nobody could tell what
+    /// they followed up. The link is stored on the NEW task, the one it is made from, and read both ways (RelatedOf), so
+    /// the source task lists it too. No link when the session has no open task (it adds a plain note, as before), or when
+    /// the note is a subtask of that very task (--parent), whose parent line already says it. One board, so one save.
+    /// </summary>
+    public Result<(TaskBoard Board, TaskItem Task)> AddNoteFrom(string sessionId, string title, Maybe<Guid> workspace,
+        DateTimeOffset now, Guid newId, Quadrant quadrant = Quadrant.IV, Maybe<Guid> parent = default) =>
+        AddNote(title, workspace, now, newId, quadrant, parent).Bind(added => TaskOf(sessionId)
+            .Where(source => !(added.Task.ParentId.HasValue && added.Task.ParentId.Value == source.Id))
+            .Match(
+                source => added.Board.Relate(added.Task.Id, source.Id, now)
+                    .Map(board => (board, board.Tasks.Single(t => t.Id == added.Task.Id))),
+                () => Result.Success(added)));
+
+    /// <summary>
     /// A session splits its work (`task subtask`): a Backlog subtask assigned to Claude, so the next session on the
     /// workspace is offered it. Its parent is the session's own task, or, when that is already a subtask, that task's
     /// parent, so the new one is a SIBLING (one level is the limit, and splitting your own piece is exactly when this is

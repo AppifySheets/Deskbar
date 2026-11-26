@@ -384,7 +384,7 @@ public static class SessionBriefing
         "A message from the user never resolves your question by itself: you do, with task answered. Never leave a question open once it is resolved.",
         $"  {Shim} task comment - --session {sessionId}   (rare: only what the user must know, in one or two short lines; what they must do is task ask)",
         $"  {Shim} task done --session {sessionId}   (when the work is finished and nothing waits on the user, so not while a pull request of yours waits to be merged; only the user closes a task)",
-        $"  {Shim} task later - --session {sessionId}   (the title of a follow-up note on your workspace)",
+        $"  {Shim} task later - --session {sessionId}   (the title of a follow-up note on your workspace, linked to your task as related)",
         // Subtasks spec: a session splitting its work makes a subtask, which the next session picks up with this one's
         // context (its join reply names this session and its transcript). `task family` is not listed here: the join
         // reply, the start briefing and a subtask's prompt line carry it where it matters.
