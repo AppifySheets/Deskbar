@@ -338,7 +338,10 @@ A click on a chip switches to its workspace and opens it there, so a link opens 
 desktop and a program's window lands in that workspace. Nothing opens on its own: switching to a workspace
 starts none of its bookmarks. A program or app chip is hidden while it has a window open anywhere, and comes
 back when the window closes. A program that lives only in the tray has no window, so its chip stays and a click
-starts it. A link chip is never hidden.
+starts it. A link chip is never hidden, since Deskbar sees windows and not tabs. Once you open a link, its
+chip turns bright with a solid outline while the browser window the link went into stays open, and goes back
+to faded when that window closes. Closing only the tab does not count. A click on a bright link opens it again.
+After a restart every link chip starts faded.
 
 Right-click a chip for **Open**, **Open all bookmarks**, **Rename…** and **Remove**. **Open all bookmarks**
 switches once and opens every chip that is showing, so a program already running is not started again.

@@ -1,3 +1,4 @@
+using System.Reactive.Linq;
 using CSharpFunctionalExtensions;
 using Deskbar.Core.Abstractions;
 using Deskbar.Core.Bookmarks;
@@ -46,7 +47,22 @@ public sealed class BookmarkOpenerTests
             App: id => { calls.Add($"app {id}"); return refused.Contains(id) ? Result.Failure("not installed") : Result.Success(); },
             Link: url => { calls.Add($"link {url}"); return refused.Contains(url) ? Result.Failure("no browser") : Result.Success(); });
         opener = new BookmarkOpener(manager, starts, () => appIds);
+        // The same starts, plus the link-window watch the app wires (OpenedLinks): every watch listens to one fake
+        // receiver, and takes its first window, as the real one does.
+        watching = new BookmarkOpener(manager, starts, () => appIds, new LinkWindows(
+            desktop => { watched.Add(desktop); return receiver.Take(1); },
+            window => alive.Contains(window.Handle),
+            gone));
     }
+
+    // The link-window seams: which desktops a watch was asked for, the window a watch reports, which windows still
+    // live, and the window list's "gone for real".
+    readonly List<Guid> watched = [];
+    readonly System.Reactive.Subjects.Subject<LinkWindow> receiver = new();
+    readonly HashSet<WindowHandle> alive = [];
+    readonly System.Reactive.Subjects.Subject<WindowHandle> gone = new();
+    readonly BookmarkOpener watching;
+    static readonly LinkWindow Edge = new(new WindowHandle(0x500), 4242);
 
     static Bookmark Link(string url) => BookmarkRules.Link(url).Value;
 
@@ -170,5 +186,116 @@ public sealed class BookmarkOpenerTests
         Assert.True(opened.IsFailure);
         Assert.Contains("Broken: no such file", opened.Error);
         Assert.Equal(["link https://a.local/", @"program C:\apps\broken.exe", "link https://b.local/"], calls);
+    }
+
+    // --- Opened links (option B): a link runs while the browser window it went into stays open -------------------------
+
+    [Fact]
+    public void An_opened_link_runs_while_the_browser_window_it_went_into_lives()
+    {
+        var link = Added(work, Link("https://gph.local/"));
+
+        Assert.True(watching.Open(work.Id, link.Id).IsSuccess);
+        Assert.False(watching.IsRunning(link));
+        receiver.OnNext(Edge);
+        alive.Add(Edge.Handle);
+
+        Assert.Equal([work.DesktopId!.Value], watched);
+        Assert.True(watching.IsRunning(link));
+        Assert.True(watching.IsLinkOpen(link));
+        // Still shown: a link chip never hides, it is drawn open instead.
+        Assert.Equal([link.Id], watching.Showing(manager.State.Workspaces.Single(w => w.Id == work.Id)).Select(b => b.Id));
+
+        alive.Remove(Edge.Handle);
+        Assert.False(watching.IsRunning(link));
+    }
+
+    [Fact]
+    public void A_window_gone_for_real_drops_its_notes()
+    {
+        var link = Added(work, Link("https://gph.local/"));
+        watching.Open(work.Id, link.Id);
+        receiver.OnNext(Edge);
+
+        gone.OnNext(Edge.Handle);
+
+        Assert.Empty(watching.OpenedLinks.Noted);
+    }
+
+    [Fact]
+    public void A_failed_link_start_watches_for_nothing()
+    {
+        var link = Added(work, Link("https://gph.local/"));
+        refused.Add(link.Target);
+
+        Assert.True(watching.Open(work.Id, link.Id).IsFailure);
+        receiver.OnNext(Edge);
+
+        Assert.Empty(watching.OpenedLinks.Noted);
+    }
+
+    [Fact]
+    public void Open_all_notes_one_window_for_every_link_that_went_into_it()
+    {
+        var a = Added(work, Link("https://a.local/"));
+        var b = Added(work, Link("https://b.local/"));
+        alive.Add(Edge.Handle);
+
+        watching.OpenAll(work.Id);
+        receiver.OnNext(Edge);
+
+        Assert.True(watching.IsRunning(a));
+        Assert.True(watching.IsRunning(b));
+    }
+
+    [Fact]
+    public void Removing_the_bookmark_forgets_its_note()
+    {
+        var link = Added(work, Link("https://gph.local/"));
+        alive.Add(Edge.Handle);
+        watching.Open(work.Id, link.Id);
+        receiver.OnNext(Edge);
+
+        Assert.True(manager.RemoveBookmark(work.Id, link.Id).IsSuccess);
+
+        Assert.Empty(watching.OpenedLinks.Noted);
+    }
+
+    // A window that turns up after its bookmark was removed is not noted for a bookmark that no longer exists.
+    [Fact]
+    public void A_window_arriving_after_the_bookmark_was_removed_is_not_noted()
+    {
+        var link = Added(work, Link("https://gph.local/"));
+        watching.Open(work.Id, link.Id);
+        manager.RemoveBookmark(work.Id, link.Id);
+
+        receiver.OnNext(Edge);
+
+        Assert.Empty(watching.OpenedLinks.Noted);
+    }
+
+    [Fact]
+    public void Programs_and_apps_are_not_watched()
+    {
+        var program = Added(work, Program("Tool", @"C:\apps\tool.exe"));
+        var app = Added(work, new Bookmark(Guid.NewGuid(), "Calc", BookmarkKind.App, "Calc!App"));
+
+        watching.Open(work.Id, program.Id);
+        watching.Open(work.Id, app.Id);
+
+        Assert.Empty(watched);
+    }
+
+    // Without the watch (a test bar, or a copy that cannot see windows) a link is never running, as before.
+    [Fact]
+    public void Without_a_watch_a_link_never_runs()
+    {
+        var link = Added(work, Link("https://gph.local/"));
+
+        opener.Open(work.Id, link.Id);
+        receiver.OnNext(Edge);
+
+        Assert.False(opener.IsRunning(link));
+        Assert.False(opener.IsLinkOpen(link));
     }
 }

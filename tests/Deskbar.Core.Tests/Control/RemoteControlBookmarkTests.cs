@@ -175,6 +175,23 @@ public sealed class RemoteControlBookmarkTests
         Assert.False(Parsed(withoutOpener.Execute(["bookmark", "list"]))[0].GetProperty("running").GetBoolean());
     }
 
+    // Option B: a link whose browser window is still open lists as running, the answer that draws its chip open, so
+    // the pipe and the bar agree. The watch here reports its window at once and the window stays alive.
+    [Fact]
+    public void List_reports_an_opened_link_as_running()
+    {
+        var window = new LinkWindow(new WindowHandle(0x77), 900);
+        var starts = new BookmarkStarts((_, _, _) => Result.Success<int?>(null), _ => Result.Success(), _ => Result.Success());
+        var watched = new RemoteControl(manager, bookmarks: new BookmarkOpener(manager, starts, () => new HashSet<string>(),
+            new LinkWindows(_ => System.Reactive.Linq.Observable.Return(window), _ => true, System.Reactive.Linq.Observable.Never<WindowHandle>())));
+        Parsed(watched.Execute(["bookmark", "add", "Work", "--url", "https://example.com/a", "--name", "Site"]));
+        Assert.False(Parsed(watched.Execute(["bookmark", "list", "Work"]))[0].GetProperty("running").GetBoolean());
+
+        Parsed(watched.Execute(["bookmark", "open", "Work", "Site"]));
+
+        Assert.True(Parsed(watched.Execute(["bookmark", "list", "Work"]))[0].GetProperty("running").GetBoolean());
+    }
+
     // Ruling P6: C runtime quoting, as CommandLineToArgvW reads it back.
     [Theory]
     [InlineData(new[] { "a b", "c" }, "\"a b\" c")]

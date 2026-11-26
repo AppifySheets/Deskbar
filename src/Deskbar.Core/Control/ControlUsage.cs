@@ -251,7 +251,8 @@ public static class ControlUsage
         new("Bookmark chip menu", [
             new("bookmark", "list [<workspace>]",
                 "every bookmark as JSON (or one workspace's): workspace, id, name, kind, target, arguments, workingDirectory,\n"
-                + "      running (a running one shows no chip)"),
+                + "      running (a running program or app shows no chip; a link runs while the browser window it went\n"
+                + "      into stays open, and its chip is drawn bright)"),
             new("bookmark", "add <workspace> --url <url> | --program <path> [--cwd <folder>] [-- <args>] | --app <id> [--name <name>]",
                 "add a bookmark chip to the workspace's row: --url is the twin of the row menu's \"Bookmark link from\n"
                 + "      clipboard\" and of dropping a link on the row; --program and --app are the twins of a drop and of\n"
