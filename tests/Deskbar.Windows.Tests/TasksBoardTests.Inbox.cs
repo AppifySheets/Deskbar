@@ -923,4 +923,43 @@ public partial class TasksBoardTests
         Assert.False(t.Window.InboxShown!.Tabbed);
         Assert.Equal([k.Note], DrawnInboxLines(t));
     });
+
+    // A note just added is followed into the Claude tab once Claude starts on it (Add and start Claude, or Start Claude
+    // pressed later on the same selected line).
+    [Fact]
+    public void A_note_just_added_is_followed_into_the_claude_tab_when_claude_starts() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        InboxTasks(t);
+        t.Controller.Show();
+        ChooseInbox(t);
+        Click(ButtonNamed(t.Window.InboxHeaderShown!, "New"));
+        Assert.True(t.Window.TypeNote("Try the faster build", Key.Enter));
+        var added = t.Tasks.Board.Tasks.Single(x => x.Title == "Try the faster build").Id;
+        Assert.Equal(InboxTab.Notes, t.Window.InboxTabShown);
+
+        Assert.True(t.Tasks.Join(added, Session("s9")).IsSuccess);
+
+        Assert.Equal(InboxTab.Claude, t.Window.InboxTabShown);
+        Assert.Contains(added, DrawnInboxLines(t));
+        Assert.True(t.Window.InboxGlowing(added));
+    });
+
+    // The user taking over (a tab button) ends the follow: the tab on show stays.
+    [Fact]
+    public void A_tab_click_ends_the_follow() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        InboxTasks(t);
+        t.Controller.Show();
+        ChooseInbox(t);
+        Click(ButtonNamed(t.Window.InboxHeaderShown!, "New"));
+        Assert.True(t.Window.TypeNote("Try the faster build", Key.Enter));
+        var added = t.Tasks.Board.Tasks.Single(x => x.Title == "Try the faster build").Id;
+
+        Click(ButtonNamed(t.Window.InboxHeaderShown!, "Needs you"));
+        Assert.True(t.Tasks.Join(added, Session("s9")).IsSuccess);
+
+        Assert.Equal(InboxTab.NeedsYou, t.Window.InboxTabShown);
+    });
 }
