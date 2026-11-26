@@ -323,6 +323,23 @@ public partial class TaskDetailWindowInboxTests
         Assert.Equal(id, t.Panel.InboxPageShown);
     });
 
+    // L1: a note has no Open Claude, so the window's menu keeps "Go to its workspace"; a task with a session has Open Claude
+    // instead, and a closed task has neither.
+    [Fact]
+    public void The_pages_menu_goes_to_the_workspace_of_a_note_and_a_task_with_a_session_has_open_claude_instead() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var note = t.Tasks.AddNote("Errand", Maybe<Guid>.None).Value.Id;
+        t.Board.Show();
+        var (_, notePage) = Open(t, note);
+
+        var names = notePage.OpenMenuFor(note).Items.OfType<MenuItem>().Select(i => (i.Header as TextBlock)?.Text).ToList();
+
+        Assert.Contains(TasksWindow.GoToWorkspaceText, names);
+        // Before the delete's separator, with "Show in the tasks panel".
+        Assert.True(names.IndexOf(TasksWindow.GoToWorkspaceText) < names.IndexOf(TasksWindow.ShowInPanelText));
+        Assert.DoesNotContain(TasksWindow.OpenClaudeText, names);
+    });
     // The comment box posts as the panel's does, and what is typed outlives a redraw.
     [Fact]
     public void The_comment_box_posts_and_keeps_a_draft_over_a_redraw() => StaThread.Run(() =>
