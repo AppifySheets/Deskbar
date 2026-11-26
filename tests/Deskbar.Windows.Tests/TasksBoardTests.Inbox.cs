@@ -782,4 +782,28 @@ public partial class TasksBoardTests
         Assert.Equal(0, control.Execute(["tasks-window", "list"]).ExitCode);
         Assert.Null(t.Window.InboxShown);
     });
+
+    // The tester's M1: the Inbox's Keys are the lines drawn in the tab on show, so F2 with the selection in another tab
+    // does nothing, and the panel keeps redrawing.
+    [Fact]
+    public void F2_with_the_selection_in_another_tab_does_nothing_and_the_panel_still_redraws() => StaThread.Run(() =>
+    {
+        var selection = new TaskSelection();
+        using var t = Build(selection: selection);
+        var k = InboxTasks(t);
+        t.Controller.Show();
+        ChooseInbox(t);
+        Assert.Equal([k.Asking, k.Done], t.Window.Keys);
+        selection.Select(k.Note);
+
+        Assert.False(t.Window.Press(Key.F2, ModifierKeys.None));
+        Assert.Null(t.Window.Editor);
+
+        Click(ButtonNamed(t.Window.InboxHeaderShown!, "Notes"));
+        Assert.Equal([k.Note], t.Window.Keys);
+        Assert.Equal([k.Note], DrawnInboxLines(t));
+        // On show now, F2 edits it.
+        Assert.True(t.Window.Press(Key.F2, ModifierKeys.None));
+        Assert.NotNull(t.Window.Editor);
+    });
 }

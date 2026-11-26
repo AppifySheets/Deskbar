@@ -586,7 +586,7 @@ public partial class TasksWindow : Window
         if (view.Inbox is not null)
         {
             LeaveList();
-            DrawInbox(view, shownRows);
+            DrawInbox(view);
             return;
         }
         if (view.Matrix)
