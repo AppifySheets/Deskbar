@@ -1438,6 +1438,24 @@ AS4. In a workspace whose tasks know several folders (or none), the button adds 
 AS5. The button on an empty box adds nothing and starts nothing. With Claude sessions off in Manage the note is
      still added, and the same refusal "Start Claude on this" gives says why no session started.
 
+## Reevaluate
+
+(Task 3dd07539.) The tasks panel open on the List, with a Claude task waiting on you whose question is already
+settled (it asks you to merge a pull request that is merged), a Claude task in progress, and a note.
+
+RE1. Widen the panel past 710 DIP: the waiting task's line ends with a refresh icon before ⋯, tooltip "Ask Claude to
+     check where this task really stands...". The task in progress and the note have no such button.
+RE2. At the default width the line has no room for it: open the waiting task's thread and "Reevaluate" is in the row
+     of buttons at its top. Widen the panel again and it leaves the row (the line shows it).
+RE3. Press it. The thread gets Deskbar's line "Asked Claude to reevaluate the task.", and within a minute the session
+     runs `task answered` (the merged pull request settled the question): the task leaves Waiting on you, and its
+     status line says where it stands. Its session's prompt starts "Deskbar: the user asked you to reevaluate".
+RE4. Do the same on a task whose session has ended: it is resumed with the request, as a comment would resume it.
+RE5. The ⋯ menu of the task in progress has "Reevaluate" after "Add subtask…", and so does the bar's right-click menu
+     of a Claude task; the note's menus have none.
+RE6. `deskbar.cmd task reevaluate <note id>` is refused ("no Claude session has worked on this task..."), and nothing
+     changes on the note.
+
 ## Results (2026-08-01)
 
 Status: **pending human execution.** An agent cannot observe the desktop, Task View,

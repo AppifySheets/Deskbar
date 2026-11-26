@@ -280,6 +280,27 @@ public sealed class TaskService(ITaskStore store, Func<DateTimeOffset> now, Func
     /// <summary>The user's own new comments and the manager's, each with its task's id, after they are saved (see Comment).</summary>
     public IObservable<(Guid TaskId, TaskComment Comment)> Commented => commented;
 
+    // REEVALUATE (task 3dd07539; Petre asked for "a button on a task" that makes its Claude session look at the task again,
+    // after a session kept its task waiting on him for a pull request already merged). The press is announced on
+    // Reevaluations, and the app's CommentWaker hands its session SessionBriefing.Reevaluate on the roads a comment
+    // takes, so an idle or ended session is reached too. A Deskbar line in the thread says it was asked, so the press has
+    // a visible effect even before the session answers. Refused for a task no session has worked on (nobody to ask) and
+    // for a closed one (history; Reopen comes first). Every caller, the line's button, its menu, the bar's menu and
+    // `task reevaluate <id>`, comes through here.
+    public Result Reevaluate(Guid id) =>
+        Board.Tasks.TryFirst(t => t.Id == id).ToResult("no such task")
+            .Ensure(t => t.IsClaudes, "no Claude session has worked on this task, so there is no one to reevaluate it")
+            .Ensure(t => t.Status != TaskStatus.Closed, "the task is closed; reopen it first")
+            .Bind(t => Note(t.Id, ReevaluateNote).Tap(() => reevaluations.OnNext(t.Id)));
+
+    /// <summary>The thread's line for a press of Reevaluate (Reevaluate).</summary>
+    public const string ReevaluateNote = "Asked Claude to reevaluate the task.";
+
+    readonly Subject<Guid> reevaluations = new();
+
+    /// <summary>The tasks whose session is to reevaluate them (Reevaluate), each after its thread line is saved.</summary>
+    public IObservable<Guid> Reevaluations => reevaluations;
+
     /// <summary>
     /// Petre sent a session a message. These two run on every prompt and every session end, nearly always with
     /// nothing to change, so they save and pulse only when the board really changed (TaskBoard returns the same

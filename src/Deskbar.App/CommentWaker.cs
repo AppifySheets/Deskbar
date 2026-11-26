@@ -48,24 +48,35 @@ sealed class CommentWaker : IDisposable
         this.trace = trace;
         // One comment at a time, in order, each with the latest list (Take(1) of the replay).
         // Only while sessions keep their tasks (AppState.ClaudeTasksInEffect): otherwise there is no waiter and no list.
-        subscription = tasks.Commented
+        // REEVALUATE (task 3dd07539) rides the same roads: a press of a task's Reevaluate button (TaskService.Reevaluations)
+        // is delivered exactly as a comment is, with SessionBriefing.Reevaluate as its message, in the same one-at-a-time
+        // queue, so a press and a comment never race each other into one session.
+        var comments = tasks.Commented.Select(commented => new Delivery(commented.TaskId, "a comment",
+            task => SessionBriefing.Commented(task, tasks.ExpandImages(commented.Comment.Markdown), commented.Comment.ByManager)));
+        var reevaluations = tasks.Reevaluations.Select(taskId => new Delivery(taskId, "a reevaluate request", SessionBriefing.Reevaluate));
+        subscription = comments.Merge(reevaluations)
             .Where(_ => enabled())
-            .Select(commented => live.Take(1).SelectMany(listed => Observable.FromAsync(() => Deliver(commented.TaskId, commented.Comment, listed)))
+            .Select(delivery => live.Take(1).SelectMany(listed => Observable.FromAsync(() => Deliver(delivery, listed)))
                 // One delivery that throws must not end the waker for the rest of the run (final review, I5): it is traced,
                 // and the comments after it still go.
                 .Catch((Exception e) =>
                 {
-                    trace?.Invoke($"comment waker: a comment on {commented.TaskId} was not delivered: {e.Message}");
+                    trace?.Invoke($"comment waker: {delivery.What} on {delivery.TaskId} was not delivered: {e.Message}");
                     return Observable.Empty<System.Reactive.Unit>();
                 }))
             .Concat()
             .Subscribe(_ => { }, error => trace?.Invoke($"comment waker: stopped by {error.Message}"));
     }
 
-    async Task<System.Reactive.Unit> Deliver(Guid taskId, TaskComment comment, IReadOnlyCollection<ClaudeAgent> listed)
+    // What goes to a task's session: its task, what it is (for the trace) and its words, made from the task as it stands
+    // when it is delivered.
+    sealed record Delivery(Guid TaskId, string What, Func<TaskItem, string> Message);
+
+    async Task<System.Reactive.Unit> Deliver(Delivery delivery, IReadOnlyCollection<ClaudeAgent> listed)
     {
+        var taskId = delivery.TaskId;
         if (tasks.Board.Tasks.FirstOrDefault(t => t.Id == taskId) is not { Sessions.Count: > 0 } task) return System.Reactive.Unit.Default;
-        var message = SessionBriefing.Commented(task, tasks.ExpandImages(comment.Markdown), comment.ByManager);
+        var message = delivery.Message(task);
         // A WAITER CAN BE GONE WHILE ITS GEN FILE SAYS IT IS ALIVE (task daeaa26c). A turn that ends on an API error, the
         // usage limit above all, runs no Stop hook, so no waiter is started after it, and the one before it may be the
         // very waiter whose comment woke the session for that turn. The gen file still names that waiter, good for a

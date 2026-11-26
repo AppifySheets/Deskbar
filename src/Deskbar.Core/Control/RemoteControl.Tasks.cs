@@ -185,6 +185,9 @@ public sealed partial class RemoteControl
             ["snooze", var id, var length] => TaskSnooze.Parse(length, service.Now.ToLocalTime(), TimeZoneInfo.Local.GetUtcOffset)
                 .Match(until => TaskChange(service, id, t => service.Snooze(t.Id, until)), ControlReply.Fail),
             ["wake", var id] => TaskChange(service, id, t => service.Wake(t.Id)),
+            // Reevaluate (task 3dd07539): the twin of the line's Reevaluate button. The task's session is asked to check
+            // where the task stands and fix its question, status and status line; a task no session worked on refuses.
+            ["reevaluate", var id] => TaskChange(service, id, t => service.Reevaluate(t.Id)),
             // Subtasks (docs/superpowers/specs/2026-11-24-subtasks-design.md): put a task under another or free it, and read
             // the family text a session on it would read.
             ["parent", var id, var parent] => TaskParent(service, id, parent),

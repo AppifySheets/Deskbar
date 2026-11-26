@@ -96,7 +96,32 @@ public class SetAsideStopHookTests
         Assert.True(SessionBriefing.DeliveredByDeskbar(SessionKeeper.ContinueMessage));
         Assert.True(SessionBriefing.DeliveredByDeskbar(SessionBriefing.Commented(task, "look at this")));
         Assert.True(SessionBriefing.DeliveredByDeskbar(SessionBriefing.Commented(task, "look at this", byManager: true)));
+        // The Reevaluate button's request (task 3dd07539) is Deskbar's, not Petre replying: read as his reply it would set
+        // aside the very question the session is asked to check.
+        Assert.True(SessionBriefing.DeliveredByDeskbar(SessionBriefing.Reevaluate(task)));
         Assert.False(SessionBriefing.DeliveredByDeskbar("remove the footnote"));
+    }
+
+    // Task 3dd07539: the Reevaluate message shows the session what Deskbar shows (status, question, status line, pull
+    // requests) and names the command for each thing that can be stale.
+    [Fact]
+    public void Reevaluate_message_carries_what_the_board_shows_and_the_commands()
+    {
+        var task = new TaskItem(Guid.NewGuid(), "usage limit", Guid.NewGuid(), TaskStatus.WaitingOnYou, "PR open, waiting on merge",
+            Maybe<string>.From("Merge #599"), clock, clock, clock, [], [])
+        {
+            PullRequests = [new PullRequestLink("AppifySheets", "Deskbar", 599)],
+        };
+
+        var message = SessionBriefing.Reevaluate(task);
+
+        Assert.Contains("status: waiting on the user", message);
+        Assert.Contains("your question: \"Merge #599\"", message);
+        Assert.Contains("status line: \"PR open, waiting on merge\"", message);
+        Assert.Contains("https://github.com/AppifySheets/Deskbar/pull/599", message);
+        Assert.Contains("task answered --session", message);
+        Assert.Contains("task done --session", message);
+        Assert.Contains("task status-line - --session", message);
     }
 
     // The openings of prompts Claude Code delivers itself, copied from this machine's transcripts (task b846f5ad): a

@@ -64,16 +64,22 @@ public static class SessionBriefing
     // deliveries from Petre typing (DeliveredByDeskbar).
     const string ManagerCommentOpening = "Deskbar: the manager (the session coordinating the user's tasks) commented on your task ";
     const string UserCommentOpening = "Deskbar: the user commented on your task ";
+    const string ReevaluateOpening = "Deskbar: the user asked you to reevaluate your task ";
 
     /// <summary>
     /// Whether a prompt is one Deskbar itself put in the session (task 8bd18246, RepliedTasks): a comment delivered by a
     /// resume (Commented; Petre's own comment already counts as his reply through the task, and the manager's is not his),
-    /// or the keeper's resume of a cut-off turn (SessionKeeper.ContinueMessage). Only other prompts are Petre replying.
+    /// or the keeper's resume of a cut-off turn (SessionKeeper.ContinueMessage), or the Reevaluate button's request
+    /// (Reevaluate, task 3dd07539). Only other prompts are Petre replying.
     /// </summary>
+    // The reevaluate request must not count as Petre's reply: a reply sets the task's question aside while the session
+    // works (RepliedTasks), and the whole point of the request is that the SESSION decides whether the question still
+    // holds. Read as a reply, the very question it is asked to check would already be gone from Waiting on you.
     public static bool DeliveredByDeskbar(string prompt) =>
         prompt.TrimStart() is var text
         && (text.StartsWith(ManagerCommentOpening, StringComparison.Ordinal)
             || text.StartsWith(UserCommentOpening, StringComparison.Ordinal)
+            || text.StartsWith(ReevaluateOpening, StringComparison.Ordinal)
             || text.TrimEnd() == SessionKeeper.ContinueMessage);
 
     // How Claude Code opens the prompts it delivers itself (task b846f5ad). Each one fires UserPromptSubmit like a message
@@ -136,6 +142,34 @@ public static class SessionBriefing
         + (task.Status == TaskStatus.Done
             ? $"\nYour task is done. If this comment gives you more work on it, run {Shim} task join {task.Id.ToString()[..8]} --session <your session id> to put it back in progress; if it only asks about the finished work, leave it done.\n"
             : "");
+
+    /// <summary>
+    /// What the task's session reads when Petre presses Reevaluate on the task (task 3dd07539): check where the task
+    /// really stands and put right what Deskbar shows about it. Delivered on a comment's roads (the app's CommentWaker),
+    /// so an idle or ended session gets it too.
+    /// </summary>
+    // WHY (task 3dd07539, from task daeaa26c, 2026-11-26): a session that had asked "Merge #599" kept its task waiting on
+    // Petre after the merge, because it was watching the release run instead of settling its question, and he had to point
+    // it out. The button is his one-click "look again". The message carries what Deskbar shows now (status, question,
+    // status line, pull requests), so the session compares the board with the truth instead of with its memory, and names
+    // the one command for each thing that can be stale. It asks for a check with gh and git, not a recollection.
+    public static string Reevaluate(TaskItem task) =>
+        $"{ReevaluateOpening}{task.Id.ToString()[..8]} \"{Cut(task.Title)}\": check where it really stands now and fix what Deskbar shows about it.\n\n"
+        + "What Deskbar shows now:\n"
+        + $"- status: {StatusText(task.Status)}\n"
+        + (task.Question.HasValue ? $"- your question: \"{Cut(task.Question.Value, QuestionLength)}\"\n" : "")
+        + (task.StatusLine.Length > 0 ? $"- status line: \"{task.StatusLine}\"\n" : "- status line: none\n")
+        + (task.PullRequests.Count > 0 ? $"- pull requests: {string.Join(", ", task.PullRequests.Select(p => p.Url))}\n" : "")
+        + "\nCheck each against the facts (gh pr view, gh run list, git log), not from memory, then:\n"
+        + $"- a question that is already settled (its pull request merged or closed, the decision made): run {Shim} task answered --session <your session id>\n"
+        + $"- a question that still holds but no longer says what the user must do now: ask again with {Shim} task ask - --session <your session id>, the text on stdin\n"
+        + $"- work that is finished with nothing waiting on the user: run {Shim} task done --session <your session id>, with what to try in the status line\n"
+        + $"- a task marked done whose work is not finished after all: run {Shim} task join {task.Id.ToString()[..8]} --session <your session id> and carry on\n"
+        + $"- a status line that no longer says where the task stands: rewrite it with {Shim} task status-line - --session <your session id>\n"
+        + "If everything is already right, change nothing. Say in one short line what you changed, then stop.\n";
+
+    // How much of the question the Reevaluate message quotes: enough to recognise it, short enough not to bury the steps.
+    const int QuestionLength = 300;
 
     /// <summary>
     /// What a session reads when it starts, resumes, clears or compacts: its own task when it has one, otherwise the
