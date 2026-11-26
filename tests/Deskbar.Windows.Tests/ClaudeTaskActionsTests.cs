@@ -310,6 +310,31 @@ public class ClaudeTaskActionsTests
         Assert.Empty(expired.Launches);
     }
 
+    // Task 6a57f59b: CanOpen answers what Go would do, so a line offers Open Claude only where the click opens something.
+    // A listed session opens, an ended one with its transcript resumes, and with no list at all the editor is tried. An
+    // ended session that cannot be resumed (the App's seam also says no once its worktree is gone) and a task with no
+    // session at all have nothing to open.
+    [Fact]
+    public void Can_open_only_a_session_the_click_can_reach()
+    {
+        using var rig = new Rig();
+        var task = rig.ClaudeTask();
+        Assert.True(rig.Actions.CanOpen(task));
+        rig.Listed(Agent(SessionId, background: true));
+        Assert.True(rig.Actions.CanOpen(task));
+        rig.Listed();
+        Assert.True(rig.Actions.CanOpen(task));
+
+        rig.Transcript = _ => false;
+        Assert.False(rig.Actions.CanOpen(task));
+        // Listed, it opens whatever the disk says: the list is what Go goes by first.
+        rig.Listed(Agent(SessionId, background: true));
+        Assert.True(rig.Actions.CanOpen(task));
+
+        var note = rig.Tasks.AddNote("Dishwasher tablets", rig.Sparrow).Value;
+        Assert.False(rig.Actions.CanOpen(note));
+    }
+
     // A session someone is sitting in (VS Code, a terminal) cannot be attached to: its editor window comes forward, as
     // the bar's icon finds it. With no list at all ("cannot tell") nothing is resumed or attached, the editor is all.
     [Fact]
@@ -399,6 +424,30 @@ public class ClaudeTaskActionsTests
         menu.IsOpen = false;
         Assert.Equal([("Write the docs", @"C:\repos\Deskbar")], rig.Starts);
     });
+
+    // Task 6a57f59b (Petre: "and it's waiting on me"): a task the keeper gave up on (its session could not be resumed)
+    // waits on Petre with the give-up's question. A fresh session started on it answers that, so the task is back In
+    // progress with no question. A question of the session's own is left alone by a start.
+    [Fact]
+    public void A_start_clears_the_keepers_give_up_and_nothing_else()
+    {
+        using var rig = new Rig();
+        var task = rig.ClaudeTask();
+        rig.Listed();
+        Assert.True(rig.Tasks.Ask(task.Id, SessionKeeper.ResumeFailed).IsSuccess);
+
+        Assert.True(rig.Actions.Start(rig.TaskOf(task.Id), Folder).IsSuccess);
+        rig.Settle();
+        Assert.Equal(Deskbar.Core.Tasks.TaskStatus.InProgress, rig.TaskOf(task.Id).Status);
+        Assert.False(rig.TaskOf(task.Id).Question.HasValue);
+
+        var asked = rig.ClaudeTask("Merge it", "aaaaaaaa-0000-0000-0000-000000000001");
+        Assert.True(rig.Tasks.Ask(asked.Id, "Merge PR 512").IsSuccess);
+        Assert.True(rig.Actions.Start(rig.TaskOf(asked.Id), Folder).IsSuccess);
+        rig.Settle();
+        Assert.Equal(Deskbar.Core.Tasks.TaskStatus.WaitingOnYou, rig.TaskOf(asked.Id).Status);
+        Assert.Equal("Merge PR 512", rig.TaskOf(asked.Id).Question.GetValueOrDefault());
+    }
 
     // Review Focus 4: an untrusted folder. Claude's own words go into the thread, and Petre is offered a plain terminal
     // there (`wt -w new -d <folder> claude`) to accept the trust prompt himself; no second start, no retry.

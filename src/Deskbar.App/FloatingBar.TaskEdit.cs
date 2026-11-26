@@ -49,6 +49,12 @@ public partial class FloatingBar
     /// </summary>
     internal Func<Guid, ContextMenu?>? StartClaude { get; init; }
 
+    /// <summary>
+    /// Whether going to a Claude task's session can open anything (task 6a57f59b): the App's ClaudeTaskActions.CanOpen.
+    /// Decides between a line menu's Open Claude and Start Claude on this. Unset (the tests), every session counts as openable.
+    /// </summary>
+    internal Func<TaskItem, bool>? OpensClaudeSession { get; init; }
+
     /// <summary>"Open in window" (task dca4ebeb): the App's TasksBoard.OpenWindow. Unset, the item is not shown.</summary>
     internal Action<Guid>? OpenTaskWindow { get; init; }
 
@@ -92,7 +98,9 @@ public partial class FloatingBar
         // on the line, so nothing opens first. Only on a Claude task: a note has no session, and its go is the workspace
         // switch a row of the bar already gives. Run once this menu has closed, so the window it brings forward is not
         // brought forward under an open menu.
-        if (line.Claudes)
+        // Only while the click can open the session (task 6a57f59b, TaskLine.OpensSession): a session whose worktree was
+        // removed or whose transcript is gone gets Start Claude on this below instead, rather than an item that does nothing.
+        if (line.Claudes && line.OpensSession)
             menu.Items.Add(TaskMenuItem(TasksWindow.OpenClaudeText, () => Dispatcher.BeginInvoke(() => OnTaskLineGo(line),
                 System.Windows.Threading.DispatcherPriority.Input)));
         // Task 9: handing the task to Claude, right after Edit (the spec, "Where the clicks are"). Run once this menu has

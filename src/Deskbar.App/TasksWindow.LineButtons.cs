@@ -181,9 +181,11 @@ public partial class TasksWindow
         VerticalAlignment = VerticalAlignment.Center,
     };
 
-    // Whether a line has the Start Claude button: an open task no session has joined, while Deskbar can start one.
+    // Whether a line has the Start Claude button: an open task no session has joined, or one whose session cannot be
+    // opened any more (task 6a57f59b, TaskRowView.OpensSession: its worktree removed, its transcript gone), while Deskbar
+    // can start one. Exactly the lines OpensClaude leaves out, so the column has one Claude button, never both.
     bool StartsClaude(TaskRowView row) =>
-        !row.Claudes && !row.Closing && row.Status != TaskStatus.Closed && Actions?.StartClaude is not null;
+        !row.OpensSession && !row.Closing && row.Status != TaskStatus.Closed && Actions?.StartClaude is not null;
 
     // The assignee's choices under the line's button, as the "⋯" menu's "Assign to" submenu lists them.
     // Internal, answering the menu, for the tests.

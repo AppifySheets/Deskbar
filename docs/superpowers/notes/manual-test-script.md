@@ -1298,6 +1298,11 @@ TB1. Open the thread of a Claude task with one session, still working or idle: i
      **Open Claude** goes to the session, as the line's double-click does. Once that session has ended the row reads
      the same (task 5e02e99f): **Open Claude** resumes it, and **Start Claude on this** does not join the row. Only a
      task whose session has expired (its transcript deleted) has **Start Claude on this** in **Open Claude**'s place.
+TB1a. (Task 6a57f59b.) Take a Claude task whose session ran in a git worktree that has since been removed (a merged
+     PR's task, once its worktree is cleaned up). Its line in the tasks panel shows the plain spark, Start Claude on
+     this, not the orange one; its "⋯" menu and its menu on the bar have **Start Claude on this** and no **Open
+     Claude**; its thread's row agrees. Press the spark: Claude starts in the repo the worktree belonged to and a
+     window opens on it. Before the fix the orange spark showed and a press did nothing at all.
 TB2. Open the thread of a note: the row reads **Open in window**, **Start Claude on this**, **Add subtask**. Press
      **Add subtask**: the box opens right under the row and the button leaves the row; Esc brings it back.
 TB3. Open the thread of a task with two sessions: each session line that can be opened has its Open again. Narrow

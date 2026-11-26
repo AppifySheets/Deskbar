@@ -188,6 +188,27 @@ public sealed class ClaudeTaskActions : IDisposable
         Resume(task, session);
     }
 
+    /// <summary>
+    /// Whether going to the task's Claude session (Go, Open Claude) can open anything: the session it goes to
+    /// (TaskViews.SessionToGoTo) is listed as running, or can be resumed. Answered by the same steps Open takes, so a
+    /// line or menu that offers Open Claude never offers a click that ends in Open's silent "has expired, nothing to
+    /// open" (task 6a57f59b). With no list to go by ("cannot tell", the feature off or `claude` unreadable) Open goes to
+    /// the session's editor window, so this says yes.
+    /// </summary>
+    //
+    // TASK 6a57f59b (Petre, a screenshot of "background sleep probe" and its thread of "was resumed, but Claude Code did
+    // not list it", then "doesn't open claude ... and it's waiting on me"): the session's git worktree had been removed,
+    // so since task 0bdf74d0 the session counts as expired (ClaudeSessions.Resumable) and the thread offered Start Claude
+    // on this. But the line's orange Claude icon and both lines' "Open Claude" menu items went by IsClaudes alone, so they
+    // still offered Open Claude, whose click only wrote a trace line. Every place now asks this instead, and a task whose
+    // session cannot come back offers Start Claude on this there, as its thread does.
+    public bool CanOpen(TaskItem task) =>
+        TaskViews.SessionToGoTo(task).Map(session =>
+                Latest is not { HasValue: true } listed
+                || listed.Value.Any(a => a.SessionId == session.Id)
+                || seams.TranscriptExists(session))
+            .GetValueOrDefault(false);
+
     // An interactive session's window, as the bar found it before: the VS Code window showing its folder.
     void ToEditor(string folder, string sessionId) =>
         seams.EditorWindow(folder).Tap(hwnd => seams.BringForward(new WindowHandle(hwnd))
@@ -438,12 +459,25 @@ public sealed class ClaudeTaskActions : IDisposable
             .ObserveOn(scheduler)
             .Subscribe(
                 started => started.Match(
-                    sessionId => Current(task.Id).Where(_ => !quiet).Tap(t =>
-                        Attach(t, new ClaudeAgent(sessionId, Maybe<string>.None, folder, Background: true, Busy: false, Name: ""))),
+                    sessionId =>
+                    {
+                        ClearGiveUp(task.Id);
+                        Current(task.Id).Where(_ => !quiet).Tap(t =>
+                            Attach(t, new ClaudeAgent(sessionId, Maybe<string>.None, folder, Background: true, Busy: false, Name: "")));
+                    },
                     Failed),
                 error => Failed(error.Message));
         return Result.Success();
     }
+
+    // A fresh session now works on a task the keeper had given up on (task 6a57f59b; Petre, of a task whose session could
+    // not be resumed because its worktree was gone: "and it's waiting on me"). The give-up's question ("Deskbar could not
+    // resume this session...") kept the task in Waiting on you, though the start had answered it: back to In progress,
+    // as a resumed session does in Shown. Any other question stays, since it is the session's own and still open.
+    void ClearGiveUp(Guid taskId) =>
+        Current(taskId).Where(SessionKeeper.GivenUp).Tap(given =>
+            tasks.SetStatus(given.Id, Deskbar.Core.Tasks.TaskStatus.InProgress)
+                .TapError(e => trace?.Invoke($"claude actions: give-up on {given.Id} not cleared after a start: {e}")));
 
     // No Claude Code at all comes first (see the header): the install question instead of the failure. Otherwise Claude's
     // words in the thread; an untrusted folder (measured: "Workspace not trusted. Run `claude` in <folder> once

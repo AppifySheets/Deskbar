@@ -627,6 +627,9 @@ public partial class TasksWindow : Window
     static string ListRowSignature(TaskRowView r) =>
         $"{r.Id}|{r.Title}|{r.Detail}|{r.Description}|{r.Status}|{r.Claudes}|{r.Assignee.Id}|{r.Sessions}|{r.SessionCount}|{r.LiveCount}|{PlaceSignature(r.Place)}|{r.CommentCount}|" +
         $"{r.Expanded}|{r.Closing}|{r.Important}|{r.Urgent}|{r.WorkingCount}|{r.ParentTitle}|{r.ParentId}|{r.SubtaskCount}|{r.ClaudeWorking}|{r.Nested}|" +
+        // Which Claude button the line has (task 6a57f59b, OpensSession): it changes when the first agents list arrives or
+        // a session's worktree goes, with nothing else on a closed line changing, so without it the orange icon would stay.
+        $"{r.OpensSession}|" +
         // The ring or the disc, the chip's word and the tooltip line (task 8470d176): GitHub's answer changes nothing else.
         $"{r.Delivery.Stage}|{r.Delivery.Note}|{r.Problem}|" +
         SubtasksSignature(r) + "|" +
@@ -1160,8 +1163,11 @@ public partial class TasksWindow : Window
                 OpenClaudeText, () => Actions?.Go(row.Id), "Open Claude: go to its session without opening the task")
             : null;
 
-    // Whether a line has the Open Claude button: a Claude task that is open and not in its undo window.
-    static bool OpensClaude(TaskRowView row) => row.Claudes && !row.Closing && row.Status != TaskStatus.Closed;
+    // Whether a line has the Open Claude button: a Claude task that is open, not in its undo window, and whose session the
+    // click can open (TaskRowView.OpensSession, task 6a57f59b). A task whose session cannot come back (its worktree was
+    // removed, or its transcript is gone) has Start Claude on this in that column instead (StartsClaude), as its thread
+    // and its menu do: an orange icon whose click opened nothing is what Petre reported as "doesn't open claude".
+    static bool OpensClaude(TaskRowView row) => row.Claudes && row.OpensSession && !row.Closing && row.Status != TaskStatus.Closed;
 
     // The slim line's age column (2026-11-24, the age moved off the bar), wide enough that the text never trims. The
     // widest age TaskAge.Format writes is one in hours and minutes, "23h59m": "m" is its widest letter. Measured from
@@ -1909,7 +1915,7 @@ public partial class TasksWindow : Window
           // Whether there is a session to open decides which Claude button is in the row at the thread's top (task
           // 5e02e99f: Open Claude, or "Start Claude on this" once the session has expired). The two differ in width, so
           // the swap moves "Add subtask" beside them and must start the guard, or a click meant for it lands elsewhere.
-          + (row.HasSessionToOpen ? "opens" : "") + "/"
+          + (row.OpensSession ? "opens" : "") + "/"
           // A subtask open in place (task 0eb943d8) puts its whole thread inside this one.
           + string.Join(',', row.Subtasks.Select(c => $"{c.Id}" + (c.Row is { } open ? "[" + ThreadLayoutKey(open) + "]" : ""))) + "/"
           // Task links: the link lines and an open picker sit above the comments, so each moves them.
@@ -2020,8 +2026,8 @@ public partial class TasksWindow : Window
     //   Open in window        the task in a window of its own (task dca4ebeb): the thread is where a long task stops fitting;
     //   Open Claude           a Claude task's session, the line's own Open Claude button and its double-click (Actions.Go,
     //                         task 7f61af2e), here so the thread has it too; tagged so the session line can leave its Open
-    //                         off. Only while there is a session it can open (TaskRowView.HasSessionToOpen): running, or
-    //                         ended, which it resumes;
+    //                         off. Only while there is a session it can open (TaskRowView.OpensSession, the line's own
+    //                         rule since task 6a57f59b): running, or ended, which it resumes;
     //   Start Claude on this  only where Open Claude is not: a task no session has joined, or one whose session has
     //                         expired, so nothing is left to open;
     //   Reevaluate            beside Open Claude (task 3dd07539, "move it as a button at the top"): the session checks
@@ -2042,7 +2048,7 @@ public partial class TasksWindow : Window
         if (Actions?.OpenWindow is { } openWindow)
             buttons.Add(Small(OpenInWindowText, OpenInWindowText, () => openWindow(row.Id),
                 "Read and edit the whole task in a window of its own"));
-        var openClaude = Actions is not null && OpensClaude(row) && row.HasSessionToOpen;
+        var openClaude = Actions is not null && OpensClaude(row);
         if (openClaude)
             buttons.Add(Small(OpenClaudeText, OpenClaudeText, () => Actions?.Go(row.Id),
                 "Go to this task's Claude session, resuming it first if it has ended"));
@@ -2719,7 +2725,8 @@ public partial class TasksWindow : Window
             // that picks the task and opens its thread first (Ruling 54). Only on a Claude task, which has a session to
             // open; a note's go is a workspace switch. Run once this menu has closed, as the items below are, so the
             // window it brings forward does not come up under an open menu.
-            if (row.Claudes)
+            // Only while the click can open the session (OpensClaude, task 6a57f59b); otherwise Start Claude on this below.
+            if (OpensClaude(row))
                 menu.Items.Add(Item(OpenClaudeText, () => Dispatcher.BeginInvoke(() => Actions?.Go(id), System.Windows.Threading.DispatcherPriority.Input)));
             // Task 9: handing the task to Claude, right after Edit (the spec, "Where the clicks are"). Run once this menu
             // has closed: it may ask a question or open a pick list of folders at the pointer.

@@ -110,7 +110,8 @@ public class FloatingBarTaskListTests
         Func<nint, bool>? onCurrentDesktop = null, Func<DateTimeOffset>? taskNow = null, Action<Guid>? openTask = null,
         Func<TaskItem, Maybe<string>>? goalTitle = null, IObservable<System.Reactive.Unit>? goalChanges = null,
         Func<Guid, ContextMenu?>? startClaude = null, IObservable<bool>? panelShown = null, string? stateDir = null,
-        Action<Guid>? openParent = null, Action? openManager = null, Func<ManagerAsk?>? managerAsks = null)
+        Action<Guid>? openParent = null, Action? openManager = null, Func<ManagerAsk?>? managerAsks = null,
+        Func<TaskItem, bool>? opensClaudeSession = null)
     {
         var harness = Harness.Build();
         var minutes = 0;
@@ -146,6 +147,7 @@ public class FloatingBarTaskListTests
             GoalTitle = goalTitle ?? (_ => Maybe<string>.None),
             GoalChanges = goalChanges,
             StartClaude = startClaude,
+            OpensClaudeSession = opensClaudeSession,
             OpenParentTask = openParent,
             // Pictures pasted into the add box are written here, never into the real profile.
             TaskStateDir = stateDir ?? Path.GetTempPath(),
@@ -3464,6 +3466,31 @@ public class FloatingBarTaskListTests
         Assert.DoesNotContain(noteMenu.Items.OfType<MenuItem>(), i => i.Header is TextBlock { Text: "Open Claude" });
         Assert.Contains(noteMenu.Items.OfType<MenuItem>(), i => i.Header is TextBlock { Text: "Start Claude on this" });
         noteMenu.IsOpen = false;
+    });
+
+    // Task 6a57f59b (Petre: "doesn't open claude", on a task whose session's worktree had been removed): a Claude task
+    // whose session cannot be opened (OpensClaudeSession, the App's ClaudeTaskActions.CanOpen) has Start Claude on this
+    // in its menu, as a note has, never an Open Claude whose click opens nothing.
+    [Fact]
+    public void A_bar_line_whose_session_cannot_be_opened_offers_Start_Claude() => StaThread.Run(() =>
+    {
+        var started = new List<Guid>();
+        using var t = Build(startClaude: id =>
+        {
+            started.Add(id);
+            return null;
+        }, opensClaudeSession: _ => false);
+        var id = t.Tasks.Create("background sleep probe", t.Gepha, Session("s1")).Value.Id;
+        t.Tasks.MarkDone(id); // Done: a Claude task shows on the bar while it needs him (Ruling 48)
+
+        var menu = t.Bar.OpenTaskLineMenu(id)!;
+        var items = menu.Items.OfType<MenuItem>().ToList();
+        Assert.DoesNotContain(items, i => i.Header is TextBlock { Text: "Open Claude" });
+        var start = items.Single(i => i.Header is TextBlock { Text: "Start Claude on this" });
+        start.RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+        menu.IsOpen = false;
+        t.Bar.Dispatcher.Invoke(() => { }, System.Windows.Threading.DispatcherPriority.ApplicationIdle);
+        Assert.Equal([id], started);
     });
 
     // --- subtasks (docs/superpowers/specs/2026-11-24-subtasks-design.md, "Making subtasks", Petre's pick A) ----------

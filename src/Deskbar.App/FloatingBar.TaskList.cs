@@ -539,7 +539,7 @@ public partial class FloatingBar
     /// </summary>
     internal static IReadOnlyList<TaskLine> Lines(TaskBoard board, Func<Guid, Maybe<string>> workspaceName,
         Func<Guid, Brush?> colour, Func<string, Maybe<nint>> sessionWindow, Func<TaskItem, Maybe<string>>? goalTitle = null,
-        Func<TaskItem, TaskDelivery>? delivery = null) =>
+        Func<TaskItem, TaskDelivery>? delivery = null, Func<TaskItem, bool>? opensSession = null) =>
         // A snoozed task is off the bar until it comes back (task 6da8d7eb, TaskItem.SnoozedUntil); the tasks panel's
         // "Snoozed" filter is where it can be found meanwhile.
         // The Done tasks show the full discs first, then the hollow rings (task a1debf34, TaskBoard.Pinned).
@@ -565,6 +565,9 @@ public partial class FloatingBar
             SubtaskCount = board.OpenSubtaskCount(t.Id),
             // Whether a Done task's change runs in this Deskbar yet: the ring, or the disc (task 8470d176).
             Delivery = delivery?.Invoke(t) ?? TaskDelivery.None,
+            // Whether the line menu's Open Claude can open anything (task 6a57f59b, ClaudeTaskActions.CanOpen). Without
+            // the App's answer (the tests) a Claude task's session counts as openable, as before.
+            OpensSession = t.IsClaudes && (opensSession?.Invoke(t) ?? true),
         }).ToArray();
 
     // SUBTASKS UNDER THEIR PARENT (follow-up to the subtasks spec; Petre's screenshot of "↳ test1" four lines above its
@@ -1123,7 +1126,10 @@ public partial class FloatingBar
         // The bar's lines in the pile's order; UnderParents draws subtasks under their parent. WithPendingCloses does it
         // again with the lines in their undo window among them (review of #467, finding 4).
         var flat = Lines(taskService.Board, WorkspaceName, id => workspaceAccents.GetValueOrDefault(id), SessionWindow, GoalTitle,
-                taskService.DeliveryOf)
+                taskService.DeliveryOf,
+                // Asked only of the lines the bar keeps (NeedsYou): the others are dropped below, so their folders and
+                // transcripts are not looked up on every paint (task 6a57f59b review).
+                OpensClaudeSession is { } opens ? t => t.Assignee.IsMe && opens(t) : null)
             .Where(NeedsYou).ToArray();
         // The tasks panel's "Subtasks" checkbox applies here too (task 173ef268; Petre, with a screenshot of the bar's
         // Warehouse parent and its subtasks under it: "same checkbox"). One setting, saved by the panel, so the bar and
@@ -1340,7 +1346,7 @@ public partial class FloatingBar
 
     // Everything a line shows, as text, so two paints can be compared without drawing anything.
     static string ShapeOf(TaskLine line) =>
-        $"{line.Id}|{line.Status}|{line.Title}|{line.Detail}|{line.Claudes}|{line.WorkspaceName}|" +
+        $"{line.Id}|{line.Status}|{line.Title}|{line.Detail}|{line.Claudes}|{line.OpensSession}|{line.WorkspaceName}|" +
         $"{(line.Colour as SolidColorBrush)?.Color}|{line.Window.Match(w => w.ToString(), () => "")}|{line.Closing}|" +
         $"{line.Important}|{line.Urgent}|{line.StartsGroup}|{line.GoalTitle}|{line.Assignee.Id}|" +
         // Subtasks: the parent's title (the arrow's tooltip), the count, and where the line is drawn. A count can change
@@ -2612,6 +2618,12 @@ internal sealed record TaskLine(Guid Id, string Title, string Detail, TaskStatus
 
     /// <summary>The task's two flags (Task 12), drawn in the title: bold for important, italic for urgent (Ruling 59).</summary>
     public bool Important { get; init; }
+
+    /// <summary>
+    /// Whether the line menu's Open Claude can open anything (task 6a57f59b): a Claude task whose session to go to runs or
+    /// can be resumed. False, the menu offers Start Claude on this instead, as the tasks panel's line and thread do.
+    /// </summary>
+    public bool OpensSession { get; init; }
 
     public bool Urgent { get; init; }
 

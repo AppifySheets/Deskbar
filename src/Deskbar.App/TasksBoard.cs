@@ -124,6 +124,8 @@ public sealed class TasksBoard : IDisposable
     readonly Func<TaskItem, string, Result>? openSession;
     readonly Func<TaskItem, int> workingOf;
     readonly Func<bool> knowsActivity;
+    // Whether Open Claude on a task can open anything (task 6a57f59b; the App's ClaudeTaskActions.CanOpen): TaskRowView.OpensSession.
+    readonly Func<TaskItem, bool> opensSession;
     // "Stop Claude and close" (task 37cd7081): the App's ClaudeTaskActions.StopAndClose. None (the tests): the close alone.
     readonly Func<TaskItem, Result>? stopClaudeAndClose;
     readonly IDisposable subscriptions;
@@ -221,19 +223,24 @@ public sealed class TasksBoard : IDisposable
     //   knowsActivity whether workingOf has a list to go by (task 10b49554, ClaudeTaskActions.KnowsActivity). While it
     //                 has none the block stays whole, as before the split, rather than showing every task idle.
     //                 None: known exactly when workingOf was given
+    //   opensSession  whether Open Claude on a task can open anything (task 6a57f59b, ClaudeTaskActions.CanOpen): the line's
+    //                 Claude icon, its menu and its thread offer Open Claude only then, else Start Claude on this. None:
+    //                 judged on sessionsOf, the thread's own rule (TaskRowView.HasSessionIn)
     // Internal because TasksPanel is: only the App and the tests build a board.
     internal TasksBoard(TasksWindow window, TasksPanel panel, TaskService tasks, WorkspaceManager manager, Func<TaskItem, Result> goTo,
         Func<Guid, Brush?>? colourOf = null, Func<nint, bool>? bringForward = null, Func<TimeSpan, Action, IDisposable>? undoTimer = null,
         Func<DateTimeOffset>? now = null, TaskSelection? selection = null, GoalService? goals = null,
         Func<TaskItem, IReadOnlyList<SessionView>>? sessionsOf = null, Action<Guid>? startClaude = null,
         Func<TaskItem, string, Result>? openSession = null, IObservable<System.Reactive.Unit>? sessionsChanged = null,
-        Func<TaskItem, int>? workingOf = null, Func<TaskItem, Result>? stopClaudeAndClose = null, Func<bool>? knowsActivity = null)
+        Func<TaskItem, int>? workingOf = null, Func<TaskItem, Result>? stopClaudeAndClose = null, Func<bool>? knowsActivity = null,
+        Func<TaskItem, bool>? opensSession = null)
     {
         this.workingOf = workingOf ?? (_ => 0);
         this.knowsActivity = knowsActivity ?? (workingOf is null ? () => false : () => true);
         this.stopClaudeAndClose = stopClaudeAndClose;
         this.goals = goals;
         this.sessionsOf = sessionsOf ?? (task => TaskViews.SessionList(task, Maybe<IReadOnlyCollection<ClaudeAgent>>.None, _ => true));
+        this.opensSession = opensSession ?? (task => TaskRowView.HasSessionIn(this.sessionsOf(task)));
         this.openSession = openSession;
         this.window = window;
         this.panel = panel;
@@ -1455,6 +1462,10 @@ public sealed class TasksBoard : IDisposable
         SessionList = open ? sessionsOf(task) : [],
         // Of its live sessions, how many Claude is busy in now (Task 8): their squares wear a halo.
         WorkingCount = workingOf(task),
+        // Whether Open Claude can open anything (task 6a57f59b): asked of every Claude task's line, not only an open one,
+        // since the line's Claude icon and its menu need it. Its cost is one session's folder and transcript on disk.
+        // A closed task has neither Claude button, so it is not asked (its folder and transcript would be looked up for nothing).
+        OpensSession = task.IsClaudes && task.Status != TaskStatus.Closed && opensSession(task),
         // Subtasks (Petre's pick A): the parent's title in front of a subtask's, and a parent's open subtasks' count.
         ParentTitle = tasks.Board.ParentOf(task).Map(p => (string?)FloatingBar.FirstLine(p.Title)).GetValueOrDefault(),
         // ...and the parent's id, for the subtask's way back to it (task 54b39c4c: "Subtask of" in the thread, "Open
@@ -1712,9 +1723,20 @@ internal sealed record TaskRowView(Guid Id, string Title, string Detail, TaskSta
     // sessions the list no longer shows, which every readable poll does. In the one poll between, on a task with two or
     // more sessions, the button can be judged on a different session than the click goes to; each session line has its
     // own Open then (two or more sessions), so there is a way round, and the next poll puts it right.
-    public bool HasSessionToOpen =>
-        (SessionList.FirstOrDefault(s => s.State is SessionState.Working or SessionState.Idle) ?? SessionList.FirstOrDefault())
+    public bool HasSessionToOpen => HasSessionIn(SessionList);
+
+    /// <summary>HasSessionToOpen's rule over any list of sessions, for TasksBoard's default OpensSession.</summary>
+    public static bool HasSessionIn(IReadOnlyList<SessionView> sessions) =>
+        (sessions.FirstOrDefault(s => s.State is SessionState.Working or SessionState.Idle) ?? sessions.FirstOrDefault())
             is { State: not SessionState.Expired };
+
+    /// <summary>
+    /// Whether Open Claude on this line can open anything (task 6a57f59b): a Claude task whose session to go to is running
+    /// or can be resumed (ClaudeTaskActions.CanOpen in the app). Set on every line, open or not, unlike SessionList. The
+    /// line's Claude icon, its menu and its thread offer Open Claude when it is true, and Start Claude on this when it is
+    /// not (TasksWindow.OpensClaude, StartsClaude).
+    /// </summary>
+    public bool OpensSession { get; init; }
 
     /// <summary>
     /// How many of the task's live sessions Claude is working in right now (tasks panel plan, Task 8): the first that many

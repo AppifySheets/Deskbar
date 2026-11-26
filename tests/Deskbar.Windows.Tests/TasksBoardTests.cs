@@ -4547,6 +4547,52 @@ public class TasksBoardTests
         Assert.Equal(["Open in window", "Start Claude on this", "Add subtask"], Words());
     });
 
+    // Task 6a57f59b (Petre, on a task whose session's worktree had been removed: "doesn't open claude"): the thread offered
+    // Start Claude on this, but the line's orange Claude icon and its menu still offered Open Claude, whose click opened
+    // nothing. The line and the menu now follow the same rule (opensSession, the App's ClaudeTaskActions.CanOpen): Open
+    // Claude while the session can be opened, Start Claude on this once it cannot, one or the other, never both.
+    [Theory]
+    [InlineData(Wide)]
+    [InlineData(TasksPanelLayout.SlimBelow - 1)]
+    public void A_line_whose_session_cannot_be_opened_offers_Start_Claude(double width) => StaThread.Run(() =>
+    {
+        var started = new List<Guid>();
+        // Idle at first, then Expired, as the App lists a session whose worktree was removed (ClaudeSessions.Resumable
+        // says no). The change arrives as a sessions pulse with nothing else on the line changing (the review's case: the
+        // first agents list after a start), so the line must redraw on it alone.
+        var state = SessionState.Idle;
+        var changed = new System.Reactive.Subjects.Subject<System.Reactive.Unit>();
+        using var t = Build(width: width, startClaude: started.Add, openSession: (_, _) => Result.Success(),
+            sessionsOf: task => TaskViews.SessionList(task, Maybe<IReadOnlyCollection<ClaudeAgent>>.None, _ => true)
+                .Select(v => v with { State = state }).ToList(),
+            sessionsChanged: changed);
+        var id = t.Tasks.Create("background sleep probe", t.Gepha, Session("s1")).Value.Id;
+        t.Controller.Show();
+        t.Window.UpdateLayout();
+
+        IReadOnlyList<string?> LineWords() => Inside(LineOf(t.Window, id)).OfType<Button>().Select(AutomationProperties.GetName).ToList();
+        Assert.Contains("Open Claude", LineWords());
+        Assert.DoesNotContain(TasksWindow.StartClaudeText, LineWords());
+
+        state = SessionState.Expired;
+        changed.OnNext(System.Reactive.Unit.Default);
+        t.Window.UpdateLayout();
+        Assert.DoesNotContain("Open Claude", LineWords());
+        var start = ButtonNamed(LineOf(t.Window, id), TasksWindow.StartClaudeText);
+        // The spark in the plain ink: the colour says there is no session to open.
+        var mark = Inside(start).OfType<System.Windows.Shapes.Path>().Single(p => TasksWindow.ClaudeMarkTag.Equals(p.Tag));
+        Assert.Same(TasksWindow.ClaudeNoSessionInk, mark.Stroke);
+        Click(start);
+        Assert.Equal([id], started);
+        Assert.Empty(t.WentTo);
+
+        var menu = t.Window.OpenMenuFor(id);
+        var items = menu.Items.OfType<MenuItem>().Select(i => i.Header as string ?? (i.Header as TextBlock)?.Text).ToList();
+        menu.IsOpen = false;
+        Assert.DoesNotContain(TasksWindow.OpenClaudeText, items);
+        Assert.Contains(TasksWindow.StartClaudeText, items);
+    });
+
     // Task 3dd07539 (Petre, on Reevaluate in the "⋯" menu: "move it as a button at the top"): an open Claude task's thread
     // has Reevaluate in its row of buttons at the top, waiting on him or in progress, at every width, and the line and
     // the "⋯" menu have none. A click asks the session (Reevaluations) and writes Deskbar's line. A note has no button.

@@ -2234,6 +2234,9 @@ public partial class App : Application
                 SessionWindow = SessionWindowOf,
                 // A line menu's "Start Claude on this" (Task 9): ClaudeTaskActions.Offer, which may open a pick list.
                 StartClaude = id => claudeActions?.Offer(id),
+                // Whether a line menu offers Open Claude or Start Claude on this (task 6a57f59b): the click's own test.
+                // Before the actions exist, a session counts as openable, as it always did.
+                OpensClaudeSession = task => claudeActions?.CanOpen(task) ?? true,
                 // A tick on a task Claude is still working on (task 37cd7081): ClaudeTaskActions.StopAndClose, which closes
                 // it and then stops its background sessions.
                 StopClaudeAndClose = id => tasks!.Board.Tasks.TryFirst(t => t.Id == id).ToResult($"No task with id {id}")
@@ -2623,6 +2626,9 @@ public partial class App : Application
                 // Task 8): their squares wear a halo. 0 before the first list; each new list pulses sessionsChanged
                 // above, which redraws a line whose count moved.
                 workingOf: task => claudeActions?.WorkingCount(task) ?? 0,
+                // Whether Open Claude on a task can open anything (task 6a57f59b): the line's Claude icon, its menu and its
+                // thread offer Start Claude on this instead when its session cannot come back (a removed worktree).
+                opensSession: task => claudeActions?.CanOpen(task) ?? true,
                 // Whether there is a list to split the Claude working block by (task 10b49554): until the first one,
                 // and while the feature is off, the block stays whole rather than showing every task idle.
                 knowsActivity: () => claudeActions?.KnowsActivity ?? false,
