@@ -155,7 +155,7 @@ public partial class TasksWindow
             Background = InboxLook.Raised,
             ToolTip = InboxMarks.WordsOf(line.Mark),
         };
-        var icon = InboxMarks.Icon(InboxMarks.IconOf(line.Mark), 18, InboxMarks.InkOf(line.Mark), InboxLook.Raised);
+        var icon = InboxMarks.Icon(InboxMarks.IconOf(line.Mark), 18, InboxMarks.InkOf(line.Mark), InboxLook.Raised, turning: line.Mark == InboxMark.Working);
         if (row.Closing)
             tile.Child = Centred(TickOf(row.Id, row.Status, row.Closing, ""));
         else if (line.Mark == InboxMark.Note)

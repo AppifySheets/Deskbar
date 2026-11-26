@@ -753,7 +753,8 @@ public partial class TasksWindow : Window
         current.ToolTip = "Only the tasks of the workspace you are on, following you when you switch desktops";
         // A screen reader hears it as a checkbox's state, the same word the tests read.
         AutomationProperties.SetItemStatus(current, following ? "checked" : "unchecked");
-        Filters.Children.Add(current);
+        // Not in the Inbox's Filter sheet: its header's "This workspace | Everywhere" is this switch (task 740a2231).
+        if (view.Inbox is null) Filters.Children.Add(current);
         CurrentWorkspaceOn = following;
         Button? workspace = null;
         workspace = Flat(new TextBlock { Text = $"{view.WorkspaceFilterLabel} ▾", Foreground = Ink, FontSize = 11 }, "Workspace filter",
