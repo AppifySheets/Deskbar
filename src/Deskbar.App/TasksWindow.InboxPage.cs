@@ -241,7 +241,6 @@ public partial class TasksWindow
             DockPanel.SetDock(bottom, Dock.Bottom);
             dock.Children.Add(bottom);
         }
-        if (PermissionCards(row) is { } cards) { DockPanel.SetDock(cards, Dock.Bottom); dock.Children.Add(cards); }
         // A CHAT READS FROM THE BOTTOM UP (the PM's fix 1 after checkpoint 1). A body shorter than the page sits at its
         // bottom, so the comment box is at the bottom edge and the empty room is on top; a longer one scrolls. The
         // scroller arranges its content at least as tall as the view, so the body's own bottom alignment does it.
@@ -256,6 +255,7 @@ public partial class TasksWindow
             Content = body,
         };
         dock.Children.Add(pageScroller);
+        DockBottom(dock, row, pageScroller);
         InboxPage.Child = dock;
         // Opened: at its end, where the newest comments and the comment box are. Redrawn: where it was.
         var scroller = pageScroller;
