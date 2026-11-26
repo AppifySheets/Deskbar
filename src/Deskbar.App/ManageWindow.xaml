@@ -109,6 +109,14 @@
                              list reads, and cleared by the next good read. -->
                         <TextBlock x:Name="ClaudeListProblem" TextWrapping="Wrap" Margin="60,4,0,0" Foreground="#C42B1C"
                                    Visibility="Collapsed"/>
+                        <!-- Allow / Deny from a task's page (AppState.ClaudePermissions, ManageWindow.Permission.cs). Off by
+                             default; under the tasks box, greyed and unticked while that box is. The warning under it is
+                             the PM's ruling Q6: what it writes into Claude Code's settings, and what happens beside a hook of
+                             the user's own on the same event. -->
+                        <CheckBox x:Name="ClaudePermissions" Margin="40,6,0,0" Checked="OnClaudePermissionsToggled" Unchecked="OnClaudePermissionsToggled">
+                            <TextBlock TextWrapping="Wrap" Text="Answer Claude's permission questions in Deskbar"/>
+                        </CheckBox>
+                        <TextBlock x:Name="ClaudePermissionsNote" TextWrapping="Wrap" Margin="60,2,0,0" Opacity="0.75"/>
 
                         <!-- SECTION 2: THE BAR. -->
                         <TextBlock Text="The bar" FontSize="15" FontWeight="SemiBold" Margin="0,20,0,6"/>

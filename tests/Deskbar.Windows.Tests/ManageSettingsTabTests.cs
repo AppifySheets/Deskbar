@@ -19,7 +19,7 @@ namespace Deskbar.Windows.Tests;
 // OPENED without writing anything. That last one is not hypothetical -- setting four sliders from state
 // raises four change events, and if they were taken at face value merely opening Manage would rewrite
 // state.json and rebuild the bar.
-public class ManageSettingsTabTests
+public partial class ManageSettingsTabTests
 {
     static WorkspaceManager Built(AppState state)
     {

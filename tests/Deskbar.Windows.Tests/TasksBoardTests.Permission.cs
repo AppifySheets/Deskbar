@@ -1,0 +1,192 @@
+using System.IO;
+using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Input;
+using System.Windows.Interop;
+using CSharpFunctionalExtensions;
+using Deskbar.App;
+using Deskbar.Core.Tasks;
+
+namespace Deskbar.Windows.Tests;
+
+// The permission card on a task's Inbox page and the line's mark (Allow / Deny from a task's page). The desk is a real
+// PermissionDesk over a scratch folder, so a click writes a real answer file, read back here. Hard properties held: the
+// card shows the whole request (nothing cut, folded by whole lines, marks for hidden characters); only a click on a
+// button answers, never a key; a click right after the card appears is ignored.
+public partial class TasksBoardTests
+{
+    sealed class PermissionRig : IDisposable
+    {
+        public required Board Board { get; init; }
+        public required PermissionDesk Desk { get; init; }
+        public required string Box { get; init; }
+        public required Guid Task { get; init; }
+
+        public void Dispose()
+        {
+            Board.Dispose();
+            if (Directory.Exists(Box)) Directory.Delete(Box, true);
+        }
+    }
+
+    static int permissionSlots;
+
+    // A Claude task whose session "s1" asks for `command` (by `tool`), the Inbox on and its page open.
+    static PermissionRig PermissionPage(string command = "git push fork feature/x", string tool = "Bash", Func<DateTime>? clickClock = null)
+    {
+        var t = Build(clickClock: clickClock);
+        var box = Path.Combine(Path.GetTempPath(), "deskbar-perm-card-" + Guid.NewGuid().ToString("N"));
+        var desk = new PermissionDesk(box, () => Start.AddHours(1));
+        t.Controller.Permissions = desk;
+        var id = t.Tasks.Create("Ship the fix", t.Gepha, Session("s1")).Value.Id;
+        t.Controller.Show();
+        ChooseInbox(t);
+        var rig = new PermissionRig { Board = t, Desk = desk, Box = box, Task = id };
+        Ask(rig, command, tool);
+        Click(LineOf(t.Window, id));
+        return rig;
+    }
+
+    static string Ask(PermissionRig rig, string command, string tool = "Bash")
+    {
+        var slot = $"req-{Interlocked.Increment(ref permissionSlots)}-1";
+        Directory.CreateDirectory(Path.Combine(rig.Box, slot));
+        var field = tool == "Bash" ? "command" : "file_path";
+        Assert.True(rig.Desk.Register(slot, new PermissionRequest("s1", tool, @"C:\repos\TaskSpaces", "default",
+            [new PermissionField(field, command), new PermissionField("description", "Push the branch")])).IsSuccess);
+        return slot;
+    }
+
+    static IReadOnlyList<Border> Cards(PermissionRig rig) =>
+        rig.Board.Window.InboxPageContent is { } page
+            ? Inside(page).OfType<Border>().Where(b => b.Tag as string == TasksWindow.PermissionCardTag).ToList()
+            : [];
+
+    static string? AnswerIn(PermissionRig rig, string slot) =>
+        File.Exists(Path.Combine(rig.Box, slot, PermissionDesk.AnswerFile)) ? File.ReadAllText(Path.Combine(rig.Box, slot, PermissionDesk.AnswerFile)) : null;
+
+    [Fact]
+    public void A_question_shows_as_a_card_with_the_whole_command_and_the_line_wears_the_shield() => StaThread.Run(() =>
+    {
+        var command = "git push fork feature/x && rm -rf " + new string('a', 400) + " \u202E";
+        using var r = PermissionPage(command);
+
+        var card = Assert.Single(Cards(r));
+        var shown = Inside(card).OfType<TextBlock>().Single(b => b.Tag as string == TasksWindow.PermissionPartTag);
+        Assert.Equal(PermissionDisplay.Visible(command), shown.Text);
+        Assert.EndsWith("⟨U+202E⟩", shown.Text);
+        Assert.Equal(TextWrapping.Wrap, shown.TextWrapping);
+        Assert.Equal(TextTrimming.None, shown.TextTrimming);
+        Assert.Contains(Inside(card).OfType<TextBlock>(), b => b.Text == "Claude says: Push the branch");
+        Assert.True(HasButtonNamed(card, TasksWindow.AllowText));
+        Assert.True(HasButtonNamed(card, TasksWindow.DenyText));
+        Assert.True(HasButtonNamed(card, TasksWindow.AnswerInTerminalText));
+        // Not an edit, so no "stop asking for edits".
+        Assert.False(HasButtonNamed(card, TasksWindow.AllowEditsText));
+        Assert.Equal(InboxMark.AsksPermission, r.Board.Window.InboxShown!.Lines.Single(l => l.Id == r.Task).Mark);
+        Assert.Equal(InboxSection.Permissions, r.Board.Window.InboxShown!.Lines.Single(l => l.Id == r.Task).Section);
+    });
+
+    [Fact]
+    public void An_edit_offers_allow_and_stop_asking_for_edits() => StaThread.Run(() =>
+    {
+        using var r = PermissionPage(@"C:\repos\TaskSpaces\src\App.cs", tool: "Edit");
+
+        Assert.True(HasButtonNamed(Cards(r).Single(), TasksWindow.AllowEditsText));
+    });
+
+    [Theory]
+    [InlineData(TasksWindow.AllowText, "allow")]
+    [InlineData(TasksWindow.DenyText, "deny")]
+    [InlineData(TasksWindow.AnswerInTerminalText, "pass")]
+    public void A_click_writes_its_answer_and_the_card_goes(string button, string word) => StaThread.Run(() =>
+    {
+        using var r = PermissionPage();
+        var slot = r.Desk.All.Single().Slot;
+
+        Click(ButtonNamed(Cards(r).Single(), button));
+
+        Assert.EndsWith($" {word}\n", AnswerIn(r, slot));
+        Assert.Empty(r.Desk.All);
+        Assert.Empty(Cards(r));
+    });
+
+    // A click in the first moments after a card appears may have been meant for what was under the pointer: ignored.
+    [Fact]
+    public void A_click_right_after_the_card_appears_is_ignored() => StaThread.Run(() =>
+    {
+        // The click clock steps a second a read while the page opens, then stands still for the new card.
+        var now = ClickStart;
+        var stepping = true;
+        using var r = PermissionPage(clickClock: () => stepping ? now = now.AddSeconds(1) : now);
+        stepping = false;
+        var slot = Ask(r, "a new question");
+
+        now += TimeSpan.FromMilliseconds(200);
+        Click(ButtonNamed(Cards(r)[1], TasksWindow.AllowText));
+        Assert.Null(AnswerIn(r, slot));
+
+        now += TasksWindow.ArmTime;
+        Click(ButtonNamed(Cards(r)[1], TasksWindow.AllowText));
+        Assert.EndsWith(" allow\n", AnswerIn(r, slot));
+    });
+
+    // No single key answers: every key the window takes writes nothing, and Space, the other key a button takes, is
+    // swallowed by the card's buttons. Enter on a focused button is the keyboard's one way (WPF's own Button behaviour).
+    [Fact]
+    public void No_key_answers_a_question() => StaThread.Run(() =>
+    {
+        using var r = PermissionPage();
+        var slot = r.Desk.All.Single().Slot;
+
+        foreach (var key in new[] { Key.Enter, Key.Space, Key.A, Key.Y, Key.Return, Key.F2, Key.Tab })
+            r.Board.Window.Press(key, ModifierKeys.None);
+        Assert.Null(AnswerIn(r, slot));
+
+        var allow = ButtonNamed(Cards(r).Single(), TasksWindow.AllowText);
+        Assert.True(allow.Focusable);
+        using var source = new HwndSource(new HwndSourceParameters("perm-key-test"));
+        foreach (var routed in new[] { Keyboard.PreviewKeyDownEvent, Keyboard.PreviewKeyUpEvent })
+        {
+            var space = new KeyEventArgs(Keyboard.PrimaryDevice, source, 0, Key.Space) { RoutedEvent = routed };
+            allow.RaiseEvent(space);
+            Assert.True(space.Handled);
+        }
+        Assert.Null(AnswerIn(r, slot));
+    });
+
+    // A long command folds by whole lines behind "Show all", and shows every line once unfolded.
+    [Fact]
+    public void A_long_command_folds_by_whole_lines() => StaThread.Run(() =>
+    {
+        var lines = Enumerable.Range(1, 30).Select(i => $"step {i} && echo {i}").ToArray();
+        using var r = PermissionPage(string.Join('\n', lines));
+
+        TextBlock Shown() => Inside(Cards(r).Single()).OfType<TextBlock>().First(b => b.Tag as string == TasksWindow.PermissionPartTag);
+        Assert.Equal(string.Join('\n', lines.Take(PermissionDisplay.FoldLines)), Shown().Text);
+        var more = Inside(Cards(r).Single()).OfType<Button>().Single(b =>
+            System.Windows.Automation.AutomationProperties.GetName(b).StartsWith(TasksWindow.ShowAllPartPrefix, StringComparison.Ordinal));
+        Assert.Contains($"{30 - PermissionDisplay.FoldLines} more lines", System.Windows.Automation.AutomationProperties.GetName(more));
+
+        Click(more);
+
+        Assert.Equal(string.Join('\n', lines), Shown().Text);
+    });
+
+    // Two questions at once: two cards, the oldest first; and one that ended before the click says so and writes nothing.
+    [Fact]
+    public void Two_questions_show_two_cards_and_a_click_too_late_writes_nothing() => StaThread.Run(() =>
+    {
+        using var r = PermissionPage("first");
+        var second = Ask(r, "second");
+
+        Assert.Equal(2, Cards(r).Count);
+        var allowSecond = ButtonNamed(Cards(r)[1], TasksWindow.AllowText);
+        // The second question ends (the session moved on) while its card is still drawn.
+        r.Desk.Forget("s1");
+        Click(allowSecond);
+
+        Assert.Null(AnswerIn(r, second));
+        Assert.Contains(Inside(r.Board.Window.InboxPageContent!).OfType<TextBlock>(), b => b.Text.Contains("Answer it in the terminal"));
+    });
+}

@@ -101,6 +101,14 @@ Under it, **Claude Code sessions keep their tasks in the task list** adds three 
 
 While it is on, Deskbar also keeps one permission rule in the same file, under `permissions.allow`: `Read(//c/Users/<you>/AppData/Roaming/Deskbar/task-images/**)`. That folder holds the pictures you paste into tasks (see [Tasks](tasks.md#the-tasks-window)), and it is outside every session's own folder, so a session in Claude Code's default permission mode would otherwise stop and ask you before reading one. The rule lets sessions read that one folder and nothing else; your own rules stay as they are, and unticking the box takes the rule out again.
 
+### Permission questions on the task's page
+
+Under the tasks box, **Answer Claude's permission questions in Deskbar** is off until you tick it (`deskbar.cmd claude-permissions on|off` from a script). Ticked, with Claude Code 2.1.332 or newer, Deskbar adds a PermissionRequest hook to `%USERPROFILE%\.claude\settings.json`, running `%APPDATA%\Deskbar\claude-permission-hook.cmd`, and takes only that entry out again when you untick it.
+
+When a background session (one started with `claude --bg`, which every session Deskbar starts is) is about to ask whether it may run a command or edit a file, and its task is open, the question also shows on the task's page in the Inbox view: a card at the page's bottom with the whole command or file path, nothing cut off (a long one folds by whole lines behind "Show all"; hidden or direction-changing characters show as marks like ⟨U+202E⟩), and the buttons **Allow**, **Deny**, **Allow and stop asking for edits** (only for a file edit: the session then edits without asking, also after a restart) and **Answer in the terminal**. The line wears a shield with a keyhole, first under Needs you, and on the bar its second line says "Asks permission". The terminal's own dialog is there the whole time, so you can answer there instead; the card then goes once the session moves on.
+
+Only a click on the card answers: no `deskbar.cmd` command can, and another program cannot write an answer the hook would take. Whenever Deskbar cannot show the question (closed, restarted, the Inbox view off, a session in a terminal or VS Code, Claude's own multiple-choice and plan dialogs) the hook says nothing and the terminal asks as before. Nothing about a question is written to Deskbar's trace. If you have PermissionRequest hooks of your own, Claude Code runs them as well and takes whichever answers first.
+
 ### Your comments wake the session
 
 While it is on, a comment you post on a Claude task reaches that task's session and wakes it if it sits idle, so you can hand it a screenshot or a correction from the tasks panel without finding its window. A comment goes to one session: the task's live one, or else its newest. How it gets there depends on the session:
