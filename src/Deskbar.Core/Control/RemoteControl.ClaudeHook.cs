@@ -60,6 +60,7 @@ public sealed partial class RemoteControl
     ControlReply ClaudeHook(IReadOnlyList<string> rest) =>
         ControlArguments.ParseClaudeHook(rest)
             .Bind(request => ClaudeHookEvent.Parse(request.Json!, request.Entrypoint, request.Attended, request.Job).Map(hook => (request, hook)))
+            .Tap(found => QuestionsSettledBy(found.hook))
             .Match(found => Answer(found.hook, found.request.From), ControlReply.Fail);
 
     // CLAUDE-WAIT: a session's comment waiter registering (plan docs/superpowers/plans/2026-11-24-comment-wakes-session.md,

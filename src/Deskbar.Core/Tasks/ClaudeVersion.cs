@@ -18,7 +18,18 @@ public static class ClaudeVersion
 
     static readonly Regex Leading = new(@"^\s*(\d+)\.(\d+)\.(\d+)", RegexOptions.Compiled);
 
-    public static bool SupportsAsyncRewake(string versionOutput) =>
+    public static bool SupportsAsyncRewake(string versionOutput) => AtLeast(versionOutput, AsyncRewakeSince);
+
+    /// <summary>
+    /// The oldest Claude Code whose PermissionRequest hook was measured to work as Deskbar uses it (Allow / Deny from a
+    /// task's page; the live spike of 2026-11-26 ran 2.1.332: allow, deny, setMode, and the dialog drawn alongside). An
+    /// older build gets no permission entry, so nothing new is written into a settings file it may not read the same way.
+    /// </summary>
+    public static readonly Version PermissionHookSince = new(2, 1, 332);
+
+    public static bool SupportsPermissionHook(string versionOutput) => AtLeast(versionOutput, PermissionHookSince);
+
+    static bool AtLeast(string versionOutput, Version since) =>
         Leading.Match(versionOutput ?? "") is { Success: true } m
-        && new Version(int.Parse(m.Groups[1].Value), int.Parse(m.Groups[2].Value), int.Parse(m.Groups[3].Value)) >= AsyncRewakeSince;
+        && new Version(int.Parse(m.Groups[1].Value), int.Parse(m.Groups[2].Value), int.Parse(m.Groups[3].Value)) >= since;
 }

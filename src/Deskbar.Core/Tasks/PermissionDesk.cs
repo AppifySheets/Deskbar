@@ -49,6 +49,19 @@ public sealed class PermissionDesk(string folder, Func<DateTimeOffset> now)
     /// <summary>How long Deskbar offers a question: the script's wait less a margin, so a click always lands while it reads.</summary>
     public static readonly TimeSpan HeldFor = ScriptWait - TimeSpan.FromSeconds(10);
 
+    /// <summary>The script's wait in its own ticks: one look a second, each tick a second or a little more.</summary>
+    public static int ScriptSeconds => (int)ScriptWait.TotalSeconds;
+
+    /// <summary>
+    /// The hook entry's "timeout", in seconds: the script's wait plus room for ticks that run slow, so Claude Code never
+    /// kills the script while it prints. Were it killed, nothing would be lost: Claude Code drops a killed hook's output
+    /// and keeps its own dialog (the spike's run B5), and the slot is deleted when the question expires.
+    /// </summary>
+    public static int HookTimeoutSeconds => ScriptSeconds + 120;
+
+    /// <summary>Raised after a question is added or taken off, so the page and the bar can redraw.</summary>
+    public event Action? Changed;
+
     /// <summary>The answer file's name inside a slot.</summary>
     public const string AnswerFile = "answer.txt";
 
@@ -89,6 +102,7 @@ public sealed class PermissionDesk(string folder, Func<DateTimeOffset> now)
                 var code = RandomNumberGenerator.GetHexString(32, lowercase: true);
                 var at = now();
                 held.Add((new Pending(slot!, request, at, at + HeldFor), code));
+                Changed?.Invoke();
                 return code;
             });
 
@@ -103,6 +117,7 @@ public sealed class PermissionDesk(string folder, Func<DateTimeOffset> now)
         if (index < 0) return Result.Failure("This question has ended. Answer it in the terminal.");
         var (pending, code) = held[index];
         held.RemoveAt(index);
+        Changed?.Invoke();
         if (now() >= pending.Until)
         {
             Delete(slot);
@@ -124,8 +139,13 @@ public sealed class PermissionDesk(string folder, Func<DateTimeOffset> now)
     /// <summary>A session's questions taken off, their slots deleted: it ended, or settled them elsewhere. True when any went.</summary>
     public bool Forget(string sessionId) => Drop(h => h.Request.SessionId == sessionId);
 
-    /// <summary>Only the questions of sessions that still wait on a permission prompt kept; the rest taken off. True when any went.</summary>
-    public bool Keep(Func<string, bool> stillAsking) => Drop(h => !stillAsking(h.Request.SessionId));
+    /// <summary>
+    /// After a read of the session list: the questions of sessions that no longer wait on a permission prompt taken off
+    /// (answered in the terminal, or the session went). Only questions that arrived before <paramref name="seenBefore"/>
+    /// count, because a question newer than the read may not show in it yet. True when any went.
+    /// </summary>
+    public bool Keep(Func<string, bool> stillAsking, DateTimeOffset seenBefore) =>
+        Drop(h => h.Arrived < seenBefore && !stillAsking(h.Request.SessionId));
 
     /// <summary>Every question taken off and its slot deleted: Deskbar exits, or the setting went off.</summary>
     public bool ReleaseAll() => Drop(_ => true);
@@ -150,6 +170,7 @@ public sealed class PermissionDesk(string folder, Func<DateTimeOffset> now)
             held.Remove(h);
             Delete(h.Pending.Slot);
         });
+        if (going.Count > 0) Changed?.Invoke();
         return going.Count > 0;
     }
 

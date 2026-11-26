@@ -161,6 +161,27 @@ public sealed class RemoteControlPermissionTests : IDisposable
         Assert.True(desk.Answer(slot, PermissionDecision.Deny).IsSuccess);
     }
 
+    // The terminal answered while the card was on show: the session's next event (its turn ending, a new prompt, its end)
+    // takes the question off and deletes the slot, so the hook script ends without a word. The permission prompt's own
+    // Notification, sent while it still waits, does not.
+    [Theory]
+    [InlineData("Stop", true)]
+    [InlineData("UserPromptSubmit", true)]
+    [InlineData("SessionEnd", true)]
+    [InlineData("Notification", false)]
+    public void The_sessions_next_event_takes_its_question_off(string hookEvent, bool settles)
+    {
+        var manager = Ready();
+        var slot = Slot();
+        Registered(manager, Call(slot, Hook()));
+
+        Control(manager).Execute(["claude-hook", "--entry", "cli", "--attended", "0", "--job", Job, "--from", Repo,
+            "--json", $$"""{"session_id":"{{Session}}","cwd":"C:\\repos\\proj1","hook_event_name":"{{hookEvent}}"}"""]);
+
+        Assert.Equal(!settles, desk.Asks(Session));
+        Assert.Equal(!settles, Directory.Exists(Path.Combine(box, slot)));
+    }
+
     [Fact]
     public void A_registration_never_prints_an_answer()
     {

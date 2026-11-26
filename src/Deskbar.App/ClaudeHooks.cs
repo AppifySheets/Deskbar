@@ -72,8 +72,12 @@ static class ClaudeHooks
     // Task 4). It carries `"asyncRewake": true`, so Claude Code lets it run on after the turn and wakes the session when
     // it exits 2, and `"timeout"` a month (CommentInbox.WaiterTimeout, measured accepted), so the waiter outlives an idle
     // session's long silences. Null leaves it out (the tests that predate it).
+    //
+    // `permissionCommand` runs claude-permission-hook.cmd: Deskbar's entry on PermissionRequest (Allow / Deny from a task's
+    // page; PermissionEntry), on the same terms as the task events and only while its own setting is on. Null leaves it
+    // out, and takes out one written before.
     internal static bool Sync(bool on, bool tasks, string settingsPath, string askCommand, string taskCommand, string? imagesRule = null,
-        string? waitCommand = null)
+        string? waitCommand = null, string? permissionCommand = null)
     {
         JsonObject root;
         string? original = null;
@@ -102,7 +106,7 @@ static class ClaudeHooks
             return false;
         }
 
-        var (hooksChanged, hooksComplete) = Apply(root, Wanted(on, tasks, askCommand, taskCommand, waitCommand));
+        var (hooksChanged, hooksComplete) = Apply(root, Wanted(on, tasks, askCommand, taskCommand, waitCommand, permissionCommand));
         var (ruleChanged, ruleComplete) = imagesRule is null ? (false, true) : ApplyRule(root, on && tasks, imagesRule);
         var (changed, complete) = (hooksChanged || ruleChanged, hooksComplete && ruleComplete);
         if (!changed) return complete;
@@ -121,14 +125,32 @@ static class ClaudeHooks
 
     // Every event Deskbar may hold an entry on, and the entries it should hold there now, in order (none: take ours out).
     // Stop holds two while the task events are on: the ask entry, then the comment waiter (see Sync).
-    static IReadOnlyList<(string Name, IReadOnlyList<JsonObject> Entries)> Wanted(bool on, bool tasks, string askCommand, string taskCommand, string? waitCommand) =>
+    static IReadOnlyList<(string Name, IReadOnlyList<JsonObject> Entries)> Wanted(bool on, bool tasks, string askCommand, string taskCommand, string? waitCommand,
+        string? permissionCommand) =>
     [
         ("Notification", on ? [Entry(askCommand)] : []),
         ("Stop", on ? [Entry(askCommand), .. tasks && waitCommand is not null ? [WaitEntry(waitCommand)] : Array.Empty<JsonObject>()] : []),
         .. TaskEvents.Select(name => (name, (IReadOnlyList<JsonObject>)(on && tasks ? [Entry(taskCommand)] : []))),
         ("PreToolUse", on && tasks ? [DialogEntry(taskCommand)] : []),
         ("PostToolUse", on && tasks ? [.. PullRequestTools.Select(tool => ToolEntry(tool, taskCommand)), DialogEntry(taskCommand)] : []),
+        ("PermissionRequest", on && tasks && permissionCommand is not null ? [PermissionEntry(permissionCommand)] : []),
     ];
+
+    // ALLOW / DENY FROM A TASK'S PAGE (Core's PermissionDesk; ClaudeSkill.PermissionScript). One entry with no matcher, so
+    // every tool's question reaches the script, which asks Deskbar whether to put it on a page. Its `timeout` is the
+    // script's own wait plus room (PermissionDesk.HookTimeoutSeconds), so the script always gives up first. It has NO
+    // onFailure: the hooks reference says `onFailure: "block"` makes a failed PermissionRequest hook DENY the call, and a
+    // failure here must leave Claude Code's own dialog instead, which is what a hook that prints nothing does.
+    static JsonObject PermissionEntry(string command) =>
+        new()
+        {
+            ["hooks"] = new JsonArray(new JsonObject
+            {
+                ["type"] = "command",
+                ["command"] = command,
+                ["timeout"] = (long)Core.Tasks.PermissionDesk.HookTimeoutSeconds,
+            }),
+        };
 
     // A QUESTION IN CLAUDE CODE'S DIALOG IS THE TASK'S QUESTION (task 493b7ba9, Core's DialogQuestion). One entry on
     // PreToolUse and one on PostToolUse, matched to the AskUserQuestion tool only, on the task script: before the dialog
@@ -293,7 +315,8 @@ static class ClaudeHooks
         CommandOf(entry) is { } command
         && (command.Contains(ClaudeSkill.HookScriptName, StringComparison.OrdinalIgnoreCase)
             || command.Contains(ClaudeSkill.TaskHookScriptName, StringComparison.OrdinalIgnoreCase)
-            || command.Contains(ClaudeSkill.WaitHookScriptName, StringComparison.OrdinalIgnoreCase))
+            || command.Contains(ClaudeSkill.WaitHookScriptName, StringComparison.OrdinalIgnoreCase)
+            || command.Contains(ClaudeSkill.PermissionHookScriptName, StringComparison.OrdinalIgnoreCase))
         && command.Contains("Deskbar", StringComparison.OrdinalIgnoreCase);
 
     // The command of an entry that holds exactly one command hook, which is the shape Deskbar writes; anything else is
