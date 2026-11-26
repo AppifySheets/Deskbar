@@ -38,8 +38,12 @@ internal sealed class ChatStepsView : Border
     readonly Dictionary<string, Row> rowOf = new(StringComparer.Ordinal);
     string runId;
 
-    public ChatStepsView(ChatSteps run, ChatStreamDeps deps)
+    // Whether the session is live and this is its newest run: only then can a step without a result be running (Update).
+    bool live;
+
+    public ChatStepsView(ChatSteps run, ChatStreamDeps deps, bool live = true)
     {
+        this.live = live;
         this.deps = deps;
         runId = run.Id;
         Tag = StepsTag;
@@ -57,7 +61,7 @@ internal sealed class ChatStepsView : Border
         column.Children.Add(header);
         column.Children.Add(rows);
         Child = column;
-        Update(run);
+        Update(run, live);
     }
 
     bool Open => deps.State.OpenRuns.Contains(runId);
@@ -71,17 +75,24 @@ internal sealed class ChatStepsView : Border
     ChatSteps current = null!;
 
     /// <summary>Takes the run as it is now: its header, and its rows for new or changed steps. Rows of unchanged steps are not touched.</summary>
-    public void Update(ChatSteps run)
+    /// <param name="run">The run as it is now.</param>
+    /// <param name="live">
+    /// Whether the session runs AND this is its newest run (tester finding M3). A step with no result is "running" only then;
+    /// in an older run, or once the session ended, it has no result and never will, so it says "no result", with a shape of its
+    /// own, and its mark does not turn.
+    /// </param>
+    public void Update(ChatSteps run, bool live = true)
     {
         current = run;
+        this.live = live;
         foreach (var step in run.Steps)
         {
             if (rowOf.TryGetValue(step.Id, out var row))
             {
-                if (row.Step != step) row.Set(step);
+                if (row.Step != step || row.Running != live) row.Set(step, live);
                 continue;
             }
-            var added = new Row(step);
+            var added = new Row(step, live);
             rowOf[step.Id] = added;
             rows.Children.Add(added.Frame);
         }
@@ -102,9 +113,10 @@ internal sealed class ChatStepsView : Border
         // the words are what a test and a screen reader read.
         var heading = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
         heading.Children.Add(new TextBlock { Text = title, FontSize = 12.5, FontWeight = FontWeights.SemiBold, Foreground = InboxLook.Ink });
-        if (duration.Length > 0) heading.Children.Add(new TextBlock { Text = " · " + duration, FontSize = 12.5, Foreground = InboxLook.Ink2 });        var summary = new TextBlock
+        if (duration.Length > 0) heading.Children.Add(new TextBlock { Text = " · " + duration, FontSize = 12.5, Foreground = InboxLook.Ink2 });
+        var summary = new TextBlock
         {
-            Text = SummaryOf(steps), FontSize = 12, Foreground = InboxLook.Ink3, TextTrimming = TextTrimming.CharacterEllipsis,
+            Text = SummaryOf(steps, live), FontSize = 12, Foreground = InboxLook.Ink3, TextTrimming = TextTrimming.CharacterEllipsis,
             VerticalAlignment = VerticalAlignment.Center, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(10, 0, 0, 0),
         };
         var chevron = InboxMarks.Icon(open ? "chevD" : "chevR", 12, InboxLook.Ink2);
@@ -130,12 +142,14 @@ internal sealed class ChatStepsView : Border
 
     // "running Ran dotnet test · 1 failed · 2 files changed · 3 commands": what is happening, what went wrong, what was done.
     // Words, so a folded block still tells a failure apart without opening it.
-    static string SummaryOf(IReadOnlyList<ChatStep> steps)
+    static string SummaryOf(IReadOnlyList<ChatStep> steps, bool live)
     {
         var parts = new List<string>();
-        if (steps.LastOrDefault(s => !s.Done) is { } running) parts.Add("running " + ChatStepIcons.TextOf(running));
+        if (live && steps.LastOrDefault(s => !s.Done) is { } running) parts.Add("running " + ChatStepIcons.TextOf(running));
         var failed = steps.Count(s => s.Failed);
         if (failed > 0) parts.Add($"{failed} failed");
+        var unanswered = live ? 0 : steps.Count(s => !s.Done);
+        if (unanswered > 0) parts.Add(unanswered == 1 ? "1 with no result" : $"{unanswered} with no result");
         var files = steps.Where(s => s.Kind is StepKind.Edit or StepKind.Write).Select(s => s.Label).Distinct().Count();
         if (files > 0) parts.Add(files == 1 ? "1 file changed" : $"{files} files changed");
         var commands = steps.Count(s => s.Kind == StepKind.Run);
@@ -147,13 +161,15 @@ internal sealed class ChatStepsView : Border
     sealed class Row
     {
         public ChatStep Step { get; private set; }
+        /// <summary>Whether a step with no result was drawn as running (its run is the newest of a live session).</summary>
+        public bool Running { get; private set; }
         public Grid Element { get; } = new();
         readonly TextBlock text = new() { FontSize = 12.5, Foreground = InboxLook.Ink, TextTrimming = TextTrimming.CharacterEllipsis, VerticalAlignment = VerticalAlignment.Center };
         readonly TextBlock word = new() { FontSize = 12, Foreground = InboxLook.Ink2, FontWeight = FontWeights.SemiBold, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(8, 0, 0, 0) };
         readonly Border kind = new() { Width = 14, Height = 14, VerticalAlignment = VerticalAlignment.Center };
         readonly Border state = new() { Width = 14, Height = 14, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(8, 0, 0, 0) };
 
-        public Row(ChatStep step)
+        public Row(ChatStep step, bool live)
         {
             Step = step;
             // Icon, words (the rest of the width), state word, state mark.
@@ -166,7 +182,7 @@ internal sealed class ChatStepsView : Border
             Place(state, 3);
             var rule = new Border { Tag = RowTag, BorderBrush = InboxLook.Hairline, BorderThickness = new Thickness(0, 1, 0, 0), Padding = new Thickness(11, 5, 11, 5), Child = Element };
             Frame = rule;
-            Set(step);
+            Set(step, live);
         }
 
         public Border Frame { get; }
@@ -177,9 +193,10 @@ internal sealed class ChatStepsView : Border
             Element.Children.Add(part);
         }
 
-        public void Set(ChatStep step)
+        public void Set(ChatStep step, bool live)
         {
             Step = step;
+            Running = live;
             var words = ChatStepIcons.TextOf(step);
             text.Text = words;
             text.ToolTip = words;
@@ -190,11 +207,18 @@ internal sealed class ChatStepsView : Border
                 word.Visibility = Visibility.Visible;
                 state.Child = InboxMarks.Icon("fail", 14, InboxLook.Ink);
             }
-            else if (!step.Done)
+            else if (!step.Done && live)
             {
                 word.Text = "running";
                 word.Visibility = Visibility.Visible;
                 state.Child = InboxMarks.Icon("working", 14, InboxLook.Blue, turning: true);
+            }
+            else if (!step.Done)
+            {
+                // No result and no one left to write it: neither running nor failed. A ring with a dash, and the words.
+                word.Text = "no result";
+                word.Visibility = Visibility.Visible;
+                state.Child = InboxMarks.Icon("blank", 14, InboxLook.Ink3);
             }
             else
             {
@@ -202,7 +226,7 @@ internal sealed class ChatStepsView : Border
                 word.Visibility = Visibility.Collapsed;
                 state.Child = InboxMarks.Icon("tick", 14, InboxLook.Ink3);
             }
-            AutomationProperties.SetName(Frame, step.Failed ? words + ", failed" : !step.Done ? words + ", running" : words);
+            AutomationProperties.SetName(Frame, step.Failed ? words + ", failed" : !step.Done ? words + (live ? ", running" : ", no result") : words);
         }
     }
 

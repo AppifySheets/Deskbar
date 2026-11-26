@@ -266,7 +266,76 @@ public class ChatStreamPanelTests
         panel.Apply(Enumerable.Range(0, ClaudeChatStream.MaxDrawn + 10).Select(i => (ChatItem)Said("m " + i, i)).ToArray());
 
         Assert.Equal(ClaudeChatStream.MaxDrawn, panel.Keys.Count);
-        Assert.Contains("10 earlier messages and steps not shown", Words(panel));
+        Assert.Contains("10 earlier messages and steps not shown · show 10 more", Words(panel));
+    });
+
+    // M2: the earlier line is a button, each press shows 60 more of the session's items, and a comment is never cut.
+    [Fact]
+    public void The_earlier_line_is_a_button_that_shows_more_and_a_comment_on_the_cut_side_stays() => StaThread.Run(() =>
+    {
+        var comment = new Border { Tag = "an-old-comment" };
+        var panel = Panel(comments: [("c1", Now.AddSeconds(5), comment)]);
+        var items = Enumerable.Range(0, 2 * ClaudeChatStream.MaxDrawn + 10).Select(i => (ChatItem)Said("m " + i, i * 10)).ToArray();
+
+        panel.Apply(items);
+
+        // 130 items: the last 60 show, 70 are earlier; the comment (at 5 s, before every shown item) is still in the stream.
+        Assert.Equal(ClaudeChatStream.MaxDrawn + 1, panel.Keys.Count);
+        Assert.Equal("c1", panel.Keys[0]);
+        Assert.Same(comment, panel.Children.Cast<UIElement>().Single(e => Equals((e as FrameworkElement)?.Tag, "an-old-comment")));
+        var button = Assert.IsType<Button>(Inside(panel).OfType<FrameworkElement>().Single(e => Equals(e.Tag, ChatStreamPanel.EarlierTag)));
+        Assert.Contains("70 earlier messages and steps not shown · show 60 more", Words(button));
+
+        Click(button);
+
+        Assert.Equal(2 * ClaudeChatStream.MaxDrawn + 1, panel.Keys.Count);
+        Assert.Equal("c1", panel.Keys[0]);
+        Assert.Contains("10 earlier messages and steps not shown · show 10 more", Words(panel));
+
+        Click(Assert.IsType<Button>(Inside(panel).OfType<FrameworkElement>().Single(e => Equals(e.Tag, ChatStreamPanel.EarlierTag))));
+
+        Assert.Equal(items.Length + 1, panel.Keys.Count);
+        Assert.DoesNotContain(Inside(panel).OfType<FrameworkElement>(), e => Equals(e.Tag, ChatStreamPanel.EarlierTag));
+    });
+
+    // M3: running only while the session runs and the run is its newest.
+    [Fact]
+    public void A_step_without_a_result_in_an_ended_session_says_no_result_and_its_mark_does_not_turn() => StaThread.Run(() =>
+    {
+        var panel = Panel();
+        panel.Apply([Run("r1", Step("a", StepKind.Run, "dotnet test", done: false))], live: true);
+        Assert.Contains("running", Words(Rows(panel).Single()));
+
+        panel.Apply([Run("r1", Step("a", StepKind.Run, "dotnet test", done: false))], live: false);
+
+        var row = Rows(panel).Single();
+        Assert.Contains("no result", Words(row));
+        Assert.DoesNotContain("running", Words(row));
+        Assert.DoesNotContain(Inside(row).OfType<Canvas>(), c => Equals(c.Tag, InboxMarks.TurningTag));
+        Assert.Equal("Ran dotnet test, no result", AutomationProperties.GetName(row));
+        Assert.DoesNotContain("running", string.Concat(Words(Header(panel))));
+        Assert.Contains("1 with no result", string.Concat(Words(Header(panel))));
+    });
+
+    [Fact]
+    public void A_step_without_a_result_in_an_older_run_says_no_result_and_only_the_newest_run_runs() => StaThread.Run(() =>
+    {
+        var panel = Panel();
+        var older = Run("r1", Step("a", StepKind.Run, "dotnet build", done: false, at: 0));
+        panel.Apply([older, Said("between", 5), Run("r2", Step("b", StepKind.Run, "dotnet test", done: false, at: 10))]);
+
+        var rows = Rows(panel).ToArray();
+        Assert.Contains("no result", Words(rows[0]));
+        Assert.Contains("running", Words(rows[1]));
+        Assert.Single(Inside(panel).OfType<Canvas>(), c => Equals(c.Tag, InboxMarks.TurningTag));
+
+        // The newest run gets a result and a newer run starts: the one before it stops "running".
+        panel.Apply([older, Said("between", 5), Run("r2", Step("b", StepKind.Run, "dotnet test", done: false, at: 10)), Said("later", 20),
+            Run("r3", Step("c", StepKind.Read, "A.cs", done: false, at: 30))]);
+
+        rows = Rows(panel).ToArray();
+        Assert.Contains("no result", Words(rows[1]));
+        Assert.Contains("running", Words(rows[2]));
     });
 
     [Fact]
