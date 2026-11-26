@@ -2483,6 +2483,7 @@ public partial class FloatingBar
             taskAddStartClaude.Visibility = StartClaude is null ? Visibility.Collapsed : Visibility.Visible;
         PaintParentChip();
         PaintPlaceholder();
+        PaintInboxAdd(); // the Inbox look's add row (FloatingBar.InboxAdd.cs)
     }
 
     // The empty box says where a note typed now would go: the chosen chip's workspace ("Add to Sparrow…"), or "Add…" for none. Not the workspace in front: after picking "none" the box must not

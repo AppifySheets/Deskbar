@@ -142,6 +142,8 @@ public partial class FloatingBar
         var managerShown = OpenManager is not null;
         inboxFooter.Visibility = InboxBarOn && (allShown || managerShown) ? Visibility.Visible : Visibility.Collapsed;
         inboxFooter.Child = InboxBarOn ? inboxFooterButtons : null;
+        // The add box and its row follow the same switch (FloatingBar.InboxAdd.cs); this paint runs on every list paint.
+        PaintInboxAdd();
         inboxAllTasks.Visibility = allShown ? Visibility.Visible : Visibility.Collapsed;
         inboxManager.Visibility = managerShown ? Visibility.Visible : Visibility.Collapsed;
         // One button alone takes the whole row.

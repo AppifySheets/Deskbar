@@ -452,4 +452,145 @@ public partial class FloatingBarTaskListTests
         Assert.Equal(1, toggles);
         Assert.Equal(1, managers);
     });
+
+    // --- the add box and its row (FloatingBar.InboxAdd.cs) ------------------------------------------------------------
+
+
+
+    static Button AddToggle(ListBar t, string name) => Inside(t.Chips).OfType<Button>().Single(b => AutomationProperties.GetName(b) == name);
+
+    // The look comes with the Inbox, and the old look comes back exactly as it was.
+    [Fact]
+    public void The_add_box_and_row_take_the_inbox_look_only_with_the_inbox_and_come_back_as_they_were() => StaThread.Run(() =>
+    {
+        using var t = Build(startClaude: _ => null);
+        t.Tasks.AddNote("One", t.Gepha);
+        var oldFill = t.Box.Background;
+        var oldEdge = t.Box.BorderBrush;
+        var oldTemplate = t.Box.Template;
+        var oldPlaceholder = Placeholder(t).Foreground;
+        var chip = AddToggle(t, "Add to workspace");
+        var oldChipFace = chip.Content;
+        var play = Inside(t.List).OfType<Button>().Single(b => AutomationProperties.GetName(b) == FloatingBar.AddAndStartClaudeText);
+        Assert.Same(t.Chips, play.Parent);
+        Assert.False(t.Bar.AddRowInInboxLook);
+
+        InboxLook(t);
+        Assert.True(t.Bar.AddRowInInboxLook);
+        Assert.Equal(FloatingBar.InboxFieldFill, t.Box.Background);
+        Assert.Equal(FloatingBar.InboxFieldEdge, t.Box.BorderBrush);
+        Assert.Equal(Deskbar.App.InboxLook.Ink2, Placeholder(t).Foreground);
+        Assert.NotSame(oldChipFace, chip.Content);
+        Assert.NotSame(t.Chips, play.Parent);
+        Assert.True(AddRow(t).Children.Contains(play));
+
+        InboxLook(t, on: false);
+        Assert.False(t.Bar.AddRowInInboxLook);
+        Assert.Same(oldFill, t.Box.Background);
+        Assert.Same(oldEdge, t.Box.BorderBrush);
+        Assert.Same(oldTemplate, t.Box.Template);
+        Assert.Same(oldPlaceholder, Placeholder(t).Foreground);
+        Assert.Same(oldChipFace, chip.Content);
+        Assert.Same(t.Chips, play.Parent);
+    });
+
+    // The chip: an outline, a dot in the workspace's colour and the full name; "none" without a dot. The same menu.
+    [Fact]
+    public void The_add_chip_shows_the_full_name_with_a_dot_and_opens_the_same_menu() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        InboxLook(t);
+        var face = Inside(t.Chips).OfType<Border>().Single(b => Equals(b.Tag, FloatingBar.InboxAddChipTag));
+        Assert.NotEqual(Colors.Transparent, ((SolidColorBrush)face.BorderBrush).Color);
+        Assert.Contains(Inside(face).OfType<TextBlock>(), b => b.Text == "GEPHA");
+        Assert.Equal(Visibility.Visible, Inside(face).OfType<Ellipse>().Single().Visibility);
+
+        Click(AddToggle(t, "Add to workspace"));
+        Assert.NotNull(t.Bar.TaskAddMenu);
+        t.Bar.TaskAddMenu!.IsOpen = false;
+    });
+
+    // The toggles: on and off differ by fill, not by colour alone, and the tooltip says the state.
+    [Fact]
+    public void The_add_toggles_differ_by_fill_and_say_their_state() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        InboxLook(t);
+        var important = AddToggle(t, "Add as important");
+        Border Pill() => Inside(important).OfType<Border>().Single(b => Equals(b.Tag, FloatingBar.InboxAddToggleTag));
+        Assert.Equal(Brushes.Transparent, Pill().Background);
+        Assert.StartsWith("Important: off", $"{important.ToolTip}");
+
+        Click(important);
+        Assert.Equal(FloatingBar.InboxToggleOnFill, Pill().Background);
+        Assert.StartsWith("Important: on", $"{important.ToolTip}");
+        Assert.StartsWith("Urgent: off", $"{AddToggle(t, "Add as urgent").ToolTip}");
+    });
+
+    // The box still adds a note on Enter and clears on Esc in the Inbox look, and its edge follows the keyboard.
+    [Fact]
+    public void The_add_box_still_adds_and_clears_in_the_inbox_look() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        InboxLook(t);
+        ClickBox(t);
+        t.Box.Text = "Call the accountant";
+        Press(t.Bar, t.Box, Key.Enter);
+        Assert.Contains(t.Tasks.Board.Tasks, x => x.Title == "Call the accountant");
+
+        ClickBox(t);
+        t.Box.Text = "Draft";
+        Press(t.Bar, t.Box, Key.Escape);
+        Assert.Equal("", t.Box.Text);
+    });
+
+    // A docked bar still fits: the lines in sight, the foot and the add row stay inside the bar's height.
+    [Fact]
+    public void A_docked_bar_still_fits_its_lines_with_the_new_rows() => StaThread.Run(() =>
+    {
+        using var t = Build(openWindow: () => { }, openManager: () => { });
+        t.Bar.SizeToContent = SizeToContent.Manual;
+        t.Bar.Height = 700;
+        Enumerable.Range(1, 14).ToList().ForEach(i => t.Tasks.AddNote($"Errand number {i}", t.Gepha));
+        InboxLook(t);
+        Settle(t);
+
+        var foot = Inside(t.List).OfType<Border>().Single(b => Equals(b.Tag, FloatingBar.InboxFooterTag));
+        Assert.True(t.Bar.InboxFooterShown);
+        Assert.True(foot.TranslatePoint(new Point(0, foot.ActualHeight), t.Bar).Y <= t.Bar.ActualHeight + 0.5);
+        Assert.True(t.Bar.TaskLinesInSight.Count >= 3);
+        Assert.StartsWith("All tasks · ", t.Bar.InboxFooterWords);
+    });
+
+    // Every text and glyph of the add box and its row reads at 4.5 to 1 or better on its surface.
+    [Fact]
+    public void Every_add_row_colour_has_a_contrast_of_at_least_4_5()
+    {
+        static double Luminance(Color c)
+        {
+            static double Channel(byte v) => v / 255.0 is var s && s <= 0.03928 ? s / 12.92 : Math.Pow((s + 0.055) / 1.055, 2.4);
+            return 0.2126 * Channel(c.R) + 0.7152 * Channel(c.G) + 0.0722 * Channel(c.B);
+        }
+        static double Contrast(Brush a, Brush b)
+        {
+            var (x, y) = (Luminance(((SolidColorBrush)a).Color), Luminance(((SolidColorBrush)b).Color));
+            return (Math.Max(x, y) + 0.05) / (Math.Min(x, y) + 0.05);
+        }
+        var bar = new SolidColorBrush(BarSurface.Base);
+        var hover = new SolidColorBrush(Color.FromRgb(0x37, 0x38, 0x3C));
+        var pairs = new (string Name, Brush Ink, Brush Back)[]
+        {
+            ("typed text on the box", Deskbar.App.InboxLook.Ink, FloatingBar.InboxFieldFill),
+            ("placeholder on the box", Deskbar.App.InboxLook.Ink2, FloatingBar.InboxFieldFill),
+            ("chip name on the chip", Deskbar.App.InboxLook.Ink, Deskbar.App.InboxLook.Surface),
+            ("none and the arrow on the chip", Deskbar.App.InboxLook.Ink2, Deskbar.App.InboxLook.Surface),
+            ("an off toggle on the bar", Deskbar.App.InboxLook.Ink2, bar),
+            ("an off toggle under the pointer", Deskbar.App.InboxLook.Ink2, hover),
+            ("an on toggle", FloatingBar.InboxToggleOnInk, FloatingBar.InboxToggleOnFill),
+            ("the play glyph", Deskbar.App.InboxLook.Ink2, Deskbar.App.InboxLook.Raised),
+            ("the foot's words", Deskbar.App.InboxLook.Ink, new SolidColorBrush(Color.FromRgb(0x20, 0x24, 0x2C))),
+            ("the foot's count", Deskbar.App.InboxLook.Ink2, new SolidColorBrush(Color.FromRgb(0x2C, 0x32, 0x3D))),
+        };
+        Assert.All(pairs, p => Assert.True(Contrast(p.Ink, p.Back) >= 4.5, $"{p.Name}: {Contrast(p.Ink, p.Back):0.00}"));
+    }
 }
