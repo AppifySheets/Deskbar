@@ -310,6 +310,9 @@ public sealed partial class RemoteControl
     string Prompted(TaskService service, ClaudeHookEvent hook)
     {
         var sessionId = hook.SessionId;
+        // EVERY prompt, whoever put it there, starts a turn: the tasks panel's working part takes it as proof the session
+        // is working, past the resume grace (ClaudeActivity, task 10b49554).
+        service.TurnStarted(sessionId);
         if (hook.Prompt.Map(SessionBriefing.FromTheUser).GetValueOrDefault(true)) service.Prompted(sessionId);
         var own = service.Board.TaskOf(sessionId);
         return SessionBriefing.Prompt(sessionId, own, own.HasValue ? Maybe<TaskItem>.None : service.Board.ClosedTaskOf(sessionId), service.ExpandImages);

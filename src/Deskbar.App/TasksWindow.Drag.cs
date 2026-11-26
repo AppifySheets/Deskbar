@@ -200,7 +200,10 @@ public partial class TasksWindow
         var current = drag;
         drag = null;
         dropShown = null;
-        if (current is not null && DraggedButton(current) is { } dragged) dragged.Opacity = 1;
+        // Back to the line's own opacity: an idle line of the Claude block rests dimmed (task 10b49554), and a drop where it
+        // was redraws nothing that would dim it again.
+        if (current is not null && DraggedButton(current) is { } dragged)
+            dragged.Opacity = current.Entry is null && idleLines.Contains(current.Id) ? IdleOpacity : 1;
         if (dropAdorner is not null) AdornerLayer.GetAdornerLayer(DragSurface)?.Remove(dropAdorner);
         dropAdorner = null;
         ClearValue(CursorProperty);

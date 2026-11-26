@@ -4,6 +4,7 @@ using System.Windows.Automation;
 using System.Windows.Controls;
 using System.Windows.Documents;
 using System.Windows.Input;
+using System.Windows.Media;
 using CSharpFunctionalExtensions;
 using Deskbar.App;
 using Deskbar.Core.Tasks;
@@ -168,7 +169,8 @@ public class TasksBoardTests
     [Fact]
     public void The_board_groups_open_tasks_as_the_bar() => StaThread.Run(() =>
     {
-        using var t = Build();
+        // Every live session working (task 10b49554), so the block is the one "Claude working" group.
+        using var t = Build(workingOf: _ => 1);
         var note = t.Tasks.AddNote("Dishwasher tablets", Maybe<Guid>.None).Value.Id;
         var working = t.Tasks.Create("DurableFile move guard", t.Gepha, Session("s1")).Value.Id;
         var asking = t.Tasks.Create("Tasks redesign", t.Gepha, Session("s2")).Value.Id;
@@ -355,7 +357,8 @@ public class TasksBoardTests
     });
 
     // Task 93fa0b9b: the Claude working chip is kept across opens like the Current workspace checkbox, in
-    // AppState.TasksPanel.ClaudeWorking, and read as a checkbox's state. Showing a task it hides turns it off for good.
+    // AppState.TasksPanel, and read as a checkbox's state. Showing a task it hides turns it off for good. Since task
+    // 10b49554 the chip is the switch's "Claude" part (ClaudeSessionFilter.Any).
     [Fact]
     public void The_Claude_working_chip_survives_a_fresh_open_until_it_is_turned_off() => StaThread.Run(() =>
     {
@@ -363,23 +366,23 @@ public class TasksBoardTests
         var note = t.Tasks.AddNote("note", t.Gepha).Value.Id;
         var live = t.Tasks.Create("DurableFile move guard", t.Gepha, Session("s1")).Value.Id;
         t.Controller.Show();
-        Assert.Equal("unchecked", AutomationProperties.GetItemStatus(ButtonNamed(t.Window, "Filter: Claude working")));
+        Assert.Equal("unchecked", AutomationProperties.GetItemStatus(ButtonNamed(t.Window, "Filter: Claude")));
 
-        Click(ButtonNamed(t.Window, "Filter: Claude working"));
-        Assert.True(t.Harness.Manager.State.TasksPanel!.ClaudeWorking);
-        Assert.Equal("checked", AutomationProperties.GetItemStatus(ButtonNamed(t.Window, "Filter: Claude working")));
+        Click(ButtonNamed(t.Window, "Filter: Claude"));
+        Assert.True(t.Harness.Manager.State.TasksPanel!.ClaudeSwitch == ClaudeSessionFilter.Any);
+        Assert.Equal("checked", AutomationProperties.GetItemStatus(ButtonNamed(t.Window, "Filter: Claude")));
 
         t.Controller.Hide();
         t.Controller.Show();
-        Assert.True(t.Window.ClaudeWorkingOn);
+        Assert.True(t.Window.ClaudeFilterOn == ClaudeSessionFilter.Any);
         Assert.Equal([live], t.Window.Keys);
 
         // The note has no live session, so showing it turns the chip off, and the next open starts with it off.
         t.Controller.ShowTask(note);
-        Assert.False(t.Harness.Manager.State.TasksPanel!.ClaudeWorking);
+        Assert.False(t.Harness.Manager.State.TasksPanel!.ClaudeSwitch == ClaudeSessionFilter.Any);
         t.Controller.Hide();
         t.Controller.Show();
-        Assert.False(t.Window.ClaudeWorkingOn);
+        Assert.False(t.Window.ClaudeFilterOn == ClaudeSessionFilter.Any);
         Assert.Equal(2, t.Window.Keys.Count);
     });
 
@@ -389,7 +392,8 @@ public class TasksBoardTests
     [Fact]
     public void A_task_Claude_works_on_sits_after_waiting_on_you_and_drags_as_its_quadrant() => StaThread.Run(() =>
     {
-        using var t = Build();
+        // Every live session working (task 10b49554), so the block is the one "Claude working" group.
+        using var t = Build(workingOf: _ => 1);
         var note = t.Tasks.AddNote("note", t.Gepha).Value.Id;
         var working = t.Tasks.Create("working", t.Gepha, Session("s1")).Value.Id;
         var asking = t.Tasks.Create("asking", t.Gepha, Session("s2")).Value.Id;
@@ -762,17 +766,73 @@ public class TasksBoardTests
         t.Window.SearchBox.Text = "store  tier";
         Assert.Equal([screenshots], t.Window.Keys);
         Assert.Contains("Open 1", t.Window.FilterLabels);
-        Assert.Equal("Claude working 1", t.Window.ClaudeWorkingLabel);
+        Assert.Equal("Claude 1", t.Window.ClaudeLabels[0]);
 
         t.Window.SearchBox.Text = "nothing like it";
         Assert.Empty(t.Window.Keys);
         Assert.Contains("Open 0", t.Window.FilterLabels);
-        Assert.Equal("Claude working 0", t.Window.ClaudeWorkingLabel);
+        Assert.Equal("Claude 0", t.Window.ClaudeLabels[0]);
 
         // Cleared, everything is back.
         t.Window.SearchBox.Text = "";
         Assert.Equal([screenshots, dishes, submission], t.Window.Keys);
         Assert.Contains("Open 3", t.Window.FilterLabels);
+    });
+
+    // Task 10b49554 (Petre picked option B of the mockup): the Claude working block lists the tasks with a session working
+    // first, then the idle ones under the "idle" divider, dimmed; the switch's three parts count and show each, a click on
+    // the part that is on turns it off, and the part in force is kept across opens.
+    [Fact]
+    public void The_Claude_block_puts_idle_tasks_under_the_working_ones_and_the_switch_shows_each() => StaThread.Run(() =>
+    {
+        var busy = new HashSet<string> { "s1" };
+        using var t = Build(workingOf: task => task.Sessions.Count(s => s.IsLive && busy.Contains(s.Id)));
+        var note = t.Tasks.AddNote("Dishwasher tablets", t.Gepha).Value.Id;
+        var idle = t.Tasks.Create("Store screenshots", t.Gepha, Session("s2")).Value.Id;
+        var working = t.Tasks.Create("DurableFile move guard", t.Gepha, Session("s1")).Value.Id;
+        t.Controller.Show();
+
+        Assert.Equal(["Claude working", "Claude idle", "IV  Not urgent, not important"], t.Window.Headers);
+        Assert.Equal([working, idle, note], t.Window.Keys);
+        Assert.Equal(["Claude 2", "working 1", "idle 1"], t.Window.ClaudeLabels);
+        Assert.Equal(ClaudeSessionFilter.Off, t.Window.ClaudeFilterOn);
+
+        Click(ButtonNamed(t.Window, "Filter: Claude idle"));
+        Assert.Equal(ClaudeSessionFilter.Idle, t.Window.ClaudeFilterOn);
+        Assert.Equal([idle], t.Window.Keys);
+        Assert.Equal("checked", AutomationProperties.GetItemStatus(ButtonNamed(t.Window, "Filter: Claude idle")));
+        Assert.Equal("unchecked", AutomationProperties.GetItemStatus(ButtonNamed(t.Window, "Filter: Claude working")));
+
+        Click(ButtonNamed(t.Window, "Filter: Claude working"));
+        Assert.Equal([working], t.Window.Keys);
+        Assert.Equal(ClaudeSessionFilter.Working, t.Harness.Manager.State.TasksPanel!.ClaudeSwitch);
+
+        // Kept across a fresh open.
+        t.Controller.Hide();
+        t.Controller.Show();
+        Assert.Equal(ClaudeSessionFilter.Working, t.Window.ClaudeFilterOn);
+        Assert.Equal([working], t.Window.Keys);
+
+        // A click on the part that is on turns the switch off.
+        Click(ButtonNamed(t.Window, "Filter: Claude working"));
+        Assert.Equal(ClaudeSessionFilter.Off, t.Window.ClaudeFilterOn);
+        Assert.Equal(3, t.Window.Keys.Count);
+    });
+
+    // Task 10b49554 (Petre: "change selected color so that the button gets the color, not only the ring"): a status chip
+    // that is on is filled as well as edged; one that is off is neither.
+    [Fact]
+    public void A_status_chip_that_is_on_is_filled() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        t.Tasks.AddNote("Dishwasher tablets", t.Gepha);
+        t.Controller.Show();
+
+        var open = ButtonNamed(t.Window, "Filter: Open 1");
+        var done = ButtonNamed(t.Window, "Filter: Done 0");
+        Assert.Equal(Color.FromRgb(0x2E, 0x5B, 0xAA), ((SolidColorBrush)open.Background).Color);
+        Assert.Equal(Color.FromRgb(0x4F, 0x8C, 0xFF), ((SolidColorBrush)open.BorderBrush).Color);
+        Assert.NotEqual(Color.FromRgb(0x2E, 0x5B, 0xAA), ((SolidColorBrush)done.Background).Color);
     });
 
     // The chip keeps only tasks with at least one LIVE session (an ended session does not count), and says how many it
@@ -785,23 +845,23 @@ public class TasksBoardTests
         var live = t.Tasks.Create("DurableFile move guard", t.Gepha, Session("s1")).Value.Id;
         var ended = t.Tasks.Create("Store screenshots", t.Gepha, Session("s2", live: false)).Value.Id;
         t.Controller.Show();
-        Assert.Equal("Claude working 1", t.Window.ClaudeWorkingLabel);
-        Assert.False(t.Window.ClaudeWorkingOn);
+        Assert.Equal("Claude 1", t.Window.ClaudeLabels[0]);
+        Assert.False(t.Window.ClaudeFilterOn == ClaudeSessionFilter.Any);
 
-        Click(ButtonNamed(t.Window, "Filter: Claude working"));
+        Click(ButtonNamed(t.Window, "Filter: Claude"));
 
-        Assert.True(t.Window.ClaudeWorkingOn);
+        Assert.True(t.Window.ClaudeFilterOn == ClaudeSessionFilter.Any);
         Assert.Equal([live], t.Window.Keys);
-        Assert.Equal("Claude working 1", t.Window.ClaudeWorkingLabel);
+        Assert.Equal("Claude 1", t.Window.ClaudeLabels[0]);
         Assert.Contains("Open 1", t.Window.FilterLabels);
 
         // A session ending takes its task out of the filter as it happens.
         t.Tasks.SessionEnded("s1");
         Assert.Empty(t.Window.Keys);
-        Assert.Equal("Claude working 0", t.Window.ClaudeWorkingLabel);
+        Assert.Equal("Claude 0", t.Window.ClaudeLabels[0]);
 
-        Click(ButtonNamed(t.Window, "Filter: Claude working"));
-        Assert.False(t.Window.ClaudeWorkingOn);
+        Click(ButtonNamed(t.Window, "Filter: Claude"));
+        Assert.False(t.Window.ClaudeFilterOn == ClaudeSessionFilter.Any);
         Assert.Equal(3, t.Window.Keys.Count);
         Assert.Contains(note, t.Window.Keys);
         Assert.Contains(ended, t.Window.Keys);
@@ -820,19 +880,19 @@ public class TasksBoardTests
         var list = t.Tasks.AddNote("deploy list", t.Gepha).Value.Id;
         var other = t.Tasks.Create("runner disk", t.Gepha, Session("s4")).Value.Id;
         t.Controller.Show();
-        Assert.Equal("Claude working 3", t.Window.ClaudeWorkingLabel);
+        Assert.Equal("Claude 3", t.Window.ClaudeLabels[0]);
 
         t.Controller.Search("deploy");
-        Assert.Equal("Claude working 2", t.Window.ClaudeWorkingLabel);
+        Assert.Equal("Claude 2", t.Window.ClaudeLabels[0]);
         Assert.DoesNotContain(other, t.Window.Keys);
 
         t.Controller.FilterWorkspace(TaskWorkspaceFilter.On(t.Gepha));
-        Assert.Equal("Claude working 1", t.Window.ClaudeWorkingLabel);
+        Assert.Equal("Claude 1", t.Window.ClaudeLabels[0]);
         Assert.Equal(3, t.Window.Keys.Count);
         Assert.Contains(fix, t.Window.Keys);
         Assert.Contains(list, t.Window.Keys);
 
-        t.Controller.FilterClaudeWorking(true);
+        t.Controller.FilterClaude(ClaudeSessionFilter.Any);
         Assert.Equal([guard], t.Window.Keys);
         Assert.Contains("Open 1", t.Window.FilterLabels);
 
@@ -840,20 +900,20 @@ public class TasksBoardTests
         t.Controller.FilterWorkspace(TaskWorkspaceFilter.All);
         t.Controller.Filter(TaskFilter.WaitingOnYou);
         Assert.Equal([notes], t.Window.Keys);
-        Assert.Equal("Claude working 1", t.Window.ClaudeWorkingLabel);
+        Assert.Equal("Claude 1", t.Window.ClaudeLabels[0]);
         Assert.Contains("Waiting on you 1", t.Window.FilterLabels);
 
         // Assigned to me: the task that asks is on Petre (an ask hands it to him), the one Claude works on is not.
         t.Controller.Filter(TaskFilter.Open);
         t.Controller.FilterAssignee(TaskAssigneeFilter.Me);
         Assert.Equal([notes], t.Window.Keys);
-        Assert.Equal("Claude working 1", t.Window.ClaudeWorkingLabel);
+        Assert.Equal("Claude 1", t.Window.ClaudeLabels[0]);
 
         // A search nothing matches leaves nothing, and the chip says so.
         t.Controller.FilterAssignee(TaskAssigneeFilter.All);
         t.Controller.Search("deploy nowhere");
         Assert.Empty(t.Window.Keys);
-        Assert.Equal("Claude working 0", t.Window.ClaudeWorkingLabel);
+        Assert.Equal("Claude 0", t.Window.ClaudeLabels[0]);
     });
 
     // Search by id (task 6e4dc116, Petre: "searching for tasks by their id, like 173ef268 should give me that task, from all
@@ -870,7 +930,7 @@ public class TasksBoardTests
         t.Controller.Show();
         Click(ButtonNamed(t.Window, "Matrix"));
         t.Controller.FilterWorkspace(TaskWorkspaceFilter.On(t.Sparrow));
-        t.Controller.FilterClaudeWorking(true);
+        t.Controller.FilterClaude(ClaudeSessionFilter.Any);
         Assert.Equal([open], t.Window.Keys);
 
         t.Controller.Search(closed.ToString()[..8]);
@@ -897,14 +957,14 @@ public class TasksBoardTests
         var live = t.Tasks.Create("DurableFile move guard", t.Gepha, Session("s1")).Value.Id;
         t.Controller.Show();
         t.Window.SearchBox.Text = "guard";
-        Click(ButtonNamed(t.Window, "Filter: Claude working"));
+        Click(ButtonNamed(t.Window, "Filter: Claude"));
         Assert.Equal([live], t.Window.Keys);
 
         t.Controller.Hide();
         t.Controller.Show();
 
         Assert.Equal("", t.Window.SearchBox.Text);
-        Assert.True(t.Window.ClaudeWorkingOn);
+        Assert.True(t.Window.ClaudeFilterOn == ClaudeSessionFilter.Any);
         Assert.Equal([live], t.Window.Keys);
         // The box does not take the keyboard on a show: the panel opens on the board.
         Assert.False(t.Window.SearchBox.IsKeyboardFocused);
@@ -994,7 +1054,8 @@ public class TasksBoardTests
     });
 
     // The chip as the approved mockup draws it (Task 7 review, Important): the orange edge on or off, the normal chip fill
-    // while off and the AskTint fill while on, never the other chips' blue selected edge.
+    // while off and an orange fill while on, never the other chips' blue selected edge. Since task 10b49554 the fill is
+    // the stronger ClaudeOnFill (Petre: "the button gets the color, not only the ring"), on the switch's Claude part.
     [Fact]
     public void The_Claude_working_chip_keeps_its_orange_edge_and_fills_when_on() => StaThread.Run(() =>
     {
@@ -1003,18 +1064,18 @@ public class TasksBoardTests
         t.Controller.Show();
         var orange = FloatingBar.AskingOrange;
         var normalFill = System.Windows.Media.Color.FromRgb(0x2A, 0x2C, 0x33);
-        var askTint = System.Windows.Media.Color.FromRgb(0x3A, 0x2C, 0x1C);
+        var askTint = System.Windows.Media.Color.FromRgb(0x8A, 0x54, 0x10);
         static System.Windows.Media.Color ColourOf(System.Windows.Media.Brush brush) =>
             Assert.IsType<System.Windows.Media.SolidColorBrush>(brush).Color;
 
-        var off = ButtonNamed(t.Window, "Filter: Claude working");
+        var off = ButtonNamed(t.Window, "Filter: Claude");
         Assert.Equal(orange, ColourOf(off.BorderBrush));
         Assert.Equal(normalFill, ColourOf(off.Background));
 
         Click(off);
 
-        var on = ButtonNamed(t.Window, "Filter: Claude working");
-        Assert.True(t.Window.ClaudeWorkingOn);
+        var on = ButtonNamed(t.Window, "Filter: Claude");
+        Assert.True(t.Window.ClaudeFilterOn == ClaudeSessionFilter.Any);
         Assert.Equal(orange, ColourOf(on.BorderBrush));
         Assert.Equal(askTint, ColourOf(on.Background));
     });
@@ -1038,7 +1099,8 @@ public class TasksBoardTests
         // The search row, then the chips, Claude working among them.
         Assert.True(Bottom(t.Window.SearchRow) <= Top(t.Window.Filters));
         Assert.True(t.Window.Filters.ActualHeight > 0);
-        Assert.Contains(ButtonNamed(t.Window, "Filter: Claude working"), t.Window.Filters.Children.OfType<Button>());
+        // The Claude switch's parts sit together in one panel among the chips (task 10b49554).
+        Assert.Contains(ButtonNamed(t.Window, "Filter: Claude"), Inside(t.Window.Filters).OfType<Button>());
         // The search row is the panel's full width inside the toolbar's padding, as wide as the title line.
         Assert.Equal(((FrameworkElement)t.Window.ToolbarTitle.Parent).ActualWidth, t.Window.SearchRow.ActualWidth, 1);
     });
@@ -1055,30 +1117,30 @@ public class TasksBoardTests
         var ended = t.Tasks.Create("DurableFile cleanup", t.Gepha, Session("s2", live: false)).Value.Id;
         t.Controller.Show();
         t.Window.SearchBox.Text = "durablefile";
-        Click(ButtonNamed(t.Window, "Filter: Claude working"));
+        Click(ButtonNamed(t.Window, "Filter: Claude"));
         Assert.Equal([guard], t.Window.Keys);
 
         // Matches the search, but has no live session: only the chip goes off.
         t.Controller.ShowTask(ended);
         Assert.Equal("durablefile", t.Window.SearchBox.Text);
-        Assert.False(t.Window.ClaudeWorkingOn);
+        Assert.False(t.Window.ClaudeFilterOn == ClaudeSessionFilter.Any);
         Assert.Contains(ended, t.Window.Keys);
         Assert.DoesNotContain(note, t.Window.Keys);
 
         // Turned back on, then a task hidden by both: the box empties and the chip goes off.
-        Click(ButtonNamed(t.Window, "Filter: Claude working"));
+        Click(ButtonNamed(t.Window, "Filter: Claude"));
         t.Controller.ShowTask(note);
         Assert.Equal("", t.Window.SearchBox.Text);
-        Assert.False(t.Window.ClaudeWorkingOn);
+        Assert.False(t.Window.ClaudeFilterOn == ClaudeSessionFilter.Any);
         Assert.Contains(note, t.Window.Keys);
         Assert.True(t.Window.ThreadShown(note));
 
         // A live task the search admits: neither is touched.
         t.Window.SearchBox.Text = "guard";
-        Click(ButtonNamed(t.Window, "Filter: Claude working"));
+        Click(ButtonNamed(t.Window, "Filter: Claude"));
         t.Controller.ShowTask(guard);
         Assert.Equal("guard", t.Window.SearchBox.Text);
-        Assert.True(t.Window.ClaudeWorkingOn);
+        Assert.True(t.Window.ClaudeFilterOn == ClaudeSessionFilter.Any);
         Assert.Equal([guard], t.Window.Keys);
     });
 

@@ -2582,6 +2582,9 @@ public partial class App : Application
                 // Task 8): their squares wear a halo. 0 before the first list; each new list pulses sessionsChanged
                 // above, which redraws a line whose count moved.
                 workingOf: task => claudeActions?.WorkingCount(task) ?? 0,
+                // Whether there is a list to split the Claude working block by (task 10b49554): until the first one,
+                // and while the feature is off, the block stays whole rather than showing every task idle.
+                knowsActivity: () => claudeActions?.KnowsActivity ?? false,
                 // Brought forward: raised, then activated (TasksBoard.Arrive). Activated through the activator, since a
                 // `tasks-window show` typed in a terminal carries no foreground right. No move to the desktop in front
                 // any more: the panel is pinned to every desktop (above).

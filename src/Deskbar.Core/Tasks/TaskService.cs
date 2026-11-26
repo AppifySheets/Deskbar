@@ -345,6 +345,21 @@ public sealed class TaskService(ITaskStore store, Func<DateTimeOffset> now, Func
         ImmutableInterlocked.Update(ref prompted, map => map.SetItem(sessionId, at));
     }
 
+    // When each session last had ANY prompt submitted, Deskbar's and Claude Code's own included (task 10b49554): a prompt
+    // starts a turn, so the tasks panel shows the session working at once instead of waiting out the resume grace
+    // (ClaudeActivity). In memory only, kept per session until Deskbar restarts, like `prompted` above.
+    ImmutableDictionary<string, DateTimeOffset> turnsStarted = ImmutableDictionary<string, DateTimeOffset>.Empty;
+
+    /// <summary>A prompt of any kind was submitted in this session (RemoteControl.Prompted): a turn started.</summary>
+    public void TurnStarted(string sessionId)
+    {
+        var at = now();
+        ImmutableInterlocked.Update(ref turnsStarted, map => map.SetItem(sessionId, at));
+    }
+
+    /// <summary>When each session last had a prompt of any kind (TurnStarted), for ClaudeActivity.</summary>
+    public IReadOnlyDictionary<string, DateTimeOffset> TurnsStarted => turnsStarted;
+
     // The quiet clock of StalledTasks: when each watched Claude task last had a session working on it. In memory only;
     // after a restart StalledTasks measures from the task's UpdatedAt instead (see its header).
     ImmutableDictionary<Guid, DateTimeOffset> lastBusy = ImmutableDictionary<Guid, DateTimeOffset>.Empty;

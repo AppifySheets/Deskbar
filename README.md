@@ -464,9 +464,11 @@ Deskbar remembers the width and whether the panel was open. A search box (Ctrl+F
 tasks by every word you type, in titles, status lines and questions. Type a task's id, or a pull request's
 number (`523`, `#523`, `PR 523`, `Deskbar #523` or its link), and it finds that task in every section, closed
 ones included. A Claude session's `gh pr create` puts the new pull request on its task by itself, and the task
-window lists them under "Pull requests". Tasks Claude is working on sit in their
-own "Claude working" group right under "Waiting on you". The "Claude working" chip shows only the tasks with
-a live Claude session and stays on across restarts, as "Current workspace" does. The List is a grid: a header names the columns (Task,
+window lists them under "Pull requests". Tasks with a live Claude session sit in their
+own "Claude working" group right under "Waiting on you": the ones whose session is working right now first, then
+the idle ones, dimmer, under a dashed "idle" line. The "Claude | working | idle" switch next to the status chips
+shows only the tasks with a live Claude session, only the working ones or only the idle ones, and stays on across
+restarts, as "Current workspace" does. A chip or checkbox that is on is filled blue. The List is a grid: a header names the columns (Task,
 Status, Sessions, Who, Age, Workspace), and dragging the line between two headers makes a column wider or
 narrower, the title taking whatever is left; double-click that line to put the column back. Deskbar
 remembers the widths. The buttons (the toggles, comments, Open Claude and the menu) sit together at the right

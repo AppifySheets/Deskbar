@@ -62,18 +62,18 @@ public partial class TasksWindow
     {
         var stats = view.Stats is not null;
         var shown = view.MatrixAllowed ? Visibility.Visible : Visibility.Collapsed;
-        // Outlined like a filter chip, the one on show.
+        // Edged and filled like a filter chip that is on, the one on show (Picked, task 10b49554).
         if (listSwitch is not null)
         {
             listSwitch.Visibility = view.MatrixAllowed || stats ? Visibility.Visible : Visibility.Collapsed;
-            listSwitch.BorderBrush = view.Matrix || stats ? Brushes.Transparent : PickedEdge;
+            Picked(listSwitch, !view.Matrix && !stats);
         }
         if (matrixSwitch is not null)
         {
             matrixSwitch.Visibility = shown;
-            matrixSwitch.BorderBrush = view.Matrix && !stats ? PickedEdge : Brushes.Transparent;
+            Picked(matrixSwitch, view.Matrix && !stats);
         }
-        if (statsSwitch is not null) statsSwitch.BorderBrush = stats ? PickedEdge : Brushes.Transparent;
+        if (statsSwitch is not null) Picked(statsSwitch, stats);
     }
 
     // For the tests: whether the Matrix is on show, where a quadrant's cell sits (row, column), which cell holds a

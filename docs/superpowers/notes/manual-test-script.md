@@ -350,9 +350,10 @@ written for the floating window and now describe the panel; 64a to 64n cover wha
     then type the pull request's number in the panel's search box, then `#` and the number, then its link: each
     time the closed task shows, and only it. A task whose thread links a pull request is found by that number too.
 64j. Claude working. With one task that has a live Claude session, one with an ended session and one note, click
-    the "Claude working N" chip: only the live one stays, N is 1, and its session square glows while Claude is
-    working. Close and reopen the panel, then restart Deskbar: the chip is still on (task 93fa0b9b). Click the chip
-    again: all tasks are back, and a reopen keeps it off.
+    the switch's "Claude N" part (the "Claude working N" chip before task 10b49554): only the live one stays, N is 1,
+    and its session square glows while Claude is working. Close and reopen the panel, then restart Deskbar: the part
+    is still on (task 93fa0b9b). Click it again: all tasks are back, and a reopen keeps it off. The working and idle
+    parts are steps WI1 to WI7.
 64k. Floating bar. Undock the bar so it floats, near the left edge of a screen: the panel opens on that edge, by the
     bar. Move the bar to the right half: the panel stays on the left edge (a floating bar's moves are not followed,
     by decision). Dock the bar again: the panel docks inside it.
@@ -1376,6 +1377,30 @@ WG5. Tick one of the three waiting lines: it stays struck through in its place f
 WG6. On a floating bar (three lines) with the same tasks: one waiting line, the group line "+5 more waiting on you",
      then the important note, all three in view without scrolling.
 WG7. Select a task inside the group (WG4), then click another line: the first one folds back into the group at once.
+
+## Working and idle Claude sessions
+
+(Task 10b49554.) The tasks panel open on the List, with one Claude task whose session is working right now (give it a
+prompt that takes a minute), one whose session sits idle at its prompt, and a note.
+
+WI1. The working task sits under the "CLAUDE WORKING" caption, its session square glowing. Under it a dashed line
+     captioned "idle" leads the idle task, drawn dimmer, with no glow. The note is in its quadrant below.
+WI2. Let the working session finish its turn without asking anything. Within about half a minute its line moves under
+     the "idle" divider and its glow goes. Give it a new prompt: within 15 seconds or so it moves back above the divider.
+WI3. Have a session end its turn while a background job of its own runs on (a PR watch, or ask it to run
+     `sleep 120` in the background and stop): it shows idle while it waits, and its thread lists the session as idle.
+WI4. With no session working, the idle tasks have the ordinary caption "CLAUDE IDLE" instead of the divider.
+WI5. The switch beside the status chips reads "Claude 2 | working 1 | idle 1". Click "working": only the working task
+     stays, and the part is filled orange. Click "idle": only the idle task. Click "idle" again: everything is back and
+     no part is filled. Turn "working" on, close and reopen the panel, then restart Deskbar: it is still on.
+WI6. A status chip that is on ("Open" at first), a ticked "Subtasks" or "Current workspace", and the List / Matrix /
+     Stats part on show are filled blue, not only ringed. The ones that are off have the plain grey fill.
+WI7. Press "Start Claude on this" on a note: its line shows under "CLAUDE WORKING", glowing, within one poll (about 15
+     seconds), not dimmed under "idle" for half a minute first.
+WI8. With "working" on, select the working task and open its thread, then let its session finish its turn: the line and
+     its thread stay on screen (the selected task is kept); select another task and it goes.
+WI9. Drag an idle line and drop it where it was, or press Esc: it is still drawn dimmer. The Matrix keeps its old order
+     and does not split working from idle (a compact line shows no sessions).
 
 ## Results (2026-08-01)
 

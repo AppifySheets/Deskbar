@@ -48,9 +48,18 @@ namespace Deskbar.App;
 //                    the board and hands back a new view. Ctrl+F anywhere in the panel focuses it (Press); Esc in it
 //                    empties it and gives the keyboard back to the board (Escape, FocusBoard). Emptied on Open, since a
 //                    fresh open resets every filter; not saved anywhere.
-//   Claude working   a chip with the status chips, "Claude working N", orange-edged (Orange) on or off, filled with
-//                    AskTint while on (the approved mockup; never the blue selected edge). N is what it would show
-//                    under every other filter (TasksView.ClaudeWorkingCount).
+//   Claude switch    three orange-edged parts with the status chips, "Claude N", "working N", "idle N" (task 10b49554,
+//                    option B of the mockup; it was the one "Claude working N" chip). One part is on at most: every task
+//                    with a live session, only those with a session working now, only the idle ones. A click on the part
+//                    that is on turns the switch off. The part that is on is filled with ClaudeOnFill, never the blue
+//                    selected edge, which would lose the orange. Each N is what that part would show under every other
+//                    filter (TasksView.ClaudeCount, ClaudeWorkingCount, ClaudeIdleCount).
+//   Selected chips   a status chip, a ticked checkbox or the List / Matrix / Stats part in force is FILLED (PickedFill)
+//                    as well as edged in blue (Picked; task 10b49554, Petre: "change selected color so that the button
+//                    gets the color, not only the ring").
+//   Idle part        the Claude working block's idle tasks (TaskGroupKind.ClaudeIdle, task 10b49554) come after its
+//                    working ones under a dashed divider captioned "idle" (IdleDivider), their lines at IdleOpacity; a
+//                    ClaudeIdle group with no working one above it has an ordinary "CLAUDE IDLE" caption instead.
 //   The width        (tasks panel plan, Task 8; spec "Lines at panel width" and "The Matrix") below 710 DIP the lines are
 //                    slim (the view's Slim: squares for sessions, no status chip, assignee, age or Reopen; "Lines at panel width"
 //                    below Line), and the List / Matrix switch shows only from 780 (MatrixAllowed, PaintViewSwitch in
@@ -76,6 +85,11 @@ public partial class TasksWindow : Window
     static readonly Brush HeaderInk = Frozen(0xFF, 0x8B, 0x8F, 0x99);
     static readonly Brush Orange = Frozen(0xFF, FloatingBar.AskingOrange.R, FloatingBar.AskingOrange.G, FloatingBar.AskingOrange.B);
     static readonly Brush AskTint = Frozen(0xFF, 0x3A, 0x2C, 0x1C);
+    // A toolbar chip that is ON is filled, not only edged (task 10b49554, Petre: "change selected color so that the button
+    // gets the color, not only the ring"): the blue of the selected edge (PickedEdge) darkened enough that the light ink
+    // stays readable on it (about 5.5:1), and for the Claude switch the orange's own dark shade (about 5:1).
+    static readonly Brush PickedFill = Frozen(0xFF, 0x2E, 0x5B, 0xAA);
+    static readonly Brush ClaudeOnFill = Frozen(0xFF, 0x8A, 0x54, 0x10);
     // A task line's tile (TasksWindow.Line): a shade lighter than the panel (#1E1F24), so each task is its own block.
     static readonly Brush TileFill = Frozen(0xFF, 0x24, 0x26, 0x2C);
     // The space between two tiles, and between a tile and the panel's sides, in DIP.
@@ -215,9 +229,9 @@ public partial class TasksWindow : Window
     // The goal filter's words, "" while it is not shown (ruling G1: no goals, no goal filter).
     internal string GoalFilterLabel { get; private set; } = "";
     internal string AssigneeFilterLabel { get; private set; } = "";
-    // The "Claude working" chip's words ("Claude working 2") and whether it is on (Task 7).
-    internal string ClaudeWorkingLabel { get; private set; } = "";
-    internal bool ClaudeWorkingOn { get; private set; }
+    // The Claude switch's three parts' words ("Claude 3", "working 1", "idle 2") and which part is on (task 10b49554).
+    internal IReadOnlyList<string> ClaudeLabels { get; private set; } = [];
+    internal ClaudeSessionFilter ClaudeFilterOn { get; private set; }
     // Whether the "Current workspace" checkbox is ticked, as last drawn (task ed1a01fc), for the tests.
     internal bool CurrentWorkspaceOn { get; private set; }
     // Whether the "Subtasks" checkbox is ticked, as last drawn (task 173ef268), for the tests.
@@ -492,6 +506,7 @@ public partial class TasksWindow : Window
         authors.Clear();
         shownComments.Clear();
         closing.Clear();
+        idleLines.Clear();
         // THE STATS VIEW (task 521d2b07, TasksWindow.Stats.cs) takes the place of both the List and the Matrix, and of the
         // search row and the filter chips, which do not apply to it (it counts every task). Drawn, and nothing else.
         statsShown = view.Stats is not null;
@@ -535,13 +550,22 @@ public partial class TasksWindow : Window
         fullGrids.Add(ColumnHeader);
         if (view.Matrix) DrawMatrix(view);
         else
-            view.Groups.ToList().ForEach(group =>
+            view.Groups.Select((group, i) => (Group: group, Above: i > 0 ? view.Groups[i - 1].Kind : (TaskGroupKind?)null)).ToList().ForEach(x =>
             {
-                Rows.Children.Add(Header(group));
+                var group = x.Group;
+                Rows.Children.Add(Header(group, x.Above));
                 group.Rows.ToList().ForEach(row =>
                 {
                     closing[row.Id] = row.Closing;
-                    Rows.Children.Add(Line(row));
+                    var line = Line(row);
+                    // The Claude working block's idle lines are dimmed (task 10b49554, see the header). Only Claude's: a
+                    // note nested under an idle parent is no idle Claude work.
+                    if (group.Kind == TaskGroupKind.ClaudeIdle && row.Claudes)
+                    {
+                        line.Opacity = IdleOpacity;
+                        idleLines.Add(row.Id);
+                    }
+                    Rows.Children.Add(line);
                     if (row.Expanded) Rows.Children.Add(Thread(row));
                 });
             });
@@ -569,9 +593,10 @@ public partial class TasksWindow : Window
             $"{view.ShowsGoals}{view.GoalFilterLabel}{view.GoalFilter}",
             // The "Assigned" filter (Ruling 57): its label is what the toolbar draws.
             $"{view.AssigneeFilterLabel}",
-            // The "Claude working" chip (Task 7): on or off, and its count. NOT the search text: the box is not drawn from
-            // the view, and the lines it narrows are below, so a keystroke that changes no line redraws nothing.
-            $"{view.ClaudeWorking}{view.ClaudeWorkingCount}",
+            // The Claude switch (Task 7's chip, three parts since task 10b49554): which part is on, and each part's count.
+            // NOT the search text: the box is not drawn from the view, and the lines it narrows are below, so a keystroke
+            // that changes no line redraws nothing.
+            $"{view.ClaudeFilter}{view.ClaudeCount}/{view.ClaudeWorkingCount}/{view.ClaudeIdleCount}",
             // The "Subtasks" checkbox (task 173ef268): a tick on a list with no subtasks changes no line, and the box must
             // still redraw ticked.
             $"{view.ShowsSubtasks}",
@@ -632,25 +657,40 @@ public partial class TasksWindow : Window
         {
             var button = Flat(new TextBlock { Text = chip.Label, Foreground = chip.Asks ? Orange : Ink, FontSize = 11 }, $"Filter: {chip.Label}",
                 () => Actions?.Filter(chip.Filter), new Thickness(8, 2, 8, 2));
-            button.BorderBrush = chip.On ? PickedEdge : Brushes.Transparent;
+            Picked(button, chip.On);
             button.Margin = new Thickness(0, 0, 6, ChipRowGap);
             Filters.Children.Add(button);
         });
-        // "Claude working N" (Task 7, see the header), with the status chips; the WrapPanel lets it wrap on a narrow panel.
-        // A click flips it. As the approved mockup draws it: the orange edge ALWAYS (it is the Claude chip, on or off), and
-        // while on the AskTint fill under it, never the other chips' blue selected edge, which would lose the orange.
-        var working = Flat(new TextBlock { Text = $"Claude working {view.ClaudeWorkingCount}", Foreground = Ink, FontSize = 11 },
-            "Filter: Claude working", () => Actions?.FilterClaudeWorking(!view.ClaudeWorking), new Thickness(8, 2, 8, 2));
-        working.BorderBrush = Orange;
-        working.Background = view.ClaudeWorking ? AskTint : ButtonFill;
-        working.Margin = new Thickness(0, 0, 6, ChipRowGap);
-        working.ToolTip = "Only the tasks Claude has a live session on. Kept when the panel opens again";
-        // Read as a checkbox's state by a screen reader and the tests, as "Current workspace" is (task 93fa0b9b: the two
-        // are now kept alike across opens).
-        AutomationProperties.SetItemStatus(working, view.ClaudeWorking ? "checked" : "unchecked");
-        Filters.Children.Add(working);
-        ClaudeWorkingLabel = $"Claude working {view.ClaudeWorkingCount}";
-        ClaudeWorkingOn = view.ClaudeWorking;
+        // The Claude switch (Task 7's chip, three parts since task 10b49554; see the header), with the status chips. The
+        // three parts sit together in one panel so the WrapPanel never splits them across rows on a narrow panel.
+        var claude = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 6, ChipRowGap) };
+        var parts = new (ClaudeSessionFilter Part, string Label, string Name, string Tip)[]
+        {
+            (ClaudeSessionFilter.Any, $"Claude {view.ClaudeCount}", "Filter: Claude",
+                "Only the tasks Claude has a session open on, working or idle. Kept when the panel opens again"),
+            (ClaudeSessionFilter.Working, $"working {view.ClaudeWorkingCount}", "Filter: Claude working",
+                "Only the tasks Claude is working on right now. Kept when the panel opens again"),
+            (ClaudeSessionFilter.Idle, $"idle {view.ClaudeIdleCount}", "Filter: Claude idle",
+                "Only the tasks whose Claude session is open but idle: its turn is over and it asked nothing. Kept when the panel opens again"),
+        };
+        parts.ToList().ForEach(p =>
+        {
+            var on = view.ClaudeFilter == p.Part;
+            // A click on the part that is on turns the switch off; on another part, moves it there.
+            var button = Flat(new TextBlock { Text = p.Label, Foreground = Ink, FontSize = 11 }, p.Name,
+                () => Actions?.FilterClaude(on ? ClaudeSessionFilter.Off : p.Part), new Thickness(8, 2, 8, 2));
+            // The orange edge ALWAYS (it is the Claude switch, on or off) and the orange fill on the part that is on.
+            button.BorderBrush = Orange;
+            button.Background = on ? ClaudeOnFill : ButtonFill;
+            button.Margin = new Thickness(0, 0, p.Part == ClaudeSessionFilter.Idle ? 0 : 2, 0);
+            button.ToolTip = p.Tip;
+            // Read as a checkbox's state by a screen reader and the tests, as "Current workspace" is.
+            AutomationProperties.SetItemStatus(button, on ? "checked" : "unchecked");
+            claude.Children.Add(button);
+        });
+        Filters.Children.Add(claude);
+        ClaudeLabels = parts.Select(p => p.Label).ToArray();
+        ClaudeFilterOn = view.ClaudeFilter;
         // The menu opens from Flat's own press, never from a Click handler added afterwards: Flat's handler marks the
         // click handled, and WPF does not call a later += handler on a handled event, so such a menu never opened
         // (2026-11-23, "dropdown doesn't work"; TasksBoardTests.The_add_rows_workspace_chip_opens_its_menu_and_a_pick_lands).
@@ -669,7 +709,7 @@ public partial class TasksWindow : Window
         {
             var on = view.ShowsSubtasks;
             var subtasks = Flat(CheckContent(on, "Subtasks"), "Subtasks", () => showSubtasks(!on), new Thickness(6, 2, 8, 2));
-            subtasks.BorderBrush = on ? PickedEdge : Brushes.Transparent;
+            Picked(subtasks, on);
             subtasks.Margin = new Thickness(0, 0, 6, ChipRowGap);
             subtasks.ToolTip = on
                 ? "Subtasks are drawn under their parent, here and on the bar. Untick to fold them into the parent's line, which counts them"
@@ -681,7 +721,7 @@ public partial class TasksWindow : Window
         var following = view.Where.FollowsCurrent;
         var current = Flat(CheckContent(following, "Current workspace"), "Current workspace",
             () => Actions?.FilterWorkspace(following ? TaskWorkspaceFilter.All : TaskWorkspaceFilter.Current), new Thickness(6, 2, 8, 2));
-        current.BorderBrush = following ? PickedEdge : Brushes.Transparent;
+        Picked(current, following);
         current.Margin = new Thickness(0, 0, 6, ChipRowGap);
         current.ToolTip = "Only the tasks of the workspace you are on, following you when you switch desktops";
         // A screen reader hears it as a checkbox's state, the same word the tests read.
@@ -751,14 +791,56 @@ public partial class TasksWindow : Window
         ToolbarEnd.Children.Add(close);
     }
 
-    UIElement Header(TaskGroupView group) => new TextBlock
+    // A group's caption. The Claude working block's idle part right under its working part (task 10b49554, see the
+    // header) is one block split in two, so it gets the divider instead of a caption of its own.
+    UIElement Header(TaskGroupView group, TaskGroupKind? above) =>
+        group.Kind == TaskGroupKind.ClaudeIdle && above == TaskGroupKind.ClaudeWorking
+            ? IdleDivider()
+            : new TextBlock
+            {
+                Tag = "task-group",
+                Text = group.Header.ToUpperInvariant(),
+                FontSize = 10,
+                Foreground = group.Kind == TaskGroupKind.WaitingOnYou ? Orange : HeaderInk,
+                Margin = new Thickness(12, 6, 12, 1),
+            };
+
+    // How much an idle line of the Claude working block is dimmed (task 10b49554): still readable, plainly quieter than the
+    // working lines above it, as the approved mockup draws them.
+    const double IdleOpacity = 0.72;
+
+    // The lines drawn at IdleOpacity in the last draw, so a drag's end puts the dimming back (TasksWindow.Drag.cs).
+    readonly HashSet<Guid> idleLines = [];
+
+    // The dashed hairline with "idle" in italics at its left end, between the Claude working block's working and idle
+    // lines (task 10b49554, option B of the mockup).
+    static UIElement IdleDivider()
     {
-        Tag = "task-group",
-        Text = group.Header.ToUpperInvariant(),
-        FontSize = 10,
-        Foreground = group.Kind == TaskGroupKind.WaitingOnYou ? Orange : HeaderInk,
-        Margin = new Thickness(12, 6, 12, 1),
-    };
+        var grid = new Grid { Tag = "task-group", Margin = new Thickness(12, 5, 12, 1) };
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        var words = new TextBlock { Text = "idle", FontSize = 10, FontStyle = FontStyles.Italic, Foreground = HeaderInk, Margin = new Thickness(0, 0, 6, 0) };
+        var dashes = new System.Windows.Shapes.Rectangle
+        {
+            Height = 1,
+            Stroke = HeaderInk,
+            StrokeThickness = 1,
+            StrokeDashArray = [3, 3],
+            VerticalAlignment = VerticalAlignment.Center,
+            SnapsToDevicePixels = true,
+        };
+        Grid.SetColumn(dashes, 1);
+        grid.Children.Add(words);
+        grid.Children.Add(dashes);
+        return grid;
+    }
+
+    // A toolbar chip on or off (task 10b49554, see the header): on is the blue edge AND the blue fill.
+    static void Picked(Button button, bool on)
+    {
+        button.BorderBrush = on ? PickedEdge : Brushes.Transparent;
+        button.Background = on ? PickedFill : ButtonFill;
+    }
 
     // One line: a button across the window, so a click anywhere on it goes to the task; the small buttons inside it
     // mark their Click handled, so the line does not also act on them.

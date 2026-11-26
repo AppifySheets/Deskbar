@@ -86,6 +86,12 @@ namespace Deskbar.App;
 // apply), so it too says how many it would show. The search is not saved and starts over on a fresh open. Claude working
 // is KEPT across opens and restarts, as the "Current workspace" checkbox is (task 93fa0b9b, 2026-11-25, Petre: "i also
 // want a filter on claude working on tasks at the top, just like with current workspace"; AppState.TasksPanel.ClaudeWorking).
+// WORKING OR IDLE (task 10b49554, 2026-11-26, Petre picked option B of the mockup). The chip became a three-way switch,
+// "Claude N | working N | idle N" (ClaudeSessionFilter, saved as AppState.TasksPanel.ClaudeFilter): every task with a live
+// session, only those with a session working right now, or only those whose sessions are idle. Each part counts what it
+// would show, as the chip did. "Working" is the App's ClaudeActivity (busy with the turn in flight, held through one quiet
+// poll), read through `workingOf`, the same count the session halos wear; the Claude working block draws its idle tasks
+// in a ClaudeIdle group under a divider by the same test (TaskViews.Grouped's `busy`).
 // Text that starts a task's id (task 6e4dc116, TaskSearch.Found) is a lookup instead: that task in whatever section it
 // is in, closed included, past every filter, and in the List even when the Matrix is on.
 //
@@ -117,6 +123,7 @@ public sealed class TasksBoard : IDisposable
     readonly Func<TaskItem, IReadOnlyList<SessionView>> sessionsOf;
     readonly Func<TaskItem, string, Result>? openSession;
     readonly Func<TaskItem, int> workingOf;
+    readonly Func<bool> knowsActivity;
     // "Stop Claude and close" (task 37cd7081): the App's ClaudeTaskActions.StopAndClose. None (the tests): the close alone.
     readonly Func<TaskItem, Result>? stopClaudeAndClose;
     readonly IDisposable subscriptions;
@@ -131,7 +138,8 @@ public sealed class TasksBoard : IDisposable
     TaskAssigneeFilter assigneeFilter = TaskAssigneeFilter.All;
     // The search box's text and the "Claude working" chip (Task 7, see the header); both start over on a fresh open.
     TaskSearch search = TaskSearch.None;
-    bool claudeWorking;
+    // The three-way Claude switch (task 10b49554), off by default, kept across opens (AppState.TasksPanel.ClaudeFilter).
+    ClaudeSessionFilter claudeFilter;
     // Whether the Stats view shows in place of the List or the Matrix (task 521d2b07, TasksWindow.Stats.cs). Not
     // remembered: a fresh open starts on the List or the Matrix, whichever AppState.TasksMatrix says, as before.
     bool statsShown;
@@ -205,16 +213,21 @@ public sealed class TasksBoard : IDisposable
     //   sessionsChanged  pulses when the sessions' states may have changed, to redraw an open thread
     //   workingOf     how many of a task's live sessions Claude is busy in now (Task 8; the App's ClaudeTaskActions
     //                 .WorkingCount over the latest `claude agents --json`); their squares wear a halo. None, 0 for all.
-    //                 A new list pulses sessionsChanged, so a line redraws when only this count moved
+    //                 A new list pulses sessionsChanged, so a line redraws when only this count moved. Since task 10b49554
+    //                 it also splits the Claude working block into working, then idle (Busy)
+    //   knowsActivity whether workingOf has a list to go by (task 10b49554, ClaudeTaskActions.KnowsActivity). While it
+    //                 has none the block stays whole, as before the split, rather than showing every task idle.
+    //                 None: known exactly when workingOf was given
     // Internal because TasksPanel is: only the App and the tests build a board.
     internal TasksBoard(TasksWindow window, TasksPanel panel, TaskService tasks, WorkspaceManager manager, Func<TaskItem, Result> goTo,
         Func<Guid, Brush?>? colourOf = null, Func<nint, bool>? bringForward = null, Func<TimeSpan, Action, IDisposable>? undoTimer = null,
         Func<DateTimeOffset>? now = null, TaskSelection? selection = null, GoalService? goals = null,
         Func<TaskItem, IReadOnlyList<SessionView>>? sessionsOf = null, Action<Guid>? startClaude = null,
         Func<TaskItem, string, Result>? openSession = null, IObservable<System.Reactive.Unit>? sessionsChanged = null,
-        Func<TaskItem, int>? workingOf = null, Func<TaskItem, Result>? stopClaudeAndClose = null)
+        Func<TaskItem, int>? workingOf = null, Func<TaskItem, Result>? stopClaudeAndClose = null, Func<bool>? knowsActivity = null)
     {
         this.workingOf = workingOf ?? (_ => 0);
+        this.knowsActivity = knowsActivity ?? (workingOf is null ? () => false : () => true);
         this.stopClaudeAndClose = stopClaudeAndClose;
         this.goals = goals;
         this.sessionsOf = sessionsOf ?? (task => TaskViews.SessionList(task, Maybe<IReadOnlyCollection<ClaudeAgent>>.None, _ => true));
@@ -266,7 +279,7 @@ public sealed class TasksBoard : IDisposable
             Assign: (id, who) => Assign(id, who),
             FilterAssignee: FilterAssignee,
             Search: Search,
-            FilterClaudeWorking: FilterClaudeWorking)
+            FilterClaude: FilterClaude)
         {
             StartClaude = startClaude,
             // The manager line's click (task 61e4d143): the Manager button's own click, read when it happens, since the
@@ -454,9 +467,10 @@ public sealed class TasksBoard : IDisposable
     {
         filter = TaskFilter.Open;
         // The "Current workspace" checkbox (AppState.TasksPanel.CurrentWorkspace, task ed1a01fc) and the "Claude working"
-        // chip (AppState.TasksPanel.ClaudeWorking, task 93fa0b9b) are the filters a fresh open keeps.
+        // chip (task 93fa0b9b), now the three-way Claude switch (AppState.TasksPanel.ClaudeSwitch, task 10b49554), are the
+        // filters a fresh open keeps.
         where = PanelState.CurrentWorkspace ? TaskWorkspaceFilter.Current : TaskWorkspaceFilter.All;
-        claudeWorking = PanelState.ClaudeWorking;
+        claudeFilter = PanelState.ClaudeSwitch;
         goalFilter = TaskGoalFilter.All;
         assigneeFilter = TaskAssigneeFilter.All;
         // The window empties its search box in its own Open (TasksWindow.Open), so the box and this agree.
@@ -688,12 +702,13 @@ public sealed class TasksBoard : IDisposable
     }
 
     /// <summary>
-    /// The "Claude working" chip: only the tasks with a live session while on, remembered across opens and restarts
-    /// (AppState.TasksPanel.ClaudeWorking, task 93fa0b9b; see the header).
+    /// The three-way Claude switch (task 10b49554, see the header): off, every task with a live session, only working or
+    /// only idle, remembered across opens and restarts (AppState.TasksPanel.ClaudeFilter). The window passes Off when the
+    /// part already on is clicked again.
     /// </summary>
-    public void FilterClaudeWorking(bool on)
+    public void FilterClaude(ClaudeSessionFilter shown)
     {
-        KeepClaudeWorking(on);
+        KeepClaudeFilter(shown);
         Refresh();
     }
 
@@ -709,13 +724,18 @@ public sealed class TasksBoard : IDisposable
         Refresh();
     }
 
-    // The chip's state and its saved copy move together, so whatever turns it off (the chip, a task it hides being shown)
-    // is what the next open starts with. A no-op write when nothing changes (SaveTasksPanel compares).
-    void KeepClaudeWorking(bool on)
+    // The switch's state and its saved copy move together, so whatever turns it off (the switch, a task it hides being
+    // shown) is what the next open starts with. A no-op write when nothing changes (SaveTasksPanel compares). The old
+    // chip's flag is cleared on the way, so it cannot turn the switch back on at the next open (AppState.ClaudeSwitch).
+    void KeepClaudeFilter(ClaudeSessionFilter shown)
     {
-        claudeWorking = on;
-        _ = manager.SaveTasksPanel(PanelState with { ClaudeWorking = on });
+        claudeFilter = shown;
+        _ = manager.SaveTasksPanel(PanelState with { ClaudeFilter = shown, ClaudeWorking = false });
     }
+
+    // Whether a session of the task is working right now (task 10b49554): the count the session halos wear, from the App's
+    // ClaudeActivity. What splits the Claude working block and what the switch's working and idle parts show.
+    bool Busy(TaskItem task) => workingOf(task) > 0;
 
     // THE HEADER'S DIVIDER DRAG END (task 3df2d28f): the full line's column widths saved with the panel, then a redraw so
     // the view carries them. The window already shows them (it resized every line live during the drag); the redraw
@@ -879,7 +899,7 @@ public sealed class TasksBoard : IDisposable
             search = TaskSearch.None;
             window.ClearSearch();
         }
-        if (claudeWorking && !task.Value.HasLiveSession) KeepClaudeWorking(false);
+        if (!ClaudeWorking.Admits(claudeFilter, task.Value, Busy)) KeepClaudeFilter(ClaudeSessionFilter.Off);
     }
 
     /// <summary>A line's click (see the header). The window stays open; a refusal shows on its problem line.</summary>
@@ -1139,7 +1159,9 @@ public sealed class TasksBoard : IDisposable
         // under every other filter, whether it is on or off.
         var whole = WithPendingCloses(tasks.Board);
         var searched = search.Narrow(goalFilter.Narrow(whole, goalBoard));
-        var board = ClaudeWorking.Narrow(searched, claudeWorking);
+        // The task Petre picked stays past the Claude switch (task 10b49554): under "working" a line would otherwise vanish,
+        // open thread and all, the moment its session ends its turn, as FoldSubtasks keeps the selected task (b0526e18).
+        var board = ClaudeWorking.Narrow(searched, claudeFilter, Busy, keep: selection.Current);
         // SEARCH BY ID (task 6e4dc116; TaskSearch has the rule): text that starts a task's id finds that task in whatever
         // section it is in, closed and snoozed included, past every filter, so the lookup is taken on the whole board
         // and grouped by TaskViews.Everywhere, not by the status filter. The chips keep their counts from `board`.
@@ -1148,10 +1170,13 @@ public sealed class TasksBoard : IDisposable
         // TaskWorkspaceFilter.Current), so the groups, the Matrix, every chip's count and the add box all follow a
         // desktop switch, which redraws through ShownStateKey (it holds CurrentWorkspaceId).
         var shown = where.Resolved(manager.CurrentWorkspaceId);
-        var claudeWorkingCount = TaskViews.Count(ClaudeWorking.Narrow(searched, true), filter, shown, assigneeFilter);
+        // Each part of the Claude switch says how many it would show under every other filter (task 10b49554).
+        int ClaudeCount(ClaudeSessionFilter part) => TaskViews.Count(ClaudeWorking.Narrow(searched, part, Busy), filter, shown, assigneeFilter);
         // Follow-up to the subtasks spec: a subtask is drawn right under its parent, in the parent's group (TaskViews.UnderParents);
-        // such a line is Nested, so it shows the arrow without the parent's name.
-        var (underParents, nested) = TaskViews.UnderParents(foundById.Match(TaskViews.Everywhere, () => TaskViews.Grouped(board, filter, shown, assigneeFilter)));
+        // such a line is Nested, so it shows the arrow without the parent's name. The Claude working block is split into
+        // its working and idle parts by Busy (task 10b49554), once there is a list to tell them by (knowsActivity).
+        var split = knowsActivity() ? Busy : (Func<TaskItem, bool>?)null;
+        var (underParents, nested) = TaskViews.UnderParents(foundById.Match(TaskViews.Everywhere, () => TaskViews.Grouped(board, filter, shown, assigneeFilter, split)));
         // The "Subtasks" checkbox unticked (task 173ef268): the lines drawn under a parent are left out, and the parent's
         // own "· N subtasks" says they are there. Read from the saved state, as OpenFresh reads CurrentWorkspace.
         // A search by id never folds (task 6e4dc116): the subtask asked for by its id would vanish under its parent.
@@ -1195,6 +1220,8 @@ public sealed class TasksBoard : IDisposable
         var places = WorkspaceChipMenu.Entries(manager.State, withNone: true);
         var addTarget = shown.Any ? PlaceOf(manager.CurrentWorkspaceId) : PlaceOf(shown.Workspace);
         // The Matrix's four cells (Ruling 28), drawn instead of the groups while the switch says so (AppState.TasksMatrix).
+        // Not split by Busy (task 10b49554 review): a compact Matrix line shows no sessions, so a line moving between
+        // working and idle would jump inside its cell with nothing on screen to say why.
         var matrix = TaskViews.Matrix(board, filter, shown, assigneeFilter);
         var cellTasks = showsSubtasks ? matrix : TaskViews.FoldSubtasks(matrix, selection.Current, snoozedFamily);
         var cellIds = cellTasks.SelectMany(c => c.Tasks).Select(t => t.Id).ToHashSet();
@@ -1233,8 +1260,10 @@ public sealed class TasksBoard : IDisposable
             AssigneeFilter = assigneeFilter,
             AssigneeFilterLabel = AssigneeFilterLabel(),
             Search = search.Text,
-            ClaudeWorking = claudeWorking,
-            ClaudeWorkingCount = claudeWorkingCount,
+            ClaudeFilter = claudeFilter,
+            ClaudeCount = ClaudeCount(ClaudeSessionFilter.Any),
+            ClaudeWorkingCount = ClaudeCount(ClaudeSessionFilter.Working),
+            ClaudeIdleCount = ClaudeCount(ClaudeSessionFilter.Idle),
             ShowsSubtasks = showsSubtasks,
             // The Stats view counts the whole board, not the filtered one: it is about the work, not about what a filter
             // shows (spec 2026-11-25-task-stats-design.md, "What it shows"). Made only while it shows.
@@ -1243,12 +1272,17 @@ public sealed class TasksBoard : IDisposable
         };
     }
 
-    // What an empty list says: under a search or Claude working, that THEY found nothing, since "Nothing open" would be
+    // What an empty list says: under a search or the Claude switch, that THEY found nothing, since "Nothing open" would be
     // wrong while open tasks are only hidden by them; otherwise the status filter's own line.
     string EmptyText() =>
         !search.IsBlank ? "No task matches the search."
-        : claudeWorking ? "Claude is not working on any of these."
-        : EmptyText(filter);
+        : claudeFilter switch
+        {
+            ClaudeSessionFilter.Any => "Claude has no session open on any of these.",
+            ClaudeSessionFilter.Working => "Claude is not working on any of these.",
+            ClaudeSessionFilter.Idle => "No idle Claude session on any of these.",
+            _ => EmptyText(filter),
+        };
 
     // STALE AT MIDNIGHT (review M7, known): "this week" and "this month" are read when a view is made, and nothing makes
     // a view when the day changes, so a window left open over midnight into a new week offers last week's goals until
@@ -1733,10 +1767,17 @@ internal sealed record TasksView(IReadOnlyList<TaskFilterChip> Filters, string W
     /// </summary>
     public string Search { get; init; } = "";
 
-    /// <summary>Whether the "Claude working" chip is on, and how many tasks it would show under every other filter.</summary>
-    public bool ClaudeWorking { get; init; }
+    /// <summary>
+    /// The three-way Claude switch (task 10b49554): which part is on (Off for none), and how many tasks each part would
+    /// show under every other filter: every task with a live session, the working ones, the idle ones.
+    /// </summary>
+    public ClaudeSessionFilter ClaudeFilter { get; init; }
+
+    public int ClaudeCount { get; init; }
 
     public int ClaudeWorkingCount { get; init; }
+
+    public int ClaudeIdleCount { get; init; }
 
     /// <summary>Whether the "Subtasks" checkbox is ticked (task 173ef268): subtasks drawn under their parent, not folded.</summary>
     public bool ShowsSubtasks { get; init; } = true;
@@ -1759,7 +1800,8 @@ internal sealed record TasksView(IReadOnlyList<TaskFilterChip> Filters, string W
 /// box; every refusal is shown by the controller on the problem line. ClosePanel is the toolbar's × and Alt+F4 (the
 /// panel's Hide); ResizePanel is the grip's drag end, with the new width in DIPs (saved, and the panel re-docked at it).
 /// They replaced Remember, which kept the floating window's place in AppState.TasksWindow (tasks panel plan, Task 6).
-/// Search is the search box's text on every keystroke and FilterClaudeWorking the "Claude working" chip (Task 7).
+/// Search is the search box's text on every keystroke and FilterClaude a click on the three-way Claude switch (Task 7's
+/// chip, split into Claude, working and idle by task 10b49554).
 /// </summary>
 internal sealed record TasksWindowActions(
     Action<Guid> Go,
@@ -1791,7 +1833,7 @@ internal sealed record TasksWindowActions(
     Action<Guid, Assignee> Assign,
     Action<TaskAssigneeFilter> FilterAssignee,
     Action<string> Search,
-    Action<bool> FilterClaudeWorking)
+    Action<ClaudeSessionFilter> FilterClaude)
 {
     /// <summary>"Start Claude on this" (Task 9): the line menu's item and the thread's button. None, neither shows.</summary>
     public Action<Guid>? StartClaude { get; init; }

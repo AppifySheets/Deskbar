@@ -92,10 +92,34 @@ public sealed record TaskSearch(string Text)
     }
 }
 
-// The panel's "Claude working" switch: only tasks with at least one live session (TaskItem.HasLiveSession). Off returns
-// the same board, as TaskGoalFilter.Narrow does for All.
+/// <summary>
+/// The panel's three-way Claude switch (task 10b49554, option B of the mockup), which replaced the "Claude working" chip:
+/// off (<see cref="Off"/>), every task with a live session (<see cref="Any"/>, what the chip did), only those with a
+/// session working right now (<see cref="Working"/>), or only those whose sessions are all idle (<see cref="Idle"/>).
+/// </summary>
+// Saved by name (AppState.TasksPanelState.ClaudeFilter), so the order may change; Off stays first, the default.
+public enum ClaudeSessionFilter { Off, Any, Working, Idle }
+
+// The panel's Claude switch: only tasks with at least one live session (TaskItem.HasLiveSession), split by `busy`, the
+// test of whether one of the task's sessions is working (ClaudeActivity, held through one quiet poll). Off returns the
+// same board, as TaskGoalFilter.Narrow does for All.
 public static class ClaudeWorking
 {
+    /// <summary>The "Claude working" chip's narrowing before the switch: on is <see cref="ClaudeSessionFilter.Any"/>.</summary>
     public static TaskBoard Narrow(TaskBoard board, bool on) =>
-        on ? new TaskBoard(board.Tasks.Where(t => t.HasLiveSession).ToArray()) : board;
+        Narrow(board, on ? ClaudeSessionFilter.Any : ClaudeSessionFilter.Off, _ => false);
+
+    /// <param name="keep">A task shown whatever the switch says: the selected one, so it does not vanish from under Petre.</param>
+    public static TaskBoard Narrow(TaskBoard board, ClaudeSessionFilter filter, Func<TaskItem, bool> busy, Maybe<Guid> keep = default) =>
+        filter == ClaudeSessionFilter.Off ? board
+        : new TaskBoard(board.Tasks.Where(t => Admits(filter, t, busy) || keep.Map(id => id == t.Id).GetValueOrDefault(false)).ToArray());
+
+    /// <summary>Whether the switch shows the task (every task while it is off).</summary>
+    public static bool Admits(ClaudeSessionFilter filter, TaskItem task, Func<TaskItem, bool> busy) => filter switch
+    {
+        ClaudeSessionFilter.Any => task.HasLiveSession,
+        ClaudeSessionFilter.Working => task.HasLiveSession && busy(task),
+        ClaudeSessionFilter.Idle => task.HasLiveSession && !busy(task),
+        _ => true,
+    };
 }
