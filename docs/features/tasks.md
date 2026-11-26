@@ -93,6 +93,14 @@ The panel is narrow on purpose, which makes a long task hard to read and harder 
 - On a tiled workspace a task window is a tile like any other app's window, not a window floating over the grid. Where the grid puts it is not remembered as the place task windows open at; only a place you gave one on an untiled workspace is.
 - `deskbar.cmd task open <id>` does the same from a script.
 
+**While the [Inbox](#the-inbox) is the chosen view,** the window shows the same page the panel shows for the task, in the Inbox's dark look, in a column at most 880 DIP wide. The title bar, the place, the size, one window per task and everything above about opening and closing the window stay as they are. Switching to List or Matrix, or back to the Inbox, changes every open window at once; what you typed in the comment box goes with it, an open editor closes without saving, and pictures waiting under the box are dropped. Stats laid over the Inbox changes nothing in a window.
+
+- The top row has the state mark, the title and **⋯**, with no back arrow. Under it come the state in words, the workspace chip (click it to move the task), the task's pull requests, **Undo** while a close can still be undone, and the **Important** and **Urgent** toggles. Then the description in full with its pictures, the question in a bubble (or the status line), and the whole thread: every comment, none folded behind "N earlier comments" and none cut short. The comment box is at the end of the thread.
+- A subtask, the parent and a linked task each open in a window of their own. Esc does nothing in a window, since there is no list behind it.
+- **⋯** is the panel's menu for the task, with **Show in the tasks panel** in place of **Open in window**.
+- The sessions, the subtasks and the task's pull requests are in the page itself, so the right-hand column of the window is gone, with its **Details** (quadrant, goal, when it was added, the id) and the age. **Copy link** on **⋯** has the id.
+- **Editing and keys are the panel's, not the old window's.** Edit (or F2) opens the panel's in-place boxes for the title and the description: Enter saves, Shift+Enter is a new line, Esc keeps nothing. The old window's Markdown and Preview tabs, Ctrl+E, Ctrl+S and Ctrl+Enter to save are gone. In the comment box Enter posts and Shift+Enter is a new line (the old window posted with Ctrl+Enter, and Enter was a new line).
+
 ## Links to a task
 
 **Copy link** on a task's menu, in the tasks panel and on the bar, copies a link to the task as markdown: `[Deskbar task 5016d533](https://deskbar.app/task#5016d533-...)`. Paste it into a pull request, an issue, a comment or a message, and a click on it opens the task in its own window on the PC where Deskbar runs, on the desktop you are on.
