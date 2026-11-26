@@ -378,16 +378,22 @@ public partial class TasksWindow
             }
             if (TaskImageRow.Of(StateDir, parts.Images, OpenImage) is { } pictures) body.Children.Add(pictures);
         }
-        if (row.Detail.Length > 0)
+        // THE QUESTION IS IN THE CHAT WHEN THE CHAT SHOWS IT (task 968c2216, on main): an ask writes the question into the
+        // thread too, and an open line leaves it off while that comment is on show (DetailShown). The page follows the
+        // same rule, so the question is never drawn twice: the bubble only for a question the chat does not carry (one
+        // asked before questions went into the thread, or folded behind "N earlier comments"), and what is left of the
+        // detail ("no live session") as plain text.
+        var shownDetail = DetailShown(row);
+        if (shownDetail.Length > 0)
         {
             // The List's detail text (its links clickable, task 08cdb052), wrapped in full: an open row is never cut.
-            var detail = DetailText(row);
+            var detail = DetailText(row, shownDetail);
             detail.FontSize = 13;
             detail.FontWeight = FontWeights.Normal;
             detail.Foreground = InboxLook.Ink;
             detail.TextWrapping = TextWrapping.Wrap;
             detail.TextTrimming = TextTrimming.None;
-            if (row.Status == TaskStatus.WaitingOnYou)
+            if (row.Status == TaskStatus.WaitingOnYou && shownDetail == row.Detail)
             {
                 // The question in a bubble with an amber edge, as the mockup's "Claude asks".
                 var bubble = new StackPanel();
