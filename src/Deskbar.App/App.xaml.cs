@@ -1762,7 +1762,8 @@ public partial class App : Application
         // the bar exists nothing counts as open, so no App chip is hidden.
         var bookmarkOpener = new Core.Bookmarks.BookmarkOpener(manager,
             new Core.Bookmarks.BookmarkStarts(
-                Program: (exe, arguments, folder) => Deskbar.Windows.Processes.DetachedLauncher.StartVerbatim(exe, arguments, folder)
+                // No working folder means the exe's own folder, as a pin or Explorer would start it, not Deskbar's.
+                Program: (exe, arguments, folder) => Deskbar.Windows.Processes.DetachedLauncher.StartVerbatim(exe, arguments, folder ?? Path.GetDirectoryName(exe))
                     .MapError(error => $"Could not start {Path.GetFileName(exe)}: {error}"),
                 App: appId => Deskbar.Windows.Shell.ShellTaskbarPins.LaunchApp(appId, appId),
                 Link: url => ProgramStarter.Start(new ProgramLaunch(url, [], null))),

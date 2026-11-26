@@ -71,10 +71,11 @@ public class FloatingBarBookmarksTests
             Link: url => { Calls.Add($"link {url}"); return Result.Success(); });
     }
 
-    static BarUnderTest ShowBar(Harness harness, Started? started = null, Func<string?>? clipboard = null)
+    static BarUnderTest ShowBar(Harness harness, Started? started = null, Func<string?>? clipboard = null, Action<string>? said = null)
     {
         var bar = new FloatingBar(harness.Manager)
         {
+            ShowRefusal = said ?? (_ => { }),
             Left = -32000,
             Top = -32000,
             BookmarkOpener = new BookmarkOpener(harness.Manager, (started ?? new Started()).Starts, () => new HashSet<string>()),
@@ -160,6 +161,25 @@ public class FloatingBarBookmarksTests
         Assert.Equal("None", effects);
         Assert.StartsWith("can't bookmark: ", bar.Bar.ReadoutText);
         Assert.Empty(harness.Manager.State.Workspaces.Single(w => w.Name == "Sparrow").Bookmarks);
+    });
+
+    // The refusal is a modal box in the real bar, so it must wait until Drop has returned: a box raised inside the OLE
+    // Drop handler freezes the program that started the drag.
+    [Fact]
+    public void A_refused_drop_is_said_only_after_drop_returns() => StaThread.Run(() =>
+    {
+        var harness = Harness.Build();
+        var said = new List<string>();
+        using var bar = ShowBar(harness, said: said.Add);
+        Drag(bar, "Sparrow", LinkDrag("https://portainer.local:9443/"), DragDrop.DropEvent);
+
+        // The same link again is a duplicate, which is refused.
+        Drag(bar, "Sparrow", LinkDrag("https://portainer.local:9443/"), DragDrop.DropEvent);
+
+        Assert.Empty(said);
+        bar.Bar.Dispatcher.Invoke(() => { }, System.Windows.Threading.DispatcherPriority.ContextIdle);
+        Assert.Single(said);
+        Assert.Contains("already has this bookmark", said[0]);
     });
 
     [Fact]
