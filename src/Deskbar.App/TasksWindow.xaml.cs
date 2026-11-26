@@ -1108,7 +1108,8 @@ public partial class TasksWindow : Window
             if (ClickIgnored() || row.Closing || renaming == row.Id) return;
             // A single click picks the task and opens its thread; it goes nowhere (Ruling 54). A subtask's line in its
             // parent's thread opens or folds its thread in place instead (see inThreadOf above).
-            if (inThreadOf is not null) Actions?.ToggleThread(row.Id);
+            // On an Inbox page a subtask opens a page of its own (TasksWindow.InboxPage.cs, task 740a2231).
+            if (inThreadOf is not null) { if (!OpenSubtaskPage(row.Id)) Actions?.ToggleThread(row.Id); }
             else Actions?.Pick(row.Id);
         };
         return line;
@@ -1528,6 +1529,8 @@ public partial class TasksWindow : Window
     /// <summary>Brings the selected task's line into view, as the window opens.</summary>
     internal void ScrollToSelected()
     {
+        // The Inbox opens an explicitly shown task's page in its tab (TasksWindow.InboxPage.cs, task 740a2231).
+        if (InboxFollowsSelection(open: true)) return;
         if (selectedId.HasNoValue || !selectionFrames.TryGetValue(selectedId.Value, out var parts)) return;
         UpdateLayout();
         // The line's place in the list, a third of the way down the view; the scroll itself runs in the next layout
@@ -1566,6 +1569,8 @@ public partial class TasksWindow : Window
     /// </summary>
     internal void RevealSelected()
     {
+        // The Inbox brings the line into view in the tab on show, never switching it (task 740a2231).
+        if (InboxFollowsSelection(open: false)) return;
         if (selectedId.HasNoValue || !selectionFrames.TryGetValue(selectedId.Value, out var parts)) return;
         parts.Frame.BringIntoView();
     }
@@ -3026,6 +3031,8 @@ public partial class TasksWindow : Window
     // F2: the selected line's title, when the line is on show, open and nothing is being edited already.
     bool EditSelected()
     {
+        // An Inbox page edits its own task, whatever is selected (TasksWindow.InboxPage.cs, task 740a2231).
+        if (InboxEditPage()) return true;
         if (renaming is not null || selectedId.HasNoValue) return false;
         var id = selectedId.Value;
         // Not from a box being typed in (the add box, the search box, the subtask box in a thread): F2 there is the box's.
@@ -3596,6 +3603,8 @@ public partial class TasksWindow : Window
         // The add box's skill list closes before the box does (task 3a872301): the window's Esc runs ahead of the box's.
         else if (addSkills.Dismiss()) { }
         else if (AddBoxShown) HideAdd();
+        // An Inbox page: back, to its parent's page or the list (TasksWindow.InboxPage.cs, task 740a2231).
+        else if (InboxBack()) { }
         // RULING 63: Esc folds the selected line's open thread, the last thing it undoes.
         // Not while a comment box has the keyboard: there Esc belongs to the box (review, M5).
         else if (selectedId.HasValue && authors.ContainsKey(selectedId.Value) && !(EscapeIgnoresThreadWhile?.Invoke() ?? commentBoxes.Values.Any(box => box.IsKeyboardFocusWithin)))

@@ -419,4 +419,206 @@ public partial class TasksBoardTests
 
         Assert.Equal(TaskAge.Format(Start.AddHours(1) - since), t.Window.InboxTimeOf(k.Asking));
     });
+
+    // --- the page --------------------------------------------------------------------------------------------------------
+
+    // Criterion 7: a click opens the page over the list; the arrow and Esc go back to the list where it was scrolled.
+    [Fact]
+    public void A_click_opens_the_page_and_the_arrow_and_esc_go_back_to_the_same_place() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var many = Enumerable.Range(0, 30).Select(i => t.Tasks.AddNote($"Errand {i}", t.Gepha).Value.Id).ToArray();
+        t.Controller.Show();
+        ChooseInbox(t);
+        t.Window.ChooseInboxTab(InboxTab.Notes);
+        t.Window.UpdateLayout();
+        t.Window.Rows.Parent.SetValue(FrameworkElement.HeightProperty, 300.0);
+        t.Window.UpdateLayout();
+        ((ScrollViewer)t.Window.Rows.Parent).ScrollToVerticalOffset(400);
+        t.Window.UpdateLayout();
+        var offset = t.Window.ScrollOffset;
+        Assert.True(offset > 0);
+        var id = many[10];
+
+        Click(LineOf(t.Window, id));
+        Assert.NotNull(t.Window.InboxPageContent);
+        Assert.True(t.Window.ThreadShown(id));
+        Click(ButtonNamed(t.Window.InboxPageContent!, TasksWindow.InboxPageBackText));
+        Assert.Null(t.Window.InboxPageContent);
+        Assert.False(t.Window.ThreadShown(id));
+        Assert.Equal(offset, t.Window.ScrollOffset, 1);
+
+        Click(LineOf(t.Window, id));
+        Assert.NotNull(t.Window.InboxPageContent);
+        Assert.True(t.Window.Press(Key.Escape, ModifierKeys.None));
+        Assert.Null(t.Window.InboxPageContent);
+        Assert.Equal(offset, t.Window.ScrollOffset, 1);
+    });
+
+    // Criterion 8: the page shows every part of the thread the List's open line shows, and a comment with a picture posts
+    // from it.
+    [Fact]
+    public void The_page_shows_the_thread_and_posts_a_comment_with_a_picture() => StaThread.Run(() =>
+    {
+        var root = ScratchRoot();
+        try
+        {
+            using var t = Build(stateDir: root, sessionsOf: task => task.Sessions.Select(s => new SessionView(s.Id, s.Joined, SessionState.Idle)).ToArray(),
+                openSession: (_, _) => CSharpFunctionalExtensions.Result.Success());
+            var k = InboxTasks(t);
+            var sub = t.Tasks.AddNote("A subtask", t.Gepha).Value.Id;
+            t.Tasks.SetParent(sub, k.Asking);
+            t.Tasks.Comment(k.Asking, Maybe<string>.None, "First word");
+            t.Tasks.Comment(k.Asking, "s3", "An answer");
+            t.Tasks.Describe(k.Asking, "What to try, in **full**.");
+            t.Controller.Show();
+            ChooseInbox(t);
+
+            Click(LineOf(t.Window, k.Asking));
+            var page = t.Window.InboxPageContent!;
+            Assert.Equal(["you", "Claude"], t.Window.CommentAuthors(k.Asking));
+            Assert.True(HasButtonNamed(page, TasksWindow.OpenInWindowText));
+            Assert.True(HasButtonNamed(page, TasksWindow.OpenClaudeText));
+            Assert.Contains(Inside(page).OfType<Border>(), b => Equals(b.Tag, TasksWindow.QuestionBubbleTag));
+            Assert.Contains(Inside(page).OfType<RichTextBox>(), b => Equals(b.Tag, "task-description"));
+            Assert.Contains(Inside(page).OfType<Button>(), b => AutomationProperties.GetName(b) == $"Subtask {FloatingBar.FirstLine("A subtask")}");
+            Assert.NotNull(t.Window.CommentBoxOf(k.Asking));
+
+            Assert.True(t.Window.PasteImages(k.Asking, BitmapData()));
+            Assert.True(t.Window.TypeComment(k.Asking, "See this", Key.Enter));
+            var posted = t.Tasks.Board.Tasks.Single(x => x.Id == k.Asking).Comments.Last().Markdown;
+            Assert.Equal("See this", TaskImages.Split(posted).Text);
+            Assert.Single(TaskImages.Split(posted).Images);
+            // Still on the page after the post.
+            Assert.Equal(k.Asking, t.Window.InboxPageShown);
+        }
+        finally { System.IO.Directory.Delete(root, true); }
+    });
+
+    // The thread's row of buttons shows all of them on the page, at any width: no List line stands above it.
+    [Fact]
+    public void The_pages_thread_row_has_every_button_at_the_narrowest_width() => StaThread.Run(() =>
+    {
+        using var t = Build(width: TasksPanelLayout.MinWidth, sessionsOf: task => task.Sessions.Select(s => new SessionView(s.Id, s.Joined, SessionState.Idle)).ToArray());
+        var k = InboxTasks(t);
+        t.Controller.Show();
+        ChooseInbox(t);
+        t.Window.ChooseInboxTab(InboxTab.Claude);
+
+        Click(LineOf(t.Window, k.Idle));
+        var row = Inside(t.Window.InboxPageContent!).OfType<WrapPanel>().Single(p => Equals(p.Tag, TasksWindow.ThreadActionsTag));
+        var names = row.Children.OfType<Button>().Select(AutomationProperties.GetName).ToArray();
+        Assert.Contains(TasksWindow.OpenInWindowText, names);
+        Assert.Contains(TasksWindow.OpenClaudeText, names);
+        Assert.All(row.Children.OfType<Button>(), b => Assert.Equal(Visibility.Visible, b.Visibility));
+    });
+
+    // A finished task's page ends with Close task (six seconds of Undo, back on the list) and Not done yet.
+    [Fact]
+    public void A_finished_pages_close_task_closes_it_with_undo_on_the_list() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var k = InboxTasks(t);
+        t.Controller.Show();
+        ChooseInbox(t);
+        Click(LineOf(t.Window, k.Done));
+        Assert.True(HasButtonNamed(t.Window.InboxPageContent!, TasksWindow.NotDoneYetText));
+
+        Click(ButtonNamed(t.Window.InboxPageContent!, TasksWindow.CloseTaskPageText));
+
+        Assert.Equal(TaskStatus.Closed, t.Tasks.Board.Tasks.Single(x => x.Id == k.Done).Status);
+        Assert.Null(t.Window.InboxPageContent);
+        Assert.True(t.Window.IsClosing(k.Done));
+        Assert.True(HasButtonNamed(LineOf(t.Window, k.Done), "Undo"));
+    });
+
+    // Criterion 11, and Stats: a task shown from outside (a click on the bar, a Stats line) lands on its page, in its tab.
+    [Fact]
+    public void A_task_shown_from_the_bar_or_stats_lands_on_its_page_in_its_tab() => StaThread.Run(() =>
+    {
+        using var t = Build(workingOf: _ => 1);
+        var k = InboxTasks(t);
+        t.Controller.Show();
+        ChooseInbox(t);
+        Assert.Equal(InboxTab.NeedsYou, t.Window.InboxTabShown);
+
+        t.Controller.ShowTask(k.Working);
+        Assert.Equal(InboxTab.Claude, t.Window.InboxTabShown);
+        Assert.Equal(k.Working, t.Window.InboxPageShown);
+        Assert.NotNull(t.Window.InboxPageContent);
+
+        t.Window.Actions!.ShowStats!();
+        Assert.Null(t.Window.InboxShown);
+        t.Controller.OpenFromStats(k.Note);
+        Assert.NotNull(t.Window.InboxShown);
+        Assert.Equal(InboxTab.Notes, t.Window.InboxTabShown);
+        Assert.Equal(k.Note, t.Window.InboxPageShown);
+    });
+
+    // A terminal window coming to the front picks its task, and never switches the tab or the page.
+    [Fact]
+    public void A_terminal_in_front_never_switches_the_tab_or_the_page() => StaThread.Run(() =>
+    {
+        var selection = new TaskSelection();
+        using var t = Build(selection: selection);
+        var k = InboxTasks(t);
+        t.Controller.Show();
+        ChooseInbox(t);
+        Click(LineOf(t.Window, k.Asking));
+
+        selection.Select(k.Working);
+        t.Controller.Reveal();
+
+        Assert.Equal(InboxTab.NeedsYou, t.Window.InboxTabShown);
+        Assert.Equal(k.Asking, t.Window.InboxPageShown);
+        // F2 and Esc still act on the page's task.
+        Assert.True(t.Window.Press(Key.F2, ModifierKeys.None));
+        Assert.True(Inside(t.Window.InboxPageContent!).Contains(t.Window.Editor));
+        Assert.True(t.Window.Press(Key.Escape, ModifierKeys.None));
+        Assert.Null(t.Window.Editor);
+        Assert.True(t.Window.Press(Key.Escape, ModifierKeys.None));
+        Assert.Null(t.Window.InboxPageShown);
+    });
+
+    // A subtask in the page opens a page of its own; back returns to its parent's page.
+    [Fact]
+    public void A_subtask_opens_its_page_and_back_returns_to_the_parent() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var parent = t.Tasks.AddNote("Parent errand", t.Gepha).Value.Id;
+        var sub = t.Tasks.AddNote("Child errand", t.Gepha).Value.Id;
+        t.Tasks.SetParent(sub, parent);
+        t.Harness.Manager.SaveTasksPanel(t.Harness.Manager.State.TasksPanel! with { HideSubtasks = true });
+        t.Controller.Show();
+        ChooseInbox(t);
+        t.Window.ChooseInboxTab(InboxTab.Notes);
+        Click(LineOf(t.Window, parent));
+
+        var subLine = Inside(t.Window.InboxPageContent!).OfType<Button>().Single(b => AutomationProperties.GetName(b) == "Subtask Child errand");
+        Click(subLine);
+        Assert.Equal(sub, t.Window.InboxPageShown);
+
+        Click(ButtonNamed(t.Window.InboxPageContent!, TasksWindow.InboxPageBackText));
+        Assert.Equal(parent, t.Window.InboxPageShown);
+        Click(ButtonNamed(t.Window.InboxPageContent!, TasksWindow.InboxPageBackText));
+        Assert.Null(t.Window.InboxPageShown);
+    });
+
+    // The page opens scrolled to its end, where the newest comments and the comment box are.
+    [Fact]
+    public void A_page_opens_at_its_end() => StaThread.Run(() =>
+    {
+        using var t = Build(width: 460);
+        var k = InboxTasks(t);
+        Enumerable.Range(0, 12).ToList().ForEach(i => t.Tasks.Comment(k.Asking, Maybe<string>.None, $"Comment {i}, long enough to take a line of its own in the thread"));
+        t.Controller.Show();
+        ChooseInbox(t);
+        t.Window.UpdateLayout();
+
+        Click(LineOf(t.Window, k.Asking));
+        t.Window.UpdateLayout();
+
+        var (offset, extent) = t.Window.InboxPageScroll;
+        Assert.Equal(extent, offset, 1);
+    });
 }
