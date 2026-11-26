@@ -1,6 +1,7 @@
 using System.IO;
 using System.Windows;
 using System.Windows.Automation;
+using System.Windows.Documents;
 using System.Windows.Controls;
 using System.Windows.Input;
 using CSharpFunctionalExtensions;
@@ -33,6 +34,7 @@ public class TaskDetailWindowInboxTests
         public required TaskService Tasks { get; init; }
         public required string Scratch { get; init; }
         public required List<nint> Brought { get; init; }
+        public required List<Uri> Opened { get; init; }
 
         public Guid Sparrow => Harness.Manager.State.Workspaces.Single(w => w.Name == "Sparrow").Id;
 
@@ -54,6 +56,7 @@ public class TaskDetailWindowInboxTests
         Assert.True(harness.Manager.SaveTasksPanel(new TasksPanelState(false, 1000) { Inbox = inbox }).IsSuccess);
         var rig = new TasksPanelRig(panel).Docked("right", null);
         var brought = new List<nint>();
+        var opened = new List<Uri>();
         var seconds = 0;
         var board = new TasksBoard(panel, rig.Panel, tasks, harness.Manager, _ => Result.Success(), now: () => Start.AddHours(1))
         {
@@ -65,8 +68,10 @@ public class TaskDetailWindowInboxTests
                 PageClickClock = () => Start.UtcDateTime.AddSeconds(seconds++),
             },
             BringTaskWindowForward = brought.Add,
+            // A link's final open recorded, never a real browser.
+            OpenUri = opened.Add,
         };
-        return new Rig { Harness = harness, Panel = panel, Board = board, Tasks = tasks, Scratch = scratch, Brought = brought };
+        return new Rig { Harness = harness, Panel = panel, Board = board, Tasks = tasks, Scratch = scratch, Brought = brought, Opened = opened };
     }
 
     static TaskSession Session(string id) => new(id, @"C:\repos\TaskSpaces", Start, Maybe<DateTimeOffset>.None);
@@ -205,5 +210,187 @@ public class TaskDetailWindowInboxTests
         Assert.True(t.Tasks.Delete(id).IsSuccess);
         Assert.False(window.IsVisible);
         Assert.False(t.Board.HasWindow(id));
+    });
+
+    static bool HasButtonNamed(object scope, string name) =>
+        Inside(scope).OfType<Button>().Any(b => AutomationProperties.GetName(b) == name);
+
+    static void Click(object scope, string name) =>
+        ButtonNamed(scope, name).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+
+    static (TaskDetailWindow Window, TasksWindow Page) Open(Rig t, Guid id)
+    {
+        Assert.True(t.Board.OpenWindow(id).IsSuccess);
+        return (t.Board.WindowOf(id)!, t.Board.WindowOf(id)!.PageRenderer!);
+    }
+
+    // The old window showed the whole thread: no "N earlier comments" fold, no comment cut to three lines.
+    [Fact]
+    public void The_page_in_the_window_shows_every_comment_whole() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var id = t.Tasks.AddNote("Long brief", Maybe<Guid>.None).Value.Id;
+        Enumerable.Range(1, 6).ToList().ForEach(i => Assert.True(t.Tasks.Comment(id, Maybe<string>.None, $"Comment {i}").IsSuccess));
+        Assert.True(t.Tasks.Comment(id, Maybe<string>.None, string.Join("\n\n", Enumerable.Range(1, 12).Select(i => $"Line {i}"))).IsSuccess);
+        var (window, page) = Open(t, id);
+
+        Assert.Equal(7, page.ShownComments(id).Count);
+        Assert.Empty(Inside(window).OfType<Button>().Where(b => AutomationProperties.GetName(b) is "Earlier comments" or "Show less" && b.Visibility == Visibility.Visible));
+        Assert.Empty(Inside(window).OfType<Button>().Where(b => AutomationProperties.GetName(b) == "Show more" && b.Visibility == Visibility.Visible).Select(b => $"{b.ToolTip} {b.ActualHeight}"));
+
+        // A comment that arrives later is whole too.
+        Assert.True(t.Tasks.Comment(id, Maybe<string>.None, string.Join("\n\n", Enumerable.Range(1, 12).Select(i => $"Later {i}")), wakes: false).IsSuccess);
+        Assert.Equal(8, page.ShownComments(id).Count);
+        Assert.Empty(Inside(window).OfType<Button>().Where(b => AutomationProperties.GetName(b) == "Show more" && b.Visibility == Visibility.Visible).Select(b => $"{b.ToolTip} {b.ActualHeight}"));
+    });
+
+    // The old header's Undo: a close can be undone for its six seconds, from the window's page, which stays up meanwhile.
+    [Fact]
+    public void A_close_can_be_undone_from_the_page() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var id = t.Tasks.AddNote("Errand", Maybe<Guid>.None).Value.Id;
+        var (window, page) = Open(t, id);
+        Assert.False(HasButtonNamed(window, TasksWindow.UndoText));
+
+        t.Panel.Actions!.Close(id);
+
+        Assert.True(window.IsVisible);
+        Assert.True(page.IsClosing(id));
+        Click(window, TasksWindow.UndoText);
+        Assert.False(page.IsClosing(id));
+        Assert.False(HasButtonNamed(window, TasksWindow.UndoText));
+        Assert.NotEqual(Deskbar.Core.Tasks.TaskStatus.Closed, t.Tasks.Board.Find(id.ToString()).Value.Status);
+    });
+
+    // The old chips: Important and Urgent toggle, each a press of the same SetFlag.
+    [Fact]
+    public void Important_and_urgent_toggle_from_the_page() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var id = t.Tasks.AddNote("Errand", Maybe<Guid>.None).Value.Id;
+        var (window, _) = Open(t, id);
+
+        Click(window, TasksWindow.ImportantText);
+        Assert.True(t.Tasks.Board.Find(id.ToString()).Value.Important);
+        Assert.False(t.Tasks.Board.Find(id.ToString()).Value.Urgent);
+        Click(window, TasksWindow.UrgentText);
+        Assert.True(t.Tasks.Board.Find(id.ToString()).Value.Urgent);
+        Click(window, TasksWindow.ImportantText);
+        Assert.False(t.Tasks.Board.Find(id.ToString()).Value.Important);
+    });
+
+    // A subtask and a parent open in windows of their own, as they always did; the panel's lists are never touched.
+    [Fact]
+    public void A_subtask_and_a_parent_open_in_their_own_windows() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var parent = t.Tasks.AddNote("Parent", Maybe<Guid>.None).Value.Id;
+        var child = t.Tasks.AddNote("Child", Maybe<Guid>.None, parent: parent).Value.Id;
+        t.Board.Show();
+        var (window, _) = Open(t, parent);
+
+        Click(window, "Subtask Child");
+
+        Assert.True(t.Board.HasWindow(child));
+        Assert.NotSame(window, t.Board.WindowOf(child));
+        Assert.Null(t.Panel.InboxPageShown);
+        Click(t.Board.WindowOf(child)!, "Parent Parent");
+        Assert.Null(t.Panel.InboxPageShown);
+        // The parent's window was open already: its window is brought forward, not made again.
+        Assert.Equal(3, t.Brought.Count);
+    });
+
+    // "Show in the tasks panel" is on the window's menu, "Open in window" is not; and the item shows the task in the panel.
+    [Fact]
+    public void The_pages_menu_shows_in_the_panel_and_does_not_open_a_window() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var id = t.Tasks.AddNote("Errand", Maybe<Guid>.None).Value.Id;
+        t.Board.Show();
+        var (_, page) = Open(t, id);
+
+        var menu = page.OpenMenuFor(id);
+
+        var names = menu.Items.OfType<MenuItem>().Select(i => (i.Header as TextBlock)?.Text).ToList();
+        Assert.Contains(TasksWindow.ShowInPanelText, names);
+        Assert.DoesNotContain(TasksWindow.OpenInWindowText, names);
+        Assert.Contains("Edit", names);
+        Assert.Contains("Delete", names);
+        menu.Items.OfType<MenuItem>().Single(i => (i.Header as TextBlock)?.Text == TasksWindow.ShowInPanelText)
+            .RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+        menu.IsOpen = false;
+        Assert.Equal(id, t.Panel.InboxPageShown);
+    });
+
+    // The comment box posts as the panel's does, and what is typed outlives a redraw.
+    [Fact]
+    public void The_comment_box_posts_and_keeps_a_draft_over_a_redraw() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var id = t.Tasks.AddNote("Errand", Maybe<Guid>.None).Value.Id;
+        var (_, page) = Open(t, id);
+
+        Assert.False(page.TypeComment(id, "Half a thought", null));
+        Assert.True(t.Tasks.Comment(id, Maybe<string>.None, "Arrived meanwhile", wakes: false).IsSuccess);
+        Assert.Equal("Half a thought", page.CommentDraft(id));
+
+        Assert.True(page.TypeComment(id, "Done now", Key.Enter));
+        Assert.Contains(t.Tasks.Board.Find(id.ToString()).Value.Comments, c => c.Markdown == "Done now");
+        Assert.Equal("", page.CommentDraft(id));
+    });
+
+    // F2 edits the title and description in place, Enter saves through Edit; Esc keeps nothing and never goes "back".
+    [Fact]
+    public void F2_edits_in_place_and_Esc_goes_nowhere() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var id = t.Tasks.AddNote("Errand", Maybe<Guid>.None).Value.Id;
+        var (window, page) = Open(t, id);
+
+        Assert.True(window.Press(Key.F2, ModifierKeys.None));
+        Assert.NotNull(page.Editor);
+        Assert.True(window.Press(Key.Escape, ModifierKeys.None));
+        Assert.Null(page.Editor);
+        Assert.False(window.Press(Key.Escape, ModifierKeys.None));
+        Assert.True(window.ShowsInboxPage);
+        Assert.Equal(id, page.InboxPageShown);
+
+        Assert.True(window.Press(Key.F2, ModifierKeys.None));
+        page.Editor!.Text = "Errand, renamed";
+        page.SaveEditor();
+        Assert.Equal("Errand, renamed", t.Tasks.Board.Find(id.ToString()).Value.Title);
+        Assert.True(window.IsVisible);
+    });
+
+    // A link in the description goes to the task's workspace first, as in the panel and the old window.
+    [Fact]
+    public void A_link_in_the_page_opens_in_the_tasks_workspace() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var id = t.Tasks.AddNote("Services ticket", t.Sparrow).Value.Id;
+        Assert.True(t.Tasks.Describe(id, "The [ticket](https://example.com/browse/SHAR-13).").IsSuccess);
+        var (window, _) = Open(t, id);
+
+        var link = Inside(window).OfType<RichTextBox>().SelectMany(b => b.Document.Blocks.OfType<Paragraph>().SelectMany(p => p.Inlines.OfType<Hyperlink>())).Single();
+        link.RaiseEvent(new RoutedEventArgs(Hyperlink.ClickEvent));
+
+        Assert.Equal([t.Harness.Manager.State.Workspaces.Single(w => w.Name == "Sparrow").DesktopId!.Value], t.Harness.Desktops.Switched);
+        Assert.Equal([new Uri("https://example.com/browse/SHAR-13")], t.Opened);
+    });
+
+    // A refusal on no task shows above the page, as it showed in the old header.
+    [Fact]
+    public void A_refusal_on_no_task_shows_above_the_page() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var id = t.Tasks.AddNote("Errand", Maybe<Guid>.None).Value.Id;
+        var (window, _) = Open(t, id);
+
+        window.ShowProblem("That did not work");
+
+        Assert.Contains(Inside(window).OfType<TextBlock>(), b => b.Text == "That did not work" && b.Visibility == Visibility.Visible);
+        window.ShowProblem(null);
+        Assert.DoesNotContain(Inside(window).OfType<TextBlock>(), b => b.Text == "That did not work" && b.Visibility == Visibility.Visible);
     });
 }
