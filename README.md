@@ -607,6 +607,16 @@ it leaves "Waiting on you" and comes back still waiting, with its question, unle
 first, which brings it back at once. A script does the same with `deskbar.cmd task snooze <id> 2h` (or `tomorrow`, `monday`, `45m`, `3d`) and
 `task wake <id>`.
 
+A task can repeat. In the tasks panel, "Repeat" on a line's "⋯" menu (the task window's "⋯" menu has it too) offers
+"Every hour", "Every hour, 09:00-19:00", "Every day at 09:00", "Every weekday at 09:00", "Every Monday at 09:00",
+"Custom…" and "Off". Pick one and the task is given to Claude: at each time a background Claude session starts on it,
+works, comments and calls it done, and the task goes quiet until the next time. A line that repeats carries a small
+repeat mark; hover it to read the schedule, when the next run is and which model runs it (Sonnet unless you choose
+another). A run never opens a window or takes focus, and a run that comes due while the last one is still going is
+skipped. Nothing catches up after sleep or shutdown. Between runs the task waits under the "Snoozed" chip, and "Wake now"
+starts a run at once. A comment you post between runs starts a fresh run that reads it. See
+[Recurring tasks](docs/features/tasks.md#recurring-tasks).
+
 The panel's Stats switch, next to List and Matrix, shows how the work is going: how many tasks are open,
 how many were added and finished in the last 7 days, and the median time from added to finished. Under
 the numbers are two charts covering up to two weeks. One shows the tasks still open at the end of each

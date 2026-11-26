@@ -135,6 +135,21 @@ A task can have subtasks, one level deep: a subtask cannot have subtasks of its 
 - Open a task in the tasks panel and its thread lists its links above the comments: "Duplicate of", "Duplicate" (a task closed as a duplicate of this one) and "Related", each with its status. Click one to go to it; a closed one is shown under **Closed**. A related link has a cross that removes it.
 - What links are for: a Claude session on a task reads the linked tasks and their sessions' conversations before it starts, and looks for duplicates itself. See [With Claude sessions](#with-claude-sessions).
 
+## Recurring tasks
+
+A task can repeat, for work you want done again at a set time: a morning summary, an hourly check of a build. A Claude session does each run, so setting a repeat gives the task to Claude.
+
+- Pick **Repeat** on a line's "⋯" menu, in the tasks panel or in the task window. It offers "Every hour", "Every hour, 09:00-19:00", "Every day at 09:00", "Every weekday at 09:00", "Every Monday at 09:00", **Custom…** and, while the task repeats, **Off**. The current schedule is ticked.
+- **Custom…** asks for the same words `task repeat` takes (see [From a script](#from-a-script)), such as `every 30m`, `weekdays 08:30` or `weekly friday 16:00`, and `--model` is allowed there. Times are in this PC's time. An interval can be from 15 minutes to 24 hours, and a window after it, such as `09:00-19:00`, stays within one day.
+- A run uses Sonnet unless you name another model. It runs in the task's folder, the only one Deskbar knows for it, and a worktree counts as its repo.
+- A task that repeats shows a repeat mark on its line. Hover it to read "Repeats every hour · next run Thu 09:00 · sonnet". Between runs the task waits under the panel's **Snoozed** chip, and **Wake now** starts a run at once.
+- A run is quiet. It opens no window and takes no focus, and the task does not jump to the top. It comments on the task and marks it done, and the task goes back to waiting for the next time. About a minute after a run goes idle Deskbar stops its session, unless you have it open in a window.
+- A run that comes due while the last one is still going is skipped, not queued. There is no catch-up: if the PC was asleep or off at the time, the run is simply missed and the next one comes at its next time.
+- A comment you post between runs starts a fresh run that reads it.
+- If the folder is gone, or a run cannot start, the task asks you once, and then keeps quiet rather than asking at every time.
+- **Off** between runs ends the job: the task becomes done, and you close it as you would any finished task. **Off** while a run is going only drops the schedule and lets that run finish. Closing a repeating task stops its repeats, and reopening it starts them again from that moment.
+- A Claude session can set a repeat on a task by its id, but it may never turn one off. Only you do that.
+
 ## Tasks from older versions
 
 Earlier versions had a stopwatch that parked a workspace for a few minutes. That is gone. Tasks from those versions come back as notes, with their timers dropped, and the old file is kept beside the new one as `tasks.json.v1`. That copy appears the first time the tasks change (you add, tick or close one, or a script does), not at start. Until then `tasks.json` is still the old file.
@@ -158,6 +173,8 @@ $ts = "$env:APPDATA\Deskbar\deskbar.cmd"
 & $ts task reopen 3f2a                      # bring a closed task back
 & $ts task close 3f2a                       # an id, or a unique prefix of four or more characters
 & $ts task flag 3f2a important on           # or urgent; off clears it
+& $ts task repeat 3f2a "every 1h"           # make it recurring; "daily 09:00", "weekdays 09:00", "weekly monday 09:00"
+& $ts task repeat 3f2a off                   # end the job
 & $ts task order 3f2a top                   # or end, or a place in its quadrant counting from 1
 & $ts tasks-window matrix                   # or list
 ```

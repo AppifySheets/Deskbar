@@ -84,6 +84,12 @@ Marking a task done lets its session go: a done or closed task is never resumed.
 
 Deskbar gives up on a session when it has been resumed three times in ten minutes, when its transcript is gone, when no folder is known for it or when the resume fails. It says why once, in the thread, and the task waits on you with the reason as its question. It does not try again by itself. Set the task's status (to in progress, say) and the next check tries again. Double-clicking the task also clears the give-up once its session is back: the task goes back to in progress and the count of resumes starts afresh.
 
+## Recurring tasks
+
+A [recurring task](tasks.md#recurring-tasks) starts a fresh Claude session at each time it is due. Deskbar starts it in the background, in the task's folder, on Sonnet unless the repeat names another model, and it opens no window and takes no focus. The session reads the task, does the work, comments and marks the task done. About a minute after it goes idle Deskbar stops it, unless you have it open in a window, so finished runs do not pile up in `claude agents`.
+
+A time that comes while the last run is still going is skipped. After sleep or shutdown nothing is caught up. A comment you post between runs, or **Wake now**, starts a run at once. If the folder is gone or a run cannot start, the task asks you once. A repeat can be set or ended from a script with `deskbar.cmd task repeat`, and a session may set one on its own task but may not turn one off.
+
 ## Settings
 
 The setting is **Teach Claude Code about Deskbar**, in the Deskbar on this PC section of Manage's Settings tab. With Claude Code installed (there is a `.claude` folder in your profile) and the box ticked, Deskbar keeps two things in place:
