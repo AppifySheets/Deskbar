@@ -337,4 +337,119 @@ public partial class FloatingBarTaskListTests
         Assert.Contains(FloatingBar.WaitingGroupTag, Places());
         Assert.Equal(inSight, t.Bar.TaskLinesInSight.Select(l => l.Id));
     });
+
+    // --- the list's foot (FloatingBar.InboxFooter.cs) -----------------------------------------------------------------
+
+    static Grid AddRow(ListBar t) => Inside(t.List).OfType<Grid>().Single(g => Equals(g.Tag, "task-add-row"));
+
+    static bool ShowsIn(object scope, string name) =>
+        Inside(scope).OfType<Button>().Any(b => AutomationProperties.GetName(b) == name && b.Visibility == Visibility.Visible);
+
+    // The panel button's words in each state: "All tasks", with the out-of-sight count as "· N more" (the old button's
+    // "+N more", the same count), "Hide tasks" while the panel is shown.
+    [Fact]
+    public void The_all_tasks_button_says_all_tasks_with_its_count_and_hide_tasks_while_the_panel_shows() => StaThread.Run(() =>
+    {
+        var shown = new System.Reactive.Subjects.BehaviorSubject<bool>(false);
+        using var t = Build(openWindow: () => { }, panelShown: shown);
+        t.Tasks.AddNote("One", t.Gepha);
+        t.Tasks.AddNote("Two", t.Gepha);
+        Assert.Equal("All tasks", t.Bar.TaskListMoreText);
+        InboxLook(t);
+        Assert.Equal("All tasks", t.Bar.InboxFooterWords);
+
+        Enumerable.Range(1, 4).ToList().ForEach(i => t.Tasks.AddNote($"More {i}", t.Gepha));
+        t.Bar.UpdateLayout();
+        Assert.Equal("All tasks · 3 more", t.Bar.InboxFooterWords);
+        InboxLook(t, on: false);
+        Assert.Equal("+3 more", t.Bar.TaskListMoreText);
+        InboxLook(t);
+
+        shown.OnNext(true);
+        Assert.Equal("Hide tasks", t.Bar.InboxFooterWords);
+        shown.OnNext(false);
+        Assert.Equal("All tasks · 3 more", t.Bar.InboxFooterWords);
+    });
+
+    // With no panel behind the bar the button expands the list in place, as the old one did, and folds it again.
+    [Fact]
+    public void Without_a_panel_the_button_expands_the_list_and_folds_it_again() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        Enumerable.Range(1, 5).ToList().ForEach(i => t.Tasks.AddNote($"Note {i}", t.Gepha));
+        InboxLook(t);
+        Assert.Equal("All tasks · 2 more", t.Bar.InboxFooterWords);
+
+        Click(ButtonNamed(t.List, FloatingBar.AllTasksName));
+        t.Bar.UpdateLayout();
+        Assert.Equal("Fewer tasks", t.Bar.InboxFooterWords);
+        Assert.Equal(5, t.Bar.TaskLinesInSight.Count);
+
+        Click(ButtonNamed(t.List, FloatingBar.AllTasksName));
+        Assert.Equal("All tasks · 2 more", t.Bar.InboxFooterWords);
+    });
+
+    // The foot is the Inbox look's alone, and the add row loses its two buttons there and keeps them in the old look.
+    [Fact]
+    public void The_foot_shows_only_in_the_inbox_look_and_the_add_row_keeps_only_adding() => StaThread.Run(() =>
+    {
+        using var t = Build(openWindow: () => { }, openManager: () => { });
+        t.Tasks.AddNote("One", t.Gepha);
+        Assert.False(t.Bar.InboxFooterShown);
+        Assert.True(ShowsIn(AddRow(t), "More tasks"));
+        Assert.True(ShowsIn(AddRow(t), "Manager"));
+
+        InboxLook(t);
+        Assert.True(t.Bar.InboxFooterShown);
+        Assert.False(ShowsIn(AddRow(t), "More tasks"));
+        Assert.False(ShowsIn(AddRow(t), "Manager"));
+        var foot = Inside(t.List).OfType<Border>().Single(b => Equals(b.Tag, FloatingBar.InboxFooterTag));
+        Assert.True(ShowsIn(foot, FloatingBar.AllTasksName));
+        Assert.True(ShowsIn(foot, "Manager"));
+        // After the lines, never among them: the lines' panel still holds only line buttons.
+        Assert.False(foot.IsDescendantOf(LinesPanel(t)));
+
+        InboxLook(t, on: false);
+        Assert.False(t.Bar.InboxFooterShown);
+        Assert.True(ShowsIn(AddRow(t), "More tasks"));
+    });
+
+    // The same lines, the same count and the same fold in both looks.
+    [Fact]
+    public void The_foot_changes_no_line_count_or_fold() => StaThread.Run(() =>
+    {
+        using var t = WaitingBar();
+        IReadOnlyList<string> Places() => LinesPanel(t).Children.OfType<Button>()
+            .Select(b => b.Tag is TaskLine line ? line.Title : $"{b.Tag}").ToArray();
+        var before = Places();
+        var inSight = t.Bar.TaskLinesInSight.Select(l => l.Id).ToArray();
+        var count = t.Bar.TaskListMoreText;
+
+        InboxLook(t);
+
+        Assert.Equal(before, Places());
+        Assert.Equal(inSight, t.Bar.TaskLinesInSight.Select(l => l.Id));
+        var hidden = count.StartsWith('+') ? count[1..].Split(' ')[0] : "";
+        // The same words as the old button gives them: the count when lines are out of sight, nothing when the old button
+        // showed nothing (no panel and nothing hidden).
+        Assert.Equal(count.Length == 0 ? "" : hidden.Length > 0 ? $"All tasks · {hidden} more" : "All tasks", t.Bar.InboxFooterWords);
+    });
+
+    // A click does what the old button's did: the panel shown or hidden; Manager opens the manager.
+    [Fact]
+    public void A_click_on_the_foot_does_what_the_old_buttons_did() => StaThread.Run(() =>
+    {
+        var toggles = 0;
+        var managers = 0;
+        using var t = Build(openWindow: () => toggles++, openManager: () => managers++);
+        t.Tasks.AddNote("One", t.Gepha);
+        InboxLook(t);
+        var foot = Inside(t.List).OfType<Border>().Single(b => Equals(b.Tag, FloatingBar.InboxFooterTag));
+
+        Click(ButtonNamed(foot, FloatingBar.AllTasksName));
+        Click(ButtonNamed(foot, "Manager"));
+
+        Assert.Equal(1, toggles);
+        Assert.Equal(1, managers);
+    });
 }

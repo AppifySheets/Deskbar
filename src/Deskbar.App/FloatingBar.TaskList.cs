@@ -964,7 +964,7 @@ public partial class FloatingBar
         // The manager's question (task 61e4d143, FloatingBar.ManagerLine.cs) sits between the add row and the lines, outside
         // the scrolling viewer, so it is always the first line in sight and never scrolls away: its priority.
         taskManagerHost = new Border { Tag = "manager-line-host", Visibility = Visibility.Collapsed };
-        var host = new TakesNoWidth(VisibleWidthOf) { Child = new StackPanel { Children = { taskProblemHost, addRow, taskManagerHost, taskLinesScroller } } };
+        var host = new TakesNoWidth(VisibleWidthOf) { Child = new StackPanel { Children = { taskProblemHost, addRow, taskManagerHost, taskLinesScroller, InboxFooterRow() } } };
         TaskListLine.Child = host;
         // A RIGHT-CLICK IN THE LIST NEVER OPENS THE BAR'S MENU (Petre's screenshot: right-clicking a task line opened New
         // workspace, Window list, Arrange, Dock, Manage, Exit). The bar's menu is the Root's ContextMenu, and a
@@ -1392,9 +1392,9 @@ public partial class FloatingBar
         var waiting = hidden.Count(l => l.Status == TaskStatus.WaitingOnYou);
         // The Manager button follows the wiring on every paint: the list is built in the constructor, before the init
         // property is set, so its visibility cannot be decided at build time.
-        if (taskManagerButton is not null) taskManagerButton.Visibility = OpenManager is null ? Visibility.Collapsed : Visibility.Visible;
+        if (taskManagerButton is not null) taskManagerButton.Visibility = OpenManager is null || InboxBarOn ? Visibility.Collapsed : Visibility.Visible; // in the Inbox look, the list's foot (FloatingBar.InboxFooter.cs)
         PaintManagerDot();
-        taskMoreButton.Visibility = hidden.Length > 0 || taskListExpanded || ToggleTasksPanel is not null ? Visibility.Visible : Visibility.Collapsed;
+        taskMoreButton.Visibility = !InboxBarOn && (hidden.Length > 0 || taskListExpanded || ToggleTasksPanel is not null) ? Visibility.Visible : Visibility.Collapsed;
         taskMoreFull = MoreText(hidden.Length, waiting, taskListExpanded);
         taskMoreShort = taskListExpanded ? "Less" : hidden.Length == 0 ? "All" : $"+{hidden.Length}";
         ApplyMoreText();
@@ -1403,6 +1403,7 @@ public partial class FloatingBar
         taskMoreTip = taskListExpanded ? "Show the first three"
             : ToggleTasksPanel is not null ? $"{(hidden.Length == 0 ? "" : $"{taskMoreFull}. ")}Every task, open and closed, with its comments"
             : $"{hidden.Length} more {(hidden.Length == 1 ? "task" : "tasks")}";
+        PaintInboxFooter(hidden.Length, waiting); // the Inbox look's foot (FloatingBar.InboxFooter.cs)
         PaintTaskMoreLook();
     }
 
@@ -1427,6 +1428,7 @@ public partial class FloatingBar
     // The dot shown while the manager has something unread, and the tooltip saying so.
     internal void PaintManagerDot()
     {
+        PaintInboxFooterLook(); // its dot too (FloatingBar.InboxFooter.cs)
         if (taskManagerDot is null || taskManagerButton is null) return;
         var unread = ManagerUnread?.Invoke() == true;
         taskManagerDot.Visibility = unread ? Visibility.Visible : Visibility.Collapsed;
@@ -1446,6 +1448,7 @@ public partial class FloatingBar
         taskMoreLabel.Foreground = taskMoreWaiting ? TaskOrange : on ? TaskInk : TaskDimInk;
         taskMoreButton.ToolTip = on ? "Hide the tasks panel" : taskMoreTip;
         AutomationProperties.SetItemStatus(taskMoreButton, on ? "on" : "off");
+        PaintInboxFooterLook(); // the Inbox look's foot (FloatingBar.InboxFooter.cs)
     }
 
     // The button's words in full and cut short (Ruling 50): the label shows the short one when the list is too narrow for
