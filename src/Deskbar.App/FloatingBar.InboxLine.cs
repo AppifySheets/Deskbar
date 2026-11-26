@@ -50,15 +50,15 @@ public partial class FloatingBar
     internal const string InboxBarMarkTag = "inbox-bar-mark";
 
     // What a line's height follows in the Inbox look, beyond today's key (HeightKeyOf): the look itself, and the caption.
-    string InboxBarHeightKey(TaskLine line) => InboxBarOn ? $"|inbox|{CaptionCount(line)}" : "";
+    string InboxBarHeightKey(TaskLine line) => InboxBarOn ? $"|inbox|{CaptionCount(line)}|{PermissionWords(line.Id)}" : "";
 
     // The line's state mark, from its task as the panel reads it (InboxTabs.MarkOf).
     InboxMark BarMarkOf(TaskLine line) =>
         taskService?.Board.Tasks.FirstOrDefault(t => t.Id == line.Id) is { } task
-            ? InboxTabs.MarkOf(task, InboxMarks.StoppedOnLimit, hollow: _ => line.Delivery.Shipping)
+            ? InboxTabs.MarkOf(task, InboxMarks.StoppedOnLimit, hollow: _ => line.Delivery.Shipping, asksPermission: AsksPermission)
             : line.Claudes ? InboxMark.Idle : InboxMark.Note;
 
-    static bool MarkNeedsYou(InboxMark mark) => mark is InboxMark.Asks or InboxMark.WentQuiet or InboxMark.Finished or InboxMark.FinishedNotRunning;
+    static bool MarkNeedsYou(InboxMark mark) => mark is InboxMark.Asks or InboxMark.WentQuiet or InboxMark.Finished or InboxMark.FinishedNotRunning or InboxMark.AsksPermission;
 
     // The caption's count on the Waiting on you block's first line, or null on every other line. The block is the bar's
     // own (the questions and the Done tasks, TaskBoard.Pinned); its size is taken before the fold, so the lines folded
@@ -106,11 +106,11 @@ public partial class FloatingBar
 
         var text = new StackPanel { Margin = new Thickness(7, 0, 0, 0) };
         text.Children.Add(editingTask == line.Id && !line.Closing ? TitleOrEditor(line) : InboxBarTitle(line));
-        if (MarkNeedsYou(mark) && line.Detail.Length > 0 && editingTask != line.Id)
+        if (MarkNeedsYou(mark) && BarDetail(line, mark).Length > 0 && editingTask != line.Id)
             text.Children.Add(new TextBlock
             {
                 Tag = InboxBarTextTag,
-                Text = FirstLine(line.Detail),
+                Text = FirstLine(BarDetail(line, mark)),
                 FontSize = Text(8.5),
                 Foreground = InboxLook.Ink2,
                 TextTrimming = TextTrimming.CharacterEllipsis,

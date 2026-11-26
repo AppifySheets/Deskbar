@@ -34,12 +34,14 @@ public enum InboxTab { NeedsYou, Claude, Notes }
 /// The captioned part of a tab a line sits in, in the order the parts are drawn. <see cref="Matches"/> is the one list
 /// shown while the tabs do not apply.
 /// </summary>
-public enum InboxSection { Questions, WentQuiet, Finished, WorkingNow, Idle, UsageLimit, DoFirst, Plan, QuickOnes, Someday, Matches }
+// Permissions (Allow / Deny from a task's page) comes first: a permission question holds Claude mid-step, so it is the
+// most urgent thing the Inbox can show.
+public enum InboxSection { Permissions, Questions, WentQuiet, Finished, WorkingNow, Idle, UsageLimit, DoFirst, Plan, QuickOnes, Someday, Matches }
 
 /// <summary>
 /// A line's state mark: one shape per state, so the marks are told apart without their colours (spec, "A line").
 /// </summary>
-public enum InboxMark { Asks, WentQuiet, Finished, FinishedNotRunning, Working, Idle, UsageLimit, Note, Closed, Snoozed }
+public enum InboxMark { Asks, WentQuiet, Finished, FinishedNotRunning, Working, Idle, UsageLimit, Note, Closed, Snoozed, AsksPermission }
 
 /// <summary>
 /// One line of the Inbox: the task, its tab and section, its mark, when its state began (the time the line shows), whether
@@ -70,7 +72,7 @@ public static class InboxTabs
     /// <summary>The tab a section belongs to.</summary>
     public static InboxTab TabOf(InboxSection section) => section switch
     {
-        InboxSection.Questions or InboxSection.WentQuiet or InboxSection.Finished => InboxTab.NeedsYou,
+        InboxSection.Permissions or InboxSection.Questions or InboxSection.WentQuiet or InboxSection.Finished => InboxTab.NeedsYou,
         InboxSection.WorkingNow or InboxSection.Idle or InboxSection.UsageLimit => InboxTab.Claude,
         _ => InboxTab.Notes,
     };
@@ -81,6 +83,7 @@ public static class InboxTabs
     /// </summary>
     public static (string Caption, string Words) CaptionOf(InboxSection section) => section switch
     {
+        InboxSection.Permissions => ("Asks permission", "a yes or a no"),
         InboxSection.Questions => ("Questions", ""),
         InboxSection.WentQuiet => ("Went quiet", "no update for a while"),
         InboxSection.Finished => ("Finished", "check, then close"),
@@ -111,8 +114,10 @@ public static class InboxTabs
     /// <param name="busy">Whether a session of the task is working right now; none counts every live one as working, as the List does.</param>
     /// <param name="hollow">Whether a Done task's tick is the hollow ring (its change does not run yet).</param>
     /// <param name="tabbed">Whether the tabs apply (<see cref="TabsApply"/>).</param>
+    /// <param name="asksPermission">Whether a session of the task has a permission question on show (PermissionDesk).</param>
     public static InboxView Split(IReadOnlyList<TaskGroup> listed, IReadOnlySet<Guid> nested, TaskBoard board,
-        Func<TaskItem, bool> stoppedOnLimit, Func<TaskItem, bool>? busy = null, Func<TaskItem, bool>? hollow = null, bool tabbed = true)
+        Func<TaskItem, bool> stoppedOnLimit, Func<TaskItem, bool>? busy = null, Func<TaskItem, bool>? hollow = null, bool tabbed = true,
+        Func<TaskItem, bool>? asksPermission = null)
     {
         var lines = new List<InboxLine>();
         foreach (var group in listed)
@@ -123,8 +128,8 @@ public static class InboxTabs
                 // A line drawn under its parent goes where its parent went; a parent (or a line with no parent above it in
                 // this group, which only a hand-edited file could make) is placed by its own state.
                 var under = nested.Contains(task.Id) && lines.Count > 0 && section != InboxSection.Matches;
-                if (!under) section = SectionOf(group.Kind, task, stoppedOnLimit);
-                var mark = MarkOf(task, stoppedOnLimit, busy, hollow);
+                if (!under) section = SectionOf(group.Kind, task, stoppedOnLimit, asksPermission);
+                var mark = MarkOf(task, stoppedOnLimit, busy, hollow, asksPermission);
                 lines.Add(new InboxLine(task.Id, TabOf(section), section, mark, SinceOf(task, mark), nested.Contains(task.Id),
                     board.Links(task.Id).Map(l => !l.IsEmpty).GetValueOrDefault(false)));
             }
@@ -136,9 +141,12 @@ public static class InboxTabs
     }
 
     // Where a block goes, by its first line and the List's group it is in (see the header).
-    static InboxSection SectionOf(TaskGroupKind kind, TaskItem task, Func<TaskItem, bool> stoppedOnLimit) =>
+    // A permission question puts its task first in Needs you, whatever its group (an open task: a closed or snoozed one
+    // stays among the matches).
+    static InboxSection SectionOf(TaskGroupKind kind, TaskItem task, Func<TaskItem, bool> stoppedOnLimit, Func<TaskItem, bool>? asksPermission) =>
         kind switch
         {
+            not (TaskGroupKind.Closed or TaskGroupKind.Snoozed) when asksPermission?.Invoke(task) == true => InboxSection.Permissions,
             TaskGroupKind.WaitingOnYou => task.Status == TaskStatus.Done ? InboxSection.Finished : InboxSection.Questions,
             TaskGroupKind.Closed or TaskGroupKind.Snoozed => InboxSection.Matches,
             _ when HandedBack(task) => InboxSection.WentQuiet,
@@ -162,10 +170,13 @@ public static class InboxTabs
     /// clock; a live session is working or idle by <paramref name="busy"/>; a Claude task with no live session is idle
     /// (the pause sign; its text line says "no live session"); a task no session ever worked on is a note, the empty box.
     /// </summary>
+    // A permission question on show (asksPermission, Allow / Deny from a task's page) outranks every
+    // mark but closed and snoozed: the shield.
     public static InboxMark MarkOf(TaskItem task, Func<TaskItem, bool> stoppedOnLimit, Func<TaskItem, bool>? busy = null,
-        Func<TaskItem, bool>? hollow = null) =>
+        Func<TaskItem, bool>? hollow = null, Func<TaskItem, bool>? asksPermission = null) =>
         task.Status == TaskStatus.Closed ? InboxMark.Closed
         : task.IsSnoozed ? InboxMark.Snoozed
+        : asksPermission?.Invoke(task) == true ? InboxMark.AsksPermission
         : task.Status == TaskStatus.WaitingOnYou ? SessionKeeper.GivenUp(task) ? InboxMark.WentQuiet : InboxMark.Asks
         : task.Status == TaskStatus.Done ? hollow?.Invoke(task) == true ? InboxMark.FinishedNotRunning : InboxMark.Finished
         : HandedBack(task) ? InboxMark.WentQuiet
