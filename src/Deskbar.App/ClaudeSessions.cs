@@ -78,7 +78,7 @@ namespace Deskbar.App;
 //      stop that fails is traced and retried now and then, never every poll. Going to the task resumes it (job 4).
 //
 // NOTHING HERE OPENS A WINDOW OR A TERMINAL. Putting a window on a session is the caller's (ClaudeTaskActions, Task 9).
-public sealed partial class ClaudeSessions : IDisposable
+public sealed class ClaudeSessions : IDisposable
 {
     /// <summary>How often `claude agents --json` is read while the feature is on.</summary>
     public static readonly TimeSpan Poll = TimeSpan.FromSeconds(15);
@@ -214,11 +214,7 @@ public sealed partial class ClaudeSessions : IDisposable
     // list that shows one (Start's own search or a poll) joins it to its task.
     ImmutableDictionary<string, StartClaim> claims = ImmutableDictionary<string, StartClaim>.Empty;
 
-    sealed record StartClaim(Guid TaskId, string Folder)
-    {
-        // What the start passed (TaskSession.LaunchedWith), stored on the session when it joins.
-        public SessionSettings Launch { get; init; } = SessionSettings.None;
-    }
+    sealed record StartClaim(Guid TaskId, string Folder);
 
     // Sessions a click is resuming right now (ResumeNow), apart from the queue's one in flight so neither ends the
     // other's turn: both count as queued, so no poll queues them meanwhile.
@@ -358,14 +354,11 @@ public sealed partial class ClaudeSessions : IDisposable
     /// </summary>
     public Func<string, string, bool> KnowsSkill { get; set; } = (_, _) => false;
 
-    // The task's own pick (TaskItem.Wanted, the session picker) adds its effort and mode and names the model when no
-    // model was given for this start; a task nobody picked for starts exactly as before (ClaudeStart.LaunchSettings).
-    // What was passed is stored on the session when it joins (TaskSession.LaunchedWith, JoinStarted).
     public Task<Result<string>> Start(TaskItem task, string folder, Maybe<string> model = default) =>
-        Observable.Return(ClaudeStart.LaunchSettings(model, task.Wanted, manager.State.ClaudeTaskModelInEffect))
-            .SelectMany(launch => OffThread(() => cli.Run(ClaudeStart.Arguments(task, launch,
-                    ClaudeSkills.SkillOf(task.Title).Map(skill => KnowsSkill(folder, skill)).GetValueOrDefault(false)), folder, LaunchTimeout))
-                .SelectMany(launched => Launched(task, folder, launched, launch)))
+        Observable.Return(ClaudeStart.Arguments(task, model.GetValueOrDefault(manager.State.ClaudeTaskModelInEffect),
+                ClaudeSkills.SkillOf(task.Title).Map(skill => KnowsSkill(folder, skill)).GetValueOrDefault(false)))
+            .SelectMany(arguments => OffThread(() => cli.Run(arguments, folder, LaunchTimeout)))
+            .SelectMany(launched => Launched(task, folder, launched))
             .TakeUntil(stopping)
             .DefaultIfEmpty(Result.Failure<string>("Deskbar closed before the session was found."))
             .ToTask();
@@ -615,7 +608,6 @@ public sealed partial class ClaudeSessions : IDisposable
         // Sessions Start launched join their tasks first, so the keeper sees them known and does not adopt them.
         Claim(listed);
         tasks.Reconcile(listed);
-        AdvanceSwitches(listed);
         // Stalled tasks (spec docs/superpowers/specs/2026-11-23-stalled-claude-tasks-design.md): a Claude task no session
         // has worked on for 15 minutes goes back to Petre, and back to Claude once its session works again. Any session
         // listed busy keeps its task with Claude; only one listed for BusyGrace takes a task back, because a session just
@@ -1149,10 +1141,10 @@ public sealed partial class ClaudeSessions : IDisposable
 
     // --- starting ---------------------------------------------------------------------------------------------------
 
-    IObservable<Result<string>> Launched(TaskItem task, string folder, Result<string> launched, SessionSettings launch) =>
+    IObservable<Result<string>> Launched(TaskItem task, string folder, Result<string> launched) =>
         launched
             .Bind(output => ClaudeAgents.ShortIdFromStart(output).ToResult($"Claude did not say which session it started: {output}"))
-            .Tap(shortId => claims = claims.SetItem(shortId, new StartClaim(task.Id, folder) { Launch = launch }))
+            .Tap(shortId => claims = claims.SetItem(shortId, new StartClaim(task.Id, folder)))
             .Match(shortId => Find(shortId), error => Observable.Return(Result.Failure<string>(error)));
 
     // Reads the list until it shows the session, and joins it to its task. Still claimed when it is not found in time,
@@ -1223,7 +1215,7 @@ public sealed partial class ClaudeSessions : IDisposable
     {
         if (!claims.TryGetValue(shortId, out var claim)) return agent.SessionId;
         claims = claims.Remove(shortId);
-        return tasks.Join(claim.TaskId, tasks.NewSession(agent.SessionId, claim.Folder) with { LaunchedWith = claim.Launch })
+        return tasks.Join(claim.TaskId, tasks.NewSession(agent.SessionId, claim.Folder))
             .Map(() => agent.SessionId)
             .TapError(e => trace?.Invoke($"claude sessions: started session {agent.SessionId} not joined: {e}"));
     }
