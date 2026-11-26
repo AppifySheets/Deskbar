@@ -360,6 +360,11 @@ public class FloatingBarBookmarksTests
         Assert.Empty(Outline(Chip("Alpha")).StrokeDashArray);
         Assert.Equal(0.5, Face(Chip("Beta")).Opacity);
         Assert.NotEmpty(Outline(Chip("Beta")).StrokeDashArray);
+
+        // Option A: the open chip sits on a light backing (a black favicon looked the same opened as at rest); the
+        // resting one has none.
+        Assert.Single(Face(Chip("Alpha")).Children.OfType<Border>(), b => b.Background is SolidColorBrush { Color.A: > 0 } && b.Child is null && b.Width is double.NaN);
+        Assert.DoesNotContain(Face(Chip("Beta")).Children.OfType<Border>(), b => b.Width is double.NaN);
     });
 
     [Fact]
