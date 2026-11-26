@@ -2277,6 +2277,8 @@ public partial class TasksWindow : Window
         // above each day's first comment. It replaced the hairline between comments (task aa42794f).
         ChatStreamFor(row, shown, earlier > 0 && !open).ToList().ForEach(comment => panel.Children.Add(comment));
         var box = CommentBox(row.Id);
+        // On a task's page the box is kept aside for DrawInboxPage to dock (TasksWindow.DockedBox.cs); elsewhere it stays in the thread.
+        var docked = KeepBoxForDock(box, row.Id);
         authors[row.Id] = shown.Select(c => c.Author).ToArray();
         shownComments[row.Id] = shown.Select(c => c.Id).ToArray();
         var frame = new Border
@@ -2308,7 +2310,7 @@ public partial class TasksWindow : Window
         if (subtasks.Children.Count > 0 && under is not null) head.Children.Add(SubtaskShelf(subtasks, frame));
         frame.Child = under is not null
             ? CappedThread(row.Id, frame, under, head, panel, box, shown.Select(c => (Guid?)c.Id).LastOrDefault())
-            : new StackPanel { Children = { head, panel, box } };
+            : docked ? new StackPanel { Children = { head, panel } } : new StackPanel { Children = { head, panel, box } };
         return frame;
     }
 
