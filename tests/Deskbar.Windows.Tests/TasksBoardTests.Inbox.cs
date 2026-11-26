@@ -767,4 +767,19 @@ public partial class TasksBoardTests
         };
         Assert.All(pairs, p => Assert.True(Contrast(p.Text, p.Back) >= 4.5, $"{p.Name}: {Contrast(p.Text, p.Back):0.00}"));
     }
+
+    // `tasks-window inbox` and `list` change only the saved state; the open panel follows them (TasksBoard.ShownStateKey).
+    [Fact]
+    public void The_open_panel_follows_the_remembered_view_from_the_pipe() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        InboxTasks(t);
+        t.Controller.Show();
+        var control = new Deskbar.Core.Control.RemoteControl(t.Harness.Manager);
+
+        Assert.Equal(0, control.Execute(["tasks-window", "inbox"]).ExitCode);
+        Assert.NotNull(t.Window.InboxShown);
+        Assert.Equal(0, control.Execute(["tasks-window", "list"]).ExitCode);
+        Assert.Null(t.Window.InboxShown);
+    });
 }

@@ -591,7 +591,32 @@ public class RemoteControlMenuTests
 
         Ok(control.Execute(["tasks-window", "list"]));
         Assert.False(manager.State.TasksMatrix);
-        Assert.Contains(ControlUsage.All, c => c.Verb == "tasks-window" && c.Arguments == "show|hide|list|matrix|stats");
+        Assert.Contains(ControlUsage.All, c => c.Verb == "tasks-window" && c.Arguments == "show|hide|inbox|list|matrix|stats");
+    }
+
+    // Task 740a2231: `tasks-window inbox` is the switch's Inbox button's twin, remembered with the panel's state; list and
+    // matrix leave the Inbox as their buttons do. Nothing else of the panel's state moves.
+    [Fact]
+    public void Tasks_window_inbox_is_remembered_and_list_or_matrix_leave_it()
+    {
+        var manager = Started();
+        var control = new RemoteControl(manager, setTasksWindow: _ => Result.Success());
+        Assert.False((manager.State.TasksPanel ?? TasksPanelState.Default).Inbox);
+
+        var inbox = control.Execute(["tasks-window", "inbox"]);
+        Ok(inbox);
+        Assert.True(manager.State.TasksPanel!.Inbox);
+        Assert.True(Json(inbox).GetProperty("inbox").GetBoolean());
+        Assert.Equal(TasksPanelState.Default.Width, manager.State.TasksPanel!.Width);
+
+        Ok(control.Execute(["tasks-window", "matrix"]));
+        Assert.False(manager.State.TasksPanel!.Inbox);
+        Assert.True(manager.State.TasksMatrix);
+
+        Ok(control.Execute(["tasks-window", "inbox"]));
+        Ok(control.Execute(["tasks-window", "list"]));
+        Assert.False(manager.State.TasksPanel!.Inbox);
+        Assert.False(manager.State.TasksMatrix);
     }
 
     // Task 521d2b07: `tasks-window stats` is the Stats switch's twin, through the app's callback; a copy with no panel refuses.
@@ -614,7 +639,7 @@ public class RemoteControlMenuTests
         var reply = new RemoteControl(Started(), setTasksWindow: _ => Result.Success()).Execute(["tasks-window"]);
 
         Assert.Equal(ControlReply.Failed, reply.ExitCode);
-        Assert.Equal("usage: deskbar.cmd tasks-window show|hide|list|matrix|stats", reply.Output.Trim());
+        Assert.Equal("usage: deskbar.cmd tasks-window show|hide|inbox|list|matrix|stats", reply.Output.Trim());
     }
 
     [Fact]
