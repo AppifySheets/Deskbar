@@ -123,7 +123,7 @@ public static class RunningChanges
 
 /// <summary>
 /// The build this Deskbar runs: the GitHub repository it is built from, the version it shows ("2.6.23") and the commit
-/// it was built from (40 hex digits).
+/// it was built from (hex, as short as the version carries it; GitHub's compare takes a short one).
 /// </summary>
 public sealed record RunningBuild(string Owner, string Repo, string Version, string Commit)
 {
@@ -132,9 +132,11 @@ public sealed record RunningBuild(string Owner, string Repo, string Version, str
         link.Owner.Equals(Owner, StringComparison.OrdinalIgnoreCase) && link.Repo.Equals(Repo, StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
-    /// The running build from the app's InformationalVersion, "2.6.23+&lt;commit&gt;" (Nerdbank.GitVersioning appends the
-    /// full commit). None when there is no '+' or what follows is not a 40-digit hex commit: such a build cannot be
-    /// compared, and every task keeps the full tick.
+    /// The running build from the app's InformationalVersion, "2.6.23+&lt;commit&gt;". Nerdbank.GitVersioning appends the
+    /// commit SHORTENED to ten hex digits (measured 2026-11-26: a worktree build says "2.6.95+a1bb17c550", the installed
+    /// 2.6.28 says "2.6.28+5051c48433"), and GitHub's compare takes a short commit as it takes a full one (measured with
+    /// eight digits), so anything from seven to forty hex digits is the commit. None when there is no '+' or what follows
+    /// is not such a commit: that build cannot be compared, and every task keeps the full tick.
     /// </summary>
     public static Maybe<RunningBuild> Of(string owner, string repo, string informationalVersion)
     {
@@ -142,7 +144,7 @@ public sealed record RunningBuild(string Owner, string Repo, string Version, str
         if (plus <= 0) return Maybe<RunningBuild>.None;
         // Anything after the commit (a '.' and more metadata) is not part of it.
         var commit = new string(informationalVersion[(plus + 1)..].TakeWhile(Uri.IsHexDigit).ToArray());
-        return commit.Length == 40
+        return commit.Length is >= 7 and <= 40
             ? new RunningBuild(owner, repo, informationalVersion[..plus], commit.ToLowerInvariant())
             : Maybe<RunningBuild>.None;
     }

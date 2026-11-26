@@ -14,13 +14,17 @@ namespace Deskbar.Core.Tasks;
 //
 // THE PACE. Most answers are asked once per Deskbar start: a merged or closed pull request is settled for the life of
 // the process (PullRequestArrival.Settled), since the running commit cannot change without a restart. Only an open one
-// (a session that marked its task Done before the merge) and a failed look are asked again, every Poll. A minute is
-// soon enough for a task that just turned Done to get its ring, and a look is two gh calls of about a second each
-// (`gh pr view`, then GitHub's compare; measured 2026-11-25). A look still out when the next tick comes makes that tick
-// skip, so a slow or hung gh never piles calls up.
+// (a session that marked its task Done before the merge) is asked again every Poll. A minute is soon enough for a task
+// that just turned Done to get its ring, and a look is two gh calls of about a second each (`gh pr view`, then GitHub's
+// compare; measured 2026-11-25). The pull requests of one look are asked ONE AFTER ANOTHER, not all at once: Petre's
+// board held 13 links on 9 Done tasks on 2026-11-26, and 26 gh processes at once is a burst for nothing. A look still
+// out when the next tick comes makes that tick skip, so a slow or hung gh never piles calls up.
 //
 // A failure (gh missing, signed out, offline, a local commit GitHub has never seen) leaves that pull request unknown,
-// and unknown draws the full tick as before (RunningChanges' header). The trace says why, once per run of failures.
+// and unknown draws the full tick as before (RunningChanges' header). A failed one is asked again only after
+// FailureBackoff, not every minute: a Debug build from a commit that was never pushed fails every compare for its whole
+// life (GitHub answers 404), and retrying each minute would spend gh calls, and GitHub's hourly limit that the
+// sessions share, on an answer that cannot come. The trace says why, once per run of failures.
 //
 // Threads: `scheduler` is where the board is read and TaskService is told (the UI thread in the app, a TestScheduler in
 // the tests), `background` is where `look` is started (the thread pool unless a test says otherwise), as PullRequestWatch
@@ -29,6 +33,9 @@ public sealed class RunningChangeWatch : IDisposable
 {
     /// <summary>How often the board is read for pull requests without a settled answer.</summary>
     public static readonly TimeSpan Poll = TimeSpan.FromMinutes(1);
+
+    /// <summary>How long a pull request whose look failed waits before it is asked again.</summary>
+    public static readonly TimeSpan FailureBackoff = TimeSpan.FromMinutes(30);
 
     readonly TaskService tasks;
     readonly RunningBuild build;
@@ -42,6 +49,10 @@ public sealed class RunningChangeWatch : IDisposable
     // Every answer so far, keyed by PullRequestLink.Key. Answers are kept for the life of the watch: a task that leaves
     // Done and comes back finds its pull requests already known.
     ImmutableDictionary<string, PullRequestArrival> known = ImmutableDictionary<string, PullRequestArrival>.Empty;
+
+    // When each pull request's last look failed, keyed by PullRequestLink.Key: it is not asked again until FailureBackoff
+    // has passed. A success takes it out.
+    ImmutableDictionary<string, DateTimeOffset> failedAt = ImmutableDictionary<string, DateTimeOffset>.Empty;
 
     // Whether a look is out: a tick that comes meanwhile skips.
     bool looking;
@@ -67,13 +78,16 @@ public sealed class RunningChangeWatch : IDisposable
     void Look()
     {
         if (looking) return;
-        var links = RunningChanges.ToLook(tasks.Board, build, known);
-        if (links.Count == 0) return;
+        var now = scheduler.Now;
+        var links = RunningChanges.ToLook(tasks.Board, build, known)
+            .Where(l => !failedAt.TryGetValue(l.Key, out var at) || now - at >= FailureBackoff)
+            .ToArray();
+        if (links.Length == 0) return;
         looking = true;
         // A fault `look` did not turn into a Result would otherwise escape on the dispatcher and leave `looking` set, so
         // nothing would ever be looked at again (as in PullRequestWatch).
         lookCall.Disposable = Observable
-            .FromAsync(() => Task.WhenAll(links.Select(async link => (Link: link, Arrival: await look(link, build.Commit)))))
+            .FromAsync(() => OneByOne(links))
             .SubscribeOn(background)
             .ObserveOn(scheduler)
             .Subscribe(
@@ -89,8 +103,16 @@ public sealed class RunningChangeWatch : IDisposable
                 });
     }
 
+    // Each pull request asked after the one before has answered (see the header), the answers in the same order.
+    async Task<IReadOnlyList<(PullRequestLink Link, Result<PullRequestArrival> Arrival)>> OneByOne(IReadOnlyList<PullRequestLink> links) =>
+        await links.Aggregate(
+            Task.FromResult(ImmutableList<(PullRequestLink Link, Result<PullRequestArrival> Arrival)>.Empty),
+            async (asked, link) => (await asked).Add((link, await look(link, build.Commit))));
+
     void Heard(IReadOnlyList<(PullRequestLink Link, Result<PullRequestArrival> Arrival)> answers)
     {
+        var now = scheduler.Now;
+        failedAt = answers.Aggregate(failedAt, (all, a) => a.Arrival.IsFailure ? all.SetItem(a.Link.Key, now) : all.Remove(a.Link.Key));
         var failures = answers.Where(a => a.Arrival.IsFailure).ToArray();
         if (failures.Length > 0 && !failing)
             trace?.Invoke($"running changes: could not look at {string.Join(", ", failures.Select(f => $"{f.Link.Key} ({f.Arrival.Error})"))}");

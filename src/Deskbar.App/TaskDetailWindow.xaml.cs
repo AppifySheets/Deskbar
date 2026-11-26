@@ -287,6 +287,8 @@ public partial class TaskDetailWindow : Window
             r.Description, r.Important, r.Urgent, r.SnoozedUntil?.ToString("O") ?? "", r.Goal?.Title ?? "", r.ParentTitle ?? "",
             // The parent's id too (task 54b39c4c): the Parent button opens it, so a move to a namesake parent redraws.
             r.ParentId?.ToString() ?? "",
+            // Whether a Done task's change runs in this Deskbar yet (task 8470d176): the status chip's word and tooltip.
+            r.Delivery.Stage, r.Delivery.Note,
             // The pull requests section (task e7aa49b1): a new one redraws.
             string.Join('\u001e', r.PullRequests.Select(p => p.Key)),
             r.ClaudeWorking, r.WorkingCount,
@@ -330,7 +332,11 @@ public partial class TaskDetailWindow : Window
     {
         var row = view.Row;
         Meta.Children.Clear();
-        Meta.Children.Add(Chip(row.Closing ? "Closed" : TaskViews.StatusName(row.Status), StatusFill, StatusInk));
+        // A Done task whose change is not in this Deskbar yet says "Merged" (or "PR open"), as the panel's chip does, and
+        // its tooltip says where the change stands (task 8470d176, TaskDelivery).
+        var status = Chip(row.Closing ? "Closed" : DeliveryWord(row), StatusFill, StatusInk);
+        if (!row.Closing && row.Delivery.Note.Length > 0) status.ToolTip = row.Delivery.Note;
+        Meta.Children.Add(status);
         if (row.Closing && Actions is { } undoing)
             Meta.Children.Add(MetaButton(Flat("Undo", "Undo", () => undoing.Undo(row.Id), tip: "Undo the close")));
         Meta.Children.Add(Chip(row.Place.Name, row.Place.Colour ?? ButtonFill, row.Place.Colour is null ? DimInk : Ink));
@@ -356,6 +362,12 @@ public partial class TaskDetailWindow : Window
         button.Margin = new Thickness(0, 0, 6, 6);
         return button;
     }
+
+    // The status chip's word: "Merged" or "PR open" for a Done task whose change is not running here yet (task 8470d176),
+    // the status's name otherwise.
+    static string DeliveryWord(TaskRowView row) =>
+        row.Status != TaskStatus.Done || !row.Delivery.Shipping ? TaskViews.StatusName(row.Status)
+        : row.Delivery.Stage == DeliveryStage.Open ? "PR open" : "Merged";
 
     static Border Chip(string text, Brush fill, Brush ink) => new()
     {
