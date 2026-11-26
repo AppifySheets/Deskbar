@@ -79,6 +79,10 @@ namespace Deskbar.App;
 // reorders it (TasksWindow.Drag.cs). The Matrix draws the same lines, compact (TasksWindow.Matrix.cs).
 public partial class TasksWindow : Window
 {
+    // UI Automation sees this window and nothing inside it, so WPF stops walking its element tree after every
+    // layout pass (QuietAutomation.cs has the measurement: 1.45 s freezes on a busy machine).
+    protected override System.Windows.Automation.Peers.AutomationPeer OnCreateAutomationPeer() => new QuietWindowPeer(this);
+
     // The mockup's palette. Frozen, as every static WPF brush must be (CLAUDE.md, Traps).
     static readonly Brush Ink = Frozen(0xFF, 0xE6, 0xE6, 0xE6);
     static readonly Brush DimInk = Frozen(0xFF, 0xA9, 0xAD, 0xB8);

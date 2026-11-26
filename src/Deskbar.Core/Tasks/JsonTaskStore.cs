@@ -70,7 +70,10 @@ namespace Deskbar.Core.Tasks;
 // stay its two members: only a store made of files has files to move aside.
 //
 // `trace` hears what goes wrong without failing anything: today only a .v1 copy that could not be written (KeepVersion1).
-public sealed class JsonTaskStore(string baseDirectory, Action<string>? trace = null) : ITaskStore
+//
+// `write` puts the serialized text on the disk, as for state.json (JsonPersistenceStore): null is DurableFile.Write,
+// synchronous; the app passes DeferredWrites.Write so the flush happens off the UI thread.
+public sealed class JsonTaskStore(string baseDirectory, Action<string>? trace = null, Action<string, string>? write = null) : ITaskStore
 {
     const int CurrentVersion = 2;
 
@@ -200,7 +203,7 @@ public sealed class JsonTaskStore(string baseDirectory, Action<string>? trace = 
             Directory.CreateDirectory(baseDirectory);
             KeepVersion1();
             // Flushed and swapped in with the old file kept as tasks.json.previous, as state.json is.
-            DurableFile.Write(TasksPath, JsonSerializer.Serialize(new FileDto(CurrentVersion, board.Tasks.Select(ToDto).ToArray()), Options));
+            (write ?? DurableFile.Write)(TasksPath, JsonSerializer.Serialize(new FileDto(CurrentVersion, board.Tasks.Select(ToDto).ToArray()), Options));
         }, e => $"Could not write {TasksPath}: {e.Message}");
 
     static Parsed Parse(string text) =>

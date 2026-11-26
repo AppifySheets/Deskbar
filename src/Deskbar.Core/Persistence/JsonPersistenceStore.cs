@@ -12,7 +12,11 @@ namespace Deskbar.Core.Persistence;
 // `runningVersion` is this build's version. Save stamps it into state.json as WrittenBy and Load refuses a file
 // stamped by a newer major version (StateVersionGate). Null (the tests, mostly) stamps nothing and refuses
 // nothing. Top-level fields this build does not know ride through Load and Save in AppState.Extra.
-public sealed class JsonPersistenceStore(string baseDirectory, Action<string>? trace = null, string? runningVersion = null) : IPersistenceStore
+//
+// `write` puts the serialized text on the disk. Null (the tests) is DurableFile.Write, synchronous. The app passes
+// DeferredWrites.Write, so the flush to the disk happens off the UI thread (DeferredWrites has the measurement).
+public sealed class JsonPersistenceStore(string baseDirectory, Action<string>? trace = null, string? runningVersion = null,
+    Action<string, string>? write = null) : IPersistenceStore
 {
     // Finding 5 (reviewer, Important): without a string converter, RuleMatchKind (and any
     // future enum) serializes as a bare int -- unreadable in state.json and a silent
@@ -126,6 +130,7 @@ public sealed class JsonPersistenceStore(string baseDirectory, Action<string>? t
         Result.Try(() =>
         {
             Directory.CreateDirectory(baseDirectory);
-            DurableFile.Write(StatePath, JsonSerializer.Serialize(runningVersion is null ? state : state with { WrittenBy = runningVersion }, Options));
+            // Serialized HERE, on the caller's thread, so the text is this state and no other thread reads it.
+            (write ?? DurableFile.Write)(StatePath, JsonSerializer.Serialize(runningVersion is null ? state : state with { WrittenBy = runningVersion }, Options));
         }, e => $"Could not write {StatePath}: {e.Message}");
 }
