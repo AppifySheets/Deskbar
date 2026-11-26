@@ -525,7 +525,8 @@ throwaway folder Claude Code trusts, and tracing on for the `claude actions:` an
     "Start Claude on this". The tasks panel's "⋯" menu has it in the same place, and an open thread has a
     "Start Claude on this" button above the comments. A closed task has neither. A task that already has a session
     has "Open Claude" in that place on both menus and no "Start Claude on this" there (task b6f068b1: one Claude item
-    per menu); its open thread has the button only while none of its sessions is running.
+    per menu); its open thread has "Open Claude" in its row of buttons and no start button either (task 5e02e99f),
+    until its session has expired.
 91. Pick "Start Claude on this" on a note whose workspace knows exactly one folder: no question, no list. Within a few
     seconds a Windows Terminal window titled "<the note's title> · Claude" opens on the note's workspace, in the Deskbar
     Claude look, attached to a session that is already working on the note (its first message names the task). The
@@ -545,7 +546,9 @@ throwaway folder Claude Code trusts, and tracing on for the `claude actions:` an
     idle, "Open Claude" is in the row of buttons at the top of the thread (task 1c17b7d6; the line itself has Open
     only when the task has a second session to open), and there is no "Start Claude on this" button. "Open in window" shows the same: no
     button in the Sessions column and no "Start Claude on this" on the "⋯" menu. Stop the session (`claude stop`):
-    after the next poll the line reads ended and the button is back in both places.
+    after the next poll the line reads ended. The thread still has "Open Claude" and no "Start Claude on this" (task
+    5e02e99f: one Claude button, and Open Claude resumes the ended session); the task's own window has its start
+    button back in the Sessions column and on its "⋯" menu.
 94. Close the terminal window from 91 (its X). `claude agents` still lists the session, and the task still shows it.
     Double-click the task's line: you go to its workspace and a new terminal window attaches to the same session.
     Double-click again while it is open: that same window comes to the front, and no second window opens (a second
@@ -1236,8 +1239,9 @@ MP5. Have the manager ask you something (as MQ1): its window's icon on the bar g
 
 TB1. Open the thread of a Claude task with one session, still working or idle: it starts with one row of buttons,
      **Open in window**, **Open Claude** and **Add subtask**. The session's line under it has no Open of its own.
-     **Open Claude** goes to the session, as the line's double-click does. Once that session has ended, **Start Claude
-     on this** joins the row before **Add subtask**, and a click on the row right then does nothing for half a second.
+     **Open Claude** goes to the session, as the line's double-click does. Once that session has ended the row reads
+     the same (task 5e02e99f): **Open Claude** resumes it, and **Start Claude on this** does not join the row. Only a
+     task whose session has expired (its transcript deleted) has **Start Claude on this** in **Open Claude**'s place.
 TB2. Open the thread of a note: the row reads **Open in window**, **Start Claude on this**, **Add subtask**. Press
      **Add subtask**: the box opens right under the row and the button leaves the row; Esc brings it back.
 TB3. Open the thread of a task with two sessions: each session line that can be opened has its Open again. Narrow

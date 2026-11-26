@@ -101,8 +101,9 @@ public partial class FloatingBar
         // ONE CLAUDE ITEM PER MENU (task b6f068b1; Petre, with a screenshot of both: "open claude and start claude , no
         // need for both"). A task that has a session gets Open Claude above and not this one: Open goes to the session
         // and resumes it when it has ended, which is what he wants from a task Claude already has. A second session on
-        // such a task comes from the "Start Claude on this" button in the task's thread, which shows once none of its
-        // sessions is running (task 9b6275bc), and from `deskbar task start` at any time.
+        // such a task comes from the "Start Claude on this" button in the task's own window (Open in window), which shows
+        // once none of its sessions is running (task 9b6275bc), and from `deskbar task start` at any time. The thread's
+        // row of buttons has one Claude button too (task 5e02e99f, TasksWindow.ThreadActions).
         else if (StartClaude is { } start)
             menu.Items.Add(TaskMenuItem(TasksWindow.StartClaudeText, () => Dispatcher.BeginInvoke(() =>
             {

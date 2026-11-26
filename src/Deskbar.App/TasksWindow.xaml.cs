@@ -1741,10 +1741,10 @@ public partial class TasksWindow : Window
     string ThreadLayoutKey(TaskRowView row) =>
         !row.Expanded ? ""
         : string.Join(',', row.SessionList.Select(s => s.Id)) + "/"
-          // Whether a session is running decides whether "Start Claude on this" is in the row of buttons at the thread's
-          // top (task 1c17b7d6), right before "Add subtask": it appearing must start the guard, or a click meant for Add
-          // subtask lands on Start Claude.
-          + (row.HasOpenSession ? "running" : "") + "/"
+          // Whether there is a session to open decides which Claude button is in the row at the thread's top (task
+          // 5e02e99f: Open Claude, or "Start Claude on this" once the session has expired). The two differ in width, so
+          // the swap moves "Add subtask" beside them and must start the guard, or a click meant for it lands elsewhere.
+          + (row.HasSessionToOpen ? "opens" : "") + "/"
           // A subtask open in place (task 0eb943d8) puts its whole thread inside this one.
           + string.Join(',', row.Subtasks.Select(c => $"{c.Id}" + (c.Row is { } open ? "[" + ThreadLayoutKey(open) + "]" : ""))) + "/"
           // Task links: the link lines and an open picker sit above the comments, so each moves them.
@@ -1754,7 +1754,7 @@ public partial class TasksWindow : Window
           + string.Join(',', ThreadComments(row).Shown.Select(c => $"{c.Id}{(longOpen.Contains(c.Id) ? "+" : "")}"))
           + $"{settledOpen.Contains(row.Id)}{earlierOpen.Contains(row.Id)}";
 
-    // The row of buttons (ThreadActions, task 1c17b7d6: Open in window, Open Claude, "Start Claude on this", Add subtask),
+    // The row of buttons (ThreadActions, task 1c17b7d6: Open in window, Open Claude or "Start Claude on this", Add subtask),
     // the task's sessions with their Open buttons (Task 9), the subtasks and links, then the comments, each with its
     // author and time over its markdown, then a box for Petre's next one. RULING 62: the settled comments are folded away
     // behind one dim line above the comments, "N settled comments", which unfolds them in place (and reads "Hide N
@@ -1830,11 +1830,20 @@ public partial class TasksWindow : Window
     // The row of buttons at the top of an open thread (task 1c17b7d6), left to right, each only where it applies:
     //   Open in window        the task in a window of its own (task dca4ebeb): the thread is where a long task stops fitting;
     //   Open Claude           a Claude task's session, the line's own Open Claude button and its double-click (Actions.Go,
-    //                         task 7f61af2e), here so the thread has it too; tagged so the session line can leave its Open off;
-    //   Start Claude on this  not while a session of the task is running (task 9b6275bc, TaskRowView.HasOpenSession), since
-    //                         Open Claude is then the thing to press; back once every session has ended, for a fresh one;
+    //                         task 7f61af2e), here so the thread has it too; tagged so the session line can leave its Open
+    //                         off. Only while there is a session it can open (TaskRowView.HasSessionToOpen): running, or
+    //                         ended, which it resumes;
+    //   Start Claude on this  only where Open Claude is not: a task no session has joined, or one whose session has
+    //                         expired, so nothing is left to open;
     //   Add subtask           the twin of the menu's "Add subtask…" (task 0eb943d8). While its box is open (Thread puts the
     //                         box right under this row) the button is left out, so the box is the one place to type.
+    // ONE CLAUDE BUTTON, NEVER BOTH (task 5e02e99f; Petre, on a screenshot of a done task's thread whose session had ended
+    // and whose row read Open in window, Open Claude, Start Claude on this, Add subtask: "open claude and start claude on
+    // this, seems excessive"). Until then Start Claude came back beside Open Claude as soon as no session was running
+    // (task 9b6275bc), for a fresh session. But Open Claude resumes the ended session, which is what is wanted from a
+    // task Claude already worked on, so the second button was a second way to the same place. This is the rule the line
+    // menus already follow (task b6f068b1). A fresh session beside an ended one still comes from the task's own window
+    // (Open in window, its Sessions column) and from `deskbar task start`.
     // A WrapPanel, so on a narrow panel the buttons wrap onto a second line instead of clipping. Tagged for the tests.
     (WrapPanel Row, bool HasOpenClaude) ThreadActions(TaskRowView row, bool addsSubtask)
     {
@@ -1842,11 +1851,12 @@ public partial class TasksWindow : Window
         if (Actions?.OpenWindow is { } openWindow)
             buttons.Add(Small(OpenInWindowText, OpenInWindowText, () => openWindow(row.Id),
                 "Read and edit the whole task in a window of its own"));
-        var openClaude = Actions is not null && OpensClaude(row);
+        var openClaude = Actions is not null && OpensClaude(row) && row.HasSessionToOpen;
         if (openClaude)
             buttons.Add(Small(OpenClaudeText, OpenClaudeText, () => Actions?.Go(row.Id),
                 "Go to this task's Claude session, resuming it first if it has ended"));
-        if (Actions?.StartClaude is { } start && row.Status != TaskStatus.Closed && !row.Closing && !row.HasOpenSession)
+        // Not beside Open Claude (see above). A running session always has Open Claude, so this never shows beside one.
+        if (!openClaude && Actions?.StartClaude is { } start && row.Status != TaskStatus.Closed && !row.Closing)
             buttons.Add(Small(StartClaudeText, StartClaudeText, () => start(row.Id),
                 "Start a background Claude session on this task, with the task as its first message"));
         if (addsSubtask && subtaskUnder != row.Id)
@@ -2478,9 +2488,9 @@ public partial class TasksWindow : Window
             // Task 9: handing the task to Claude, right after Edit (the spec, "Where the clicks are"). Run once this menu
             // has closed: it may ask a question or open a pick list of folders at the pointer.
             // ONE CLAUDE ITEM PER MENU (task b6f068b1; Petre: "open claude and start claude , no need for both"): only on
-            // a task no session has joined. A Claude task has Open Claude above, which resumes an ended session, and its
-            // thread keeps the "Start Claude on this" button while none of its sessions is running (the bar's menu follows the same rule,
-            // FloatingBar.OpenTaskLineMenu).
+            // a task no session has joined. A Claude task has Open Claude above, which resumes an ended session. Its
+            // thread follows the same rule (ThreadActions, task 5e02e99f), and so does the bar's menu
+            // (FloatingBar.OpenTaskLineMenu).
             else if (Actions?.StartClaude is { } start)
                 menu.Items.Add(Item(StartClaudeText, () => Dispatcher.BeginInvoke(() => start(id), System.Windows.Threading.DispatcherPriority.Input)));
             // Subtasks (Petre's pick A): the add box with this line's task as the parent (a sibling on a subtask's line),

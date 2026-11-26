@@ -689,9 +689,10 @@ click, which would open the task in the tasks panel, and so does the Open Claude
 task's line in the tasks panel. "Start Claude on this", in the same place on the menu of a task no session
 has worked on and as a button in an open task's thread, starts a background session with the task as its
 first message, in the task's folder or one you pick, and opens a window on it. A menu has one of the two,
-never both: a task Claude already has gets "Open Claude". While one of its sessions is running, the thread
-shows that session with Open and no start button; once every session has ended, the button is back and
-starts a fresh one. A folder Claude Code was
+never both: a task Claude already has gets "Open Claude". An open thread follows the same rule in its row of
+buttons: "Open Claude" while the task has a session to go to, which resumes an ended one, and "Start Claude on
+this" only for a task without a session or one whose session has expired. For a fresh session beside an ended
+one, use the start button in the task's own window ("Open in window"). A folder Claude Code was
 never told to trust puts Claude's message in the thread and offers a terminal there so you can accept the
 trust prompt yourself. A task's thread lists its sessions, newest first, as working, idle, ended or expired,
 each but the expired ones with Open. `deskbar.cmd task go|start|open-session` do the same from a script.
