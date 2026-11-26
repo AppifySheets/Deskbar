@@ -410,4 +410,83 @@ public class ClaudeChatTests
 
         Assert.Equal("\u10d2\u10d0\u10db\u10d0\u10e0\u10ef\u10dd\u10d1\u10d0 \u2014 caf\u00e9", Message(Assert.Single(update.Items)).Text);
     }
-}
+
+    // ---- secrets never reach a label ---------------------------------------------------------------------------------
+
+    static string LabelOfCommand(string command) =>
+        Assert.Single(OnlySteps(Assert.Single(ClaudeChat.Parse([Tool("x", "Bash", JsonSerializer.Serialize(new { command }))]))).Steps).Label;
+
+    // Every value below is made up.
+    [Theory]
+    [InlineData("curl -H \"Authorization: Bearer fakeValue123\" https://example.test/a", "fakeValue123")]
+    [InlineData("curl -H 'authorization: Basic ZmFrZTpmYWtl' https://example.test", "ZmFrZTpmYWtl")]
+    [InlineData("gh api x --header Bearer madeUpTokenText", "madeUpTokenText")]
+    [InlineData("run --token=abc-not-real-1", "abc-not-real-1")]
+    [InlineData("run --API_KEY=notARealKey", "notARealKey")]
+    [InlineData("tool password=\"two words\" --x", "two words")]
+    [InlineData("tool SECRET='made up'", "made up")]
+    [InlineData("tool ACCESS_TOKEN=zzz111", "zzz111")]
+    [InlineData("deploy 0123456789abcdef0123456789abcdef01234567", "0123456789abcdef0123456789abcdef01234567")]
+    [InlineData("echo QWxhZGRpbjpvcGVuU2VzYW1lMTIzNDU2Nzg5MA9z", "QWxhZGRpbjpvcGVuU2VzYW1lMTIzNDU2Nzg5MA9z")]
+    public void A_secret_in_a_command_never_reaches_its_label(string command, string secret)
+    {
+        var label = LabelOfCommand(command);
+
+        Assert.DoesNotContain(secret, label);
+        Assert.Contains("***", label);
+    }
+
+    [Fact]
+    public void A_secret_that_straddles_the_cut_is_not_shown_in_part()
+    {
+        // The value starts before character 60 and ends after it: redacting after the cut would leave its first half.
+        var command = "run --option-with-a-long-name-xxxxxxxxxxxxxxxxxxxxxxxxxxx --token=ABCDEFGHIJKLMNOP1234";
+
+        Assert.DoesNotContain("ABCDE", LabelOfCommand(command));
+    }
+
+    [Fact]
+    public void Ordinary_commands_paths_and_urls_are_left_alone()
+    {
+        Assert.Equal("dotnet test tests/Sample.Tests -c Release", LabelOfCommand("dotnet test tests/Sample.Tests -c Release"));
+        Assert.Equal("git log --oneline -5", LabelOfCommand("git log --oneline -5"));
+        Assert.Equal("grep -rn \"monkey\" src", LabelOfCommand("grep -rn \"monkey\" src"));
+        var step = Assert.Single(OnlySteps(Assert.Single(ClaudeChat.Parse([Tool("u", "WebFetch", """{"url":"https://example.test/docs/page?id=7"}""")]))).Steps);
+        Assert.Equal("example.test/docs/page?id=7", step.Label);
+    }
+
+    [Fact]
+    public void A_url_with_a_token_in_its_query_is_redacted()
+    {
+        var step = Assert.Single(OnlySteps(Assert.Single(ClaudeChat.Parse([Tool("u", "WebFetch", """{"url":"https://example.test/x?token=fakeFake9&page=2"}""")]))).Steps);
+
+        Assert.DoesNotContain("fakeFake9", step.Label);
+    }
+
+    // ---- Deskbar's own housekeeping is flagged --------------------------------------------------------------------
+
+    [Theory]
+    [InlineData("Bash", "deskbar.cmd task status-line 'checking' --session s1")]
+    [InlineData("Bash", "\"$APPDATA/Deskbar/deskbar.cmd\" task comment - --session s1")]
+    [InlineData("PowerShell", "& \"C:\\x\\Deskbar\\deskbar.cmd\" task ask - --session s1")]
+    [InlineData("Bash", "cd /w/repo && deskbar.cmd task join abc12345 --session s1")]
+    [InlineData("Bash", "DESKBAR.CMD TASK done --session s1")]
+    public void A_call_of_deskbars_own_shim_is_housekeeping(string tool, string command)
+    {
+        var step = Assert.Single(OnlySteps(Assert.Single(ClaudeChat.Parse([Tool("h", tool, JsonSerializer.Serialize(new { command }))]))).Steps);
+
+        Assert.True(step.Housekeeping);
+    }
+
+    [Theory]
+    [InlineData("git log --oneline")]
+    [InlineData("dotnet test")]
+    [InlineData("echo deskbar.cmd task is the shim")]
+    [InlineData("cat notes-on-deskbar.cmd")]
+    [InlineData("deskbar.cmd status")]
+    public void Any_other_command_is_not_housekeeping(string command)
+    {
+        var step = Assert.Single(OnlySteps(Assert.Single(ClaudeChat.Parse([Tool("h", "Bash", JsonSerializer.Serialize(new { command }))]))).Steps);
+
+        Assert.False(step.Housekeeping);
+    }}
