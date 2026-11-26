@@ -2623,6 +2623,10 @@ public partial class TasksWindow : Window
         // closed subtask too, since the parent is still worth reaching from it. Run once this menu has closed.
         if (row.ParentId is { } parentId && Actions?.OpenParent is { } openParent)
             menu.Items.Add(Item(OpenParentText, () => Dispatcher.BeginInvoke(() => openParent(parentId), System.Windows.Threading.DispatcherPriority.Input)));
+        // COPY LINK (task 5016d533; Petre: "create a link to the task and include it in github pr / issues / elsewhere so
+        // that when i click on it, it opens the task in deskbar"): the markdown link to the task (TaskLinkClipboard), for
+        // a pull request, an issue or a message. On every line, a closed one too: a link to history still opens it.
+        menu.Items.Add(Item(TaskLinkClipboard.CopyLinkText, () => TaskLinkClipboard.Copy(id)));
         if (menu.Items.Count > 0) menu.Items.Add(new Separator());
 
         var status = Item("Status");

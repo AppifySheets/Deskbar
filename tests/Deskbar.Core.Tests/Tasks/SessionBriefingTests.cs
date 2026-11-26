@@ -34,6 +34,23 @@ public sealed class SessionBriefingTests
         Assert.Contains("the user commented", SessionBriefing.Commented(Task("Fix the bar"), "hi"));
     }
 
+    // Task 5016d533: a session on a task is handed the task's link, whole, to put in its pull requests, issues, mockups and
+    // other pages, and
+    // every session reads `task link` among the commands, for a task it joins later.
+    [Fact]
+    public void A_session_on_a_task_is_given_its_link_for_pull_requests_and_issues()
+    {
+        var own = Task("Task links in pull requests");
+        var text = SessionBriefing.Start(Start("resume"), own, []);
+
+        Assert.Contains($"[Deskbar task {own.Id.ToString()[..8]}](https://deskbar.app/task#{own.Id})", text);
+        Assert.Contains("pull requests", text);
+        // Petre: "also include those links in other places claude generates, like mockups".
+        Assert.Contains("mockups", text);
+        Assert.Contains("task link <id>", SessionBriefing.Start(Start(), Maybe<TaskItem>.None, []));
+        Assert.DoesNotContain(Dashes, text.Contains);
+    }
+
     [Fact]
     public void A_new_session_is_told_its_id_the_offered_tasks_and_how_to_join_or_create()
     {

@@ -28,7 +28,12 @@ namespace Deskbar.App;
 static class Program
 {
     [STAThread]
-    static int Main(string[] args) => ControlCommandLine.Wants(args) ? ControlCommandLine.Run(args) : RunApp(args);
+    // A task link (deskbar://task/<id>, task 5016d533) is a client too, so it is answered here as well, before WPF:
+    // Windows starts this exe with the link when one is clicked, and TaskLinkCommandLine hands it to the running copy.
+    static int Main(string[] args) =>
+        ControlCommandLine.Wants(args) ? ControlCommandLine.Run(args)
+        : TaskLinkCommandLine.Wants(args) ? TaskLinkCommandLine.Run(args)
+        : RunApp(args);
 
     [MethodImpl(MethodImplOptions.NoInlining)]
     static int RunApp(string[] args)

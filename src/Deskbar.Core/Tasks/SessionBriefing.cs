@@ -153,7 +153,8 @@ public static class SessionBriefing
         string family = "", bool reopened = false) =>
         string.Join("\n", Intro(e.SessionId)
             .Concat(own.HasValue
-                ? [$"{(reopened ? "The user had closed your task; resuming this session reopened it. " : "")}Your task is {Describe(own.Value, expand ?? Same)}. Keep working on it."]
+                ? [$"{(reopened ? "The user had closed your task; resuming this session reopened it. " : "")}Your task is {Describe(own.Value, expand ?? Same)}. Keep working on it.",
+                   LinkLine(own.Value)]
                 : Choice(e.SessionId, offered))
             .Concat(family.Length > 0 ? [family] : Array.Empty<string>())
             .Append("")
@@ -191,6 +192,17 @@ public static class SessionBriefing
         : $"Deskbar: this session has no task yet. Once you know what you are working on, run {Shim} task join <id> --session {sessionId} with an id from {Shim} task list, or {Shim} task new - --session {sessionId} with the title on stdin (a heredoc).\n";
 
     static string Same(string markdown) => markdown;
+
+    // TASK LINKS IN PULL REQUESTS (task 5016d533; Petre, with a pull request whose body began "Task b2ff3fb7:": "create a
+    // link to the task and include it in github pr / issues / elsewhere so that when i click on it, it opens the task in
+    // deskbar"). Sessions already named their task by its eight characters, as text nothing could click. The link is the
+    // web form (TaskLink.Web), the only one GitHub keeps, and it hands on to the deskbar: protocol in the browser. Given
+    // whole in the start briefing, so the session copies it rather than building it; a session that joins later reads
+    // `task link` in the commands below. Not only pull requests and issues: Petre, pointing at a mockup a session had
+    // published as a claude.ai artifact, "also include those links in other places claude generates, like mockups". So
+    // the rule covers whatever a session makes for its task that he opens outside Deskbar.
+    static string LinkLine(TaskItem task) =>
+        $"Put your task's link near the top of everything you make for it that the user opens outside Deskbar (pull requests, issues, mockups and other published pages, documents), so a click takes them back to the task in Deskbar: {TaskLink.Markdown(task.Id)} (in a page, an <a> to it).";
 
     // A subtask's prompt line reminds a long-running session that the family exists and how to read it again (subtasks
     // spec: siblings move on after the session started). Still one line.
@@ -385,6 +397,8 @@ public static class SessionBriefing
         $"  {Shim} task comment - --session {sessionId}   (rare: only what the user must know, in one or two short lines; what they must do is task ask)",
         $"  {Shim} task done --session {sessionId}   (when the work is finished and nothing waits on the user, so not while a pull request of yours waits to be merged; only the user closes a task)",
         $"  {Shim} task later - --session {sessionId}   (the title of a follow-up note on your workspace, linked to your task as related)",
+        // Task 5016d533: the link for a pull request or issue, for a session that joined after its start briefing.
+        $"  {Shim} task link <id>   (your task's link as markdown, for the top of each pull request, issue, mockup or document you make for it)",
         // Subtasks spec: a session splitting its work makes a subtask, which the next session picks up with this one's
         // context (its join reply names this session and its transcript). `task family` is not listed here: the join
         // reply, the start briefing and a subtask's prompt line carry it where it matters.

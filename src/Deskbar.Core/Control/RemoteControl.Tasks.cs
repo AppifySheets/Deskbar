@@ -34,6 +34,7 @@ namespace Deskbar.Core.Control;
 //   task unrelate <id> <other-id>
 //   task go <id>
 //   task open <id>                    (task dca4ebeb: the task in a window of its own, the menus' "Open in window")
+//   task link <id>                    (task 5016d533: a markdown link that opens the task in Deskbar, "Copy link")
 //   task start <id> [--folder <path>] [--model <model>]
 //   task open-session <id> <session>
 //
@@ -197,6 +198,9 @@ public sealed partial class RemoteControl
             // The task in a window of its own (task dca4ebeb), as "Open in window" on a line's menu does. The task is found
             // first, so an unknown id refuses before any window opens; the reply is the task.
             ["open", var id] => TaskChange(service, id, task => openTaskWindow is { } open ? open(task) : Result.Failure(TaskWindowUnavailable)),
+            // Task 5016d533: the line menus' "Copy link", as markdown for a pull request or an issue. The link is the web form
+            // (TaskLink.Web), the one GitHub keeps; clicked, it opens the task in Deskbar through the deskbar: protocol.
+            ["link", var id] => service.Board.Find(id).Match(t => Said(TaskLink.Markdown(t.Id)), ControlReply.Fail),
             ["start", var id] => WithSessions(c => TaskStart(service, c, id, Maybe<string>.None, Maybe<string>.None)),
             ["start", var id, "--folder", var folder] => WithSessions(c => TaskStart(service, c, id, Folder(folder) ?? folder, Maybe<string>.None)),
             ["start", var id, "--model", var model] => WithSessions(c => TaskStart(service, c, id, Maybe<string>.None, model)),

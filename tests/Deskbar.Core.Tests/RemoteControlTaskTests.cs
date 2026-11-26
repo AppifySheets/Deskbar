@@ -1134,7 +1134,9 @@ public class RemoteControlTaskTests
              "comment <id> <markdown>|-", "delete <id>", "flag <id> important|urgent on|off", "order <id> top|end|<n>",
              // Task 9: going to a task, starting Claude on it and opening one of its sessions.
              // Task dca4ebeb: `open` is the menus' "Open in window", between go and start.
-             "go <id>", "open <id>", "start <id> [--folder <path>] [--model <model>]", "open-session <id> <session>",
+             "go <id>", "open <id>",
+             // Task 5016d533: "Copy link"'s twin.
+             "link <id>", "start <id> [--folder <path>] [--model <model>]", "open-session <id> <session>",
              // The manager session: the bar's Manager button's twin.
              "manager",
              // A Claude session's own forms (plan Task 8, RemoteControl.ClaudeHook.cs); `-` reads the text from stdin.
@@ -1363,6 +1365,22 @@ public class RemoteControlTaskTests
         var without = Run(manager, "task", "open", id.ToString());
         Assert.Equal(ControlReply.Failed, without.ExitCode);
         Assert.Contains(RemoteControl.TaskWindowUnavailable, without.Output);
+    }
+
+    // Task 5016d533: `task link <id>` answers with the markdown link a session puts in a pull request, any unique start
+    // of the id finding the task; an unknown id refuses.
+    [Fact]
+    public void Task_link_answers_with_the_markdown_link_to_the_task()
+    {
+        var manager = Started();
+        var id = tasks.AddNote("Linked from a pull request", Maybe<Guid>.None).Value.Id;
+        var control = new RemoteControl(manager, tasks: tasks);
+
+        var reply = control.Execute(["task", "link", id.ToString()[..8]]);
+        Ok(reply);
+        Assert.Equal($"[Deskbar task {id.ToString()[..8]}](https://deskbar.app/task#{id})", reply.Output);
+
+        Assert.Equal(ControlReply.Failed, control.Execute(["task", "link", "ffffffff"]).ExitCode);
     }
 
     // `task stats` (task 521d2b07): the Stats view's numbers as JSON, each day's tasks with their ids so a caller can

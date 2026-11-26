@@ -101,6 +101,10 @@ public static class ControlUsage
             new("task", "open <id>",
                 "open a task in a window of its own: the whole description, every comment, sessions and subtasks,\n"
                 + "      editable; a task already open in one brings that window forward, onto the desktop in front"),
+            // Task 5016d533: the twin of the line menus' "Copy link" (TaskLink).
+            new("task", "link <id>",
+                "a markdown link to the task for a pull request, an issue or a comment; clicked, it opens the task in\n"
+                +"      Deskbar on a PC where Deskbar runs (https://deskbar.app/task#<id>, handed on to deskbar://)"),
             new("task", "start <id> [--folder <path>] [--model <model>]",
                 "start a background Claude session on the task, with the task as its first message, and open a window\n"
                 + "      on it; without --folder it starts where exactly one folder is known and otherwise names them;\n"

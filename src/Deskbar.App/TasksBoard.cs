@@ -819,6 +819,17 @@ public sealed class TasksBoard : IDisposable
     // where Petre is, since a link that opens on the wrong desktop is better than one that does not open at all.
     void OpenLink(Guid id, Uri uri)
     {
+        // A TASK LINK (task 5016d533, TaskLink): https://deskbar.app/task#<id> in a task's text, pasted from a pull request
+        // or written by a session, opens that task here, in its window, as the link does from a browser. Going out to the
+        // browser and back through the deskbar: protocol would end in the same window, after a browser tab and its
+        // prompt. No workspace switch: the task window comes to the desktop in front (OpenWindow). A task this board
+        // does not have (one on another PC's board) is said on the problem line.
+        if (TaskLink.TaskIdOf(uri.OriginalString) is { HasValue: true } linked)
+        {
+            Report(tasks.Board.Find(linked.Value).Bind(task => OpenWindow(task.Id)));
+            return;
+        }
+
         var target = tasks.Board.Tasks.TryFirst(t => t.Id == id).Bind(t => t.WorkspaceId);
         var elsewhere = target.HasValue && manager.CurrentWorkspaceId.Map(current => current != target.Value).GetValueOrDefault(true);
         if (elsewhere) Report(manager.Switch(target.Value));

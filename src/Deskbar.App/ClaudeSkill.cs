@@ -356,6 +356,11 @@ static class ClaudeSkill
           run `deskbar.cmd task join <task id> --session <id>` to put it back in progress. A follow-up for later is
           `deskbar.cmd task later - --session <id>`, its title on stdin, a note on your workspace
           linked to your task as related, so it says where it came from.
+        - Link your task. Put its link near the top of everything you make for it that the user opens outside
+          Deskbar: pull requests, issues, published pages and mockups (artifacts), documents and reports.
+          `deskbar.cmd task link <task id>` prints it as markdown, [Deskbar task 1a2b3c4d](https://deskbar.app/task#...);
+          in a page, use an <a> to the same address. Clicked, it opens the task in Deskbar, so the user can get from
+          the pull request or the mockup back to the task.
         - Subtasks. A task can have subtasks, one level deep. When you join one, the join reply's `family` names the
           parent, the siblings and their sessions with transcript files: read the end of the parent session's
           transcript before you start, and stay clear of what the siblings are doing. `deskbar.cmd task family
