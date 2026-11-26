@@ -1,4 +1,5 @@
 using System.Collections.Immutable;
+using System.Windows.Controls;
 using CSharpFunctionalExtensions;
 using Deskbar.App;
 using Deskbar.Core.Tasks;
@@ -142,4 +143,47 @@ public partial class TasksBoardTests
         Assert.True(result.IsFailure);
         Assert.Equal(before, Of(t, id).Comments.Count);
     });
-}
+
+    // L3: a refusal stands under the buttons of the question on show when it was refused, and goes when that question or its
+    // answers change again.
+    static string[] AnswerTexts(Board t) =>
+        Inside(Inside(t.Window.InboxPageContent!).OfType<StackPanel>().Single(p => Equals(p.Tag, TasksWindow.AnswerButtonsTag))).OfType<TextBlock>().Select(x => x.Text).ToArray();
+
+    [Fact]
+    public void A_refusal_goes_when_the_question_or_its_answers_change_again() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var id = AskedWithOptions(t);
+        t.Controller.Show();
+        ChooseInbox(t);
+        t.Controller.ShowTask(id);
+        var stale = ButtonNamed(t.Window.InboxPageContent!, "Merge it");
+        Assert.True(t.Tasks.Ask(id, "Merge the pull request?", options: ["Merge it", "Wait for review"]).IsSuccess);
+
+        // A click on the buttons the new question replaced is refused, and the line stands under the new buttons.
+        Click(stale);
+        Assert.Contains(AnswerTexts(t), text => text.Contains(TaskBoard.OptionsChanged));
+
+        // The question changes again: a fresh start, no refusal carried over.
+        Assert.True(t.Tasks.Ask(id, "Merge the pull request?", options: ["Merge it", "Close it"]).IsSuccess);
+        Assert.DoesNotContain(AnswerTexts(t), text => text.Contains(TaskBoard.OptionsChanged));
+        Assert.True(HasButtonNamed(t.Window.InboxPageContent!, "Close it"));
+    });
+
+    [Fact]
+    public void A_refusal_for_the_buttons_on_show_stands_until_the_question_changes() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var id = AskedWithOptions(t);
+        t.Controller.Show();
+        ChooseInbox(t);
+        t.Controller.ShowTask(id);
+
+        // A click that is refused for the buttons the page draws now (an answer number they do not have).
+        t.Window.ClickAnswer(id, 7);
+        Assert.Contains(AnswerTexts(t), text => text.Contains("no answer number"));
+
+        // Another question, with other answers: a fresh start.
+        Assert.True(t.Tasks.Ask(id, "Another question?", options: ["Yes", "No"]).IsSuccess);
+        Assert.DoesNotContain(AnswerTexts(t), text => text.Contains("no answer number"));
+    });}
