@@ -51,36 +51,49 @@ public sealed record SessionPickRow(
 // undocumented field, so said as "last reply"), the rest unknown; else, for a task with no session, the task's pick, which
 // the first start will pass. A value not set reads as Claude Code's own ("default effort", "Claude Code's setting").
 //
-// READ-ONLY: the current session is listed and runs in a window of its own (VS Code, a terminal: no short id, or not a
-// background row). Deskbar cannot restart it (SettingsSwitch), so the buttons are disabled, and the tooltip says why
-// (SettingsSwitch.NotDeskbars), never hidden.
+// READ-ONLY: the task's session is listed and runs in a window of its own (VS Code, a terminal: no short id, or not a
+// background row), or is a background session Deskbar did not start. A switch never copies or stops such a session
+// (SettingsSwitch), so the buttons are disabled, and the tooltip says why, never hidden.
+//
+// "THE TASK'S SESSION" is SettingsSwitch.SessionOf, the one rule every switch question uses: an ended entry, or a
+// session that has moved to another task, is not it, and the row then shows the pick for the next start.
+//
+// CANCEL is offered while a pick waits for a pause and after the copy joined, until the copy has answered: from then on
+// the switch is final (review M2), and the row says the earlier session stops at its next pause.
 public static class SessionPicker
 {
     public const string FirstStartTip = "No session yet. Your pick is used by the first session Deskbar starts on this task.";
+    public const string NoLiveSessionTip = "No session runs on this task now. Your pick is used by the next session Deskbar starts on it.";
     public const string LastReplyTip = "Deskbar did not start this session, so it shows the model of its last reply. Pick to change it.";
     public const string NextPauseTip = "Applies at Claude's next pause.";
     public const string ConfirmingWords = "Switched. The earlier session stops once this one has answered.";
 
     /// <param name="listed">The last good `claude agents --json` read (none read yet: empty).</param>
     /// <param name="lastModel">The model of a session's last reply, from its transcript; none when unknown.</param>
-    public static SessionPickRow RowOf(TaskItem task, IReadOnlyCollection<ClaudeAgent> listed, Func<TaskSession, Maybe<string>> lastModel)
+    /// <param name="copyReplied">Whether a switch's joined copy has answered since it joined.</param>
+    public static SessionPickRow RowOf(TaskBoard board, TaskItem task, IReadOnlyCollection<ClaudeAgent> listed,
+        Func<TaskSession, Maybe<string>> lastModel, Func<TaskSession, bool> copyReplied)
     {
-        var current = SettingsSwitch.Current(task);
-        var readOnly = current.Bind(s => listed.TryFirst(a => a.SessionId == s.Id))
-            .Where(agent => !agent.Background || agent.ShortId.HasNoValue)
-            .Map(_ => SettingsSwitch.NotDeskbars);
+        var current = SettingsSwitch.SessionOf(board, task);
+        var readOnly = current.Bind(s => listed.TryFirst(a => a.SessionId == s.Id).Map(a => (Session: s, Agent: a)))
+            .Bind(x => !x.Agent.Background || x.Agent.ShortId.HasNoValue ? Maybe.From(SettingsSwitch.NotDeskbars)
+                : !SettingsSwitch.StartedByDeskbar(x.Session) ? Maybe.From(SettingsSwitch.NotStartedByDeskbar)
+                : Maybe<string>.None);
 
         if (task.Switching is { HasValue: true } switching)
         {
             var pending = switching.Value;
-            var (phase, words, cancel) = pending.CopyId.HasValue ? (PickPhase.Confirming, ConfirmingWords, true)
+            var replied = pending.CopyId.Bind(id => task.Sessions.TryFirst(s => s.Id == id)).Map(copyReplied).GetValueOrDefault(false);
+            var (phase, words, cancel) = pending.CopyId.HasValue
+                    ? replied ? (PickPhase.Confirming, SettingsSwitch.OriginalStopsAtPause, false) : (PickPhase.Confirming, ConfirmingWords, true)
                 : pending.Issued.HasValue ? (PickPhase.Switching, SettingsSwitch.UnderWay, false)
                 : (PickPhase.Waiting, WaitWords(pending, listed), true);
             return Made(pending.To, phase, words, cancel, Maybe<string>.None, NextPauseTip, Maybe<string>.None);
         }
 
         if (current.HasNoValue)
-            return Made(task.Wanted.GetValueOrDefault(SessionSettings.None), PickPhase.Settled, "", false, readOnly, FirstStartTip, Maybe<string>.None);
+            return Made(task.Wanted.GetValueOrDefault(SessionSettings.None), PickPhase.Settled, "", false, Maybe<string>.None,
+                task.Sessions.Count == 0 ? FirstStartTip : NoLiveSessionTip, Maybe<string>.None);
 
         var session = current.Value;
         if (!session.LaunchedWith.IsEmpty)

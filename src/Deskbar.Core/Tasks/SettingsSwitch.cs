@@ -10,7 +10,7 @@ namespace Deskbar.Core.Tasks;
 /// <item>ISSUED: the resume that makes the copy went out at <see cref="Issued"/>; <see cref="CopyShortId"/> once Claude
 /// printed it. Waiting for the copy to be listed.</item>
 /// <item>JOINED: <see cref="CopyId"/> set. The copy is the task's session; the original still runs, until the copy has
-/// answered once (then it is stopped) or failed (then the task goes back to it).</item>
+/// answered once and the original pauses (then it is stopped), or the copy failed (then the task goes back to it).</item>
 /// </list>
 /// <see cref="To"/> is what the copy runs on, <see cref="At"/> when the user picked.
 /// </summary>
@@ -33,13 +33,16 @@ public abstract record SwitchStep
     /// <summary>Not now (<see cref="Why"/> is the line the picker shows); the switch waits, stored, for a pause.</summary>
     public sealed record Wait(string Why) : SwitchStep;
 
-    /// <summary>A session Deskbar cannot stop from outside (VS Code, a terminal): it can only be changed in its window.</summary>
+    /// <summary>A session Deskbar does not restart (VS Code, a terminal, one it did not start): changed only in its window.</summary>
     public sealed record ReadOnly(string Why) : SwitchStep;
 
-    /// <summary>The session does not run but can be resumed: it is resumed with the new settings now (no stop needed).</summary>
+    /// <summary>
+    /// The task's live session is not listed (its process went in the moments before the list noticed) but can be resumed:
+    /// it is resumed with the new settings now, and nothing needs stopping.
+    /// </summary>
     public sealed record AtNextWake(TaskSession Session, SessionSettings To) : SwitchStep;
 
-    /// <summary>No session can take it (none, or none that can be resumed): the next start on the task uses it.</summary>
+    /// <summary>No session of this task runs (none, an ended one, one now on another task): the next start uses the pick.</summary>
     public sealed record NextStart(SessionSettings To) : SwitchStep;
 }
 
@@ -55,30 +58,37 @@ public abstract record SwitchAction
     /// <summary>Run the resume that makes the copy (ClaudeStart.SwitchArguments) of <see cref="From"/>, now.</summary>
     public sealed record Issue(TaskSession From, SessionSettings To) : SwitchAction;
 
-    /// <summary>The copy is listed: it joins the task (TaskBoard.SessionSwitched).</summary>
+    /// <summary>The copy is listed, under the short id Claude printed for our resume: it joins the task.</summary>
     public sealed record Join(ClaudeAgent Copy) : SwitchAction;
 
     /// <summary>
-    /// The resume kept the session's own id (a session Claude Code held no saved options for, measured 2026-11-26): it is
-    /// the same session, now on the new settings (TaskBoard.SessionRelaunched).
+    /// The resume kept the session's own id (a session Claude Code held no saved options for, measured 2026-11-26), as
+    /// Claude printed it: the same session, now on the new settings (TaskBoard.SessionRelaunched).
     /// </summary>
     public sealed record Relaunched(ClaudeAgent Session) : SwitchAction;
 
     /// <summary>
-    /// The copy has answered once: the switch is done. <see cref="StopOriginal"/> is the original's short id when it is
-    /// still listed as a background session and must be stopped; none when nothing of it runs.
+    /// The copy has answered and the original is at a pause (or runs no more): the switch is done.
+    /// <see cref="StopOriginal"/> is the original's short id when it is still listed and must be stopped; none when not.
     /// </summary>
     public sealed record Confirm(Maybe<string> StopOriginal) : SwitchAction;
 
     /// <summary>
-    /// The copy failed (Claude Code lists it "failed": a model it cannot run, measured 2026-11-26): the task goes back to
-    /// the original, which never stopped (TaskBoard.SwitchReverted), and the copy is stopped when it has a short id.
+    /// The copy failed before it answered, or the task was closed before it answered: the task keeps (or goes back to)
+    /// the original, which never stopped (TaskBoard.SwitchReverted), and the copy is stopped by the short id Claude
+    /// printed for it. <see cref="Why"/> is said in the thread when not empty.
     /// </summary>
-    public sealed record Revert(Maybe<string> StopCopy, string Why) : SwitchAction;
+    public sealed record Revert(string StopCopy, string Why) : SwitchAction;
+
+    /// <summary>
+    /// A copy that never joined (its task was closed first) is stopped by the short id Claude printed for it, and the
+    /// switch is given up; the original was never touched.
+    /// </summary>
+    public sealed record Discard(string StopCopy) : SwitchAction;
 
     /// <summary>
     /// The switch is given up (TaskBoard.SwitchAbandoned); <see cref="Why"/> is said in the thread when not empty, and
-    /// <see cref="KeepWanted"/> keeps the pick for later starts when the switch was not its fault.
+    /// <see cref="KeepWanted"/> keeps the pick for later starts when the switch was not its fault. Nothing is stopped.
     /// </summary>
     public sealed record Abandon(string Why, bool KeepWanted) : SwitchAction;
 }
@@ -96,34 +106,42 @@ public abstract record SwitchAction
 //     the session "idle" with state "failed".
 //   * Stopping a busy session loses the step in flight; its transcript marks the tool call as interrupted.
 //
-// THE ORDER: COPY, JOIN, AND STOP THE ORIGINAL ONLY ONCE THE COPY HAS ANSWERED. The copy is made while the original still
-// runs, the task moves to the copy (so the user's next message goes to it), and the original is stopped only after the
-// copy's first reply has come back. At no moment does a conversation sit stopped waiting for Deskbar: the owner's rule is
-// that a Claude session must never stop or hang because Deskbar closed, restarted or crashed. If the copy cannot run its
-// model, the task goes back to the original, which never stopped. Every phase is stored (PendingSwitch), so a restarted
+// THE ORDER: COPY, JOIN, AND STOP THE ORIGINAL ONLY ONCE THE COPY HAS ANSWERED AND THE ORIGINAL IS AT A PAUSE. The copy is
+// made while the original still runs, the task moves to the copy (so the user's next message goes to it), and the
+// original is stopped only after the copy's first reply has come back, and only at a read of the list that shows the
+// original at a pause exactly as a copy needs it (IsPause: not busy, not waiting on a question, its turn done). The
+// original stays reachable meanwhile (a window can be open on it, a job of its own can wake it), so a busy original
+// waits, with no time limit, for its next pause. At no moment does a conversation sit stopped waiting for Deskbar: the
+// owner's rule is that a Claude session must never stop or hang because Deskbar closed, restarted or crashed. If the
+// copy cannot run its model, the task goes back to the original, which never stopped. Once the copy has answered the
+// switch is final: Cancel is gone, and going back is a new pick. Every phase is stored (PendingSwitch), so a restarted
 // Deskbar carries on where the last one was (Next).
 //
 // WHAT STARTS ONE. Only the user's pick (ClaudeSessions.Pick, through TaskBoard.Want and SwitchStarted). Nothing here
 // makes a switch by itself: Next acts only on a switch the pick began (TaskItem.Switching), so a session that joins a
 // task with a pick on it, or a wake that comes back on other settings (Drifted), never starts a copy of its own accord.
 //
-// WHICH SESSION: the one a comment goes to (CommentWake: never one a /clear or a switch replaced; live first, then the
-// latest joined). The task's other sessions are not touched.
+// WHICH SESSION, ONE RULE (SessionOf, review H2): the task's session that is LIVE on this task, not replaced, and that the
+// board says works on this task now (TaskBoard.TaskOf), the latest joined. An ended entry is history, and a session that
+// has since joined another task is that task's: neither is ever copied or stopped for this task's pick, which then waits
+// for the next start. Every place that asks "the task's session" for a switch asks this.
 //
-// WHEN: only at a pause. A background session that is idle, its turn over (state "done"), not woken within
-// SessionKeeper.Grace (a fresh resume reads busy for up to 30 seconds while idle, measured). Busy, waiting on a permission
-// prompt (status "waiting"), or busy only on a background job of its own (ClaudeAgent.TurnOver: busy with state done or
-// blocked; the job belongs to the original's process) is a Wait. A session that never pauses never switches: nothing
-// forces it. An interactive session (no short id: VS Code, a terminal) cannot be stopped from outside (SessionKeeper's
-// header), so it is read-only; the pick still applies to the next session Deskbar starts on the task.
+// WHICH SESSIONS IT TOUCHES AT ALL (review M3): a copy is claimed only by the short id Claude printed for our own resume,
+// never by its folder; with no printed id there is no claim, and the switch is given up at once. A switch copies only a
+// background session Deskbar itself started (TaskSession.LaunchedWith set: a start, a copy or a relaunch of Deskbar's), so
+// the original it may later stop is always one of Deskbar's own (ClaudeSessions.StopForSwitch checks the same in one
+// place before any `claude stop`).
+//
+// A TASK CLOSED OR DELETED DURING A SWITCH (review L3): before the copy has answered, the copy is stopped and the original
+// stays the task's session; after, the copy stays and the original is stopped at its next pause as above. A replaced
+// session is never left running for good.
 public static class SettingsSwitch
 {
     /// <summary>How long after the copy's resume went out it may take to be listed before the switch is given up.</summary>
     public static readonly TimeSpan RecoverWithin = TimeSpan.FromMinutes(1);
 
     // The list's startedAt is whole milliseconds and Claude's own clock reading; the moment the resume was issued is this
-    // machine's, to the tick. A session that started within this much before it still counts as started after it. The
-    // original never does: it was listed long before, and a session woken within SessionKeeper.Grace is not switched.
+    // machine's, to the tick. A session that started within this much before it still counts as started after it.
     static readonly TimeSpan StartSlack = TimeSpan.FromSeconds(1);
 
     public const string Busy = "Applies when Claude finishes this step.";
@@ -131,10 +149,13 @@ public static class SettingsSwitch
     public const string JustWoken = "Applies in a moment: the session has only just been woken.";
     public const string UnderWay = "Switching…";
     public const string Confirming = "Applies from Claude's next turn.";
+    public const string OriginalStopsAtPause = "Switched. The earlier session stops at its next pause.";
     public const string NotDeskbars = "This session runs in its own window (VS Code or a terminal), which Deskbar cannot restart. Change it there: /model, /effort, Shift+Tab. Your pick applies to the next session Deskbar starts on this task.";
-    public const string SessionMoved = "The session changed before the switch could be made (a new one joined the task, or it was replaced). Your pick applies to the next session Deskbar starts on this task.";
+    public const string NotStartedByDeskbar = "Deskbar did not start this session, so it does not restart it. Change it in its window: /model, /effort, Shift+Tab. Your pick applies to the next session Deskbar starts on this task.";
+    public const string SessionMoved = "The session changed before the switch could be made (it ended, moved to another task, or was replaced). Your pick applies to the next session Deskbar starts on this task.";
     public const string CannotResume = "The session can no longer be resumed (its transcript or folder is gone). Your pick applies to the next session Deskbar starts on this task.";
     public const string NoCopy = "Claude Code did not list the copy it was asked to make within a minute, so the switch was given up. The session goes on as it was.";
+    public const string NoShortId = "Claude Code did not say which session it started for the switch, so the switch was given up. The session goes on as it was.";
     public const string CopyFailed = "Claude Code could not run the session on these settings (the copy it made failed, for example on a model this account cannot use). The task is back on its earlier session, which never stopped. A message sent meanwhile went to the failed copy: send it again.";
 
     /// <summary>The thread's line when the copy joins its task.</summary>
@@ -147,12 +168,12 @@ public static class SettingsSwitch
     /// <param name="listed">The last good `claude agents --json` read. Never an unreadable one passed as empty.</param>
     /// <param name="resumable">Whether an unlisted session can be woken (ClaudeSessions.Resumable).</param>
     /// <param name="recentlyWoken">Whether Deskbar resumed this session id within SessionKeeper.Grace.</param>
-    public static SwitchStep Plan(TaskItem task, IReadOnlyCollection<ClaudeAgent> listed,
+    public static SwitchStep Plan(TaskBoard board, TaskItem task, IReadOnlyCollection<ClaudeAgent> listed,
         Func<TaskSession, bool> resumable, Func<string, bool> recentlyWoken)
     {
         if (!task.IsOpen || task.Wanted.HasNoValue) return new SwitchStep.Nothing();
         if (task.Switching is { HasValue: true } under && under.Value.Issued.HasValue) return new SwitchStep.Wait(UnderWay);
-        if (Current(task) is not { HasValue: true } current) return new SwitchStep.NextStart(task.Wanted.Value);
+        if (SessionOf(board, task) is not { HasValue: true } current) return new SwitchStep.NextStart(task.Wanted.Value);
         return Decide(current.Value, Target(task.Wanted.Value, current.Value), listed, resumable, recentlyWoken);
     }
 
@@ -166,76 +187,100 @@ public static class SettingsSwitch
 
         var agent = listing.Value;
         if (!agent.Background || agent.ShortId.HasNoValue) return new SwitchStep.ReadOnly(NotDeskbars);
+        // Only a session Deskbar started is ever copied, so the original a switch later stops is always Deskbar's own.
+        if (!StartedByDeskbar(session)) return new SwitchStep.ReadOnly(NotStartedByDeskbar);
         if (recentlyWoken(session.Id)) return new SwitchStep.Wait(JustWoken);
         // Listed with no process (ClaudeAgent.HasProcess): nothing runs, so there is no step to lose.
         if (!agent.HasProcess) return new SwitchStep.CopyNow(session, agent.ShortId.Value, to);
         if (agent.Status.Map(s => s == "waiting").GetValueOrDefault(false)) return new SwitchStep.Wait(WaitingOnPermission);
-        return agent.Busy || !agent.State.Map(s => s == "done").GetValueOrDefault(false)
-            ? new SwitchStep.Wait(Busy)
-            : new SwitchStep.CopyNow(session, agent.ShortId.Value, to);
+        return IsPause(agent) ? new SwitchStep.CopyNow(session, agent.ShortId.Value, to) : new SwitchStep.Wait(Busy);
     }
 
     /// <summary>
-    /// The session a pick applies to: the one a comment goes to (CommentWake), so never one a /clear or a switch
-    /// replaced; live first, then the latest joined. None for a task with no such session.
+    /// Whether a listed session is at a pause, the one moment a switch acts on it (a copy made of it, or its stop): not
+    /// busy, not waiting on a question (status "waiting"), and its turn done (state "done"). A row with no process runs
+    /// nothing, so it is at a pause too.
     /// </summary>
-    public static Maybe<TaskSession> Current(TaskItem task) =>
-        task.Sessions.Where(s => !s.Replaced).OrderByDescending(s => s.IsLive).ThenByDescending(s => s.Joined).TryFirst();
+    public static bool IsPause(ClaudeAgent agent) =>
+        !agent.HasProcess
+        || (!agent.Busy && !agent.Status.Map(s => s == "waiting").GetValueOrDefault(false) && agent.State.Map(s => s == "done").GetValueOrDefault(false));
+
+    /// <summary>
+    /// Whether Deskbar started the session (a start, a switch's copy or its relaunch: TaskSession.LaunchedWith is set only
+    /// then). Only such a session is copied, and only such an original is ever stopped by a switch.
+    /// </summary>
+    public static bool StartedByDeskbar(TaskSession session) => !session.LaunchedWith.IsEmpty;
+
+    /// <summary>
+    /// THE TASK'S SESSION, for every question a switch or the picker asks (see the header, review H2): live on this task,
+    /// not replaced, and working on this task now by the board's own rule (TaskBoard.TaskOf: a session that joined
+    /// another task since is that task's); the latest joined. None when no session of the task runs.
+    /// </summary>
+    public static Maybe<TaskSession> SessionOf(TaskBoard board, TaskItem task) =>
+        task.Sessions
+            // TaskOf knows open tasks only, so a closed task has no session here: nothing of a closed task is switched.
+            .Where(s => s.IsLive && !s.Replaced && board.TaskOf(s.Id).Map(t => t.Id == task.Id).GetValueOrDefault(false))
+            .OrderByDescending(s => s.Joined)
+            .TryFirst();
 
     /// <summary>
     /// What the copy runs on: the pick, with the model the session was started on when the pick names none. A copy always
-    /// names a model (ClaudeStart.SwitchArguments), and "I changed only the effort" must not move it to another model. A
-    /// session Deskbar did not start has no model on record; the app fills that in when it issues the copy.
+    /// names a model (ClaudeStart.SwitchArguments), and "I changed only the effort" must not move it to another model.
     /// </summary>
     public static SessionSettings Target(SessionSettings wanted, TaskSession session) =>
         wanted.Model.HasValue ? wanted : wanted with { Model = session.LaunchedWith.Model };
 
     /// <summary>
     /// The next step of the switch under way on <paramref name="task"/>, on a good read of the list: the only way a
-    /// switch moves on after the pick began it. See <see cref="PendingSwitch"/> for the phases.
+    /// switch moves on after the pick began it. See <see cref="PendingSwitch"/> for the phases and the header for the
+    /// rules. <paramref name="task"/> may be one the board no longer holds (deleted during the switch): it is then handed
+    /// in as last seen, closed, so its copy or original is still seen to.
     /// </summary>
-    /// <param name="known">Whether a session id is on any task already (the copy is not, until it is joined).</param>
     /// <param name="copyReplied">Whether the joined copy has answered since it joined (ClaudeTranscript.RepliedSince).</param>
-    public static SwitchAction Next(TaskItem task, IReadOnlyCollection<ClaudeAgent> listed, DateTimeOffset now,
-        Func<TaskSession, bool> resumable, Func<string, bool> recentlyWoken, Func<string, bool> known, Func<TaskSession, bool> copyReplied)
+    public static SwitchAction Next(TaskBoard board, TaskItem task, IReadOnlyCollection<ClaudeAgent> listed, DateTimeOffset now,
+        Func<TaskSession, bool> resumable, Func<string, bool> recentlyWoken, Func<TaskSession, bool> copyReplied)
     {
         if (task.Switching is not { HasValue: true } switching) return new SwitchAction.Nothing();
         var pending = switching.Value;
-        if (!task.IsOpen) return new SwitchAction.Abandon("", KeepWanted: true);
         if (task.Sessions.TryFirst(s => s.Id == pending.FromSession) is not { HasValue: true } fromEntry)
             return new SwitchAction.Abandon(SessionMoved, KeepWanted: true);
         var from = fromEntry.Value;
 
-        // JOINED: the copy is the task's session; the original waits for the copy's first reply.
+        // JOINED: the copy is the task's session; the original waits for the copy's first reply, then for its own pause.
         if (pending.CopyId is { HasValue: true } copyId)
         {
-            var copyListing = listed.TryFirst(a => a.SessionId == copyId.Value);
-            var original = listed.TryFirst(a => a.SessionId == from.Id && a.Background && a.ShortId.HasValue).Map(a => a.ShortId.Value);
-            if (copyListing.Map(a => a.State.Map(s => s == "failed").GetValueOrDefault(false)).GetValueOrDefault(false))
-                return new SwitchAction.Revert(copyListing.Bind(a => a.ShortId), CopyFailed);
-            if (task.Sessions.TryFirst(s => s.Id == copyId.Value) is { HasValue: true } copy && copyReplied(copy.Value))
-                return new SwitchAction.Confirm(original);
+            var copyShortId = pending.CopyShortId.GetValueOrDefault(copyId.Value[..Math.Min(8, copyId.Value.Length)]);
+            var replied = task.Sessions.TryFirst(s => s.Id == copyId.Value).Map(copyReplied).GetValueOrDefault(false);
+            if (replied) return Finish(board, task, from, listed);
+            if (listed.TryFirst(a => a.SessionId == copyId.Value).Map(a => a.State.Map(s => s == "failed").GetValueOrDefault(false)).GetValueOrDefault(false))
+                return new SwitchAction.Revert(copyShortId, CopyFailed);
+            // Closed (or deleted) before the copy answered: the original stays the task's session, the copy goes.
+            if (!task.IsOpen) return new SwitchAction.Revert(copyShortId, "");
             // Neither runs any more (both stopped, a finished task's sessions are): nothing is left to stop or to fall
             // back to, so the copy simply stays the task's session.
-            if (copyListing.HasNoValue && listed.All(a => a.SessionId != from.Id)) return new SwitchAction.Confirm(Maybe<string>.None);
+            if (listed.All(a => a.SessionId != copyId.Value) && listed.All(a => a.SessionId != from.Id)) return new SwitchAction.Confirm(Maybe<string>.None);
             return new SwitchAction.Wait(Confirming);
         }
 
-        // ISSUED: the copy's resume went out; it joins once listed.
+        // ISSUED: the copy's resume went out; it is claimed only by the short id Claude printed for it.
         if (pending.Issued is { HasValue: true } issued)
         {
-            var copies = listed.Where(agent => IsCopyOf(task, pending, agent) && !known(agent.SessionId)).ToList();
-            if (copies.Count == 1) return new SwitchAction.Join(copies[0]);
-            // The resume kept the session's own id: it is listed again, started after the resume went out.
-            if (listed.TryFirst(a => a.SessionId == from.Id && a.StartedAt.Map(at => at >= issued.Value - StartSlack).GetValueOrDefault(false)
-                    && pending.CopyShortId.Map(id => from.Id.StartsWith(id, StringComparison.OrdinalIgnoreCase)).GetValueOrDefault(true))
-                is { HasValue: true } same)
-                return new SwitchAction.Relaunched(same.Value);
+            if (pending.CopyShortId is not { HasValue: true } shortId) return new SwitchAction.Abandon(NoShortId, KeepWanted: false);
+            var known = board.Tasks.SelectMany(t => t.Sessions).Select(s => s.Id).ToHashSet();
+            var copy = listed.TryFirst(a => IsCopyOf(task, pending, a) && !known.Contains(a.SessionId));
+            if (copy.HasValue) return task.IsOpen ? new SwitchAction.Join(copy.Value) : new SwitchAction.Discard(shortId.Value);
+            // The resume kept the session's own id: Claude printed the original's own short id, and it is listed again,
+            // started after the resume went out.
+            if (from.Id.StartsWith(shortId.Value, StringComparison.OrdinalIgnoreCase)
+                && listed.TryFirst(a => a.SessionId == from.Id && a.StartedAt.Map(at => at >= issued.Value - StartSlack).GetValueOrDefault(false))
+                    is { HasValue: true } same)
+                return task.IsOpen ? new SwitchAction.Relaunched(same.Value) : new SwitchAction.Abandon("", KeepWanted: true);
             return now - issued.Value > RecoverWithin ? new SwitchAction.Abandon(NoCopy, KeepWanted: false) : new SwitchAction.Wait(UnderWay);
         }
 
-        // REQUESTED: waiting for a pause of the session it was picked for.
-        if (Current(task).Map(s => s.Id != from.Id).GetValueOrDefault(true)) return new SwitchAction.Abandon(SessionMoved, KeepWanted: true);
+        // REQUESTED: waiting for a pause of the session it was picked for, while it is still this task's session.
+        if (!task.IsOpen) return new SwitchAction.Abandon("", KeepWanted: true);
+        if (SessionOf(board, task).Map(s => s.Id != from.Id).GetValueOrDefault(true)) return new SwitchAction.Abandon(SessionMoved, KeepWanted: true);
         return Decide(from, pending.To, listed, resumable, recentlyWoken) switch
         {
             SwitchStep.CopyNow copy => new SwitchAction.Issue(from, copy.To),
@@ -247,31 +292,44 @@ public static class SettingsSwitch
         };
     }
 
+    // The copy has answered: the switch is final. The original is stopped at a read that shows it at a pause (H1); one
+    // that no longer runs, or that has since joined another task (never ours to stop then), is left alone and the switch
+    // is done.
+    static SwitchAction Finish(TaskBoard board, TaskItem task, TaskSession from, IReadOnlyCollection<ClaudeAgent> listed)
+    {
+        if (listed.TryFirst(a => a.SessionId == from.Id) is not { HasValue: true } original) return new SwitchAction.Confirm(Maybe<string>.None);
+        if (board.TaskOf(from.Id).Map(t => t.Id != task.Id).GetValueOrDefault(false)) return new SwitchAction.Confirm(Maybe<string>.None);
+        if (!original.Value.Background || original.Value.ShortId.HasNoValue) return new SwitchAction.Confirm(Maybe<string>.None);
+        return IsPause(original.Value) ? new SwitchAction.Confirm(original.Value.ShortId) : new SwitchAction.Wait(OriginalStopsAtPause);
+    }
+
     /// <summary>
     /// Whether a listed session may be the copy of a switch issued on <paramref name="task"/>, so the keeper must not
-    /// adopt it as a task of its own (SessionKeeper.Plan), and the copy's own SessionStart hook may join it
-    /// (TaskBoard.SwitchingTaskFor).
+    /// adopt it as a task of its own (SessionKeeper.Plan): only the session Claude printed for our resume.
     /// </summary>
     public static bool MayClaim(TaskItem task, ClaudeAgent agent) =>
         task.Switching is { HasValue: true } pending && pending.Value.CopyId.HasNoValue && IsCopyOf(task, pending.Value, agent);
 
-    // By short id when the switch has one; else by folder and start time. The folder is compared as text, ignoring case,
-    // slashes and trailing separators: the copy runs in the folder the resume ran in, which is the original's own.
+    // By the short id Claude printed for our resume, and by nothing else (review M3): a session started in the same folder
+    // meanwhile (a VS Code panel, a terminal) is never taken for the copy.
     static bool IsCopyOf(TaskItem task, PendingSwitch pending, ClaudeAgent agent) =>
         agent.SessionId != pending.FromSession
         && pending.Issued.HasValue
-        && pending.CopyShortId.Match(
-            shortId => agent.ShortId.Map(id => id.Equals(shortId, StringComparison.OrdinalIgnoreCase)).GetValueOrDefault(false)
-                || agent.SessionId.StartsWith(shortId, StringComparison.OrdinalIgnoreCase),
-            () => task.Sessions.TryFirst(s => s.Id == pending.FromSession)
-                .Map(from => SameFolder(from.Folder, agent.Folder) && agent.StartedAt.Map(at => at >= pending.Issued.Value - StartSlack).GetValueOrDefault(false))
-                .GetValueOrDefault(false));
+        && pending.CopyShortId.Map(shortId =>
+                agent.ShortId.Map(id => id.Equals(shortId, StringComparison.OrdinalIgnoreCase)).GetValueOrDefault(false)
+                || agent.SessionId.StartsWith(shortId, StringComparison.OrdinalIgnoreCase))
+            .GetValueOrDefault(false);
 
-    /// <summary>Two folders as the same text, ignoring case, slashes and trailing separators.</summary>
-    public static bool SameFolder(string a, string b) =>
-        a.Length > 0 && string.Equals(Normal(a), Normal(b), StringComparison.OrdinalIgnoreCase);
-
-    static string Normal(string folder) => folder.Replace('/', '\\').TrimEnd('\\');
+    /// <summary>
+    /// Whether a switch may run `claude stop` on <paramref name="shortId"/> (review M3, the one place this is decided): the
+    /// copy's short id as Claude printed it for our own resume, or the short id of the task's original session when Deskbar
+    /// itself started it. Nothing else, so a switch can never stop a session Deskbar did not start.
+    /// </summary>
+    public static bool MayStop(TaskItem task, PendingSwitch pending, string shortId) =>
+        shortId.Length >= 8
+        && (pending.CopyShortId.Map(id => id.Equals(shortId, StringComparison.OrdinalIgnoreCase)).GetValueOrDefault(false)
+            || task.Sessions.Any(s => s.Id == pending.FromSession && StartedByDeskbar(s)
+                && s.Id.StartsWith(shortId, StringComparison.OrdinalIgnoreCase)));
 
     /// <summary>
     /// Whether a woken session came back on other settings than Deskbar started it with: its effort or permission mode,

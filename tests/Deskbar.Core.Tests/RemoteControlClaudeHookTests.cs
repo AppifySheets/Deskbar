@@ -1341,8 +1341,9 @@ public class RemoteControlClaudeHookTests
 
     // A SWITCH'S COPY (SettingsSwitch): Claude Code starts it with source "fork" under a new id (measured 2026-11-26). Its
     // own SessionStart joins it to the task whose switch waits for it, so it is briefed on that task, not offered a
-    // choice; the task keeps its status and the original is replaced by it. A fork elsewhere, or with no switch issued,
-    // joins nothing.
+    // choice; the task keeps its status and the original is replaced by it. Only the session whose id Claude printed for
+    // our resume is claimed (review M3): a fork before the id is known, another session in the same folder, a fork
+    // elsewhere, or one with no switch issued, joins nothing.
     [Fact]
     public void A_switch_s_copy_joins_its_task_from_its_own_session_start()
     {
@@ -1357,11 +1358,15 @@ public class RemoteControlClaudeHookTests
         // Not issued yet: no copy is awaited.
         Hooked(manager, "SessionStart", session: "c0", source: "fork");
         Assert.True(tasks.SwitchIssued(id, to).IsSuccess);
+        // Issued, but Claude has not printed the copy's id yet: nothing is claimed, even in the same folder.
+        Hooked(manager, "SessionStart", session: "c9", source: "fork");
+        Assert.True(tasks.SwitchCopyNamed(id, "c2").IsSuccess);
         Hooked(manager, "SessionStart", session: "c1", source: "fork", from: @"C:\repos\Other");
+        Hooked(manager, "SessionStart", session: "c3", source: "fork");
         var briefing = Hooked(manager, "SessionStart", session: "c2", source: "fork", from: "C:/repos/TaskSpaces/");
 
         var task = Titled("Tasks board");
-        Assert.DoesNotContain(tasks.Board.Tasks.SelectMany(t => t.Sessions), s => s.Id is "c0" or "c1");
+        Assert.DoesNotContain(tasks.Board.Tasks.SelectMany(t => t.Sessions), s => s.Id is "c0" or "c1" or "c3" or "c9");
         Assert.Equal(to, task.Sessions.Single(s => s.Id == "c2").LaunchedWith);
         Assert.Equal("c2", task.Sessions.Single(s => s.Id == "s1").ReplacedBy.Value);
         Assert.Equal("c2", task.Switching.Value.CopyId.Value);

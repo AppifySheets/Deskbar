@@ -18,8 +18,8 @@ public class SessionPickerTests
 
     static ClaudeAgent Background(string status = "idle") => new(Original, "eea5466c", @"C:\repos\proj", true, status == "busy", "") { Status = status, State = "done" };
 
-    static SessionPickRow Row(TaskItem task, IReadOnlyCollection<ClaudeAgent>? listed = null, string? lastModel = null) =>
-        SessionPicker.RowOf(task, listed ?? [Background()], _ => Maybe.From(lastModel));
+    static SessionPickRow Row(TaskItem task, IReadOnlyCollection<ClaudeAgent>? listed = null, string? lastModel = null, bool replied = false) =>
+        SessionPicker.RowOf(new TaskBoard([task]), task, listed ?? [Background()], _ => Maybe.From(lastModel), _ => replied);
 
     [Fact]
     public void A_session_Deskbar_started_shows_what_it_was_started_with()
@@ -36,12 +36,27 @@ public class SessionPickerTests
     [Fact]
     public void A_session_Deskbar_did_not_set_shows_its_last_reply_s_model_or_defaults()
     {
+        // Listed in the background but not started by Deskbar: shown, and read-only, with why.
         var seen = Row(Task(), lastModel: "claude-opus-5-5");
         Assert.Equal("claude-opus-5-5 (last reply) · default effort", seen.ModelWords);
-        Assert.Equal(SessionPicker.LastReplyTip, seen.Tip);
+        Assert.Equal(SettingsSwitch.NotStartedByDeskbar, seen.ReadOnlyWhy.Value);
         Assert.Equal("Claude Code's setting", seen.ModeWords);
+        // Not listed yet: the last reply's model, and the tip says where it comes from.
+        Assert.Equal(SessionPicker.LastReplyTip, Row(Task(), [], lastModel: "claude-opus-5-5").Tip);
 
         Assert.Equal("Default model · default effort", Row(Task()).ModelWords);
+    }
+
+    // Review H2: an ended entry, or a session that moved to another task, is not this task's session.
+    [Fact]
+    public void A_task_whose_session_ended_or_moved_shows_its_pick_for_the_next_start()
+    {
+        var ended = Task(SonnetLowEdits) with { Sessions = [new TaskSession(Original, @"C:\repos\proj", T0, T0.AddMinutes(1)) { LaunchedWith = SonnetLowEdits }] };
+        var row = Row(ended with { Wanted = new SessionSettings("haiku", Maybe<string>.None, Maybe<string>.None) });
+
+        Assert.Equal("Haiku · default effort", row.ModelWords);
+        Assert.Equal(SessionPicker.NoLiveSessionTip, row.Tip);
+        Assert.True(row.Pickable);
     }
 
     [Fact]
@@ -80,8 +95,15 @@ public class SessionPickerTests
         var issued = Row(Task() with { Switching = pending with { Issued = T0 } });
         Assert.Equal((PickPhase.Switching, false, false), (issued.Phase, issued.CanCancel, issued.Pickable));
 
-        var joined = Row(Task() with { Switching = pending with { Issued = T0, CopyId = "c" } });
+        var copy = new TaskSession("c0000001-0000", @"C:\repos\proj", T0.AddMinutes(2), Maybe<DateTimeOffset>.None) { LaunchedWith = SonnetLowEdits };
+        var joinedTask = Task() with { Sessions = [.. Task().Sessions, copy], Switching = pending with { Issued = T0, CopyId = copy.Id } };
+        var joined = Row(joinedTask);
         Assert.Equal((PickPhase.Confirming, SessionPicker.ConfirmingWords, true), (joined.Phase, joined.PhaseWords, joined.CanCancel));
         Assert.NotEqual(waiting.Signature, joined.Signature);
+
+        // Review M2: once the copy has answered the switch is final: no Cancel, and the row says the earlier session
+        // stops at its next pause.
+        var final = Row(joinedTask, replied: true);
+        Assert.Equal((PickPhase.Confirming, SettingsSwitch.OriginalStopsAtPause, false), (final.Phase, final.PhaseWords, final.CanCancel));
     }
 }
