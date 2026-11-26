@@ -481,6 +481,98 @@ public class FloatingBarStripsTests
         });
     });
 
+    // --- bookmark chips on the strips (the second bookmarks PR) ---------------------------------------------------
+
+    static Deskbar.Core.Bookmarks.Bookmark Bookmarked(StripHarness h, string workspace, string name, int? screen = null)
+    {
+        var bookmark = new Deskbar.Core.Bookmarks.Bookmark(Guid.NewGuid(), name, Deskbar.Core.Bookmarks.BookmarkKind.Program,
+            $@"C:\{name}.exe", Screen: screen);
+        Assert.True(h.Manager.AddBookmark(IdOf(h, workspace), bookmark).IsSuccess);
+        return bookmark;
+    }
+
+    // What a strip's row holds after its name tag, as kinds: "tab", "chip" or "jump", in order.
+    static IReadOnlyList<string> KindsOf(ScreenStrip strip) =>
+        strip.Row.Children.Cast<UIElement>().Skip(1).Cast<Button>()
+            .Select(b => b.Tag switch { "bookmark" => "chip", FloatingBar.WorkspaceJumpTag => "jump", _ => "tab" })
+            .ToList();
+
+    static IReadOnlyList<string> ChipsOn(ScreenStrip strip) =>
+        strip.Row.Children.OfType<Button>().Where(b => b.Tag is "bookmark").Select(LabelOf).ToList();
+
+    // Petre: "include those links in the top bar as well. maybe on the right somewhere". The CURRENT workspace's chips,
+    // on every strip, after the tabs and just before the jump items; another workspace's never.
+    [Fact]
+    public void The_current_workspaces_chips_sit_before_the_jump_items_on_every_strip() => StaThread.Run(() =>
+    {
+        using var h = StripHarness.Build(previousItem: true);
+        Bookmarked(h, "GEPHA", "RustDesk");
+        Bookmarked(h, "Sparrow", "Elsewhere");
+        h.Fill();
+
+        Assert.All(h.Strips, strip => Assert.Equal(["RustDesk"], ChipsOn(strip)));
+        Assert.Equal(["tab", "chip", "jump"], KindsOf(h.StripA));
+        Assert.Equal(["chip", "jump"], KindsOf(h.StripC));
+        // A chip on the strip is drawn small enough for the strip's height.
+        var chip = h.StripA.Row.Children.OfType<Button>().Single(b => b.Tag is "bookmark");
+        Assert.True(chip.Width <= 20, $"chip is {chip.Width} DIP wide");
+    });
+
+    // A chip that remembers a screen is only on that screen's strip; one whose screen has no strip is on every strip.
+    [Fact]
+    public void A_chip_that_remembers_a_screen_is_only_on_that_strip() => StaThread.Run(() =>
+    {
+        using var h = StripHarness.Build();
+        Bookmarked(h, "GEPHA", "OnTwo", screen: 2);
+        Bookmarked(h, "GEPHA", "Gone", screen: 7);
+        h.Fill();
+
+        Assert.Equal(["Gone"], ChipsOn(h.StripA));
+        Assert.Equal(["OnTwo", "Gone"], ChipsOn(h.StripB));
+        Assert.Equal(["Gone"], ChipsOn(h.StripC));
+    });
+
+    // The row half of the same choice: a chip that remembers screen 2 sits after screen 2's windows in the workspace's
+    // row, in the same lane stack as code's icon, not in the first lane with rdm.
+    [Fact]
+    public void A_chip_that_remembers_a_screen_sits_in_that_screens_lane() => StaThread.Run(() =>
+    {
+        using var h = StripHarness.Build();
+        Bookmarked(h, "GEPHA", "Left");
+        Bookmarked(h, "GEPHA", "Right", screen: 2);
+        h.Fill();
+
+        var row = h.Rows.Children.OfType<Border>().Select(b => b.Child).OfType<Grid>()
+            .Single(g => System.Windows.Automation.AutomationProperties.GetName(g) == "GEPHA");
+        var buttons = Descendants(row).OfType<Button>().ToList();
+        Button Named(string name) => buttons.Single(b => System.Windows.Automation.AutomationProperties.GetName(b) == name);
+        var lane = (DependencyObject b) => LogicalTreeHelper.GetParent(b);
+
+        Assert.Same(lane(Named(h.Rdm.Title)), lane(Named("Left")));
+        Assert.Same(lane(Named(h.Code.Title)), lane(Named("Right")));
+        Assert.NotSame(lane(Named("Left")), lane(Named("Right")));
+    });
+
+    // A row whose only windows are on the second screen: the first lane holds only a chip (a lane added for it), and
+    // the second lane's chip still joins that lane's windows.
+    [Fact]
+    public void A_lane_made_for_chips_alone_does_not_shift_the_next_lane() => StaThread.Run(() =>
+    {
+        using var h = StripHarness.Build();
+        h.Screens.Put(h.Beeper.Handle, 2);
+        Bookmarked(h, "Sparrow", "Anywhere");
+        Bookmarked(h, "Sparrow", "Second", screen: 2);
+        h.Fill();
+
+        var row = h.Rows.Children.OfType<Border>().Select(b => b.Child).OfType<Grid>()
+            .Single(g => System.Windows.Automation.AutomationProperties.GetName(g) == "Sparrow");
+        var buttons = Descendants(row).OfType<Button>().ToList();
+        Button Named(string name) => buttons.Single(b => System.Windows.Automation.AutomationProperties.GetName(b) == name);
+
+        Assert.Same(LogicalTreeHelper.GetParent(Named(h.Beeper.Title)), LogicalTreeHelper.GetParent(Named("Second")));
+        Assert.NotSame(LogicalTreeHelper.GetParent(Named("Anywhere")), LogicalTreeHelper.GetParent(Named("Second")));
+    });
+
     // --- pinned workspaces (FloatingBar.WorkspaceJumps.cs) ---------------------------------------------------------
 
     // The item at the end of a strip, after the window tabs (Petre: "put it at the end of the list of windows").
@@ -836,9 +928,9 @@ public class FloatingBarStripsTests
     static string TagText(ScreenStrip strip) => ((TextBlock)strip.NameTag.Child).Text;
 
     // The tabs on a strip, in order: every child of its row after the name tag that is not an item (the pinned
-    // workspaces' and the previous workspace's, FloatingBar.WorkspaceJumps.cs).
+    // workspaces' and the previous workspace's, FloatingBar.WorkspaceJumps.cs) or a bookmark chip.
     static IReadOnlyList<Button> TabsOf(ScreenStrip strip) =>
-        strip.Row.Children.Cast<UIElement>().Skip(1).Cast<Button>().Where(b => b.Tag is not FloatingBar.WorkspaceJumpTag).ToList();
+        strip.Row.Children.Cast<UIElement>().Skip(1).Cast<Button>().Where(b => b.Tag is not (FloatingBar.WorkspaceJumpTag or "bookmark")).ToList();
 
     static IReadOnlyList<string> NamesOf(ScreenStrip strip) =>
         TabsOf(strip).Select(System.Windows.Automation.AutomationProperties.GetName).ToList();

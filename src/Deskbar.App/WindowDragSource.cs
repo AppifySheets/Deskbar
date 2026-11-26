@@ -45,7 +45,13 @@ static class WindowDragSource
     // -- dropped, cancelled or dropped on nothing. The bar uses it to stop holding itself at full
     // strength; nothing else can tell it, because DoDragDrop below BLOCKS for the whole drag and
     // the caller's onDragStarting has long since returned by then.
-    internal static void Attach(Button button, WindowHandle handle, string groupKey, Action? onDragStarting = null, Action? onDragFinished = null, Func<bool>? canStart = null)
+    internal static void Attach(Button button, WindowHandle handle, string groupKey, Action? onDragStarting = null, Action? onDragFinished = null, Func<bool>? canStart = null) =>
+        Attach(button, () => new DataObject(DraggedWindow.DragFormat, new DraggedWindow(handle, groupKey)), onDragStarting, onDragFinished, canStart);
+
+    // The same hardened press-drag for any payload. A bookmark chip uses it (DraggedBookmark, FloatingBar.Bookmarks.cs):
+    // a chip is dragged like a window icon, and every pitfall above is just as true of it. `payload` is made when the
+    // drag starts, so it carries what the chip stands for at that moment.
+    internal static void Attach(Button button, Func<DataObject> payload, Action? onDragStarting = null, Action? onDragFinished = null, Func<bool>? canStart = null)
     {
         Point? dragStart = null;
 
@@ -98,7 +104,7 @@ static class WindowDragSource
             // session, with nothing left to clear it.
             try
             {
-                DragDrop.DoDragDrop(button, new DataObject(DraggedWindow.DragFormat, new DraggedWindow(handle, groupKey)), DragDropEffects.Move);
+                DragDrop.DoDragDrop(button, payload(), DragDropEffects.Move);
             }
             finally
             {

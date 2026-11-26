@@ -152,9 +152,20 @@ public partial class FloatingBar
         // The pinned workspaces' items, worked out once and built afresh for each strip (an element has one parent),
         // at the end of every strip's tabs (FloatingBar.WorkspaceJumps.cs).
         var jumps = JumpsFor(overview);
+
+        // THE CURRENT WORKSPACE'S BOOKMARK CHIPS, on every strip just before the jump items (the second bookmarks PR;
+        // Petre: "include those links in the top bar as well. maybe on the right somewhere"). The chips the workspace's
+        // row shows (a running program's chip hides here too), built by the row's own ChipButton, so the look, the click,
+        // the menu and the drag are the row's. A chip that remembers a screen goes only on that screen's strip
+        // (ChipLayout.OnStrip), the others on every strip. An unnamed desktop has no bookmarks. Fresh buttons per strip,
+        // since an element has one parent.
+        IReadOnlyList<Core.Bookmarks.Bookmark> chips = workspace is null ? [] : ShowingBookmarks()(workspace.Workspace);
         strips.ToList().ForEach(strip =>
             strip.SetTabs(name, accent, rows.Where(row => OnStrip(row, strip)).Select(row => StripTab(name, row, accent)).ToList(),
-                jumps.Select(jump => JumpButton(jump, overview)).ToList()));
+                jumps.Select(jump => JumpButton(jump, overview)).ToList(),
+                chips.Where(chip => Core.Bookmarks.ChipLayout.OnStrip(chip, numbers[strip].HasValue ? numbers[strip].Value : null, known))
+                    .Select(chip => (FrameworkElement)ChipButton(workspace!.Workspace.Id, chip, divider: false, onStrip: true))
+                    .ToList()));
     }
 
     // One window's tab: IconButton, exactly as the bar's own buttons are built, under the titled list's group key, then

@@ -22,3 +22,13 @@ sealed record DraggedWindow(WindowHandle Handle, string SourceGroupKey)
     internal static string WorkspaceGroupKey(Guid workspaceId) => $"workspace:{workspaceId}";
     internal static string DesktopGroupKey(Guid desktopId) => $"desktop:{desktopId}";
 }
+
+// A BOOKMARK CHIP being dragged (the second bookmarks PR): to a screen half of its row, so the bookmark remembers that
+// screen, or onto another workspace's row, so it moves there. A format of its own, never DraggedWindow's, so no surface
+// that takes windows (a strip, the pinned row, a header drop) can mistake a chip for a window, and BookmarkDropData
+// (things dragged in from outside) does not read it either. `Chip` is the button the drag started on, kept so a drop
+// that lands back on the chip itself can be told apart as the slipped click it is (#48).
+sealed record DraggedBookmark(Guid WorkspaceId, Guid BookmarkId, System.Windows.FrameworkElement Chip)
+{
+    internal const string DragFormat = "Deskbar.DraggedBookmark";
+}

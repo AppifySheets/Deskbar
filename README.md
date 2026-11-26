@@ -343,11 +343,28 @@ chip turns bright with a solid outline while the browser window the link went in
 to faded when that window closes. Closing only the tab does not count. A click on a bright link opens it again.
 After a restart every link chip starts faded.
 
-Right-click a chip for **Open**, **Open all bookmarks**, **Rename…** and **Remove**. **Open all bookmarks**
-switches once and opens every chip that is showing, so a program already running is not started again.
+Right-click a chip for **Open**, **Open all bookmarks**, **Rename…**, **Colour** and **Remove**. **Open all
+bookmarks** switches once and opens every chip that is showing, so a program already running is not started again.
+**Colour** offers the same palette and **Custom…** as a workspace, plus **Default** to clear it. The colour goes
+around the icon, never on it: the chip's outline turns that colour and a small bar appears under the icon.
 
-`deskbar.cmd bookmark` has the same commands (`list`, `add`, `rename`, `remove`, `open` and `open-all`);
-`deskbar.cmd help` lists them.
+The workspace you are in also shows its chips on the screen strips, after the window tabs and just before the
+pinned workspaces' items. They look and work the same as on the row.
+
+Chips can be dragged like window icons:
+
+- Drag a program or app chip into another screen's half of its own row and the bookmark remembers that screen.
+  Its chip then sits in that screen's part of the row and only on that screen's strip, and opening it puts the new
+  window on that screen. The readout says `→ put on screen 2`. If that screen is not connected, the chip goes back
+  to the first part of the row and opens wherever the window would have opened.
+- Drag any chip onto another workspace's row to move the bookmark there (`→ move to <workspace>`). It is refused if
+  that workspace already has the same bookmark.
+- A link has no screen, since it opens in a browser window Deskbar does not move, so dragging it within its own row
+  only says so.
+
+`deskbar.cmd bookmark` has the same commands (`list`, `add`, `rename`, `remove`, `open`, `open-all`, `move` and
+`color`); `deskbar.cmd help` lists them. `bookmark move <workspace> <name> --screen 2`, `--any-screen` or
+`--to <workspace>` is the drag, and `bookmark color <workspace> <name> #RRGGBB` (or `default`) is the colour.
 
 A link chip shows the site's own icon. For each web-link bookmark Deskbar asks that site, once, for
 `/favicon.ico`. When the site has none there, Deskbar reads the bookmarked page once and fetches the icon the page

@@ -233,7 +233,34 @@ and every link opens.
 
 ### A chip's menu
 
-Open, Open all bookmarks, Rename…, Remove.
+Open, Open all bookmarks, Rename…, Colour, Remove (Colour added in the second PR, below).
+
+### The second PR: strips, screens and colour (2026-11-26)
+
+Decided with Petre during the first live try.
+
+- The strips: the current workspace's chips also show on every screen strip, after the window tabs and
+  just before the jump items, built by the row's own chip code (look, click, menu, drag). Petre: "include
+  those links in the top bar as well. maybe on the right somewhere".
+- A screen per bookmark (his option 2, "bookmark remembers that screen"): `Bookmark.Screen`, the display
+  number a window's screen move takes. A chip dragged to another screen's half of its own row remembers
+  it (`→ put on screen N`); the chip then sits in that screen's lane and only on that screen's strip, and
+  an open puts the new window there: a program through its start expectation, which now carries the
+  screen, an app through an expectation that knows its window by app id or package
+  (`WorkspaceManager.ExpectAppWindow`). Only a window the open started is moved. A screen that is gone
+  falls back to the first lane, every strip, and no placement.
+- Links have no screen (builder's call): the link goes into whatever browser window the browser picks,
+  which Deskbar does not move, so a screen would promise what it cannot do. The drag readout says so and
+  `bookmark move --screen` refuses it.
+- Dropped on another workspace's row, a chip moves there with its id (`→ move to <workspace>`, with the
+  aimed screen for a program or app), refused when that workspace has the same bookmark. A drop that
+  lands back on the chip itself is the click it started as (#48).
+- A colour per bookmark ("i want to be able to change color of the bookmark", then "not change the
+  icon"): `Bookmark.Color`, `#RRGGBB`, chosen from the workspace picker (#97) in a Colour submenu with
+  Default instead of Transparent and By position. It never changes the picture: only the outline takes
+  the colour, and a rimmed band (the ordinal family's) sits under the icon.
+- Pipe twins: `bookmark move <workspace> <name|id> [--to <workspace>] [--screen <n> | --any-screen]` and
+  `bookmark color <workspace> <name|id> <#RRGGBB|default>`; `bookmark list` reports `screen` and `color`.
 
 ### Pipe commands
 
