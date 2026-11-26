@@ -512,8 +512,8 @@ the note's description), and it lands on the workspace you are on (or on
 none, or another one, by the chip under the box). The new note is selected and glows blue for a moment,
 so you can see where it landed; the tasks panel's own add box does the same. To hand the note to Claude
 straight away, press the play button after the flag toggles, or Ctrl+Enter, instead of Enter: the note is
-added and "Start Claude on this" runs on it. Type `/` at the start of the box to pick one of your Claude Code
-skills for that workspace (the list comes from Claude Code itself), and the session starts by running it. A line on the bar has no tick box, so a long title
+added and "Start Claude on this" runs on it. Type `/` at the start of the box to pick one of the repo's own Claude Code
+skills for that workspace, the ones its repos keep in `.claude/skills` (the list comes from Claude Code itself), and the session starts by running it. A line on the bar has no tick box, so a long title
 gets its whole second row; click a line to open its task in the tasks panel, and close it there or
 with Close in the line's right-click menu, with six seconds to undo.
 An important task's title is bold and an urgent one's italic, which sorts the list into Covey's four
