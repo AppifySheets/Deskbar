@@ -264,6 +264,7 @@ public partial class TaskDetailWindow : Window
     /// <summary>Why the last action failed, until the next one works; null clears it.</summary>
     internal void ShowProblem(string? text)
     {
+        InboxProblem(text);
         ProblemText.Text = text ?? "";
         ProblemText.Visibility = string.IsNullOrEmpty(text) ? Visibility.Collapsed : Visibility.Visible;
     }
@@ -278,6 +279,7 @@ public partial class TaskDetailWindow : Window
     protected override void OnClosed(EventArgs e)
     {
         base.OnClosed(e);
+        DropInboxPage();
         // No longer a task window: Windows may hand this handle to another window now. The handle as it was listed,
         // since the interop helper's may already read zero while the window is being destroyed.
         var listed = listedHandle;
@@ -299,6 +301,8 @@ public partial class TaskDetailWindow : Window
     /// or a comment is being edited in place, then draws the newest view.</summary>
     internal void Present(TaskDetailView view)
     {
+        // While the Inbox is the chosen view the page draws the task instead (TaskDetailWindow.Inbox.cs).
+        if (PresentInboxPage(view)) return;
         if (menuOpen || editingComment is not null)
         {
             waiting = view;
@@ -876,6 +880,7 @@ public partial class TaskDetailWindow : Window
     /// <summary>A key in the window, as one method the tests drive without a real key event; whether it was used.</summary>
     internal bool Press(Key key, ModifierKeys modifiers)
     {
+        if (InboxPress(key, modifiers) is { } onPage) return onPage;
         var ctrl = modifiers.HasFlag(ModifierKeys.Control);
         if (editing)
             return key switch
