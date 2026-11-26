@@ -282,6 +282,10 @@ public sealed class TasksBoard : IDisposable
             FilterClaude: FilterClaude)
         {
             StartClaude = startClaude,
+            // The add box's Start Claude button (task 3c40dec9): none, as StartClaude, while Claude cannot be started.
+            AddNoteAndStartClaude = startClaude is { } start
+                ? (title, workspace, quadrant, describe) => AddNoteAndStartClaude(start, title, workspace, quadrant, describe)
+                : null,
             // The manager line's click (task 61e4d143): the Manager button's own click, read when it happens, since the
             // App sets OpenManager after this constructor. A refusal shows on the problem line like any other.
             OpenManager = () => Report(OpenManager?.Invoke() ?? Result.Failure("The manager is not available.")),
@@ -1049,13 +1053,29 @@ public sealed class TasksBoard : IDisposable
     /// One of Petre's notes, in the backlog, where the add box's chip says, with the flags its toggles say (Ruling 37):
     /// it lands at the top of that quadrant. <paramref name="describe"/>, when the add box holds pasted pictures, writes them
     /// under the new task's id and answers its description (TaskService.AddNote); a failure there adds nothing and shows
-    /// on the problem line like any other refusal.
+    /// on the problem line like any other refusal. <paramref name="added"/>, when given, is run with the new task's id
+    /// once it is shown: the add box's Start Claude button (task 3c40dec9, AddNoteAndStartClaude) hands the note to
+    /// Claude through it.
     /// </summary>
     public Result AddNote(string title, Maybe<Guid> workspace, Quadrant quadrant = Quadrant.IV, Maybe<Guid> parent = default,
-        Func<Guid, Result<string>>? describe = null) =>
+        Func<Guid, Result<string>>? describe = null, Action<Guid>? added = null) =>
         Report((describe is null
             ? tasks.AddNote(title, workspace, quadrant, parent)
-            : tasks.AddNote(title, workspace, quadrant, parent, describe)).Tap(task => ShowAdded(task.Id)).Bind(_ => Result.Success()));
+            : tasks.AddNote(title, workspace, quadrant, parent, describe))
+            .Tap(task => ShowAdded(task.Id))
+            .Tap(task => added?.Invoke(task.Id))
+            .Bind(_ => Result.Success()));
+
+    // ADD AND START CLAUDE (task 3c40dec9; Petre: "when adding a task, have a button to start immediately with claude").
+    // The add box's Start Claude button and Ctrl+Enter: the note is added exactly as Enter adds it, then handed to
+    // "Start Claude on this" (`startClaude`, the App's ClaudeTaskActions.Offer), so the one folder starts at once and
+    // several open the pick list, with every refusal that item has. Queued on the panel's thread rather than run inside
+    // the key press or click, so the add box has closed (TasksWindow.HideAdd) before Offer asks a question or opens its
+    // pick list. Whether the add worked, as AddNote answers it: a refused note starts nothing.
+    bool AddNoteAndStartClaude(Action<Guid> startClaude, string title, Maybe<Guid> workspace, Quadrant quadrant,
+        Func<Guid, Result<string>>? describe) =>
+        AddNote(title, workspace, quadrant, describe: describe,
+            added: id => window.Dispatcher.BeginInvoke(() => startClaude(id), System.Windows.Threading.DispatcherPriority.Input)).IsSuccess;
 
     /// <summary>
     /// A subtask typed into the box in a thread, where "Add subtask" was (task 0eb943d8, Petre: "make it right there, at
@@ -1854,6 +1874,12 @@ internal sealed record TasksWindowActions(
 {
     /// <summary>"Start Claude on this" (Task 9): the line menu's item and the thread's button. None, neither shows.</summary>
     public Action<Guid>? StartClaude { get; init; }
+
+    /// <summary>
+    /// The add box's Start Claude button and Ctrl+Enter (task 3c40dec9): AddNote's note, then "Start Claude on this" on
+    /// it; whether the add worked. None, the button is not shown and Ctrl+Enter adds as Enter does.
+    /// </summary>
+    public Func<string, Maybe<Guid>, Quadrant, Func<Guid, Result<string>>?, bool>? AddNoteAndStartClaude { get; init; }
 
     /// <summary>The manager line's click (task 61e4d143): opens the manager session.</summary>
     public Action? OpenManager { get; init; }

@@ -3017,6 +3017,8 @@ public partial class TasksWindow : Window
         AddPlaceholder.Text = NotePlaceholder;
         // The important and urgent toggles first (Ruling 37, TasksWindow.AddFlags.cs), then the workspace chip.
         AddFlagToggles().ToList().ForEach(toggle => AddEnd.Children.Add(toggle));
+        // Then Start Claude (task 3c40dec9), while the controller can start one: AddAndStartClaudeButton.
+        if (AddAndStartClaudeButton() is { } start) AddEnd.Children.Add(start);
         var target = addChosen ?? latest?.AddTarget;
         if (target is null) return;
         // DROPDOWN THAT DID NOT OPEN (2026-11-23, Petre: "dropdown doesn't work"). The menu used to open from a second
@@ -3045,16 +3047,48 @@ public partial class TasksWindow : Window
     {
         // Shift+Enter is a line break, which the box makes itself (AcceptsReturn), as in the comment boxes.
         if (key is not (Key.Enter or Key.Return) || modifiers.HasFlag(ModifierKeys.Shift)) return KeyOutcome.Ignored;
+        // Ctrl+Enter is the Start Claude button's key (task 3c40dec9).
+        return AddFromBox(startClaude: modifiers.HasFlag(ModifierKeys.Control)) ? KeyOutcome.Posted : KeyOutcome.NewLine;
+    }
+
+    // The box's note added, where the chip says with the flags the toggles say, and the box closed; whether it was added.
+    // With `startClaude` (the Start Claude button or Ctrl+Enter) the note is then handed to Claude through the
+    // controller's AddNoteAndStartClaude; with none wired, it is added as Enter adds it.
+    bool AddFromBox(bool startClaude)
+    {
         var target = addChosen ?? latest?.AddTarget;
         // The first line is the title and the lines after it the description (TaskNote.Split, task 98420dbc). Pasted
         // pictures (TasksWindow.Images.cs, "the add box") follow that text in the description, and with no words typed
         // the task is called "Picture".
         var (title, body) = TaskNote.Split(AddBox.Text, AddBoxImages.Count);
         var describe = AddDescription(body);
-        var added = Actions is not null && target is not null && Actions.AddNote(title, target.Workspace, AddQuadrant, describe);
-        if (!added) return KeyOutcome.NewLine;
+        var add = startClaude && Actions?.AddNoteAndStartClaude is { } andStart ? andStart : Actions?.AddNote;
+        var added = add is not null && target is not null && add(title, target.Workspace, AddQuadrant, describe);
+        if (!added) return false;
         HideAdd();
-        return KeyOutcome.Posted;
+        return true;
+    }
+
+    // ADD AND START CLAUDE (task 3c40dec9; Petre: "when adding a task, have a button to start immediately with claude").
+    // After the flag toggles, before the workspace chip: adds the box's note as Enter does, then runs "Start Claude on
+    // this" on it (TasksBoard.AddNoteAndStartClaude), which starts in the workspace's one folder or opens the folder pick
+    // list. Ctrl+Enter in the box is the same. The glyph is the line's own Start Claude button's, Segoe's "Play" (U+E768),
+    // so the two read as one action. Unfocusable (Flat), so a refused add leaves the keyboard in the box. None while the
+    // controller cannot start Claude, as the line's button.
+    internal const string AddAndStartClaudeText = "Add and start Claude";
+
+    Button? AddAndStartClaudeButton()
+    {
+        if (Actions?.AddNoteAndStartClaude is null) return null;
+        var button = Flat(new TextBlock { Text = "", FontFamily = IconFont, FontSize = 12, Foreground = DimInk },
+            AddAndStartClaudeText, () =>
+            {
+                if (!AddFromBox(startClaude: true) && AddBoxShown) AddBox.Focus();
+            }, new Thickness(5, 2, 5, 2));
+        button.Background = Brushes.Transparent;
+        button.ToolTip = "Add and start Claude (Ctrl+Enter): adds the task and starts a Claude session on it";
+        button.Margin = new Thickness(4, 0, 0, 0);
+        return button;
     }
 
     // For the tests: types into the add box and presses a key.

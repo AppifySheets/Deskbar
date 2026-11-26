@@ -1423,6 +1423,21 @@ UC4. Merge a pull request labelled `critical-update`. Its release notes open wit
      copy below that release with the box unticked is offered the update at its next check, without the day.
 UC5. "Check for updates…" from the tray finds the newest release whatever the day, box or no box.
 
+## Add and start Claude
+
+(Task 3c40dec9.) Claude sessions on, in a workspace whose tasks know exactly one folder.
+
+AS1. Type a note into the bar's box. After the important and urgent toggles there is a play button, "Add and start
+     Claude". Press it: the note is added and glows, the box empties and the keyboard goes back to the window you
+     were typing in, and within a few seconds a Claude window opens on the task, as "Start Claude on this" opens one.
+AS2. Type another note and press Ctrl+Enter instead: the same. Plain Enter only adds.
+AS3. The tasks panel, + Add: the same play button sits after the toggles, before the workspace chip, and Ctrl+Enter
+     does the same. The box closes once the note is added.
+AS4. In a workspace whose tasks know several folders (or none), the button adds the note and opens the folder pick
+     list at the pointer, as "Start Claude on this" does. Esc on the list leaves a plain note.
+AS5. The button on an empty box adds nothing and starts nothing. With Claude sessions off in Manage the note is
+     still added, and the same refusal "Start Claude on this" gives says why no session started.
+
 ## Results (2026-08-01)
 
 Status: **pending human execution.** An agent cannot observe the desktop, Task View,

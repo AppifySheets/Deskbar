@@ -790,7 +790,7 @@ public partial class FloatingBar
             TextWrapping = TextWrapping.Wrap,
             AcceptsReturn = true,
             MaxLines = TaskAddMaxLines,
-            ToolTip = "Enter adds the task, Shift+Enter starts a new line, Esc clears the box. The first line is the title, the rest the description. Ctrl+V or a drop adds a picture",
+            ToolTip = "Enter adds the task, Ctrl+Enter adds it and starts Claude on it, Shift+Enter starts a new line, Esc clears the box. The first line is the title, the rest the description. Ctrl+V or a drop adds a picture",
         };
         AutomationProperties.SetName(taskAddBox, "New task");
         taskAddBox.PreviewKeyDown += OnTaskAddKey;
@@ -830,11 +830,14 @@ public partial class FloatingBar
         // sits in TakesNoWidth), and the docked fit pass measures the row as it is.
         taskAddImportant = AddFlagToggle(TaskFlag.Important);
         taskAddUrgent = AddFlagToggle(TaskFlag.Urgent);
+        // ADD AND START CLAUDE (task 3c40dec9; Petre: "when adding a task, have a button to start immediately with
+        // claude"), after the two flags: AddAndStartClaudeButton says what it does.
+        taskAddStartClaude = AddAndStartClaudeButton();
         taskAddChips = new WrapPanel
         {
             Tag = "task-add-chips",
             Margin = new Thickness(0, 3, 0, 0),
-            Children = { taskAddOn, taskAddChip.Button, ParentChipButton(), taskAddImportant.Button, taskAddUrgent.Button },
+            Children = { taskAddOn, taskAddChip.Button, ParentChipButton(), taskAddImportant.Button, taskAddUrgent.Button, taskAddStartClaude },
         };
         PaintAddFlags();
         // RULING 50 (Petre: "move all tasks to the top to save vertical space, next to workspace selection"). "All tasks" /
@@ -2063,8 +2066,10 @@ public partial class FloatingBar
     // The box lets go of the keyboard. After Enter or Esc (`clear`) it empties, the chip goes back to the current
     // workspace and the keyboard goes back to where Petre was typing. After a click elsewhere (the bar lost the
     // foreground) the text stays as it is, with its chip, for whenever he comes back to it (Ruling 9: the box itself
-    // is the draft); nothing is handed back, since the keyboard is already where he took it.
-    void EndTyping(bool clear)
+    // is the draft); nothing is handed back, since the keyboard is already where he took it. `handBack` false keeps the
+    // keyboard (and the window it goes back to, taskReturnTo) for later: the add that starts Claude hands it back only
+    // once "Start Claude on this" has had its say (StartAddedTask).
+    void EndTyping(bool clear, bool handBack = true)
     {
         if (taskAddBox is null) return;
         taskTyping = false;
@@ -2080,7 +2085,7 @@ public partial class FloatingBar
             ClearTaskAddPictures();
             PaintAddFlags();
             PaintTaskChips();
-            GiveTaskKeyboardBack();
+            if (handBack) GiveTaskKeyboardBack();
         }
         else taskReturnTo = 0;
         PaintAddRow();
@@ -2172,7 +2177,8 @@ public partial class FloatingBar
         if (e.Key == Key.Enter)
         {
             e.Handled = true;
-            CommitTaskNote();
+            // Ctrl+Enter is the Start Claude button's key (task 3c40dec9): the note is added and handed to Claude.
+            CommitTaskNote(startClaude: Keyboard.Modifiers.HasFlag(ModifierKeys.Control));
         }
         else if (e.Key == Key.Escape)
         {
@@ -2186,8 +2192,9 @@ public partial class FloatingBar
     // Enter: a Backlog note where the chips say. A title of nothing is refused by the board and the box keeps the
     // keyboard. The first line is the title and any lines after it the description (TaskNote.Split, task 98420dbc).
     // Pasted pictures go in the description too, after that text, and with nothing typed the task is called "Picture"
-    // (FloatingBar.TaskPictures.cs). The note added is then highlighted (ShowAddedTask).
-    void CommitTaskNote()
+    // (FloatingBar.TaskPictures.cs). The note added is then highlighted (ShowAddedTask). With `startClaude` (the Start
+    // Claude button or Ctrl+Enter, task 3c40dec9) the note is then handed to Claude (StartAddedTask).
+    void CommitTaskNote(bool startClaude = false)
     {
         if (taskService is null || taskAddBox is null) return;
         var (title, body) = TaskNote.Split(taskAddBox.Text, taskAddImages.Count);
@@ -2197,11 +2204,71 @@ public partial class FloatingBar
                 : taskService.AddNote(title, taskAddTarget, quadrant, taskAddParent))
             .Tap(task =>
             {
-                EndTyping(clear: true);
+                var starts = startClaude && StartClaude is not null;
+                EndTyping(clear: true, handBack: !starts);
                 ShowAddedTask(task.Id);
+                if (starts) StartAddedTask(task.Id);
             })
             .TapError(err => ClickTrace.Write($"task list: note not added: {err}"));
     }
+
+    // ADD AND START CLAUDE (task 3c40dec9; Petre: "when adding a task, have a button to start immediately with claude").
+    // Before this, a note meant for Claude took three steps: Enter, find its line, right-click and "Start Claude on this".
+    // The button after the flag toggles (and Ctrl+Enter in the box) does all three: it adds the note exactly as Enter
+    // does, then runs the line menu's "Start Claude on this" on it (StartClaude, the App's ClaudeTaskActions.Offer). So
+    // everything that item does holds here too: it starts in the workspace's one folder, or opens the folder pick list
+    // at the pointer, and a refusal (Claude sessions off, Claude Code missing) is told the same way. With nothing typed
+    // and no picture, the board refuses the note as Enter's add is refused, and nothing starts. Shown only while the App
+    // wired StartClaude, as the menu item is (PaintTaskChips, since the init property is set after this list is built).
+    // The glyph is the tasks panel line's Start Claude button, Segoe's "Play" (U+E768), so the two read as one action.
+    Button? taskAddStartClaude;
+
+    internal const string AddAndStartClaudeText = "Add and start Claude";
+
+    Button AddAndStartClaudeButton()
+    {
+        var glyph = new TextBlock
+        {
+            Text = "",
+            FontFamily = IconFont,
+            FontSize = Text(8.5),
+            Foreground = TaskDimInk,
+            VerticalAlignment = VerticalAlignment.Center,
+            Margin = new Thickness(3, 1, 3, 1),
+        };
+        // Pressed on an idle box (a draft left in it), it takes the keyboard first, as a chip or a flag toggle does, so
+        // the add hands it back to the window noted now (BeginTyping) and not to one noted long ago.
+        // On an idle, empty box (a stray press, or the second press of a double-click after the first added the note)
+        // there is nothing to add, so the press does nothing rather than take the keyboard for an empty box.
+        var button = TaskButton(AddAndStartClaudeText, glyph, () =>
+            {
+                if (!taskTyping && taskAddBox?.Text.Length is null or 0 && taskAddImages.Count == 0) return;
+                if (!taskTyping) BeginTyping();
+                CommitTaskNote(startClaude: true);
+            },
+            "Add and start Claude (Ctrl+Enter): adds the task and starts a Claude session on it");
+        button.Visibility = Visibility.Collapsed;
+        return button;
+    }
+
+    // "Start Claude on this" on the note just added, run once the add's own work has settled (the paint, the selection),
+    // as the line menu's item runs once its menu has closed. The keyboard is still the bar's (CommitTaskNote kept it):
+    // handed back before this, the folder pick list would open while another app had the foreground, so its arrows and
+    // Esc went to that app, and a refusal's message box could open behind it (review of task 3c40dec9). So a pick list,
+    // when it opens, holds the bar still the way the bar's own menus do, and the Claude window it leads to takes the
+    // front; otherwise (one folder started, or a refusal told) the keyboard goes back to where Petre was typing now.
+    void StartAddedTask(Guid id)
+    {
+        if (StartClaude is not { } start) return;
+        Dispatcher.BeginInvoke(() =>
+        {
+            if (start(id) is { } pick) HoldFadeWhileOpen(pick);
+            else GiveTaskKeyboardBack();
+        }, DispatcherPriority.Input);
+    }
+
+    // For the tests: the add row's Start Claude button.
+    internal Button? TaskAddStartClaudeButton => taskAddStartClaude;
 
     // THE NOTE JUST ADDED IS HIGHLIGHTED (task ee75f046; TaskGlow has the mockup and Petre's pick). A note lands at the top
     // of its quadrant, often below the lines on show, and before this nothing said where it went. It becomes the
@@ -2336,6 +2403,9 @@ public partial class FloatingBar
         taskAddChip.Label.Foreground = TaskInk;
         taskAddChip.Face.Background = fill;
         taskAddChip.Face.BorderBrush = fill;
+        // The Start Claude button shows once the App has wired StartClaude (AddAndStartClaudeButton).
+        if (taskAddStartClaude is not null)
+            taskAddStartClaude.Visibility = StartClaude is null ? Visibility.Collapsed : Visibility.Visible;
         PaintParentChip();
         PaintPlaceholder();
     }
