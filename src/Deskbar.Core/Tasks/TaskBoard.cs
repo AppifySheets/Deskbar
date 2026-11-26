@@ -464,20 +464,15 @@ public sealed record TaskBoard(IReadOnlyList<TaskItem> Tasks)
             : ChangeOpen(id, t => t with { Switching = pending with { Issued = Maybe<DateTimeOffset>.None, CopyShortId = Maybe<string>.None, CopyId = Maybe<string>.None }, UpdatedAt = now }));
 
     /// <summary>
-    /// The copy's resume goes out now (ISSUED), stored BEFORE the process starts, so a Deskbar that closes before Claude
-    /// answers still looks for the copy when it starts again (SettingsSwitch.Next) instead of leaving it to be adopted.
-    /// <paramref name="to"/> is what the resume passes, the model filled in where the pick named none.
+    /// The copy's resume went out at <paramref name="issuedAt"/> and Claude printed its short id (ISSUED): stored in ONE
+    /// write, after the id is known (review N6). A Deskbar that closes before this write leaves the switch REQUESTED, so it
+    /// claims nothing and the original stays as it was; one that closes after it looks for the copy by that id when it
+    /// starts again. <paramref name="to"/> is what the resume passed, the model filled in where the pick named none.
     /// </summary>
-    public Result<TaskBoard> SwitchIssued(Guid id, SessionSettings to, DateTimeOffset now) =>
+    public Result<TaskBoard> SwitchIssued(Guid id, SessionSettings to, string shortId, DateTimeOffset issuedAt, DateTimeOffset now) =>
         Lookup(id).Bind(task => task.Switching is { HasValue: true } pending && pending.Value.Issued.HasNoValue
-            ? ChangeOpen(id, t => t with { Switching = pending.Value with { Issued = now, To = to }, UpdatedAt = now })
+            ? ChangeOpen(id, t => t with { Switching = pending.Value with { Issued = issuedAt, To = to, CopyShortId = shortId }, UpdatedAt = now })
             : Result.Failure<TaskBoard>("No switch waits to be issued on this task."));
-
-    /// <summary>Claude named the copy (the short id `claude --bg` printed): kept on the switch under way.</summary>
-    public Result<TaskBoard> SwitchCopyNamed(Guid id, string shortId, DateTimeOffset now) =>
-        Lookup(id).Bind(task => task.Switching is { HasValue: true } pending && pending.Value.Issued.HasValue
-            ? ChangeOpen(id, t => t with { Switching = pending.Value with { CopyShortId = shortId }, UpdatedAt = now })
-            : Result.Failure<TaskBoard>("No switch is under way on this task."));
 
     /// <summary>
     /// The copy runs (JOINED): it joins the task with what it was launched with (<see cref="TaskSession.LaunchedWith"/>),

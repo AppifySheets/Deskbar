@@ -160,13 +160,21 @@ public class SettingsSwitchTests
         Assert.True(confirm.StopOriginal.HasNoValue);
     }
 
-    // Review M3: only a background session Deskbar started is ever copied, so only Deskbar's own original is ever stopped.
+    // Review N2: what makes a session safe to copy is that it is the task's live session and a BACKGROUND one, not that
+    // Deskbar holds a launch record (every session from before the picker has none). A window of the user's own is not.
     [Fact]
-    public void A_background_session_Deskbar_did_not_start_is_read_only()
+    public void A_background_session_with_no_launch_record_is_switchable_and_one_in_its_own_window_is_not()
     {
-        var notOurs = Task(wanted: SonnetLow, sessions: Session(Original, 0, launched: SessionSettings.None));
+        var noRecord = Task(wanted: SonnetLow, sessions: Session(Original, 0, launched: SessionSettings.None));
 
-        Assert.Equal(SettingsSwitch.NotStartedByDeskbar, Assert.IsType<SwitchStep.ReadOnly>(Plan(notOurs, Idle())).Why);
+        Assert.Equal(SonnetLow, Assert.IsType<SwitchStep.CopyNow>(Plan(noRecord, Idle())).To);
+        var interactive = new ClaudeAgent(Original, Maybe<string>.None, Folder, false, false, "");
+        var readOnly = Assert.IsType<SwitchStep.ReadOnly>(Plan(noRecord, interactive));
+        Assert.Equal(SettingsSwitch.NotDeskbars, readOnly.Why);
+        Assert.Contains("runs in its own window", readOnly.Why);
+        // It never claims who started the session.
+        Assert.DoesNotContain("did not start", readOnly.Why);
+        Assert.DoesNotContain("started", readOnly.Why);
     }
 
     // The session a comment goes to: never a replaced one; live first, then the latest joined.
@@ -233,13 +241,12 @@ public class SettingsSwitchTests
         Assert.True(board.SwitchStarted(TaskId, Requested with { FromSession = "someone-else" }, T0).IsFailure);
 
         var filled = new SessionSettings("claude-opus-5-5", "low", Maybe<string>.None);
-        var issued = started.SwitchIssued(TaskId, filled, T0.AddSeconds(1)).Value;
-        Assert.Equal(Requested with { Issued = T0.AddSeconds(1), To = filled }, issued.Tasks.Single().Switching.Value);
+        // Review N6: issued and named in one write, at the moment the resume went out, once Claude has printed the id.
+        var issued = started.SwitchIssued(TaskId, filled, "8c42135c", T0.AddSeconds(1), T0.AddSeconds(2)).Value;
+        Assert.Equal(Requested with { Issued = T0.AddSeconds(1), To = filled, CopyShortId = "8c42135c" }, issued.Tasks.Single().Switching.Value);
         Assert.True(issued.SwitchStarted(TaskId, later, T0).IsFailure);
-        Assert.True(issued.SwitchIssued(TaskId, filled, T0).IsFailure);
-
-        Assert.Equal("8c42135c", issued.SwitchCopyNamed(TaskId, "8c42135c", T0).Value.Tasks.Single().Switching.Value.CopyShortId.Value);
-        Assert.True(started.SwitchCopyNamed(TaskId, "8c42135c", T0).IsFailure);
+        Assert.True(issued.SwitchIssued(TaskId, filled, "8c42135c", T0, T0).IsFailure);
+        Assert.True(Board(Task(TaskStatus.Closed, SonnetLow) with { Switching = Requested }).SwitchIssued(TaskId, filled, "8c42135c", T0, T0).IsFailure);
     }
 
     // The task keeps its status: changing the model is not more work, so a Done task stays Done.
@@ -558,20 +565,22 @@ public class SettingsSwitchTests
         Assert.Equal("8c42135c", Assert.IsType<SwitchAction.Discard>(Next(issued, [Idle(), Copy()])).StopCopy);
     }
 
-    // Review M3: a switch stops only the copy Claude printed for our resume, or an original Deskbar itself started.
+    // Reviews M3 and N2, the one gate: a switch stops only the copy Claude printed for our resume, or its own original while
+    // the list shows that original as a background session, launch record or not; never a window of the user's own.
     [Fact]
-    public void A_switch_may_stop_only_its_printed_copy_or_an_original_Deskbar_started()
+    public void A_switch_may_stop_only_its_printed_copy_or_its_original_listed_in_the_background()
     {
         var pending = Issued;
-        var ours = Task(wanted: SonnetLow) with { Switching = pending };
-        var notOurs = Task(wanted: SonnetLow, sessions: Session(Original, 0, launched: SessionSettings.None)) with { Switching = pending };
+        var task = Task(wanted: SonnetLow, sessions: Session(Original, 0, launched: SessionSettings.None)) with { Switching = pending };
+        var interactive = new ClaudeAgent(Original, Maybe<string>.None, Folder, false, false, "");
 
-        Assert.True(SettingsSwitch.MayStop(ours, pending, "8c42135c"));
-        Assert.True(SettingsSwitch.MayStop(ours, pending, "eea5466c"));
-        Assert.False(SettingsSwitch.MayStop(notOurs, pending, "eea5466c"));
-        Assert.False(SettingsSwitch.MayStop(ours, pending, "99999999"));
-        Assert.False(SettingsSwitch.MayStop(ours, pending with { CopyShortId = Maybe<string>.None }, "8c42135c"));
-        Assert.False(SettingsSwitch.MayStop(ours, pending, ""));
+        Assert.True(SettingsSwitch.MayStop(task, pending, "8c42135c", []));
+        Assert.True(SettingsSwitch.MayStop(task, pending, "eea5466c", [Idle()]));
+        Assert.False(SettingsSwitch.MayStop(task, pending, "eea5466c", []));
+        Assert.False(SettingsSwitch.MayStop(task, pending, "eea5466c", [interactive]));
+        Assert.False(SettingsSwitch.MayStop(task, pending, "99999999", [Idle("99999999-0000", "99999999")]));
+        Assert.False(SettingsSwitch.MayStop(task, pending with { CopyShortId = Maybe<string>.None }, "8c42135c", []));
+        Assert.False(SettingsSwitch.MayStop(task, pending, "", [Idle()]));
     }
 
     // --- the copy's own SessionStart hook, and the keeper's adoption ------------------------------------------------

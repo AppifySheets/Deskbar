@@ -1357,10 +1357,10 @@ public class RemoteControlClaudeHookTests
 
         // Not issued yet: no copy is awaited.
         Hooked(manager, "SessionStart", session: "c0", source: "fork");
-        Assert.True(tasks.SwitchIssued(id, to).IsSuccess);
-        // Issued, but Claude has not printed the copy's id yet: nothing is claimed, even in the same folder.
+        // Requested while `claude` runs: a fork then, in the same folder, is claimed by nothing.
         Hooked(manager, "SessionStart", session: "c9", source: "fork");
-        Assert.True(tasks.SwitchCopyNamed(id, "c2").IsSuccess);
+        // Issued and named in one write once Claude printed the id (the task's last change is the service's clock now).
+        Assert.True(tasks.SwitchIssued(id, to, "c2", Titled("Tasks board").UpdatedAt).IsSuccess);
         Hooked(manager, "SessionStart", session: "c1", source: "fork", from: @"C:\repos\Other");
         Hooked(manager, "SessionStart", session: "c3", source: "fork");
         var briefing = Hooked(manager, "SessionStart", session: "c2", source: "fork", from: "C:/repos/TaskSpaces/");
