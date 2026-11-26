@@ -1906,6 +1906,8 @@ public partial class App : Application
                 new System.Reactive.Concurrency.SynchronizationContextScheduler(new System.Windows.Threading.DispatcherSynchronizationContext(Dispatcher)),
                 trace: ClickTrace.On ? ClickTrace.Write : null))
             .GetValueOrDefault();
+        if (runningChangeWatch is null && ClickTrace.On)
+            ClickTrace.Write($"running changes: no watch, the version {UpdateService.RunningVersion} names no commit");
 
         commentWaker = new CommentWaker(tasks!, () => manager.State.ClaudeTasksInEffect, claudeSessions.Live, claudeSessions.Resumable, commentInbox,
             claudeSessions.ResumeWith, claudeSessions.StopNow, ClickTrace.On ? ClickTrace.Write : null);

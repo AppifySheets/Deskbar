@@ -176,8 +176,10 @@ public sealed class RunningChangesTests
 
         Assert.Equal("2.6.23", build.Version);
         Assert.Equal(Commit, build.Commit);
+        // What a real build carries: the commit cut to ten digits (measured on the installed 2.6.28).
+        Assert.Equal("5051c48433", RunningBuild.Of("AppifySheets", "Deskbar", "2.6.28+5051c48433").Value.Commit);
         Assert.True(RunningBuild.Of("AppifySheets", "Deskbar", "2.6.23").HasNoValue);
-        Assert.True(RunningBuild.Of("AppifySheets", "Deskbar", "2.6.23+0123456").HasNoValue);
+        Assert.True(RunningBuild.Of("AppifySheets", "Deskbar", "2.6.23+012345").HasNoValue);
     }
 
     // --- the watch and TaskService --------------------------------------------------------------------------------------
@@ -251,7 +253,7 @@ public sealed class RunningChangesTests
     }
 
     [Fact]
-    public void A_failed_look_keeps_the_full_tick_and_is_tried_again()
+    public void A_failed_look_keeps_the_full_tick_and_is_tried_again_after_the_backoff()
     {
         var (board, _) = Board(TaskStatus.Done, Pr573);
         using var watch = new Watch(board);
@@ -259,8 +261,14 @@ public sealed class RunningChangesTests
         watch.Clock.AdvanceBy(TimeSpan.FromSeconds(1).Ticks);
         Assert.Equal(TaskDelivery.None, watch.Delivery);
 
+        // Not every minute: a commit GitHub has never seen fails every look, for good.
         watch.GitHub[Pr573.Key] = MergedNotHere;
-        watch.Clock.AdvanceBy(RunningChangeWatch.Poll.Ticks);
+        watch.Clock.AdvanceBy(RunningChangeWatch.Poll.Ticks * 3);
+        Assert.Single(watch.Looked);
+        Assert.Equal(TaskDelivery.None, watch.Delivery);
+
+        watch.Clock.AdvanceBy(RunningChangeWatch.FailureBackoff.Ticks);
+        Assert.Equal(2, watch.Looked.Count);
         Assert.Equal(DeliveryStage.Merged, watch.Delivery.Stage);
     }
 

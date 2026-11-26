@@ -586,6 +586,8 @@ public partial class TasksWindow : Window
             // a compact line draws no sessions, so it would only rebuild the Matrix for nothing (review minor 2).
             string.Join('\u0002', view.Cells.Select(c => $"{c.Header}:" + string.Join('\u0003', c.Rows.Select(r =>
                 $"{r.Id}|{r.Title}|{r.Detail}|{r.Description}|{r.Status}|{r.Claudes}|{r.Assignee.Id}|{PlaceSignature(r.Place)}|{r.CommentCount}|{r.Expanded}|{r.Closing}|{r.Important}|{r.Urgent}|{r.ParentTitle}|{r.ParentId}|{r.SubtaskCount}|{r.ClaudeWorking}|" +
+                // The ring or the disc and its tooltip line (task 8470d176): GitHub's answer changes nothing else on a line.
+                $"{r.Delivery.Stage}|{r.Delivery.Note}|" +
                 SubtasksSignature(r) + "|" +
                 string.Join('\u0004', r.Comments.Select(c => $"{c.Id}{c.Author}{c.When}{c.Markdown}{c.Settled}")))))),
             string.Join('\u0002', view.Groups.Select(g => $"{g.Header}:" + string.Join('\u0003', g.Rows.Select(ListRowSignature)))));
@@ -595,6 +597,8 @@ public partial class TasksWindow : Window
     static string ListRowSignature(TaskRowView r) =>
         $"{r.Id}|{r.Title}|{r.Detail}|{r.Description}|{r.Status}|{r.Claudes}|{r.Assignee.Id}|{r.Sessions}|{r.SessionCount}|{r.LiveCount}|{PlaceSignature(r.Place)}|{r.CommentCount}|" +
         $"{r.Expanded}|{r.Closing}|{r.Important}|{r.Urgent}|{r.WorkingCount}|{r.ParentTitle}|{r.ParentId}|{r.SubtaskCount}|{r.ClaudeWorking}|{r.Nested}|" +
+        // The ring or the disc, the chip's word and the tooltip line (task 8470d176): GitHub's answer changes nothing else.
+        $"{r.Delivery.Stage}|{r.Delivery.Note}|" +
         SubtasksSignature(r) + "|" +
         string.Join('\u0004', r.SessionList.Select(s => $"{s.Id}{s.Joined}{s.State}")) + "|" +
         // Task links: the thread's link lines, and the status words of a closed duplicate.
