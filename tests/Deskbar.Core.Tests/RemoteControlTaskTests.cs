@@ -303,6 +303,8 @@ public class RemoteControlTaskTests
         var reply = RunAsManager(manager, "task", "ask", "Which comes first?");
 
         Assert.Equal(ControlReply.Ok, reply.ExitCode);
+        // The options hint belongs to a session's ask only (RemoteControl.AskedReply), never the manager's.
+        Assert.DoesNotContain("hint", reply.Output);
         Assert.Equal("Which comes first?", manager.State.Manager!.Question);
         Assert.Equal(clock, manager.State.Manager.AskedAt);
         Assert.Equal("mgr", manager.State.Manager.SessionId);

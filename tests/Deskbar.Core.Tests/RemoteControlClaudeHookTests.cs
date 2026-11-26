@@ -1586,6 +1586,37 @@ public class RemoteControlClaudeHookTests
         Assert.Equal("Merge [PR 512](https://example.com/pull/512)?", task.Question.Value);
         Assert.Equal(["Merge it", "Not yet"], task.QuestionOptions);
         Assert.Equal("Merge [PR 512](https://example.com/pull/512)?", Assert.Single(task.Comments).Markdown);
+        // A session that gave options has learned the form: its reply is the plain task.
+        Assert.DoesNotContain("hint", reply.Output);
+    }
+
+    // The briefing has no room for the options, so the reply to an ask that gave none teaches them (RemoteControl.AskedReply).
+    [Fact]
+    public void An_ask_without_options_replies_with_a_hint_about_them_and_still_asks()
+    {
+        var manager = Started();
+        Editor(manager, 0x10, "TaskSpaces", "Deskbar");
+        Said(manager, "s1", Repo, "new", "Tasks board");
+
+        var reply = Said(manager, "s1", Repo, "ask", "OK to merge?");
+
+        Assert.Equal(ControlReply.Ok, reply.ExitCode);
+        var json = System.Text.Json.JsonDocument.Parse(reply.Output).RootElement;
+        Assert.Equal(RemoteControl.OptionsHint, json.GetProperty("hint").GetString());
+        Assert.Contains("--options", RemoteControl.OptionsHint);
+        Assert.Equal("OK to merge?", json.GetProperty("question").GetString());
+        Assert.Equal(TaskStatus.WaitingOnYou, Titled("Tasks board").Status);
+    }
+
+    [Fact]
+    public void A_refused_ask_carries_no_hint_and_other_forms_never_do()
+    {
+        var manager = Started();
+        Editor(manager, 0x10, "TaskSpaces", "Deskbar");
+        Said(manager, "s1", Repo, "new", "Tasks board");
+
+        Assert.DoesNotContain("hint", Said(manager, "s1", Repo, "ask", "Merge?\n--options\na\nb\nc\nd\ne").Output);
+        Assert.DoesNotContain("hint", Said(manager, "s1", Repo, "status-line", "waiting for CI").Output);
     }
 
     [Fact]

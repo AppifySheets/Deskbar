@@ -449,16 +449,11 @@ public sealed class AnswerOptionsTests : IDisposable
     // --- the help text and the briefing ------------------------------------------------------------------------------
 
     [Fact]
-    public void The_help_text_and_the_briefing_tell_a_session_about_the_options_line()
+    public void The_help_text_tells_a_session_about_the_options_line()
     {
         var ask = Deskbar.Core.Control.ControlUsage.All.Single(c => c.Verb == "task" && c.Arguments.StartsWith("ask <question>|- --session"));
         Assert.Contains("--options", ask.Description);
         Assert.Contains("up to 4", ask.Description);
-
-        var briefing = SessionBriefing.Start(new ClaudeHookEvent("SessionStart", "92943450", @"C:\repos\TaskSpaces", "startup", Headless: false),
-            Maybe<TaskItem>.None, []);
-        Assert.Contains("--options", briefing);
-        Assert.Contains("40 characters", briefing);
     }
 
     // --- tasks.json --------------------------------------------------------------------------------------------------
