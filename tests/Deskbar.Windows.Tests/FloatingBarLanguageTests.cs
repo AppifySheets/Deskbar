@@ -203,6 +203,68 @@ public class FloatingBarLanguageTests
         bar.Close();
     });
 
+    // A colleague on 2.6.49, typing a report in Deskbar's own Report window: "I can't change the keyboard; it stays
+    // on KA. Right now, in this window" (Deskbar-reports issue 8). The button passed over every Deskbar window, so it
+    // switched the last outside window and handed it the foreground. An own window with a text box focused is now the
+    // one read and switched, nothing is handed the foreground, and the outside window is still remembered for later.
+    [Fact]
+    public void An_own_window_you_type_in_is_the_one_switched() => StaThread.Run(() =>
+    {
+        var languages = new FakeLanguages(English, Georgian);
+        languages.ByWindow[Editor] = English;
+        nint front = Editor;
+        var handed = new List<nint>();
+        // Any window of this process with a text box focused stands in for the Report window; off screen, unactivated.
+        var reportWindow = new Window { Left = -32000, Top = -32000, Width = 100, Height = 100, ShowActivated = false, ShowInTaskbar = false };
+        reportWindow.Show();
+        var report = new System.Windows.Interop.WindowInteropHelper(reportWindow).Handle;
+        var bar = BarWith(languages, () => front, handed.Add, typing: h => h == report);
+        languages.ByWindow[report] = Georgian;
+
+        front = report;
+        bar.PaintLanguage();
+        Assert.Equal("KA", Code(bar));
+
+        bar.StepLanguage(+1);
+        Settle(bar);
+        Assert.Equal([(report, "EN")], languages.Switches);
+        Assert.Empty(handed);
+        Assert.Equal("EN", Code(bar));
+
+        // The Report window was never remembered in the editor's place: with the bar itself in front (something on it
+        // clicked), the editor is still the window read, switched and handed the foreground back.
+        reportWindow.Close();
+        front = new System.Windows.Interop.WindowInteropHelper(bar).Handle;
+        bar.PaintLanguage();
+        Assert.Equal("EN", Code(bar));
+        bar.StepLanguage(+1);
+        Settle(bar);
+        Assert.Equal([(report, "EN"), (Editor, "KA")], languages.Switches);
+        Assert.Equal([Editor], handed);
+        bar.Close();
+    });
+
+    // The bar's add box keeps WPF's logical focus after a task is added, and gets the keyboard back whenever the bar
+    // is activated. So a bar in front with a text box focused but no task being added or edited is the bar clicked,
+    // not typed in: the window you were in is switched and gets the foreground back, as before.
+    [Fact]
+    public void The_bar_with_a_leftover_focused_box_is_not_a_window_you_type_in() => StaThread.Run(() =>
+    {
+        var languages = new FakeLanguages(English, Georgian);
+        languages.ByWindow[Editor] = Georgian;
+        nint front = Editor;
+        var handed = new List<nint>();
+        var bar = BarWith(languages, () => front, handed.Add, typing: _ => true);
+
+        front = new System.Windows.Interop.WindowInteropHelper(bar).Handle;
+        bar.StepLanguage(+1);
+        Settle(bar);
+
+        Assert.Equal([(Editor, "EN")], languages.Switches);
+        Assert.Equal([Editor], handed);
+        bar.Close();
+    });
+
     // Runs what the dispatcher has queued behind the current input, as a finished click would.
     static void Settle(FloatingBar bar) => bar.Dispatcher.Invoke(() => { }, System.Windows.Threading.DispatcherPriority.Background);
 
@@ -252,7 +314,8 @@ public class FloatingBarLanguageTests
     // `front` stands in for the window Windows says is in the foreground; the editor unless a test says otherwise,
     // and never the real one, which is whatever the person running the suite has open. `handForeground` hears every
     // window the bar hands the foreground to, which in a test must never be a real one either.
-    static FloatingBar BarWith(IInputLanguages languages, Func<nint>? front = null, Action<nint>? handForeground = null)
+    // `typing` says which own windows have a text box focused; none, unless a test says otherwise.
+    static FloatingBar BarWith(IInputLanguages languages, Func<nint>? front = null, Action<nint>? handForeground = null, Func<nint, bool>? typing = null)
     {
         var desktops = new PulsingDesktops { CurrentId = Guid.NewGuid() };
         desktops.Desktops.Add(new DesktopInfo(desktops.CurrentId, "Work"));
@@ -263,6 +326,7 @@ public class FloatingBarLanguageTests
             Left = -32000, Top = -32000, SendShellKeys = _ => { },
             ForegroundWindow = front ?? (() => Editor),
             HandForegroundTo = handForeground ?? (_ => { }),
+            OwnWindowTakesTyping = typing ?? (_ => false),
             InputLanguages = languages,
         };
         bar.ShowBar();
