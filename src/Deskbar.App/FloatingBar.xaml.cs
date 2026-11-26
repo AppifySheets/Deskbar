@@ -419,28 +419,124 @@ public partial class FloatingBar : Window
     {
         Minimized = false; // before Save() below, which persists this as Visible
         ClickTrace.Write("bar restore");
-        Rebuild();
-        Show();
 
-        // Docked when it was minimized: dock again, keeping the floating position it already holds.
-        // Running the floating placement first would place a full-height window and then remember THAT
-        // as where the bar floats.
-        if (dockedEdge is { } current)
-            DockTo(current).TapError(error => ClickTrace.Write($"dock on restore failed: {error}"));
-        else
+        // The first show of a docked bar re-checks its screen once the desk has settled, and holds its saves until
+        // then (CheckDockAfterStart below has why). Decided before anything is placed or saved, and what this show is
+        // about to read is noted now, before PositionFromState acts on it.
+        var firstShow = !checkedAfterStart;
+        checkedAfterStart = true;
+        holdingStartSaves = firstShow && dockedEdge is null && manager.State.DockBar;
+        var read = ClickTrace.On ? DescribeStartRead() : "";
+
+        // Whether the re-check got armed. The finally below lets go of the hold whenever it did not, a throw on the way
+        // included, so the saves can never stay held for the rest of the run with nothing coming to release them.
+        var armed = false;
+        try
         {
-            PositionFromState();
-            // Docking switched on in settings: dock, from the floating position just restored, which is
-            // what DockTo keeps for undocking. A dock that fails leaves the bar floating, which is a
-            // working bar, so the failure is traced rather than shown.
-            if (manager.State.DockBar)
-                DockToEdge().TapError(error => ClickTrace.Write($"dock on show failed: {error}"));
-        }
+            Rebuild();
+            Show();
 
-        // On screen and floating (DockBar off, the default, or a dock that failed): the tasks panel hears it and docks by
-        // the floating rule. A dock above has announced itself instead, and this then says nothing (AnnounceFloating).
-        AnnounceFloating();
+            // Docked when it was minimized: dock again, keeping the floating position it already holds.
+            // Running the floating placement first would place a full-height window and then remember THAT
+            // as where the bar floats.
+            if (dockedEdge is { } current)
+                DockTo(current).TapError(error => ClickTrace.Write($"dock on restore failed: {error}"));
+            else
+            {
+                PositionFromState();
+                // Docking switched on in settings: dock, from the floating position just restored, which is
+                // what DockTo keeps for undocking. A dock that fails leaves the bar floating, which is a
+                // working bar, so the failure is traced rather than shown.
+                if (manager.State.DockBar)
+                    DockToEdge().TapError(error => ClickTrace.Write($"dock on show failed: {error}"));
+            }
+
+            // On screen and floating (DockBar off, the default, or a dock that failed): the tasks panel hears it and docks
+            // by the floating rule. A dock above has announced itself instead, and this then says nothing (AnnounceFloating).
+            AnnounceFloating();
+
+            // Docked by this first show: the re-check is armed and the saves stay held until it runs. Anything else (a
+            // floating bar, a dock that failed, a restore) lets go of the hold, so this Save persists as it always did.
+            if (holdingStartSaves && Docked)
+            {
+                CheckDockAfterStart();
+                armed = true;
+            }
+        }
+        finally
+        {
+            if (!armed) holdingStartSaves = false;
+        }
         Save();
+
+        // What this show read, and where the window ended up (task 7ee9ed58): one line per show, so a start that docks
+        // on the wrong screen names the cause in the trace instead of leaving it to a guess.
+        if (ClickTrace.On) TraceShownPlacement(read);
+    }
+
+    // Petre (2026-11-26, task 7ee9ed58): "deskbar restarted and went to another screen, docked". Measured in the
+    // trace: an update restart at 13:18:51 docked the bar on the primary screen's right edge (3477..3840) while every
+    // start before it that morning docked it on the left screen's inner edge (-363..0), its remembered spot, with
+    // both screens attached each time. The same had happened three times before (15:16, 19:35, 19:47), always on
+    // the first dock after a start and never in the same run's later re-docks.
+    //
+    // What put it there is not settled. Undocking at 13:19:21 sent the bar to a floating spot at the primary's left
+    // edge, so the start's placement itself had already been computed on the primary; and the trace shows the left
+    // screen missing from Windows' monitor list at times while both screens were attached (hundreds of "save
+    // skipped, the desk is changing: settled 0,0,3840,2160" lines, a settle that read the desk as the primary alone).
+    // A start that reads the monitors in such a moment places the bar on the primary, and the dock takes the screen
+    // the window is on.
+    //
+    // While the app runs, that case is handled: a display change arms layoutSettling, and the settle
+    // (ReadjustToDisplayLayout) sends a docked bar that is off its remembered screen back to it. A start has no
+    // display change, so nothing looked again and the wrong dock stayed until Petre moved it by hand. So the first
+    // show arms the same settle: 1.2 s later, with the desk read afresh, a bar docked off its remembered screen goes
+    // back to it, and a bar already on it is docked again where it is, which the shell's own notices do many times
+    // a minute anyway. Only a docked bar: a floating one is where it was put, and re-placing it a moment after the
+    // start would fight a drag begun in that moment.
+    //
+    // The saves are held until the settle has run (holdingStartSaves, read by Save). Without that the wrong start
+    // undoes its own repair: the dock and ShowBar both save, on the desk now attached, so the primary spot would be
+    // written as this desk's remembered dock, and the settle would then find the bar exactly where "remembered" says
+    // and leave it (found by review before this shipped). Held, the remembered spot is still the one from before the
+    // start when the settle compares against it. Nothing is lost by holding: the settle's own dock saves.
+    void CheckDockAfterStart()
+    {
+        layoutSettling.Stop();
+        layoutSettling.Start();
+    }
+
+    // Set by the first ShowBar, so only the first show arms CheckDockAfterStart. That is the start, or, for a bar
+    // that started minimized, its first restore from the taskbar button, where the check costs one rebuild and a
+    // re-dock in place and does no harm.
+    bool checkedAfterStart;
+
+    // True from the first show of a docked bar until the re-check above has run: Save writes nothing meanwhile.
+    // Cleared by SettleLayout just before the readjustment, so the readjustment's own saves land.
+    bool holdingStartSaves;
+
+    // What a show is about to read, taken before it places anything: the desk attached, the desk the bar last settled
+    // on (the constructor's read, until a settle replaces it), and the stored placement with where it came from ("this
+    // desk" is a placement saved for these monitors, exactly or a desk that only shifted; "any desk" is the fallback
+    // to the last position on any layout). Only built while tracing.
+    string DescribeStartRead()
+    {
+        var layout = LayoutKey();
+        var own = manager.BarPlacementFor(layout).GetValueOrDefault();
+        var placed = own ?? manager.State.FloatingBar;
+        var spot = placed is null
+            ? "none"
+            : $"{placed.Left:0.#},{placed.Top:0.#} right {placed.Right?.ToString("0.#") ?? "-"} edge {placed.DockedEdge ?? "-"}";
+        return $"desk {layout}, settled {settledLayout}, placement from {(own is null ? "any desk" : "this desk")} {spot}";
+    }
+
+    // One line per show: what it read (DescribeStartRead), whether it docked, the screen the window ended up on, and
+    // whether its saves are held for the re-check.
+    void TraceShownPlacement(string read)
+    {
+        var screen = ScreenOf(new WindowInteropHelper(this).Handle).Map(r => Describe(r)).GetValueOrDefault("none");
+        ClickTrace.Write($"bar shown: {read}, docked {dockedEdge ?? "no"}, window on screen {screen}"
+                         + (holdingStartSaves ? ", saves held for the start check" : ""));
     }
 
     // Petre: "i can see the taskspaces app in alt+tab, can you hide it from there?"
@@ -8410,11 +8506,18 @@ public partial class FloatingBar : Window
     internal void SettleLayout()
     {
         layoutSettling.Stop();
-        if (middleDragging)
+        // A width drag on the docked bar's edge waits too: the readjustment re-docks, and a re-dock in the middle of
+        // that drag puts the window back under the pointer (the reason OnShellMovedStrips skips it while resizing).
+        // The start check (CheckDockAfterStart) made this reachable a second after every start, not only on a
+        // display change.
+        if (middleDragging || resizing is not null)
         {
             layoutSettling.Start();
             return;
         }
+        // The start check is this settle when one is pending: its saves are let go now, so the readjustment's own
+        // dock writes the spot it settles on.
+        holdingStartSaves = false;
         Guarded(ReadjustToDisplayLayout, "layout");
         // ...and the screen strips follow the same settle (FloatingBar.Strips.cs, LayoutSettled). After the bar's own
         // readjustment, and not on the re-armed early return above, which is not a settle yet.
@@ -8556,6 +8659,15 @@ public partial class FloatingBar : Window
     // Nothing is written while the desk is changing (see DeskChanging below).
     void Save()
     {
+        // A start's own saves wait for its re-check (CheckDockAfterStart), or a wrong first dock would be remembered
+        // as right before anything looked again. Only while the bar is still docked: undocked in that second (the
+        // setting, or `deskbar.cmd bar undock`) it is no longer the start's dock, and a drop that follows must be
+        // saved, or the settle's floating branch would put the bar back at the spot stored before the start.
+        if (holdingStartSaves && Docked)
+        {
+            if (ClickTrace.On) ClickTrace.Write("save held until the start check");
+            return;
+        }
         var layout = LayoutKey();
         if (DeskChanging(settledLayout, layout))
         {
