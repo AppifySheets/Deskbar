@@ -18,9 +18,13 @@ namespace Deskbar.Core.Tasks;
 // for whatever a Claude session reads, and what Delete clears a task's pictures from. Null (tests, mostly) leaves image
 // paths as stored and deletes no files.
 public sealed class TaskService(ITaskStore store, Func<DateTimeOffset> now, Func<Guid>? newId = null, Action<string>? trace = null,
-    string? filesRoot = null)
+    string? filesRoot = null, TimeZoneInfo? zone = null)
 {
     readonly Func<Guid> makeId = newId ?? Guid.NewGuid;
+
+    // The zone a repeat's wall-clock schedule is read in (recurring tasks spec, task 0b78269e): the machine's own unless a
+    // test fixes one, so "daily 09:00" means 09:00 where Petre sits.
+    public TimeZoneInfo Zone { get; } = zone ?? TimeZoneInfo.Local;
     readonly Subject<Unit> changed = new();
     readonly Subject<(Guid TaskId, TaskComment Comment)> commented = new();
 
@@ -125,13 +129,13 @@ public sealed class TaskService(ITaskStore store, Func<DateTimeOffset> now, Func
     /// <summary>The note "Mark deployed" on a line's menu records (TaskService.MarkDeployed).</summary>
     public const string MarkedByHand = "Marked deployed by hand";
 
-    public Result MarkDone(Guid id) => Apply(Board.MarkDone(id, now()));
+    public Result MarkDone(Guid id) => Apply(Board.MarkDone(id, now(), Zone));
 
     // `stoppingClaude`: past the refusal for a task Claude is still working on (TaskBoard.Close, task 37cd7081), for
     // "Stop Claude and close", which stops the sessions right after.
     public Result Close(Guid id, bool stoppingClaude = false) => Apply(Board.Close(id, now(), stoppingClaude));
 
-    public Result Reopen(Guid id) => Apply(Board.Reopen(id, now()));
+    public Result Reopen(Guid id) => Apply(Board.Reopen(id, now(), Zone));
 
     public Result SetStatus(Guid id, TaskStatus status) => Apply(Board.SetStatus(id, status, now()));
 
@@ -160,6 +164,16 @@ public sealed class TaskService(ITaskStore store, Func<DateTimeOffset> now, Func
     public Result Snooze(Guid id, DateTimeOffset until) => ApplyIfChanged(Board.Snooze(id, until, now()));
 
     public Result Wake(Guid id) => ApplyIfChanged(Board.Wake(id, now()));
+
+    // Recurring tasks (spec 2026-11-26-recurring-tasks-design.md, task 0b78269e): the board's rules, with this service's
+    // clock and zone. A change that leaves the board as it was saves and pulses nothing.
+    public Result SetRepeat(Guid id, TaskRepeat repeat) => ApplyIfChanged(Board.SetRepeat(id, repeat, now(), Zone));
+
+    public Result ClearRepeat(Guid id) => ApplyIfChanged(Board.ClearRepeat(id, now()));
+
+    public Result RunStarted(Guid id) => ApplyIfChanged(Board.RunStarted(id, now(), Zone));
+
+    public Result Rescheduled(Guid id) => ApplyIfChanged(Board.Rescheduled(id, now(), Zone));
 
     /// <summary>
     /// Ends every snooze whose time has come (TaskBoard.WakeDue). The app calls it on a timer; nearly always nothing is

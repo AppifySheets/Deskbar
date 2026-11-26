@@ -96,4 +96,217 @@ public sealed class RecurringTasksTests : IDisposable
         Assert.Equal(expected, Note(t => t with { Status = status, Repeat = repeat }).IsBetweenRuns);
         Assert.False(Note(t => t with { Status = status }).IsBetweenRuns);
     }
+
+    // --- the board's rules (Task 3) ------------------------------------------------------------------------------------
+    // A fixed zone (+04:00) and a clock of Wednesday 14:20 local; `every 1h` unless a test says otherwise. Each test that
+    // moves the status and the snooze together pins the two-step order, because TaskBoard.Woken (the rule that drops a
+    // snooze when the status changes in the same step) would otherwise eat the snooze.
+
+    static readonly TimeZoneInfo Plus4 = TimeZoneInfo.CreateCustomTimeZone("T+4", TimeSpan.FromHours(4), "T+4", "T+4");
+    static readonly DateTimeOffset Now = new(2026, 11, 25, 14, 20, 0, TimeSpan.FromHours(4));
+    static readonly TimeSpan Hour = TimeSpan.FromHours(1);
+
+    static TaskRepeat Repeat(string schedule = "every 1h") => new(TaskRepeats.Parse(schedule).Value, "sonnet", @"C:\repos\TaskSpaces");
+
+    // A Backlog note and its id, on a board.
+    static (TaskBoard Board, Guid Id) Fresh()
+    {
+        var made = TaskBoard.Empty.AddNote("check the deploy", Ws, Now, Guid.NewGuid()).Value;
+        return (made.Board, made.Task.Id);
+    }
+
+    static TaskItem Of(TaskBoard board, Guid id) => board.Tasks.Single(t => t.Id == id);
+
+    static TaskSession Session(string id = "s1") => new(id, @"C:\repos\TaskSpaces", Now, Maybe<DateTimeOffset>.None);
+
+    [Fact]
+    public void SetRepeat_snoozes_a_backlog_note_until_its_next_run_and_gives_it_to_claude()
+    {
+        var (board, id) = Fresh();
+
+        var task = Of(board.SetRepeat(id, Repeat(), Now, Plus4).Value, id);
+
+        Assert.Equal(Now + Hour, task.NextRun.Value);
+        Assert.Equal(Now + Hour, task.SnoozedUntil.Value);
+        Assert.Equal(Assignee.Claude, task.Assignee);
+        Assert.Equal(TaskStatus.Backlog, task.Status);
+    }
+
+    [Fact]
+    public void SetRepeat_on_a_task_in_progress_sets_the_next_run_and_does_not_snooze_it()
+    {
+        var (board, id) = Fresh();
+        board = board.Join(id, Session(), Now).Value;
+
+        var task = Of(board.SetRepeat(id, Repeat(), Now, Plus4).Value, id);
+
+        Assert.Equal(TaskStatus.InProgress, task.Status);
+        Assert.Equal(Now + Hour, task.NextRun.Value);
+        Assert.False(task.IsSnoozed);
+    }
+
+    [Fact]
+    public void SetRepeat_refuses_a_closed_task_and_changes_nothing()
+    {
+        var (board, id) = Fresh();
+        board = board.Close(id, Now).Value;
+
+        var result = board.SetRepeat(id, Repeat(), Now, Plus4);
+
+        Assert.True(result.IsFailure);
+        Assert.False(Of(board, id).Repeat.HasValue);
+        Assert.False(Of(board, id).NextRun.HasValue);
+    }
+
+    [Theory]
+    [InlineData(RecurringRuns.FolderGoneQuestion)]
+    [InlineData(RecurringRuns.StartFailedQuestion)]
+    public void SetRepeat_answers_a_repeat_question(string question)
+    {
+        var (board, id) = Fresh();
+        board = board.Ask(id, question, Now).Value;
+
+        var task = Of(board.SetRepeat(id, Repeat(), Now, Plus4).Value, id);
+
+        Assert.Equal(TaskStatus.Backlog, task.Status);
+        Assert.False(task.Question.HasValue);
+        Assert.Equal(Now + Hour, task.SnoozedUntil.Value);
+    }
+
+    [Fact]
+    public void SetRepeat_leaves_a_question_that_is_not_about_the_repeat()
+    {
+        var (board, id) = Fresh();
+        board = board.Ask(id, "which branch?", Now).Value;
+
+        var task = Of(board.SetRepeat(id, Repeat(), Now, Plus4).Value, id);
+
+        Assert.Equal(TaskStatus.WaitingOnYou, task.Status);
+        Assert.Equal("which branch?", task.Question.Value);
+        Assert.False(task.IsSnoozed);
+    }
+
+    [Fact]
+    public void ClearRepeat_ends_the_repeat_and_the_snooze_it_made_but_not_a_later_snooze_of_petres()
+    {
+        var (board, id) = Fresh();
+        var set = board.SetRepeat(id, Repeat(), Now, Plus4).Value;
+
+        var cleared = Of(set.ClearRepeat(id, Now).Value, id);
+        Assert.False(cleared.Repeat.HasValue);
+        Assert.False(cleared.NextRun.HasValue);
+        Assert.False(cleared.IsSnoozed);
+
+        var later = Now + TimeSpan.FromDays(2);
+        var petres = Of(set.Snooze(id, later, Now).Value.ClearRepeat(id, Now).Value, id);
+        Assert.False(petres.Repeat.HasValue);
+        Assert.Equal(later, petres.SnoozedUntil.Value);
+    }
+
+    [Fact]
+    public void Done_on_a_recurring_task_is_the_end_of_a_run()
+    {
+        var (board, id) = Fresh();
+        board = board.SetRepeat(id, Repeat(), Now, Plus4).Value.Join(id, Session(), Now).Value;
+        var raised = Of(board, id).Raised;
+        var later = Now + TimeSpan.FromMinutes(5);
+
+        var task = Of(board.MarkDone(id, later, Plus4).Value, id);
+
+        Assert.Equal(TaskStatus.Backlog, task.Status);
+        Assert.Equal(raised, task.Raised);
+        Assert.False(task.Question.HasValue);
+        Assert.Equal(Assignee.Claude, task.Assignee);
+        Assert.Equal(later + Hour, task.NextRun.Value);
+        Assert.Equal(later + Hour, task.SnoozedUntil.Value);
+    }
+
+    [Fact]
+    public void Done_on_a_plain_task_is_unchanged()
+    {
+        var (board, id) = Fresh();
+
+        var task = Of(board.MarkDone(id, Now).Value, id);
+
+        Assert.Equal(TaskStatus.Done, task.Status);
+        // Done raises it (stamps Raised); the first Done task's pin is 0, so Raised is what shows the old path ran.
+        Assert.Equal(Now, task.Raised);
+        Assert.Equal(Assignee.Me, task.Assignee);
+    }
+
+    [Fact]
+    public void Close_keeps_the_repeat_and_reopen_resumes_it_from_now()
+    {
+        var (board, id) = Fresh();
+        board = board.SetRepeat(id, Repeat(), Now, Plus4).Value.Close(id, Now).Value;
+        Assert.True(Of(board, id).Repeat.HasValue);
+        var reopened = Now + TimeSpan.FromDays(2);
+
+        var task = Of(board.Reopen(id, reopened, Plus4).Value, id);
+
+        Assert.True(task.IsOpen);
+        Assert.Equal(reopened + Hour, task.NextRun.Value);
+        Assert.Equal(reopened + Hour, task.SnoozedUntil.Value);
+    }
+
+    [Fact]
+    public void Wake_now_on_a_task_between_runs_makes_its_run_due_now()
+    {
+        var (board, id) = Fresh();
+        board = board.SetRepeat(id, Repeat(), Now, Plus4).Value;
+        var later = Now + TimeSpan.FromMinutes(10);
+
+        var task = Of(board.Wake(id, later).Value, id);
+
+        Assert.Equal(later, task.NextRun.Value);
+        Assert.False(task.IsSnoozed);
+    }
+
+    [Fact]
+    public void RunStarted_wakes_the_task_and_sets_the_following_occurrence()
+    {
+        var (board, id) = Fresh();
+        board = board.SetRepeat(id, Repeat(), Now, Plus4).Value;
+        var later = Now + Hour;
+
+        var task = Of(board.RunStarted(id, later, Plus4).Value, id);
+
+        Assert.Equal(later + Hour, task.NextRun.Value);
+        Assert.False(task.IsSnoozed);
+        Assert.Equal(TaskStatus.Backlog, task.Status);
+    }
+
+    [Fact]
+    public void Rescheduled_snoozes_only_between_runs()
+    {
+        var (board, id) = Fresh();
+        board = board.SetRepeat(id, Repeat(), Now, Plus4).Value;
+        var later = Now + TimeSpan.FromMinutes(30);
+
+        var asleep = Of(board.Rescheduled(id, later, Plus4).Value, id);
+        Assert.Equal(later + Hour, asleep.NextRun.Value);
+        Assert.Equal(later + Hour, asleep.SnoozedUntil.Value);
+
+        // WaitingOnYou with a question that is not about the repeat: the new NextRun, and still visible.
+        var waiting = board.Wake(id, Now).Value.Ask(id, "which branch?", Now).Value;
+        var shown = Of(waiting.Rescheduled(id, later, Plus4).Value, id);
+        Assert.Equal(later + Hour, shown.NextRun.Value);
+        Assert.False(shown.IsSnoozed);
+    }
+
+    [Fact]
+    public void The_service_uses_its_zone()
+    {
+        var (board, id) = Fresh();
+        var store = new JsonTaskStore(dir);
+        store.Save(board);
+        var service = new TaskService(store, () => Now, zone: Plus4);
+        service.Load();
+
+        Assert.True(service.SetRepeat(id, Repeat("daily 09:00")).IsSuccess);
+
+        var next = Of(service.Board, id).NextRun.Value;
+        Assert.Equal(new DateTimeOffset(2026, 11, 26, 9, 0, 0, TimeSpan.FromHours(4)), next);
+        Assert.Equal(next, Of(service.Board, id).SnoozedUntil.Value);
+    }
 }

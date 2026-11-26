@@ -443,8 +443,25 @@ public sealed record TaskBoard(IReadOnlyList<TaskItem> Tasks)
     /// Claude's clear finish. The task stays in the list, waiting for Petre to close it. Becoming Done stamps
     /// <see cref="TaskItem.Raised"/>, which orders the Done group; a task already Done keeps its stamp.
     /// </summary>
-    public Result<TaskBoard> MarkDone(Guid id, DateTimeOffset now) =>
-        ChangeOpen(id, t => BecameDone(t, now) with { Question = Maybe<string>.None, UpdatedAt = now, Assignee = Assignee.Me });
+    //
+    // A RECURRING TASK'S DONE ENDS A RUN, NOT THE TASK (recurring tasks spec, task 0b78269e, Task 3). Done would pin it in
+    // Petre's Done block and hand it to him, but a repeat is Claude's standing job: the run is over, so the task goes back
+    // to Backlog (no Raised stamp and no Pin, so nothing is raised to him), stays Claude's, and sleeps until the next
+    // occurrence, worked out from NOW (never caught up). <paramref name="zone"/> null means the machine's own zone.
+    public Result<TaskBoard> MarkDone(Guid id, DateTimeOffset now, TimeZoneInfo? zone = null) =>
+        Tasks.FirstOrDefault(t => t.Id == id) is { IsOpen: true, Repeat.HasValue: true } recurring
+            ? ChangeOpen(id, t => t with
+                {
+                    Status = TaskStatus.Backlog,
+                    Question = Maybe<string>.None,
+                    Assignee = Assignee.Claude,
+                    NextRun = recurring.Repeat.Value.Schedule.Next(now, zone ?? TimeZoneInfo.Local),
+                    UpdatedAt = now,
+                })
+                // A second step on purpose: Woken drops a snooze whenever the status changes in the SAME step, and this
+                // step changed it, so the snooze goes on afterwards, where the status is already Backlog.
+                .Map(board => board.SleepUntilNextRun(id, now))
+            : ChangeOpen(id, t => BecameDone(t, now) with { Question = Maybe<string>.None, UpdatedAt = now, Assignee = Assignee.Me });
 
     // --- what Petre does ---------------------------------------------------------------------------
 
@@ -486,10 +503,19 @@ public sealed record TaskBoard(IReadOnlyList<TaskItem> Tasks)
     /// (Ruling 25: it left the list, so it comes back the way a new task arrives). A subtask brings its closed parent
     /// back with it (<see cref="WithParentReopened"/>).
     /// </summary>
-    public Result<TaskBoard> Reopen(Guid id, DateTimeOffset now) =>
+    //
+    // A RECURRING TASK COMES BACK WITH ITS REPEAT (recurring tasks spec, Task 3): closing kept the repeat, so reopening
+    // resumes it from now. Its next run is worked out from the reopening (a task closed for two days does not run the
+    // runs it missed), it is Claude's again, and it sleeps until that run when it is between runs. Snoozed in a second
+    // step, because Woken drops a snooze when the status changes in the same one.
+    public Result<TaskBoard> Reopen(Guid id, DateTimeOffset now, TimeZoneInfo? zone = null) =>
         Tasks.FirstOrDefault(t => t.Id == id) is { IsOpen: true }
             ? Result.Failure<TaskBoard>(TaskIsNotClosed)
-            : Change(id, t => Reopened(t, now)).Bind(board => board.WithParentReopened(id, now));
+            : Change(id, t => t.Repeat.HasValue
+                    ? Reopened(t, now) with { Assignee = Assignee.Claude, NextRun = t.Repeat.Value.Schedule.Next(now, zone ?? TimeZoneInfo.Local) }
+                    : Reopened(t, now))
+                .Bind(board => board.WithParentReopened(id, now))
+                .Map(board => board.SleepUntilNextRun(id, now));
 
     // What a reopening makes of a closed task, shared by Reopen and by a parent coming back with its subtask. The
     // assignee is derived from what the task is now (Ruling 57 review): a session still live on it is Claude's work in
@@ -687,8 +713,12 @@ public sealed record TaskBoard(IReadOnlyList<TaskItem> Tasks)
             : Result.Success(Replaced(task with { SnoozedUntil = until, UpdatedAt = now, Adopted = false })));
 
     /// <summary>Petre wakes a snoozed task early ("Wake now"). A task that is not snoozed returns this same board.</summary>
+    // A task between runs also gets NextRun = now (recurring tasks spec, Task 3): "Wake now" on a sleeping recurring task
+    // means "run it now", and the next sweep starts a run for the occurrence that is due.
     public Result<TaskBoard> Wake(Guid id, DateTimeOffset now) =>
-        Lookup(id).Map(task => task.IsSnoozed ? Replaced(task with { SnoozedUntil = Maybe<DateTimeOffset>.None, UpdatedAt = now }) : this);
+        Lookup(id).Map(task => task.IsBetweenRuns && task.NextRun != now
+            ? Replaced(task with { SnoozedUntil = Maybe<DateTimeOffset>.None, NextRun = now, UpdatedAt = now })
+            : task.IsSnoozed ? Replaced(task with { SnoozedUntil = Maybe<DateTimeOffset>.None, UpdatedAt = now }) : this);
 
     /// <summary>
     /// Every snooze whose time has come ends: the app's timer calls this, so a task comes back on its own. Nothing due
@@ -700,6 +730,71 @@ public sealed record TaskBoard(IReadOnlyList<TaskItem> Tasks)
             : this;
 
     static bool Due(TaskItem task, DateTimeOffset now) => task.SnoozedUntil.HasValue && task.SnoozedUntil.Value <= now;
+
+    // --- recurring tasks (spec docs/superpowers/specs/2026-11-26-recurring-tasks-design.md, task 0b78269e, Task 3) ----------
+    // A repeating task sleeps (snoozed) between runs and wakes by the same WakeDue timer as any snooze; NextRun is the
+    // occurrence it sleeps until. Every NextRun is worked out from NOW, never caught up. Each rule that moves the status
+    // and the snooze together applies the snooze in a SECOND step (SleepUntilNextRun) because Woken drops a snooze when
+    // the status changes in the same step.
+
+    /// <summary>
+    /// A repeat is set (or replaced): the next run is worked out from now, the task becomes Claude's (a repeat means
+    /// Claude runs it), and a task waiting on one of the two repeat questions (<see cref="RecurringRuns.IsRepeatQuestion"/>)
+    /// goes back to Backlog without it, because setting the repeat again is the answer. A task between runs sleeps until
+    /// the next run; one in progress or waiting keeps its status and is not snoozed. A closed task is refused.
+    /// </summary>
+    public Result<TaskBoard> SetRepeat(Guid id, TaskRepeat repeat, DateTimeOffset now, TimeZoneInfo zone) =>
+        ChangeOpen(id, t => (t.Status == TaskStatus.WaitingOnYou && RecurringRuns.IsRepeatQuestion(t.Question)
+                ? t with { Status = TaskStatus.Backlog, Question = Maybe<string>.None }
+                : t) with
+            {
+                Repeat = repeat,
+                NextRun = repeat.Schedule.Next(now, zone),
+                Assignee = Assignee.Claude,
+                UpdatedAt = now,
+            })
+            .Map(board => board.SleepUntilNextRun(id, now));
+
+    /// <summary>
+    /// The repeat ends. A snooze equal to the old NextRun was the repeat's own and ends with it; a later snooze of
+    /// Petre's is his and stays. A task without a repeat returns this same board.
+    /// </summary>
+    public Result<TaskBoard> ClearRepeat(Guid id, DateTimeOffset now) =>
+        Lookup(id).Map(task => !task.Repeat.HasValue && !task.NextRun.HasValue ? this
+            : Replaced(task with
+            {
+                Repeat = Maybe<TaskRepeat>.None,
+                NextRun = Maybe<DateTimeOffset>.None,
+                SnoozedUntil = task.SnoozedUntil.HasValue && task.NextRun.HasValue && task.SnoozedUntil.Value == task.NextRun.Value
+                    ? Maybe<DateTimeOffset>.None
+                    : task.SnoozedUntil,
+                UpdatedAt = now,
+            }));
+
+    /// <summary>
+    /// A run was started: the snooze ends and NextRun moves to the occurrence after it. The status is left to the new
+    /// session's `task join`, which makes the task In progress.
+    /// </summary>
+    public Result<TaskBoard> RunStarted(Guid id, DateTimeOffset now, TimeZoneInfo zone) =>
+        Lookup(id).Map(task => task.Repeat.HasValue
+            ? Replaced(task with { SnoozedUntil = Maybe<DateTimeOffset>.None, NextRun = task.Repeat.Value.Schedule.Next(now, zone), UpdatedAt = now })
+            : this);
+
+    /// <summary>
+    /// The next run is worked out again from now (an occurrence was skipped): the task sleeps until it only when it is
+    /// between runs; one in progress or waiting gets the new NextRun and stays visible.
+    /// </summary>
+    public Result<TaskBoard> Rescheduled(Guid id, DateTimeOffset now, TimeZoneInfo zone) =>
+        Lookup(id).Map(task => task.Repeat.HasValue
+            ? Replaced(task with { NextRun = task.Repeat.Value.Schedule.Next(now, zone), UpdatedAt = now }).SleepUntilNextRun(id, now)
+            : this);
+
+    // The snooze that makes a task sleep between runs: until its NextRun, only while it IsBetweenRuns (open, Backlog or
+    // Done, with a repeat). Anything else is returned unchanged.
+    TaskBoard SleepUntilNextRun(Guid id, DateTimeOffset now) =>
+        Tasks.FirstOrDefault(t => t.Id == id) is { IsBetweenRuns: true, NextRun.HasValue: true } task
+            ? Replaced(task with { SnoozedUntil = task.NextRun, UpdatedAt = now })
+            : this;
 
     // A SNOOZE ENDS WHEN SOMETHING HAPPENS THAT PETRE SHOULD SEE: the task's status changed (a session joined his note, a
     // question was answered, he set it by hand, it was closed) or it was raised (a session asked, or it became Done).
