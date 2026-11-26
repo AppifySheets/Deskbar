@@ -36,8 +36,11 @@ internal static class TaskStatusMarks
     // THE RING THAT FILLS ON ARRIVAL (task 8470d176, Petre's pick A in https://claude.ai/artifact/2NujT6C7cJyYNQUVupjhfp).
     // A Done task whose change is merged but not in the running Deskbar yet (TaskDelivery.Shipping, RunningChanges in
     // Core) gets the same mark hollow: a green ring with a green tick, on the same 14-unit grid, so it still reads as
-    // Done at a glance and the disc filling in is the deploy. The ring is drawn inside the grid (radius 6.1, stroke 1.6)
-    // so its outer edge meets the disc's and the two marks are the same size on a line.
+    // Done at a glance and the disc filling in is the deploy. The ring is the same 14-unit circle as the disc, only
+    // without the fill (task 9faa55f0, Petre: "use the same sized circle, but without a fill"). The first version placed
+    // a 12.2-unit ellipse 0.9 in, on the belief that WPF centres a stroke on the shape's edge. It does not: an Ellipse
+    // keeps its stroke INSIDE its Width and Height, so that ring's outer edge was 12.2 across and on his screen it read
+    // as a smaller mark than the disc on the next line. TaskStatusMarkSizeTests measures the painted ink of both.
 
     /// <summary>
     /// The Done tick: a green disc <paramref name="size"/> DIP across with a dark tick in it, or, while the task's change
@@ -58,16 +61,11 @@ internal static class TaskStatusMarks
             StrokeLineJoin = PenLineJoin.Round,
         };
         var canvas = new Canvas { Width = 14, Height = 14 };
-        // The ring's ellipse is 12.2 across with its stroke centred on that edge: placed 0.9 in, its outer edge sits on
-        // the 14-unit square like the disc's.
+        // Both rounds fill the whole 14-unit square from 0,0. The ring's stroke is drawn inward from that edge (WPF keeps
+        // a shape's stroke within its bounds), so its outer edge is the disc's edge and the tick sits in the same place.
         var round = shipping
-            ? new Ellipse { Width = 12.2, Height = 12.2, Stroke = DoneGreen, StrokeThickness = 1.6 }
+            ? new Ellipse { Width = 14, Height = 14, Stroke = DoneGreen, StrokeThickness = 1.6 }
             : new Ellipse { Width = 14, Height = 14, Fill = DoneGreen };
-        if (shipping)
-        {
-            Canvas.SetLeft(round, 0.9);
-            Canvas.SetTop(round, 0.9);
-        }
         canvas.Children.Add(round);
         canvas.Children.Add(tick);
         return new Viewbox
