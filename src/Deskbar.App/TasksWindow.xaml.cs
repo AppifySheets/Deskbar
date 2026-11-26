@@ -2024,7 +2024,9 @@ public partial class TasksWindow : Window
     //                         ended, which it resumes;
     //   Start Claude on this  only where Open Claude is not: a task no session has joined, or one whose session has
     //                         expired, so nothing is left to open;
-    //   Add subtask           the twin of the menu's "Add subtask…" (task 0eb943d8). While its box is open (Thread puts the
+    //   Reevaluate            beside Open Claude (task 3dd07539, "move it as a button at the top"): the session checks
+    //                         where the task stands and fixes its question, status and status line. No twin on the line;
+    //   Add subtask          the twin of the menu's "Add subtask…" (task 0eb943d8). While its box is open (Thread puts the
     //                         box right under this row) the button is left out, so the box is the one place to type.
     // ONE CLAUDE BUTTON, NEVER BOTH (task 5e02e99f; Petre, on a screenshot of a done task's thread whose session had ended
     // and whose row read Open in window, Open Claude, Start Claude on this, Add subtask: "open claude and start claude on
