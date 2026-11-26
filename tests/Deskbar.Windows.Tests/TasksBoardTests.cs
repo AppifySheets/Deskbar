@@ -95,7 +95,9 @@ public class TasksBoardTests
         Func<TaskItem, IReadOnlyList<SessionView>>? sessionsOf = null, Action<Guid>? startClaude = null,
         Func<TaskItem, string, Result>? openSession = null, IObservable<System.Reactive.Unit>? sessionsChanged = null,
         string edge = "right", double width = Wide, Func<TaskItem, int>? workingOf = null, double? screenDips = null,
-        string? stateDir = null, Action<string>? openImage = null, Func<Result>? openManager = null, Action<Uri>? openUri = null)
+        string? stateDir = null, Action<string>? openImage = null, Func<Result>? openManager = null, Action<Uri>? openUri = null,
+        Func<TaskItem, Action<string>, ContextMenu?>? pickFolder = null, Func<Guid, Result>? runNow = null,
+        Func<string, Maybe<string>>? askRepeat = null)
     {
         var harness = Harness.Build();
         var minutes = 0;
@@ -126,13 +128,14 @@ public class TasksBoardTests
             return activates?.Invoke() ?? true;
         }, undoTimer: timers.Start, now: () => Start.AddHours(1), selection: selection,
             sessionsOf: sessionsOf, startClaude: startClaude, openSession: openSession, sessionsChanged: sessionsChanged,
-            workingOf: workingOf)
+            workingOf: workingOf, pickFolder: pickFolder, runNow: runNow)
         {
             // The manager line's click (task 61e4d143); none by default, so no manager line is drawn.
             OpenManager = openManager,
             // A link's final open (task 26f15d70), recorded or dropped: a run never starts a browser.
             OpenUri = openUri ?? (_ => { }),
         };
+        if (askRepeat is not null) window.AskRepeat = askRepeat;
         return new Board { Harness = harness, Window = window, Controller = controller, Panel = panel, Tasks = tasks, Timers = timers, WentTo = went };
     }
 
@@ -2111,6 +2114,136 @@ public class TasksBoardTests
         Assert.Contains("Snoozed 0", t.Window.FilterLabels);
         t.Controller.Filter(TaskFilter.Open);
         Assert.Equal([b, a], t.Window.Keys);
+    });
+
+    // Recurring tasks (task 0b78269e, Task 8): the "Repeat" submenu of the line's "⋯" menu.
+    static string Words(MenuItem item) => item.Header is TextBlock text ? text.Text : $"{item.Header}";
+
+    static MenuItem RepeatItem(ContextMenu menu) =>
+        menu.Items.OfType<MenuItem>().Single(i => Words(i) is "Repeat" or "Repeats");
+
+    static void Click(MenuItem item) => item.RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+
+    static TaskRepeat DailyRepeat() => new(TaskRepeats.Parse("daily 09:00").Value, TaskRepeat.DefaultModel, @"C:\repos\x");
+
+    [Fact]
+    public void The_line_menu_has_Repeat_with_five_choices_custom_and_no_off_on_a_plain_task() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var id = t.Tasks.AddNote("a", t.Gepha).Value.Id;
+        t.Controller.Show();
+
+        var menu = t.Window.OpenMenuFor(id);
+        var repeat = RepeatItem(menu);
+        menu.IsOpen = false;
+
+        Assert.Equal("Repeat", Words(repeat));
+        Assert.Equal([.. TaskRepeats.MenuChoices.Select(c => c.Label), "Custom…"], repeat.Items.OfType<MenuItem>().Select(Words));
+        Assert.DoesNotContain(repeat.Items.OfType<MenuItem>(), i => i.IsChecked);
+    });
+
+    [Fact]
+    public void A_recurring_line_ticks_its_schedule_and_offers_Off() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var id = t.Tasks.AddNote("a", t.Gepha).Value.Id;
+        Assert.True(t.Tasks.SetRepeat(id, DailyRepeat()).IsSuccess);
+        t.Controller.Show();
+        t.Controller.Filter(TaskFilter.Snoozed);
+
+        var menu = t.Window.OpenMenuFor(id);
+        var repeat = RepeatItem(menu);
+        menu.IsOpen = false;
+
+        Assert.Equal("Repeats", Words(repeat));
+        var items = repeat.Items.OfType<MenuItem>().ToArray();
+        Assert.Equal(["Every day at 09:00"], items.Where(i => i.IsChecked).Select(Words));
+        Assert.Equal("Off", Words(items[^1]));
+    });
+
+    [Fact]
+    public void Picking_every_hour_with_one_known_folder_sets_the_repeat() => StaThread.Run(() =>
+    {
+        // The Start Claude pick with one known folder answers at once and opens no list (ClaudeTaskActions.PickFolder).
+        using var t = Build(pickFolder: (_, chosen) =>
+        {
+            chosen(@"C:\repos\x\.claude\worktrees\topic");
+            return null;
+        });
+        var id = t.Tasks.AddNote("a", t.Gepha).Value.Id;
+        t.Controller.Show();
+
+        var menu = t.Window.OpenMenuFor(id);
+        Click(RepeatItem(menu).Items.OfType<MenuItem>().First());
+        menu.IsOpen = false;
+
+        var task = t.Tasks.Board.Tasks.Single(x => x.Id == id);
+        Assert.Equal("every 1h", task.Repeat.Value.Schedule.Text);
+        Assert.Equal("sonnet", task.Repeat.Value.Model);
+        // The repo, not the worktree it was picked from.
+        Assert.Equal(@"C:\repos\x", task.Repeat.Value.Folder);
+        Assert.True(task.NextRun.HasValue);
+    });
+
+    [Fact]
+    public void Picking_Off_ends_the_repeat() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var id = t.Tasks.AddNote("a", t.Gepha).Value.Id;
+        Assert.True(t.Tasks.SetRepeat(id, DailyRepeat()).IsSuccess);
+        t.Controller.Show();
+        t.Controller.Filter(TaskFilter.Snoozed);
+
+        var menu = t.Window.OpenMenuFor(id);
+        Click(RepeatItem(menu).Items.OfType<MenuItem>().Single(i => Words(i) == "Off"));
+        menu.IsOpen = false;
+
+        Assert.True(t.Tasks.Board.Tasks.Single(x => x.Id == id).Repeat.HasNoValue);
+    });
+
+    [Fact]
+    public void Custom_with_a_bad_schedule_says_why_on_the_problem_line() => StaThread.Run(() =>
+    {
+        var asked = new List<string>();
+        using var t = Build(askRepeat: current =>
+        {
+            asked.Add(current);
+            return "every 5m";
+        });
+        var id = t.Tasks.AddNote("a", t.Gepha).Value.Id;
+        t.Controller.Show();
+
+        var menu = t.Window.OpenMenuFor(id);
+        Click(RepeatItem(menu).Items.OfType<MenuItem>().Single(i => Words(i) == "Custom…"));
+        menu.IsOpen = false;
+        t.Window.Dispatcher.Invoke(() => { }, System.Windows.Threading.DispatcherPriority.Background);
+
+        // The dialog was prefilled with nothing (no repeat yet); the refusal is the parser's, shown on the problem line.
+        Assert.Equal([""], asked);
+        Assert.True(t.Tasks.Board.Tasks.Single(x => x.Id == id).Repeat.HasNoValue);
+        Assert.Contains("15 minutes to 24 hours", t.Controller.Repeat(id, "every 5m").Error);
+    });
+
+    [Fact]
+    public void Wake_now_on_a_recurring_task_runs_it() => StaThread.Run(() =>
+    {
+        var ran = new List<Guid>();
+        using var t = Build(runNow: id =>
+        {
+            ran.Add(id);
+            return Result.Success();
+        });
+        var id = t.Tasks.AddNote("a", t.Gepha).Value.Id;
+        Assert.True(t.Tasks.SetRepeat(id, DailyRepeat()).IsSuccess);
+        var plain = t.Tasks.AddNote("plain", t.Gepha).Value.Id;
+        Assert.True(t.Tasks.Snooze(plain, Start.AddDays(1)).IsSuccess);
+
+        Assert.True(t.Controller.Wake(id).IsSuccess);
+        Assert.True(t.Controller.Wake(plain).IsSuccess);
+
+        // The recurring task ran; the plain snoozed one only woke.
+        Assert.Equal([id], ran);
+        Assert.False(t.Tasks.Board.Tasks.Single(x => x.Id == plain).IsSnoozed);
     });
 
     // Petre, 2026-11-25: "i may snooze something that's waiting". A line waiting on him has the moon too; snoozed, it

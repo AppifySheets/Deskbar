@@ -1,6 +1,7 @@
 using System.Reactive.Disposables;
 using System.Reactive.Linq;
 using System.Windows;
+using System.Windows.Controls;
 using System.Windows.Interop;
 using System.Windows.Media;
 using CSharpFunctionalExtensions;
@@ -126,6 +127,13 @@ public sealed class TasksBoard : IDisposable
     readonly Func<bool> knowsActivity;
     // Whether Open Claude on a task can open anything (task 6a57f59b; the App's ClaudeTaskActions.CanOpen): TaskRowView.OpensSession.
     readonly Func<TaskItem, bool> opensSession;
+
+    // Recurring tasks (task 0b78269e, spec docs/superpowers/specs/2026-11-26-recurring-tasks-design.md):
+    //   pickFolder  the Start Claude folder pick (ClaudeTaskActions.PickFolder): the repeat's folder, when its words name none
+    //   runNow      starts a recurring task's run at once (RecurringRunner.RunNow): "Wake now" on a task between runs
+    // None for either: Repeat finds no folder, and Wake only ends the sleep.
+    readonly Func<TaskItem, Action<string>, ContextMenu?>? pickFolder;
+    readonly Func<Guid, Result>? runNow;
     // "Stop Claude and close" (task 37cd7081): the App's ClaudeTaskActions.StopAndClose. None (the tests): the close alone.
     readonly Func<TaskItem, Result>? stopClaudeAndClose;
     readonly IDisposable subscriptions;
@@ -241,8 +249,11 @@ public sealed class TasksBoard : IDisposable
         Func<TaskItem, string, Result>? openSession = null, IObservable<System.Reactive.Unit>? sessionsChanged = null,
         Func<TaskItem, int>? workingOf = null, Func<TaskItem, Result>? stopClaudeAndClose = null, Func<bool>? knowsActivity = null,
         Func<TaskItem, bool>? opensSession = null,
-        Func<Maybe<Guid>, Maybe<Guid>, Task<IReadOnlyList<SkillChoice>>>? workspaceSkills = null)
+        Func<Maybe<Guid>, Maybe<Guid>, Task<IReadOnlyList<SkillChoice>>>? workspaceSkills = null,
+        Func<TaskItem, Action<string>, ContextMenu?>? pickFolder = null, Func<Guid, Result>? runNow = null)
     {
+        this.pickFolder = pickFolder;
+        this.runNow = runNow;
         this.workingOf = workingOf ?? (_ => 0);
         this.knowsActivity = knowsActivity ?? (workingOf is null ? () => false : () => true);
         this.stopClaudeAndClose = stopClaudeAndClose;
@@ -322,6 +333,8 @@ public sealed class TasksBoard : IDisposable
             NestTargets = id => tasks.Board.ParentCandidates(id).Select(t => t.Id).ToHashSet(),
             Snooze = (id, choice) => Snooze(id, choice),
             Wake = id => Wake(id),
+            // The "Repeat" submenu of both "⋯" menus (task 0b78269e; Repeat).
+            Repeat = (id, words) => Repeat(id, words),
             ShowSubtasks = ShowSubtasks,
             // "Open in window" (task dca4ebeb): the task in a window of its own (OpenWindow).
             OpenWindow = id => OpenWindow(id),
@@ -1075,7 +1088,36 @@ public sealed class TasksBoard : IDisposable
     public Result Snooze(Guid id, SnoozeChoice choice) =>
         Report(tasks.Snooze(id, TaskSnooze.Until(choice, now().ToLocalTime(), TimeZoneInfo.Local.GetUtcOffset)), id);
 
-    public Result Wake(Guid id) => Report(tasks.Wake(id), id);
+    // "Wake now" on a recurring task between runs RUNS it (task 0b78269e, spec "Wake now"): ending the sleep alone would
+    // leave a task awake with nothing working on it, which is not what the words promise. RecurringRunner.RunNow starts the
+    // run quietly and moves the task on exactly as a due run does. Any other snoozed task just wakes.
+    public Result Wake(Guid id) =>
+        runNow is { } run && tasks.Board.Tasks.Any(t => t.Id == id && t.IsBetweenRuns)
+            ? Report(run(id), id)
+            : Report(tasks.Wake(id), id);
+
+    /// <summary>
+    /// The "Repeat" submenu's one entry point (task 0b78269e): <paramref name="words"/> are what `task repeat &lt;id&gt;`
+    /// takes, a schedule text, Custom…'s line (with `--model`, `--folder`) or "off". Parsed by the same parser as the
+    /// control pipe (TaskRepeats.ParseRequest). A repeat names its folder with `--folder`, else the Start Claude folder
+    /// pick answers (one known folder at once, otherwise its list opens and the repeat is set when one is chosen); the
+    /// repo is stored, not a worktree (ClaudeStart.RepoOf). A refusal shows on the problem line.
+    /// </summary>
+    public Result Repeat(Guid id, string words) =>
+        Report(tasks.Board.Tasks.TryFirst(t => t.Id == id).ToResult($"No task with id {id}")
+            .Bind(task => TaskRepeats.ParseRequest(words.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+                .Bind(request => request is RepeatRequest.Set set ? SetRepeat(task, set) : tasks.ClearRepeat(id))), id);
+
+    Result SetRepeat(TaskItem task, RepeatRequest.Set set)
+    {
+        Result Apply(string folder) =>
+            Report(tasks.SetRepeat(task.Id, new TaskRepeat(set.Schedule, set.Model.GetValueOrDefault(TaskRepeat.DefaultModel), ClaudeStart.RepoOf(folder))), task.Id);
+        if (set.Folder.TryGetValue(out var named)) return Apply(named);
+        if (pickFolder is null) return Result.Failure("No folder is known for this task; give --folder <path>");
+        // The pick may open a list and answer later, so its result reaches the problem line itself (Apply reports).
+        pickFolder(task, folder => Apply(folder));
+        return Result.Success();
+    }
 
     /// <summary>A drop: the task goes to that place in that quadrant, taking its flags (TaskBoard.Place).</summary>
     public Result Place(Guid id, Quadrant quadrant, TaskPlace place) => Report(tasks.Place(id, quadrant, place), id);
@@ -1465,6 +1507,11 @@ public sealed class TasksBoard : IDisposable
         Important = task.Important,
         Urgent = task.Urgent,
         SnoozedUntil = task.SnoozedUntil.Map(until => (DateTimeOffset?)until).GetValueOrDefault(),
+        // The repeat (task 0b78269e): the schedule's text (the menu's tick) and words (the line's mark, Task 9), and when
+        // the next run is due.
+        RepeatText = task.Repeat.Map(r => r.Schedule.Text).GetValueOrDefault(),
+        RepeatLabel = task.Repeat.Map(r => r.Schedule.Label).GetValueOrDefault(),
+        NextRun = task.NextRun.Map(next => (DateTimeOffset?)next).GetValueOrDefault(),
         PullRequests = task.PullRequests,
         // Whether a Done task's change runs in this Deskbar yet: the ring and the outlined chip until it does (task 8470d176).
         Delivery = tasks.DeliveryOf(task),
@@ -1768,6 +1815,15 @@ internal sealed record TaskRowView(Guid Id, string Title, string Detail, TaskSta
 
     /// <summary>When a snoozed task comes back (task 6da8d7eb), or null while it is awake: the snooze button's lit state.</summary>
     public DateTimeOffset? SnoozedUntil { get; init; }
+
+    /// <summary>The task's repeat (task 0b78269e) as `task repeat` takes it ("daily 09:00"), or null: the "Repeat" menu's tick.</summary>
+    public string? RepeatText { get; init; }
+
+    /// <summary>The same schedule in words ("every day at 09:00"), or null: for the line's repeat mark (Task 9).</summary>
+    public string? RepeatLabel { get; init; }
+
+    /// <summary>When the next run is due (TaskItem.NextRun), or null.</summary>
+    public DateTimeOffset? NextRun { get; init; }
 
     /// <summary>
     /// The pull requests the task's sessions opened (task e7aa49b1, TaskItem.PullRequests), oldest first: the task window's
@@ -2079,8 +2135,14 @@ internal sealed record TasksWindowActions(
     /// <summary>Snoozes a task for one of the menu's lengths (task 6da8d7eb). None, no snooze button and no menu item.</summary>
     public Action<Guid, SnoozeChoice>? Snooze { get; init; }
 
-    /// <summary>"Wake now" on a snoozed task.</summary>
+    /// <summary>"Wake now" on a snoozed task; on a recurring one between runs it runs it.</summary>
     public Action<Guid>? Wake { get; init; }
+
+    /// <summary>
+    /// The "Repeat" submenu (task 0b78269e): a schedule text, Custom…'s words or "off" for a task (TasksBoard.Repeat). None,
+    /// the submenu does not show.
+    /// </summary>
+    public Action<Guid, string>? Repeat { get; init; }
 
     /// <summary>The "Subtasks" checkbox (task 173ef268): true draws subtasks under their parent, false folds them. None, no checkbox.</summary>
     public Action<bool>? ShowSubtasks { get; init; }

@@ -2782,6 +2782,10 @@ public partial class App : Application
                 // Whether there is a list to split the Claude working block by (task 10b49554): until the first one,
                 // and while the feature is off, the block stays whole rather than showing every task idle.
                 knowsActivity: () => claudeActions?.KnowsActivity ?? false,
+                // Recurring tasks (task 0b78269e): a repeat's folder comes from the Start Claude folder pick, and "Wake now"
+                // on a task between runs runs it (RecurringRunner.RunNow). Both read through their fields, built after this.
+                pickFolder: (task, chosen) => claudeActions?.PickFolder(task, chosen),
+                runNow: id => recurringRunner?.RunNow(id) ?? Result.Failure("Deskbar is still starting up"),
                 // Brought forward: raised, then activated (TasksBoard.Arrive). Activated through the activator, since a
                 // `tasks-window show` typed in a terminal carries no foreground right. No move to the desktop in front
                 // any more: the panel is pinned to every desktop (above).

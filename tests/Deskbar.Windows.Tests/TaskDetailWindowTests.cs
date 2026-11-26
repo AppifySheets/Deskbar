@@ -289,6 +289,23 @@ public class TaskDetailWindowTests
             b => AutomationProperties.GetName(b)?.StartsWith("Parent ") == true);
     });
 
+    // Recurring tasks (task 0b78269e, Task 8): the window's "⋯" menu carries the same Repeat submenu as the panel's.
+    [Fact]
+    public void The_window_menu_has_Repeat_too() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var id = t.Tasks.AddNote("Weekly look", Maybe<Guid>.None).Value.Id;
+        Assert.True(t.Board.OpenWindow(id).IsSuccess);
+        var window = t.Board.WindowOf(id)!;
+
+        var menu = window.OpenMenu();
+        var heads = menu.Items.OfType<MenuItem>().ToDictionary(i => (i.Header as TextBlock)?.Text ?? "", i => i);
+        menu.IsOpen = false;
+
+        Assert.Equal([.. TaskRepeats.MenuChoices.Select(c => c.Label), "Custom…"],
+            heads["Repeat"].Items.OfType<MenuItem>().Select(i => ((TextBlock)i.Header).Text));
+    });
+
     // "Open in window" sits right after Edit on the panel's line menu.
     [Fact]
     public void The_panels_line_menu_offers_open_in_window() => StaThread.Run(() =>

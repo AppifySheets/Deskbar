@@ -310,7 +310,7 @@ public partial class TaskDetailWindow : Window
         var r = view.Row;
         return string.Join('\u001f',
             r.Id, r.Title, r.Detail, r.Status, r.Claudes, r.Place.Name, r.Place.Colour?.ToString() ?? "", r.Closing, r.Assignee.Id,
-            r.Description, r.Important, r.Urgent, r.SnoozedUntil?.ToString("O") ?? "", r.Goal?.Title ?? "", r.ParentTitle ?? "",
+            r.Description, r.Important, r.Urgent, r.SnoozedUntil?.ToString("O") ?? "", r.RepeatText ?? "", r.NextRun?.ToString("O") ?? "", r.Goal?.Title ?? "", r.ParentTitle ?? "",
             // The parent's id too (task 54b39c4c): the Parent button opens it, so a move to a namesake parent redraws.
             r.ParentId?.ToString() ?? "",
             // Whether a Done task's change runs in this Deskbar yet (task 8470d176): the status chip's word and tooltip.
@@ -785,6 +785,13 @@ public partial class TaskDetailWindow : Window
             assign.Items.Add(item);
         });
         menu.Items.Add(assign);
+        // Repeat (task 0b78269e, RepeatMenu), as the panel's menu has it; open tasks only.
+        if (open && actions.Repeat is { } repeat)
+        {
+            var repeats = Item(RepeatMenu.Header(row.RepeatText));
+            RepeatMenu.Items(row.Id, row.RepeatText, repeat, AskRepeat).ForEach(item => repeats.Items.Add(item));
+            menu.Items.Add(repeats);
+        }
         // The task list's one workspace menu (WorkspaceChipMenu), opened under "⋯" once this menu has closed.
         menu.Items.Add(Item("Move to…", () => Later(() => OpenMoveMenu(anchor))));
         menu.Items.Add(new Separator());
@@ -828,6 +835,15 @@ public partial class TaskDetailWindow : Window
 
     // Run once the menu that called it has closed: it may open a menu or a question of its own.
     void Later(Action action) => Dispatcher.BeginInvoke(action, System.Windows.Threading.DispatcherPriority.Input);
+
+    /// <summary>Asks for Custom…'s words (task 0b78269e), as TasksWindow.AskRepeat does; a seam for the tests.</summary>
+    internal Func<string, Maybe<string>> AskRepeat
+    {
+        get => askRepeat ?? (current => PromptDialog.Ask("Repeat", "Schedule, e.g. every 2h, daily 09:00, weekly fri 17:30 (add --model <m> to change the model):", current, owner: this));
+        set => askRepeat = value;
+    }
+
+    Func<string, Maybe<string>>? askRepeat;
 
     // A TextBlock header, so an underscore in a word is not read as an access key.
     static MenuItem Item(string text, Action? click = null)

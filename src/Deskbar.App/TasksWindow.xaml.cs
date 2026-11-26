@@ -3127,6 +3127,13 @@ public partial class TasksWindow : Window
             SnoozeItems(id).ForEach(item => snooze.Items.Add(item));
             menu.Items.Add(snooze);
         }
+        // Repeat (task 0b78269e, RepeatMenu): the five schedules, Custom… and, while it repeats, Off. Open lines only.
+        if (Actions?.Repeat is { } repeat && row.Status != TaskStatus.Closed && !row.Closing)
+        {
+            var repeats = Item(RepeatMenu.Header(row.RepeatText));
+            RepeatMenu.Items(id, row.RepeatText, repeat, AskRepeat).ForEach(item => repeats.Items.Add(item));
+            menu.Items.Add(repeats);
+        }
         // The task list's one workspace menu (WorkspaceChipMenu), the move the bar's line chip makes. Its own menu,
         // opened under the line's "⋯" once this one has closed: the compact chip menu is a context menu of its own, not
         // a submenu.
@@ -3300,6 +3307,18 @@ public partial class TasksWindow : Window
         openMenu = menu;
         menu.IsOpen = true;
     }
+
+    /// <summary>
+    /// Asks for Custom…'s words (task 0b78269e): a PromptDialog taking what `task repeat` takes, `--model` included.
+    /// A seam for the tests, which never show a dialog.
+    /// </summary>
+    internal Func<string, Maybe<string>> AskRepeat
+    {
+        get => askRepeat ?? (current => PromptDialog.Ask("Repeat", "Schedule, e.g. every 2h, daily 09:00, weekly fri 17:30 (add --model <m> to change the model):", current, owner: this));
+        set => askRepeat = value;
+    }
+
+    Func<string, Maybe<string>>? askRepeat;
 
     // A TextBlock header rather than a string, so an underscore in a workspace's name is not read as an access key.
     static MenuItem Item(string text, Action? click = null)
