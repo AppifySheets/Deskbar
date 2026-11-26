@@ -21,11 +21,10 @@ public sealed class PermissionDeskTests : IDisposable
     static PermissionRequest Request(string session = "s1", string command = "git push") =>
         new(session, "Bash", @"C:\repos\x", "default", [new PermissionField("command", command)]);
 
-    // A slot as the script makes it: a fresh folder, with the empty reply file cmd creates for the redirect.
+    // A slot as the script makes it: a fresh, empty folder (the code never goes through a file, the review's M1).
     string Slot(string name = "req-1-2")
     {
         Directory.CreateDirectory(Path.Combine(box, name));
-        File.WriteAllText(Path.Combine(box, name, PermissionDesk.ReplyFile), "");
         return name;
     }
 
@@ -40,11 +39,11 @@ public sealed class PermissionDeskTests : IDisposable
     {
         var desk = Desk();
         var first = desk.Register(Slot("req-1-2"), Request()).Value;
-        var second = desk.Register(Slot("req-3-4"), Request()).Value;
+        var second = desk.Register(Slot("req-3-4"), Request("s2")).Value;
 
         Assert.Matches("^[0-9a-f]{32}$", first);
         Assert.NotEqual(first, second);
-        Assert.Equal(new[] { "req-1-2", "req-3-4" }, desk.Of("s1").Select(p => p.Slot));
+        Assert.Equal(new[] { "req-1-2", "req-3-4" }, desk.All.Select(p => p.Slot));
         Assert.True(desk.Asks("s1"));
         Assert.Equal(clock + PermissionDesk.HeldFor, desk.All[0].Until);
     }
@@ -70,12 +69,15 @@ public sealed class PermissionDeskTests : IDisposable
         Assert.Single(desk.All);
     }
 
-    // An answer planted in the slot before the question was asked is never trusted: the slot is refused.
-    [Fact]
-    public void A_slot_holding_anything_but_the_reply_file_is_refused()
+    // A file planted in the slot before the question was asked is never trusted: the slot is refused, whatever the file
+    // (an answer, or a reply.txt as the first script used: the code never goes through a file now, the review's M1).
+    [Theory]
+    [InlineData(PermissionDesk.AnswerFile)]
+    [InlineData("reply.txt")]
+    public void A_slot_holding_any_file_is_refused(string planted)
     {
         var slot = Slot();
-        File.WriteAllText(Path.Combine(box, slot, PermissionDesk.AnswerFile), "0123 allow");
+        File.WriteAllText(Path.Combine(box, slot, planted), "0123 allow");
 
         Assert.True(Desk().Register(slot, Request()).IsFailure);
     }
@@ -152,7 +154,7 @@ public sealed class PermissionDeskTests : IDisposable
         var desk = Desk();
         desk.Register(Slot("req-1-1"), Request());
         clock += TimeSpan.FromMinutes(5);
-        desk.Register(Slot("req-2-2"), Request());
+        desk.Register(Slot("req-2-2"), Request("s2"));
         clock += PermissionDesk.HeldFor - TimeSpan.FromMinutes(5);
 
         Assert.True(desk.Expire());
@@ -171,14 +173,36 @@ public sealed class PermissionDeskTests : IDisposable
         var desk = Desk();
         desk.Register(Slot("req-1-1"), Request("s1"));
         desk.Register(Slot("req-2-2"), Request("s2"));
-        desk.Register(Slot("req-3-3"), Request("s1", "rm x"));
+        desk.Register(Slot("req-3-3"), Request("s3"));
 
-        Assert.Equal(2, desk.Of("s1").Count);
+        Assert.Single(desk.Of("s1"));
         Assert.True(desk.Forget("s1"));
         Assert.False(desk.Asks("s1"));
-        Assert.Equal("req-2-2", desk.All.Single().Slot);
+        Assert.Equal(new[] { "req-2-2", "req-3-3" }, desk.All.Select(p => p.Slot));
         Assert.False(Directory.Exists(Path.Combine(box, "req-1-1")));
         Assert.True(Directory.Exists(Path.Combine(box, "req-2-2")));
+    }
+
+    // ONE CARD PER SESSION (the review's L5): the user answered the old question in the terminal and the session asked
+    // again at once. The newer question takes the older one off and deletes its slot, so the old card's click finds
+    // nothing and writes nothing, and the old hook, its slot gone, ends printing nothing. Another session's stays.
+    [Fact]
+    public void A_newer_question_of_the_session_takes_the_older_one_off()
+    {
+        var desk = Desk();
+        var old = desk.Register(Slot("req-1-1"), Request("s1", "first")).Value;
+        desk.Register(Slot("req-2-2"), Request("s2"));
+        var newer = desk.Register(Slot("req-3-3"), Request("s1", "second")).Value;
+
+        Assert.Equal("req-3-3", desk.Of("s1").Single().Slot);
+        Assert.False(Directory.Exists(Path.Combine(box, "req-1-1")));
+        Assert.True(Directory.Exists(Path.Combine(box, "req-2-2")));
+        Assert.True(desk.Answer("req-1-1", PermissionDecision.Allow).IsFailure);
+        Assert.False(Directory.Exists(Path.Combine(box, "req-1-1")));
+
+        Assert.True(desk.Answer("req-3-3", PermissionDecision.Allow).IsSuccess);
+        Assert.True(Printed("req-3-3", old).HasNoValue);
+        Assert.Equal(PermissionAnswer.AllowLine, Printed("req-3-3", newer).Value);
     }
 
     // The user answered in the terminal, or the session went: the session list no longer shows it waiting.

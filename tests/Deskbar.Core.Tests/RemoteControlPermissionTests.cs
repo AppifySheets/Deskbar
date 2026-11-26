@@ -58,7 +58,6 @@ public sealed class RemoteControlPermissionTests : IDisposable
     string Slot(string name = "req-1-2")
     {
         Directory.CreateDirectory(Path.Combine(box, name));
-        File.WriteAllText(Path.Combine(box, name, PermissionDesk.ReplyFile), "");
         return name;
     }
 
@@ -111,7 +110,30 @@ public sealed class RemoteControlPermissionTests : IDisposable
         var reply = Registered(manager, call, withDesk: why != "no desk");
 
         Assert.Equal("", reply.Output);
-        Assert.Equal(why == "slot already held" ? 1 : 0, desk.All.Count);
+        // A second call on a slot already held (another process of the user replaying it) cannot take it over: the
+        // session's newer request takes the held one off first (one card per session), and the slot is gone with it, so
+        // both hooks end in the terminal. Nothing is ever held for the replay.
+        Assert.Empty(desk.All);
+    }
+
+    // ONE CARD PER SESSION (the review's L5): a newer PermissionRequest from the session takes its older card off, even
+    // when the newer one is not shown (here Claude Code's own AskUserQuestion dialog): the session no longer waits on the
+    // old question, so its slot goes and a click on the old card writes nothing.
+    [Theory]
+    [InlineData("Bash")]
+    [InlineData("AskUserQuestion")]
+    public void A_newer_request_of_the_session_takes_its_older_card_off(string tool)
+    {
+        var manager = Ready();
+        var old = Slot("req-1-1");
+        Assert.NotEqual("", Registered(manager, Call(old, Hook())).Output);
+
+        var reply = Registered(manager, Call(Slot("req-2-2"), Hook(tool)));
+
+        Assert.False(Directory.Exists(Path.Combine(box, old)));
+        Assert.True(desk.Answer(old, PermissionDecision.Allow).IsFailure);
+        Assert.Equal(tool == "Bash" ? "req-2-2" : null, desk.Of(Session).SingleOrDefault()?.Slot);
+        Assert.Equal(tool == "Bash", reply.Output.Length > 0);
     }
 
     // The task closed: its session has no open task, so the question stays in the terminal.
