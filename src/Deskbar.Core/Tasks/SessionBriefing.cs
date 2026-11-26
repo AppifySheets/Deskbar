@@ -508,7 +508,7 @@ public static class SessionBriefing
         // ONE ORDER FOR DONE (task 59d0aac1). The ask's follow-up used to end "(the pull request is merged), run task
         // answered, then task done", a third place saying merged means done. It now stops at `answered`: what comes after
         // a merge is the one ordered rule below, and a deploy a person has to make is named here as an ask like a merge.
-        $"  {Shim} task ask - --session {sessionId}   (when the next move is the user's (a pull request to merge, something to try live before it merges, a deploy, a decision): what they must do in the first words, with what they must open (a pull request, a page) as a markdown link [text](https://...) (a file too: [text](file:///C:/path/page.html)); the task waits on them and moves to the top; for buttons add a line --options, then up to 4 answers, one per line (40 characters each). Once they have done it, run {Shim} task answered --session {sessionId})",
+        $"  {Shim} task ask - --session {sessionId}   (when the next move is the user's (a pull request to merge, something to try live before it merges, a deploy, a decision): what they must do in the first words, with what they must open (a pull request, a page) as a markdown link [text](https://...) (a file too: [text](file:///C:/path/page.html)); the task waits on them and moves to the top. Once they have done it, run {Shim} task answered --session {sessionId})",
         // A MERGED PULL REQUEST IS DONE (task b326761d, Petre: "when a pr is merged and a session is waiting for me to
         // check it, it should say the task is done and i will only close it if i test it and it works"). Sessions read
         // "something to try live" as a reason to ask again after the merge, so the task sat in Waiting on you with "Try
@@ -578,7 +578,7 @@ public static class SessionBriefing
         // Petre: "can we also add a review step at the end by a smarter model?". A review reads the diff, not the
         // session, so it costs a fraction of the work it checks. It finds faults in the change; it does not rescue
         // a wrong approach, which is why a plan gets the same look before the code is written.
-        "Before you open a pull request, have a subagent on the strongest model you can use review the diff for bugs, and fix what it confirms. Have it check any plan before you write the code.",
+        "Before you open a pull request, have a subagent on the strongest model you can use review the diff for bugs, and fix what it confirms. Have it read any plan the work needed before you write the code.",
         // TASK LINKS (docs/superpowers/specs/2026-11-25-task-links-design.md; Petre: "when working on a task, claude should
         // examine what's related to it"). Task 64cb52ab asked for a button that a merged PR had shipped that morning; the
         // session only found out because Petre said "see if something like this has already been done". So every session
