@@ -113,4 +113,18 @@ public class ClaudeAgentsTests
     public void The_short_id_is_read_when_the_separator_was_decoded_with_the_wrong_code_page() =>
         Assert.Equal("d5edbad6",
             ClaudeAgents.ShortIdFromStart("backgrounded Â· d5edbad6\n  claude agents             list sessions\n").Value);
+
+    // Task daeaa26c: a row without a pid is a session Claude Code still lists but no process runs (measured 2026-11-26).
+    [Fact]
+    public void A_row_without_a_pid_has_no_process()
+    {
+        var rows = ClaudeAgents.Parse("""
+            [{"pid":52816,"id":"f3565435","cwd":"E:\\x","kind":"background","sessionId":"f3565435-1","status":"idle","state":"blocked"},
+             {"id":"0e5b4b3a","cwd":"E:\\x","kind":"background","sessionId":"0e5b4b3a-1","state":"blocked"}]
+            """).Value;
+
+        Assert.True(rows[0].HasProcess);
+        Assert.False(rows[1].HasProcess);
+        Assert.False(rows[1].Busy);
+    }
 }

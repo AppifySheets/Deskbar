@@ -47,6 +47,17 @@ public sealed record ClaudeAgent(string SessionId, Maybe<string> ShortId, string
     public Maybe<string> State { get; init; } = Maybe<string>.None;
 
     /// <summary>
+    /// Whether a process runs the session: the row has a "pid" (task daeaa26c). Claude Code goes on listing a background
+    /// session whose process has ended, with no pid and no status (measured 2026-11-26, CLI 2.1.332: six task sessions
+    /// whose last turns ended normally on 2026-11-25 were listed so the next morning, state "blocked"). Such a session
+    /// cannot take a turn until something resumes or attaches it, and the comment waiter its last Stop started may still
+    /// be running as an orphan, which claims a comment from the inbox and hands it to nobody (measured the same day: the
+    /// six inboxes were emptied within a minute, no session reacted). True unless the row says otherwise, so every agent
+    /// built before this still counts as running.
+    /// </summary>
+    public bool HasProcess { get; init; } = true;
+
+    /// <summary>
     /// Whether its turn is over, even if the list calls it busy (task 607af1db). A background session whose turn has
     /// ended while a job of its own runs on (a Bash started with run_in_background, a Monitor) is listed
     /// status "busy" until that job ends, but its state is no longer "working" (measured 2026-11-26, CLI 2.1.332: a
@@ -91,7 +102,7 @@ public static partial class ClaudeAgents
         row.ValueKind == JsonValueKind.Object && Text(row, "sessionId") is { HasValue: true } session
             ? new ClaudeAgent(session.Value, Text(row, "id"), Text(row, "cwd").GetValueOrDefault(""),
                 Text(row, "kind").GetValueOrDefault("") == "background", Text(row, "status").GetValueOrDefault("") == "busy",
-                Text(row, "name").GetValueOrDefault("")) { StartedAt = Started(row), State = Text(row, "state") }
+                Text(row, "name").GetValueOrDefault("")) { StartedAt = Started(row), State = Text(row, "state"), HasProcess = row.TryGetProperty("pid", out var pid) && pid.ValueKind == JsonValueKind.Number }
             : Maybe<ClaudeAgent>.None;
 
     // startedAt as a moment, when it is a whole number of milliseconds a DateTimeOffset can hold; else none.
