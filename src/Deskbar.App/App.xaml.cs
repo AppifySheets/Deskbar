@@ -2336,12 +2336,35 @@ public partial class App : Application
             // Not when the window is in front because the bar handed the keyboard back to it after an add (task ee75f046,
             // FloatingBar.KeyboardHandedBackTo): the note just added is the selected task then, and the terminal Petre
             // was typing in must not take the selection straight back from it.
-            monitor.ForegroundChanged.Where(hwnd => !floatingBar.KeyboardHandedBackTo(hwnd)).Subscribe(hwnd =>
-                claudeActions?.TaskOfWindow(new WindowHandle(hwnd)).Tap(id =>
+            //
+            // Asked again while the window stays in front, whenever the manager may have learned it (TerminalInFront, task
+            // 6bb3dac6): a terminal just opened from a task's Open Claude comes to the front before Deskbar knows the
+            // window, so the first ask found nothing. The window events that teach the manager a window, plus its
+            // StateChanged, which the 5 s repair pulses when it adopts a window with no event at all. Subscribed here,
+            // after manager.Start, so the manager has handled the same event before TaskOfWindow looks for the window.
+            //
+            // The body is guarded like WorkspaceManager.OnWindowEvent: an exception reaching the subscription would end
+            // it, and the terminal would never select its task again until a restart.
+            Deskbar.Core.Tasks.TerminalInFront.Tasks(
+                    monitor.ForegroundChanged.Where(hwnd => !floatingBar.KeyboardHandedBackTo(hwnd)),
+                    monitor.Events
+                        .Where(e => e.Kind is WindowEventKind.Appeared or WindowEventKind.TitleChanged or WindowEventKind.Activated)
+                        .Select(_ => System.Reactive.Unit.Default)
+                        .Merge(manager.StateChanged),
+                    hwnd => claudeActions?.TaskOfWindow(new WindowHandle(hwnd)) ?? Maybe<Guid>.None,
+                    ClickTrace.Write)
+                .Subscribe(id =>
                 {
-                    floatingBar.Selection.Select(id);
-                    tasksBoard?.Reveal();
-                }));
+                    try
+                    {
+                        floatingBar.Selection.Select(id);
+                        tasksBoard?.Reveal();
+                    }
+                    catch (Exception ex)
+                    {
+                        ClickTrace.Write($"terminal in front: selecting task {id} threw {ex.GetType().Name}: {ex.Message}");
+                    }
+                });
 
             // A window dragged by its own title bar, for dropping it on a workspace row (Petre: "can i drag
             // and drop the current window, with its header, to the workspace?"). The start and end of the
