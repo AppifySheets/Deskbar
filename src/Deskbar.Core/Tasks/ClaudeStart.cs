@@ -117,7 +117,41 @@ public static class ClaudeStart
     /// the session started with (measured: it wakes "with its saved options"), so only the start names it.
     /// </summary>
     public static IReadOnlyList<string> Arguments(TaskItem task, string model, bool runsSkill = false) =>
-        ["--bg", "--model", model, "--settings", RemoteControlOff, FirstMessage(task, runsSkill)];
+        Arguments(task, new SessionSettings(model, Maybe<string>.None, Maybe<string>.None), runsSkill);
+
+    /// <summary>
+    /// The start's arguments with the task's picked effort and permission mode too (SessionSettings): `--bg`, the flags
+    /// (`--model` always, the others only when set), Remote Control held off, then the first message. Settings with no
+    /// model get <see cref="DefaultModel"/>, so no start ever goes without `--model`.
+    /// </summary>
+    public static IReadOnlyList<string> Arguments(TaskItem task, SessionSettings launch, bool runsSkill = false) =>
+        ["--bg", .. WithModel(launch).Flags(), "--settings", RemoteControlOff, FirstMessage(task, runsSkill)];
+
+    /// <summary>
+    /// What a start launches with (TaskSession.LaunchedWith): the model named for this one start (`task start --model`),
+    /// else the task's own pick (TaskItem.Wanted), else <paramref name="settingModel"/> (AppState.ClaudeTaskModelInEffect);
+    /// effort and mode only from the task's pick. A task nobody picked for starts exactly as before the picker existed:
+    /// `--model` from the setting and nothing else.
+    /// </summary>
+    public static SessionSettings LaunchSettings(Maybe<string> given, Maybe<SessionSettings> wanted, string settingModel) =>
+        new((given.HasValue ? given : wanted.Bind(w => w.Model)).GetValueOrDefault(settingModel),
+            wanted.Bind(w => w.Effort), wanted.Bind(w => w.Mode));
+
+    // A SWITCH'S COPY (SettingsSwitch; measured 2026-11-26, Claude Code 2.1.332). `claude --bg --resume <id>` with flags
+    // starts a COPY under a new id, whether the session runs or not, with the whole conversation and the new settings.
+    // The copy does NOT inherit the original's other saved options: a copy resumed without them came back without them.
+    // So the copy is given everything a start gives, Remote Control held off included (RemoteControlOff), or it would
+    // come back with the bridge the user's own settings turn on. The model is always named, as on a start.
+    /// <summary>
+    /// The arguments of the resume that makes a switch's copy: `--bg --resume &lt;full id&gt;`, the flags (`--model` always),
+    /// Remote Control held off, then <paramref name="message"/> when there is one (a comment riding on the switch).
+    /// </summary>
+    public static IReadOnlyList<string> SwitchArguments(string sessionId, SessionSettings launch, Maybe<string> message = default) =>
+        ["--bg", "--resume", sessionId, .. WithModel(launch).Flags(), "--settings", RemoteControlOff,
+            .. message.Match(m => new[] { m }, Array.Empty<string>)];
+
+    static SessionSettings WithModel(SessionSettings launch) =>
+        launch.Model.HasValue ? launch : launch with { Model = DefaultModel };
 
     /// <summary>
     /// Where to start the session, the likeliest first. A task that has had sessions starts at the REPO of its latest
