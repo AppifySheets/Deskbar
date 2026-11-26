@@ -398,6 +398,13 @@ public partial class FloatingBar
             answers.Where(a => a.Ms >= SlowAppIdMs).ToList().ForEach(a =>
                 ClickTrace.Write($"pins: app id of {a.Handle.Value:X}/{names.GetValueOrDefault(a.Handle) ?? "?"} took {a.Ms}ms -> {a.Id ?? "none"}"));
         if (answers.Any(a => a.Id is not null) && lastPinOverview is { } overview) PaintPins(overview);
+        // An app's bookmark chip hides while a window carries its app id (BookmarkRunning), and the ids arrive here,
+        // after the rebuild that asked for them. So a new id redraws the rows, but only when some workspace has an App
+        // bookmark to hide: the rows are not otherwise affected by ids. Rebuild has its own re-entrancy guard, and only
+        // windows with no id yet are asked again, so this cannot loop.
+        if (answers.Any(a => a.Id is not null)
+            && manager.State.Workspaces.Any(w => w.Bookmarks.Any(b => b.Kind == Core.Bookmarks.BookmarkKind.App)))
+            Rebuild();
     }
 
     // Which windows to ask the shell about: no ID known, not already being asked, and not told "none" within

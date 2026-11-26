@@ -1747,6 +1747,27 @@ public partial class App : Application
         // (RefuseNewerState), so from here on this copy is the one that keeps running.
         TakeOverAutostartIfPackaged();
 
+        // ONE BookmarkOpener for the bar's chips and the pipe's `bookmark open|open-all|list` (ruling R4), so a chip and
+        // the command cannot start a bookmark differently (docs/superpowers/specs/2026-11-26-workspace-bookmarks-design.md).
+        // Built here, before the pipe, which needs it; the bar is built later and read when a question comes.
+        //
+        //   Program  DetachedLauncher.StartVerbatim: the bookmark's arguments are ONE string handed to the program as
+        //            written (a .lnk's arguments are already a command line), with the package's breakaway when packaged.
+        //   App      shell:AppsFolder\<id>, the way a pinned installed app starts (ShellTaskbarPins.LaunchApp).
+        //   Link     ProgramStarter with the URL, which is what `deskbar.cmd open` does when no browser is named
+        //            (RemoteControl.AsUsual, ruling P14). Not App.OpenUrl: that shows a box about the download page on
+        //            failure, and a chip wants the failure back as a Result for the bar's own Report.
+        //
+        // Which app ids have an open window comes from the bar's cache (FloatingBar.OpenAppIds), read when asked; until
+        // the bar exists nothing counts as open, so no App chip is hidden.
+        var bookmarkOpener = new Core.Bookmarks.BookmarkOpener(manager,
+            new Core.Bookmarks.BookmarkStarts(
+                Program: (exe, arguments, folder) => Deskbar.Windows.Processes.DetachedLauncher.StartVerbatim(exe, arguments, folder)
+                    .MapError(error => $"Could not start {Path.GetFileName(exe)}: {error}"),
+                App: appId => Deskbar.Windows.Shell.ShellTaskbarPins.LaunchApp(appId, appId),
+                Link: url => ProgramStarter.Start(new ProgramLaunch(url, [], null))),
+            () => floatingBar?.OpenAppIds ?? new HashSet<string>());
+
         // The remote control: other processes (an agent setting up a worktree, a script) asking this
         // instance to list, create and move. Opened once the manager has loaded state and seen the
         // windows, so the first request is answered from the real picture rather than an empty one.
@@ -1853,7 +1874,9 @@ public partial class App : Application
             // view (TasksBoard.ShowStats). Read when the command arrives, like setTasksWindow.
             showTasksStats: () => tasksBoard is { } statsBoard
                 ? Result.Success().Tap(statsBoard.ShowStats)
-                : Result.Failure("The tasks panel is not available in this mode."));
+                : Result.Failure("The tasks panel is not available in this mode."),
+            // `bookmark open|open-all` and `bookmark list`'s running flag: the opener the chips use (built above).
+            bookmarks: bookmarkOpener);
         controlServer = new ControlPipeServer(ControlCommandLine.PipeName,
             args => Dispatcher.InvokeAsync(() =>
             {
@@ -2191,6 +2214,16 @@ public partial class App : Application
                 // ...and the language switcher's, the keyboard input languages (FloatingBar.Language.cs).
                 InputLanguages = new Windows.Input.InputLanguages(),
                 Pins =new Windows.Shell.ShellTaskbarPins(),
+                // Workspace bookmarks (FloatingBar.Bookmarks.cs): the opener the pipe also uses, the shell lookups a drop
+                // and a window's "Bookmark this" ask, and the chips' pictures. ONE favicon fetcher for the app's life (it
+                // owns an HttpClient), and the icons it brings kept under %APPDATA%\Deskbar\bookmark-icons (NewStateDir,
+                // so DESKBAR_APPDATA is honoured). BookmarkIcons is made here, on the UI thread, whose dispatcher it posts to.
+                // The icons BEFORE the opener: setting the opener redraws the rows, and that redraw should already have them.
+                BookmarkIcons = new BookmarkIcons(
+                    new Windows.Shell.FaviconStore(Path.Combine(AppPaths.NewStateDir, "bookmark-icons")),
+                    new Windows.Shell.FaviconFetcher()),
+                BookmarkSources = new Windows.Shell.ShellBookmarkSources(),
+                BookmarkOpener = bookmarkOpener,
                 Tabs = new BrowserTabs(),
                 Sound = new Windows.Audio.AudioActivity(ClickTrace.Write),
                 // ...and the now-playing line's: Windows' own media sessions (FloatingBar.Media.cs).

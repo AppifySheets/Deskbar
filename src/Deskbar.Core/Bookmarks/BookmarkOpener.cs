@@ -30,6 +30,17 @@ public sealed class BookmarkOpener(WorkspaceManager manager, BookmarkStarts star
     public IReadOnlyList<Bookmark> Showing(Workspace workspace) =>
         BookmarkRunning.Showing(workspace.Bookmarks, manager.KnownWindows, openAppIds());
 
+    // The same answer as Showing for every workspace of one bar rebuild, from ONE reading of the windows and the open
+    // app ids. The bar draws a row per workspace, and the app-id set is built afresh each time it is asked
+    // (FloatingBar.OpenAppIds makes a new HashSet from its cache), so asking per row would build it once per row for
+    // nothing. Take the snapshot at the top of a rebuild and ask it for each row.
+    public Func<Workspace, IReadOnlyList<Bookmark>> ShowingNow()
+    {
+        var windows = manager.KnownWindows;
+        var ids = openAppIds();
+        return workspace => BookmarkRunning.Showing(workspace.Bookmarks, windows, ids);
+    }
+
     public bool IsRunning(Bookmark bookmark) =>
         BookmarkRunning.IsRunning(bookmark, manager.KnownWindows, openAppIds());
 
