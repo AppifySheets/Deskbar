@@ -789,7 +789,8 @@ public partial class TaskDetailWindow : Window
         if (open && actions.Repeat is { } repeat)
         {
             var repeats = Item(RepeatMenu.Header(row.RepeatText));
-            RepeatMenu.Items(row.Id, row.RepeatText, repeat, AskRepeat).ForEach(item => repeats.Items.Add(item));
+            // After this menu has closed (Later), as Start Claude and Move to… do: the folder pick opens a menu of its own.
+            RepeatMenu.Items(row.Id, row.RepeatText, (task, words) => Later(() => repeat(task, words)), AskRepeat).ForEach(item => repeats.Items.Add(item));
             menu.Items.Add(repeats);
         }
         // The task list's one workspace menu (WorkspaceChipMenu), opened under "⋯" once this menu has closed.

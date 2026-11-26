@@ -3131,7 +3131,11 @@ public partial class TasksWindow : Window
         if (Actions?.Repeat is { } repeat && row.Status != TaskStatus.Closed && !row.Closing)
         {
             var repeats = Item(RepeatMenu.Header(row.RepeatText));
-            RepeatMenu.Items(id, row.RepeatText, repeat, AskRepeat).ForEach(item => repeats.Items.Add(item));
+            // Run once this menu has closed, as "Start Claude on this" does: the folder pick opens a menu of its own, and one
+            // opened from inside a click of this menu closes with it (review fix, task 0b78269e).
+            RepeatMenu.Items(id, row.RepeatText,
+                (task, words) => Dispatcher.BeginInvoke(() => repeat(task, words), System.Windows.Threading.DispatcherPriority.Input),
+                AskRepeat).ForEach(item => repeats.Items.Add(item));
             menu.Items.Add(repeats);
         }
         // The task list's one workspace menu (WorkspaceChipMenu), the move the bar's line chip makes. Its own menu,

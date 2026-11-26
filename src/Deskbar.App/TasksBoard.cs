@@ -1110,13 +1110,24 @@ public sealed class TasksBoard : IDisposable
 
     Result SetRepeat(TaskItem task, RepeatRequest.Set set)
     {
+        // Applies without reporting: Repeat reports once, whichever way the folder arrived (review fix, task 0b78269e).
         Result Apply(string folder) =>
-            Report(tasks.SetRepeat(task.Id, new TaskRepeat(set.Schedule, set.Model.GetValueOrDefault(TaskRepeat.DefaultModel), ClaudeStart.RepoOf(folder))), task.Id);
+            tasks.SetRepeat(task.Id, new TaskRepeat(set.Schedule, set.Model.GetValueOrDefault(TaskRepeat.DefaultModel), ClaudeStart.RepoOf(folder)));
         if (set.Folder.TryGetValue(out var named)) return Apply(named);
         if (pickFolder is null) return Result.Failure("No folder is known for this task; give --folder <path>");
-        // The pick may open a list and answer later, so its result reaches the problem line itself (Apply reports).
-        pickFolder(task, folder => Apply(folder));
-        return Result.Success();
+        // The pick answers at once with one known folder (its result goes back to Repeat, which reports it once), or opens
+        // a list and answers later, from a click; that late answer has no caller to report for it, so it reports itself.
+        // Reporting the synchronous answer here too would be drowned by Repeat's own Report of a Success.
+        var asking = true;
+        Result? answered = null;
+        pickFolder(task, folder =>
+        {
+            var result = Apply(folder);
+            if (asking) answered = result;
+            else Report(result, task.Id);
+        });
+        asking = false;
+        return answered ?? Result.Success();
     }
 
     /// <summary>A drop: the task goes to that place in that quadrant, taking its flags (TaskBoard.Place).</summary>

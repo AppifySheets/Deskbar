@@ -2122,7 +2122,13 @@ public class TasksBoardTests
     static MenuItem RepeatItem(ContextMenu menu) =>
         menu.Items.OfType<MenuItem>().Single(i => Words(i) is "Repeat" or "Repeats");
 
-    static void Click(MenuItem item) => item.RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+    // The Repeat items run their action once the menu has closed (a queued Input-priority call, as Start Claude's does), so
+    // the click is followed by letting the queue drain.
+    static void Click(MenuItem item)
+    {
+        item.RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+        item.Dispatcher.Invoke(() => { }, System.Windows.Threading.DispatcherPriority.Background);
+    }
 
     static TaskRepeat DailyRepeat() => new(TaskRepeats.Parse("daily 09:00").Value, TaskRepeat.DefaultModel, @"C:\repos\x");
 
@@ -2218,10 +2224,35 @@ public class TasksBoardTests
         menu.IsOpen = false;
         t.Window.Dispatcher.Invoke(() => { }, System.Windows.Threading.DispatcherPriority.Background);
 
-        // The dialog was prefilled with nothing (no repeat yet); the refusal is the parser's, shown on the problem line.
+        // The dialog was prefilled with nothing (no repeat yet); the refusal is the parser's, drawn under the task's title
+        // (or on the panel's top line when that line is not drawn), put there by the Custom click alone.
         Assert.Equal([""], asked);
         Assert.True(t.Tasks.Board.Tasks.Single(x => x.Id == id).Repeat.HasNoValue);
-        Assert.Contains("15 minutes to 24 hours", t.Controller.Repeat(id, "every 5m").Error);
+        var shown = LineProblemOf(t.Window, id) ?? t.Window.Problem;
+        Assert.NotNull(shown);
+        Assert.Contains("15 minutes to 24 hours", shown);
+    });
+
+    // Review fix: with one known folder the pick answers inside the click, and a refusal of SetRepeat (the task closed
+    // meanwhile) used to be cleared again by the caller's own Report of a Success before it was drawn.
+    [Fact]
+    public void A_refusal_with_one_known_folder_shows_on_the_problem_line() => StaThread.Run(() =>
+    {
+        using var t = Build(pickFolder: (task, chosen) =>
+        {
+            chosen(@"C:\repos\x");
+            return null;
+        });
+        var id = t.Tasks.AddNote("a", t.Gepha).Value.Id;
+        t.Controller.Show();
+        // A closed task takes no repeat: ChangeOpen refuses it.
+        Assert.True(t.Tasks.Close(id).IsSuccess);
+
+        var result = t.Controller.Repeat(id, "every 1h");
+
+        Assert.True(result.IsFailure);
+        // The closed task's line is not drawn in the Open view, so the refusal shows on the panel's top line.
+        Assert.Equal(result.Error, t.Window.Problem);
     });
 
     [Fact]
