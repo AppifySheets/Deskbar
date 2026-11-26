@@ -3,8 +3,8 @@ using Deskbar.Core.Tasks;
 namespace Deskbar.App;
 
 // ALLOW / DENY FROM A TASK'S PAGE, ON THE BAR. In the Inbox look a task line whose session waits on a permission
-// question wears the panel's mark for it (the shield with a keyhole, InboxMarks) and, as its quiet second line, what is
-// asked: "Asks permission: Bash". The answer itself is only ever given on the task's page or in the terminal; the bar
+// question wears the panel's mark for it (the shield with a keyhole, InboxMarks) and, in its tooltip, what is asked:
+// "Asks permission: Bash". The answer itself is only ever given on the task's page or in the terminal; the bar
 // shows, it does not answer. It repaints when a question comes or goes (PermissionDesk.Changed): the list's shape carries
 // the questions (PermissionShape), so the paint is not skipped.
 public partial class FloatingBar
@@ -30,13 +30,10 @@ public partial class FloatingBar
 
     bool AsksPermission(TaskItem task) => BarPermissionsOf(task.Id).Count > 0;
 
-    // The quiet second line of a line whose session waits on a permission question, else null.
+    // What a line whose session waits on a permission question says of it in its tooltip, else null. The bar's lines
+    // have no second line any more (the owner, 2026-11-27), so the tooltip is where it is read (InboxLineFrame).
     string? PermissionWords(Guid id) =>
         BarPermissionsOf(id) is [var first, ..] ? $"Asks permission: {PermissionDisplay.Visible(first.Request.Tool)}" : null;
-
-    // The second line a line needing the user shows: the permission question when there is one, else its detail.
-    string BarDetail(TaskLine line, InboxMark mark) =>
-        mark == InboxMark.AsksPermission ? PermissionWords(line.Id) ?? line.Detail : line.Detail;
 
     // Part of the list's shape: which tasks have a question on show.
     string PermissionShape() =>

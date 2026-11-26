@@ -23,8 +23,8 @@ namespace Deskbar.App;
 //                 caption is not a click on the task;
 //   the title     up to two rows, ending in "…"; semibold on a Claude task, normal on a plain note; bold when important,
 //                 italic when urgent (Ruling 59); "↳" before a subtask and "· N subtasks" after a parent;
-//   the text      only on a line that needs the user (asks, went quiet, finished): its question or status line, one row,
-//                 trimmed, quieter, never amber (the owner's ruling on 2026-11-26). The tooltip has it in full;
+//                 NO SECOND LINE (the owner, 2026-11-27, after using it: it added nothing and the bar has little room).
+//                 A question or a status line is in the line's tooltip, in full, with the title;
 //   the chip      the workspace's full name with a dot in its colour, under the title at every width; a click opens the
 //                 move menu as today's chip does. A task on no workspace has no chip.
 // The mark is the panel's (InboxMarks): amber only for a line that asks or went quiet. No fill behind a line but the
@@ -45,20 +45,17 @@ public partial class FloatingBar
     Brush SelectedLineFill => InboxBarOn ? InboxBarSelectedFill : TaskSelectedFill;
 
     internal const string InboxBarLineTag = "inbox-bar-line";
-    internal const string InboxBarTextTag = "inbox-bar-text";
     internal const string InboxBarCaptionTag = "inbox-bar-caption";
     internal const string InboxBarMarkTag = "inbox-bar-mark";
 
     // What a line's height follows in the Inbox look, beyond today's key (HeightKeyOf): the look itself, and the caption.
-    string InboxBarHeightKey(TaskLine line) => InboxBarOn ? $"|inbox|{CaptionCount(line)}|{PermissionWords(line.Id)}" : "";
+    string InboxBarHeightKey(TaskLine line) => InboxBarOn ? $"|inbox|{CaptionCount(line)}" : "";
 
     // The line's state mark, from its task as the panel reads it (InboxTabs.MarkOf).
     InboxMark BarMarkOf(TaskLine line) =>
         taskService?.Board.Tasks.FirstOrDefault(t => t.Id == line.Id) is { } task
             ? InboxTabs.MarkOf(task, InboxMarks.StoppedOnLimit, hollow: _ => line.Delivery.Shipping, asksPermission: AsksPermission)
             : line.Claudes ? InboxMark.Idle : InboxMark.Note;
-
-    static bool MarkNeedsYou(InboxMark mark) => mark is InboxMark.Asks or InboxMark.WentQuiet or InboxMark.Finished or InboxMark.FinishedNotRunning or InboxMark.AsksPermission;
 
     // The caption's count on the Waiting on you block's first line, or null on every other line. The block is the bar's
     // own (the questions and the Done tasks, TaskBoard.Pinned); its size is taken before the fold, so the lines folded
@@ -106,17 +103,6 @@ public partial class FloatingBar
 
         var text = new StackPanel { Margin = new Thickness(7, 0, 0, 0) };
         text.Children.Add(editingTask == line.Id && !line.Closing ? TitleOrEditor(line) : InboxBarTitle(line));
-        if (MarkNeedsYou(mark) && BarDetail(line, mark).Length > 0 && editingTask != line.Id)
-            text.Children.Add(new TextBlock
-            {
-                Tag = InboxBarTextTag,
-                Text = FirstLine(BarDetail(line, mark)),
-                FontSize = Text(8.5),
-                Foreground = InboxLook.Ink2,
-                TextTrimming = TextTrimming.CharacterEllipsis,
-                TextWrapping = TextWrapping.NoWrap,
-                Margin = new Thickness(0, 1, 0, 0),
-            });
         if (line.WorkspaceName is not null) text.Children.Add(InboxBarChip(line));
         Grid.SetRow(text, 1);
         Grid.SetColumn(text, 1);
@@ -136,6 +122,9 @@ public partial class FloatingBar
             CornerRadius = new CornerRadius(9),
             Padding = new Thickness(5, 4, 6, 5),
             Child = grid,
+            // A permission question waiting on this line's session is said in the tooltip, above the bar's own text for
+            // the line (TipOf, the Button's tooltip, which shows whenever this one is null).
+            ToolTip = PermissionWords(line.Id) is { } asked && !line.Closing ? $"{asked}\n{TipOf(line)}" : null,
         };
     }
 
