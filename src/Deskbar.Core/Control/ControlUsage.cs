@@ -131,7 +131,9 @@ public static class ControlUsage
                 "a Claude session creates its task, on the workspace of the VS Code window showing its folder, or on none"),
             new("task", "status-line <text>|- --session <session>", "the short line a session keeps current on its task"),
             new("task", "ask <question>|- --session <session>",
-                "the session's task waits on you with the question, and its workspace blinks as attention does"),
+                "the session's task waits on you with the question, and its workspace blinks as attention does. With -,\n"
+                + "      the text may end in a line `--options` and then up to 4 answers, one per line (each at most 40\n"
+                + "      characters, all different), which become buttons under the question; on stdin, never on the command line"),
             new("task", "answered --session <session>",
                 "the session's question is settled: its task goes back to in progress and the blink stops. A prompt\n"
                 + "      never settles it; the session runs this"),

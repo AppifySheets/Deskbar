@@ -271,6 +271,17 @@ public sealed record TaskItem(
     public Maybe<string> QuestionSetAside { get; init; }
 
     /// <summary>
+    /// The answers the session offered with the question the task waits on (AnswerOptions.cs; the inbox's answer buttons),
+    /// in the order it gave them, or none. They belong to the OPEN question only: TaskBoard clears them whenever
+    /// <see cref="Question"/> goes, whichever change took it (answered, done, a close, a status by hand, the user's reply
+    /// setting the question aside), and a new ask brings its own or none, so a button never answers a question the user
+    /// is no longer being asked. A question that comes back from being set aside (Restored) comes back without them: the
+    /// user had already answered it once. An init property like the flags, stored as an optional `questionOptions` list
+    /// of strings, left out of the file while empty; absent in a file means none.
+    /// </summary>
+    public IReadOnlyList<string> QuestionOptions { get; init; } = [];
+
+    /// <summary>
     /// This task with Deskbar's set-aside lines (TaskComment.IsSetAsideNote) folded, the way a settled comment is (Ruling
     /// 62: kept, behind one line), unless the task still holds a set-aside question. Petre, task aa42794f: "too much bla
     /// bla", over a thread with two set-aside lines and the merged line under them. A set-aside line matters only while
