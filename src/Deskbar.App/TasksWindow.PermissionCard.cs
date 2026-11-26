@@ -22,10 +22,12 @@ namespace Deskbar.App;
 //
 // THE BUTTONS: Allow, "Allow and stop asking for edits" (only for an edit tool, with what it does said under it), Deny,
 // and "Answer in the terminal" (the hook prints nothing at once, and the terminal's own dialog, drawn the whole time,
-// decides). A click is the only way an answer is written (no pipe command does it). The keyboard: the buttons can take
-// focus by Tab, and only Enter on a focused button presses it; Space does nothing on them, and no key anywhere else
-// reaches them, so no single key allows. A click in the first ArmTime after a card first appears is ignored, so a click
-// meant for whatever was under the pointer cannot land on Allow; the page's own guard after a redraw applies too.
+// decides). Only the user's own action in this window writes an answer (no pipe command does it). THE KEYBOARD, as the
+// PM ruled after the review's L1: a button focused with Tab and pressed with Enter is allowed; no single key allows. Space
+// does nothing on the buttons, and no key pressed elsewhere reaches them. (The plan first said "Enter never allows";
+// that was wrong as built, and the ruling keeps the build.) A click in the first ArmTime after a card first appears is
+// ignored, so a click meant for whatever was under the pointer cannot land on Allow; the page's own guard after a redraw
+// applies too.
 public partial class TasksWindow
 {
     /// <summary>How long a new card's buttons ignore clicks.</summary>
