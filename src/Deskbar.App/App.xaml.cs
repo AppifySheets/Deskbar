@@ -2186,8 +2186,6 @@ public partial class App : Application
             },
             new System.Reactive.Concurrency.SynchronizationContextScheduler(new System.Windows.Threading.DispatcherSynchronizationContext(Dispatcher)),
             trace: ClickTrace.On ? ClickTrace.Write : null);
-        // A settings switch that stopped a session a window was attached to opens one on the copy, as Open Claude does.
-        claudeSessions.ReopenWindow = id => tasks!.Board.Tasks.TryFirst(t => t.Id == id).Tap(t => claudeActions?.Reattach(t));
 
         // ...and recurring tasks' runs (RecurringRunner; task 0b78269e, docs/superpowers/specs/2026-11-26-recurring-tasks-design.md),
         // started by the snooze sweep above and by a comment between runs (CommentWaker's startRun). A run is the quiet
@@ -2914,8 +2912,6 @@ public partial class App : Application
                 OpenManager = () => managerActions?.Open() ?? Result.Failure(ClaudeActionsNotReady),
                 // Allow / Deny from a task's page: the questions on show, as cards on the page and the Inbox's mark.
                 Permissions = PermissionDesk,
-                // The picker row under a task's comment box: its words, a pick and Cancel (TasksBoard.SessionPicker.cs).
-                Sessions = claudeSessions,
             };
 
             // A panel left open at the last exit (AppState.TasksPanel, saved open by TasksBoard.Shutdown) opens again,
