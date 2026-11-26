@@ -320,6 +320,8 @@ public sealed class TasksBoard : IDisposable
             Unrelate = (id, other) => Report(tasks.Unrelate(id, other), id),
             // "Mark deployed" on a Done line (task 8470d176, phase 2): Petre saw it running, so the ring fills.
             MarkDeployed = id => Report(tasks.MarkDeployed(id, TaskService.MarkedByHand), id),
+            // "Reevaluate" (task 3dd07539): the task's session looks at the task again; a refusal shows on the task's line.
+            Reevaluate = id => Report(tasks.Reevaluate(id), id),
         };
 
         // Taken before the subscriptions below exist, so the first StateChanged pulse is compared with this state
@@ -1983,6 +1985,12 @@ internal sealed record TasksWindowActions(
     /// phase 2; TaskRowView.CanMarkDeployed): TaskService.MarkDeployed with TaskService.MarkedByHand. None, no item.
     /// </summary>
     public Action<Guid>? MarkDeployed { get; init; }
+
+    /// <summary>
+    /// "Reevaluate" on a line, its thread and its menu (task 3dd07539): TaskService.Reevaluate, which asks the task's
+    /// Claude session to check where the task stands and fix it. None, no button and no item.
+    /// </summary>
+    public Action<Guid>? Reevaluate { get; init; }
 }
 
 /// <summary>

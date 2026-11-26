@@ -2049,6 +2049,10 @@ public partial class TasksWindow : Window
                 "Start a background Claude session on this task, with the task as its first message"));
         if (addsSubtask && subtaskUnder != row.Id)
             buttons.Add(Small(ThreadAddSubtaskText, ThreadAddSubtaskText, () => BeginSubtaskAdd(row.Id), "Add a subtask under this task"));
+        // Reevaluate (task 3dd07539) on a Claude task waiting on Petre, last: the line's strip has it in its last slot, so
+        // on all but a full line it is here (FollowLine leaves it out while the line shows it).
+        if (Reevaluates(row))
+            buttons.Add(Small(ReevaluateText, ReevaluateText, () => Actions?.Reevaluate?.Invoke(row.Id), ReevaluateTip));
         var actions = new WrapPanel { Tag = ThreadActionsTag, Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 4) };
         buttons.ForEach(button =>
         {
@@ -2725,6 +2729,12 @@ public partial class TasksWindow : Window
             // once this menu has closed so the box can take the keyboard.
             if (Actions?.SubtaskParent is not null)
                 menu.Items.Add(Item(FloatingBar.AddSubtaskText, () => Dispatcher.BeginInvoke(() => BeginSubtaskAdd(id), System.Windows.Threading.DispatcherPriority.Input)));
+            // REEVALUATE (task 3dd07539): the task's session checks where the task stands and fixes its question, status
+            // and status line. On every open Claude task here, a wider set than the line's button (Reevaluates: only
+            // tasks waiting on Petre), so a stale status line on a task in progress can be put right too, and a Matrix
+            // line, which has no strip, reaches it. `task reevaluate <id>` is its remote twin.
+            if (row.Claudes && Actions?.Reevaluate is { } reevaluate)
+                menu.Items.Add(Item(ReevaluateText, () => reevaluate(id)));
         }
         // OPEN PARENT (task 54b39c4c): on a subtask's line, the parent shown, picked and opened, as the thread's "Subtask
         // of" does, without opening this line's thread first. Right after "Add subtask…", its family neighbour. On a

@@ -113,6 +113,11 @@ public partial class FloatingBar
         // as the parent, a sibling on a subtask's line. Run once this menu has closed, so the box can take the keyboard.
         menu.Items.Add(TaskMenuItem(AddSubtaskText, () => Dispatcher.BeginInvoke(() => BeginSubtaskAdd(id),
             System.Windows.Threading.DispatcherPriority.Input)));
+        // REEVALUATE (task 3dd07539), after "Add subtask…" as in the panel's menu (TasksWindow.OpenMenuFor), on a Claude
+        // task: its session checks where the task stands and fixes its question, status and status line. A refusal (a
+        // closed task) is reported as the bar's other refusals are.
+        if (line.Claudes)
+            menu.Items.Add(TaskMenuItem(TasksWindow.ReevaluateText, () => Report(taskService.Reevaluate(id))));
         // OPEN PARENT (task 54b39c4c; Petre: "subtask should show its parent and have a way to open the parent easily"):
         // a subtask's line on the bar shows only "↳", so this item reaches the parent, shown in the tasks panel with its
         // thread open, as the panel's own "Open parent" does. Run once this menu has closed, as the items above are.

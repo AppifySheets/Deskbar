@@ -197,6 +197,11 @@ public static class ControlUsage
                 + "      itself, or sooner when a session asks or finishes or its status changes; task list shows snoozedUntil"),
             new("task", "wake <id>",
                 "bring a snoozed task back now, as \"Wake now\" does"),
+            // Task 3dd07539: the twin of a line's Reevaluate button and menu item (TaskService.Reevaluate).
+            new("task", "reevaluate <id>",
+                "ask the task's Claude session to check where the task really stands and fix what is stale: settle a\n"
+                + "      question already answered, mark finished work done, rewrite an old status line. It reaches an idle\n"
+                + "      or ended session as a comment does; a task no session worked on is refused"),
             new("task", "pr <id> <url>", "put a GitHub pull request on a task, so the tasks panel's search finds the task by its number"),
             new("task", "deployed <id> <note>|-",
                 "record that a task's change runs where its app is deployed, as \"Mark deployed\" on a line's menu does;\n"
