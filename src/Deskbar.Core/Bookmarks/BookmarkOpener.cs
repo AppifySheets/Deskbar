@@ -1,3 +1,5 @@
+using System.Reactive.Disposables;
+using System.Reactive.Linq;
 using CSharpFunctionalExtensions;
 using Deskbar.Core.Control;
 using Deskbar.Core.Domain;
@@ -24,8 +26,43 @@ public sealed record BookmarkStarts(
 //
 // The bar and the control pipe both ask this class, so Showing and IsRunning live here too and cannot drift
 // between the two.
-public sealed class BookmarkOpener(WorkspaceManager manager, BookmarkStarts starts, Func<IReadOnlySet<string>> openAppIds)
+//
+// OPENED LINKS (option B, Petre's pick after the first live try): Deskbar sees windows, not tabs, so a Link chip never
+// hides. Instead, when a link is opened, `linkWindows.Watch` reports the browser window it went into and OpenedLinks
+// notes it; while that window lives the link counts as running, and the bar draws its chip OPEN (full strength, solid
+// outline) instead of at rest. Closing only the tab is not noticed. Without `linkWindows` (tests, and any copy that
+// cannot see windows) a link never counts as running, as before.
+public sealed class BookmarkOpener
 {
+    readonly WorkspaceManager manager;
+    readonly BookmarkStarts starts;
+    readonly Func<IReadOnlySet<string>> openAppIds;
+    readonly LinkWindows? linkWindows;
+
+    public BookmarkOpener(WorkspaceManager manager, BookmarkStarts starts, Func<IReadOnlySet<string>> openAppIds,
+        LinkWindows? linkWindows = null)
+    {
+        this.manager = manager;
+        this.starts = starts;
+        this.openAppIds = openAppIds;
+        this.linkWindows = linkWindows;
+
+        // Both subscriptions live as long as the opener, which the app makes once and keeps for its whole run.
+        // A window gone for real takes its notes with it.
+        linkWindows?.Gone.Subscribe(OpenedLinks.Forget);
+        // A removed bookmark (by its chip menu, the pipe, or with its workspace) takes its note too. The manager pulses
+        // StateChanged on every persisted change, so this is the one place that sees every way a bookmark can go. Only
+        // the noted ids are looked at, a handful at most.
+        manager.StateChanged.Subscribe(_ =>
+        {
+            var existing = manager.State.Workspaces.SelectMany(w => w.Bookmarks).Select(b => b.Id).ToHashSet();
+            OpenedLinks.Noted.Where(id => !existing.Contains(id)).ToList().ForEach(OpenedLinks.Forget);
+        });
+    }
+
+    // Which browser window each opened link went into. The bar redraws on its Changed.
+    public OpenedLinks OpenedLinks { get; } = new();
+
     // The bookmarks whose chips show: the ones not already running (see BookmarkRunning), in the order added.
     public IReadOnlyList<Bookmark> Showing(Workspace workspace) =>
         BookmarkRunning.Showing(workspace.Bookmarks, manager.KnownWindows, openAppIds());
@@ -41,8 +78,16 @@ public sealed class BookmarkOpener(WorkspaceManager manager, BookmarkStarts star
         return workspace => BookmarkRunning.Showing(workspace.Bookmarks, windows, ids);
     }
 
+    // What `bookmark list` reports as `running`. For a program or an app, the answer that hides its chip; for a link,
+    // whether it is open (IsLinkOpen), the answer that draws its chip open. A link's chip shows either way.
     public bool IsRunning(Bookmark bookmark) =>
-        BookmarkRunning.IsRunning(bookmark, manager.KnownWindows, openAppIds());
+        bookmark.Kind == BookmarkKind.Link
+            ? IsLinkOpen(bookmark)
+            : BookmarkRunning.IsRunning(bookmark, manager.KnownWindows, openAppIds());
+
+    // A link whose browser window, noted when it was opened, still lives. False for anything else.
+    public bool IsLinkOpen(Bookmark bookmark) =>
+        bookmark.Kind == BookmarkKind.Link && linkWindows is { } windows && OpenedLinks.IsOpen(bookmark.Id, windows.Alive);
 
     // One click: switch to the workspace unless it is the one in front (as TasksBoard.OpenLink does), then start.
     // A stale id (workspace or bookmark gone) is an ordinary failure, not an exception.
@@ -89,8 +134,31 @@ public sealed class BookmarkOpener(WorkspaceManager manager, BookmarkStarts star
                     _ => starts.Program(bookmark.Target, bookmark.Arguments ?? "", bookmark.WorkingDirectory))
                 .Bind(_ => Result.Success()),
             BookmarkKind.App => starts.App(bookmark.Target),
-            _ => starts.Link(bookmark.Target),
+            _ => StartLink(workspaceId, bookmark),
         }).MapError(e => Named(bookmark, e));
+
+    // The watch begins BEFORE the link is handed to the browser, not after: the start goes through the shell, which can
+    // pump this thread's messages, and the browser's foreground change could otherwise be delivered before anyone
+    // listens. A start that fails ends the watch at once, so nothing is noted for a link that never opened.
+    Result StartLink(Guid workspaceId, Bookmark bookmark)
+    {
+        var watch = WatchFor(workspaceId, bookmark);
+        return starts.Link(bookmark.Target).TapError(_ => watch.Dispose());
+    }
+
+    // Notes the window the link went into, if the watch finds one and the bookmark still exists by then (it can be
+    // removed within the wait). A workspace with no desktop has nowhere to look. A watch that fails is a watch that
+    // found nothing: the error handler keeps an exception from reaching the subscription.
+    IDisposable WatchFor(Guid workspaceId, Bookmark bookmark) =>
+        linkWindows is { } windows && DesktopOf(workspaceId) is { HasValue: true } desktop
+            ? windows.Watch(desktop.Value)
+                .Where(_ => manager.BookmarkOf(workspaceId, bookmark.Id).HasValue)
+                .Subscribe(window => OpenedLinks.Note(bookmark.Id, window), _ => { })
+            : Disposable.Empty;
+
+    Maybe<Guid> DesktopOf(Guid workspaceId) =>
+        manager.State.Workspaces.TryFirst(w => w.Id == workspaceId)
+            .Bind(w => w.DesktopId is { } desktop ? Maybe.From(desktop) : Maybe<Guid>.None);
 
     static string Named(Bookmark bookmark, string error) => $"{bookmark.Name}: {error}";
 }

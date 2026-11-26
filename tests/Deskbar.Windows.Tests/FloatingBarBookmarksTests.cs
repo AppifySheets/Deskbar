@@ -71,14 +71,15 @@ public class FloatingBarBookmarksTests
             Link: url => { Calls.Add($"link {url}"); return Result.Success(); });
     }
 
-    static BarUnderTest ShowBar(Harness harness, Started? started = null, Func<string?>? clipboard = null, Action<string>? said = null)
+    static BarUnderTest ShowBar(Harness harness, Started? started = null, Func<string?>? clipboard = null, Action<string>? said = null,
+        LinkWindows? links = null)
     {
         var bar = new FloatingBar(harness.Manager)
         {
             ShowRefusal = said ?? (_ => { }),
             Left = -32000,
             Top = -32000,
-            BookmarkOpener = new BookmarkOpener(harness.Manager, (started ?? new Started()).Starts, () => new HashSet<string>()),
+            BookmarkOpener = new BookmarkOpener(harness.Manager, (started ?? new Started()).Starts, () => new HashSet<string>(), links),
             ClipboardText = clipboard ?? (() => null),
             BookmarkSources = new FakeSources(),
             // As in App.xaml.cs: setting the opener does not redraw, TimeToday's init (after it) does, and that redraw
@@ -325,6 +326,35 @@ public class FloatingBarBookmarksTests
 
         Assert.Equal(["link https://alpha.org/"], started.Calls);
         Assert.Equal([harness.Manager.State.Workspaces.Single(w => w.Name == "Sparrow").DesktopId!.Value], harness.Desktops.Switched);
+    });
+
+    // A chip's face (the faded part: picture, outline, link dot) and its outline.
+    static Grid Face(Button chip) => (Grid)((Grid)chip.Content).Children[0];
+
+    static System.Windows.Shapes.Rectangle Outline(Button chip) => Face(chip).Children.OfType<System.Windows.Shapes.Rectangle>().Single();
+
+    // Option B: once the browser window a clicked link went into is noted, the chip is drawn open, full strength with a
+    // solid outline, and redrawn so without anything else happening. The other link stays at rest.
+    [Fact]
+    public void An_opened_link_chip_is_drawn_at_full_strength_with_a_solid_outline() => StaThread.Run(() =>
+    {
+        var harness = Harness.Build();
+        Added(harness, "Sparrow", Link("https://alpha.org/", "Alpha"));
+        Added(harness, "Sparrow", Link("https://beta.org/", "Beta"));
+        var receiver = new System.Reactive.Subjects.Subject<LinkWindow>();
+        using var bar = ShowBar(harness, links: new LinkWindows(
+            _ => System.Reactive.Linq.Observable.Take(receiver, 1), _ => true, System.Reactive.Linq.Observable.Never<WindowHandle>()));
+        Button Chip(string name) => Chips(RowNamed(bar.Rows, "Sparrow")).Single(c => AutomationProperties.GetName(c) == name);
+        Assert.Equal(0.5, Face(Chip("Alpha")).Opacity);
+        Assert.NotEmpty(Outline(Chip("Alpha")).StrokeDashArray);
+
+        Chip("Alpha").RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent));
+        receiver.OnNext(new LinkWindow(new WindowHandle(0x123), 1));
+
+        Assert.Equal(1.0, Face(Chip("Alpha")).Opacity);
+        Assert.Empty(Outline(Chip("Alpha")).StrokeDashArray);
+        Assert.Equal(0.5, Face(Chip("Beta")).Opacity);
+        Assert.NotEmpty(Outline(Chip("Beta")).StrokeDashArray);
     });
 
     [Fact]

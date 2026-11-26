@@ -1760,6 +1760,9 @@ public partial class App : Application
         //
         // Which app ids have an open window comes from the bar's cache (FloatingBar.OpenAppIds), read when asked; until
         // the bar exists nothing counts as open, so no App chip is hidden.
+        //
+        // The last argument watches, after a link is opened, for the browser window it went into, so the chip is drawn
+        // open while that window lives (LinkWindowSource, option B). Memory only; it never opens anything itself.
         var bookmarkOpener = new Core.Bookmarks.BookmarkOpener(manager,
             new Core.Bookmarks.BookmarkStarts(
                 // No working folder means the exe's own folder, as a pin or Explorer would start it, not Deskbar's.
@@ -1767,7 +1770,8 @@ public partial class App : Application
                     .MapError(error => $"Could not start {Path.GetFileName(exe)}: {error}"),
                 App: appId => Deskbar.Windows.Shell.ShellTaskbarPins.LaunchApp(appId, appId),
                 Link: url => ProgramStarter.Start(new ProgramLaunch(url, [], null))),
-            () => floatingBar?.OpenAppIds ?? new HashSet<string>());
+            () => floatingBar?.OpenAppIds ?? new HashSet<string>(),
+            LinkWindowSource.For(monitor, desktops, Dispatcher, ClickTrace.On ? ClickTrace.Write : null));
 
         // The remote control: other processes (an agent setting up a worktree, a script) asking this
         // instance to list, create and move. Opened once the manager has loaded state and seen the

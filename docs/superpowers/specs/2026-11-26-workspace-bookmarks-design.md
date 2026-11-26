@@ -164,7 +164,12 @@ Worked out on each bar rebuild, against every live window on every desktop:
   stays, and a click starts it, which for a single-instance app brings up its window. Only the window
   list the bar already walks is consulted; no process scan.
 - App: hidden while a window has that AppUserModelID (the `OpenAppIds` cache the pins already fill).
-- Link: never hidden.
+- Link: never hidden, because Deskbar sees windows, not tabs. Instead a link is drawn open (full
+  strength, solid outline, the link dot kept) while the browser window its last open went into is
+  still open (option B, Petre's pick after the first live try: his two links opened as tabs in the
+  browser already on that workspace, and the chips still looked "not started"). Closing only the tab
+  is not noticed. A click on an open link opens it again. `bookmark list` reports such a link as
+  `"running": true`, so the pipe and the bar agree. See Opening for how the window is found.
 
 ### Opening
 
@@ -183,6 +188,25 @@ A click on a chip:
 
 A failure (the exe is gone, the app was uninstalled) goes to the bar's problem line with the
 bookmark's name.
+
+After a link opens (a chip click, its menu's Open, Open all, `bookmark open` or `open-all`), Deskbar
+notes which browser window received it (`OpenedLinks`, `LinkWindowWatch` in Core,
+`LinkWindowSource` in the app):
+
+- the first window to come to the front within 5 seconds whose process is a browser (the Chromium
+  family `RosterIdentity` knows, plus `firefox.exe`) and which sits on the bookmark's workspace;
+- if none comes forward in that time (the browser on that desktop was already in front, so the tab
+  opened without a focus change), the window in front when the 5 seconds end, if it is such a window;
+- otherwise nothing, and the chip stays at rest.
+
+The watch starts just before the link is handed to the browser and ends at its first answer; a link
+that fails to open watches for nothing. Open all opening two links into one window notes that window
+for both. A note lasts while the window exists and belongs to the same process (`IsWindow` plus the
+process id). It is dropped when the window list reports the window gone for real (keyed off
+`IsWindow`, never off a window missing from the taskbar list) or when the bookmark is removed.
+Moving the window to another workspace keeps it. Notes live in memory only: a restart starts with
+every link chip at rest, and nothing is written to `state.json`. Nothing here opens anything; it only
+watches after an explicit open.
 
 "Open all bookmarks" is on a chip's menu and on the workspace's row menu (only when it has
 bookmarks): it switches once, then opens every chip that is showing, so running programs are skipped

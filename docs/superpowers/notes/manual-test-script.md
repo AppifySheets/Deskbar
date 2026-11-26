@@ -1670,3 +1670,10 @@ BM11. The Portainer chip shows its favicon after a moment (the site has a self-s
      letter tiles, and nothing breaks. Switch the network on and restart: the missing icons arrive.
 BM12. `deskbar.cmd bookmark list Work`, then `add Work --url <url>`, `open`, `open-all` and `remove`: each does what the
      menu item of the same name does, and `list` shows the change.
+BM13. Give a workspace two link chips and have a browser window open on that workspace (on any screen). Click the first
+     chip: the link opens as a tab in that browser window and, within 5 seconds, the chip turns bright with a solid
+     outline while the second stays faded. `deskbar.cmd bookmark list <workspace>` shows `"running": true` for the first
+     link only. Close only the tab: the chip stays bright. Click it again: the link opens again. Close the browser window:
+     the chip goes back to faded within a few seconds, and `list` says `"running": false`. Now, with no browser window on
+     that workspace, use "Open all bookmarks": the browser opens a window there and both chips turn bright. Restart
+     Deskbar: every link chip starts faded.

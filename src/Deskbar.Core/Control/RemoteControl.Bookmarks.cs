@@ -26,8 +26,9 @@ public sealed partial class RemoteControl
         _ => ControlReply.Fail(ControlUsage.LineFor("bookmark")),
     };
 
-    // One entry per bookmark, flat, so a caller can filter by `workspace`. `running` comes from the opener (the same
-    // answer that hides a chip); without one nothing is known to run.
+    // One entry per bookmark, flat, so a caller can filter by `workspace`. `running` comes from the opener: for a program
+    // or an app the answer that hides its chip, for a link the answer that draws its chip open (its browser window is
+    // still open, BookmarkOpener.IsLinkOpen). Without an opener nothing is known to run.
     ControlReply BookmarkList(string? workspace) =>
         (workspace is null ? Result.Success(manager.State.Workspaces) : WorkspaceNamed(workspace).Map(w => (IReadOnlyList<Workspace>)[w]))
             .Match(

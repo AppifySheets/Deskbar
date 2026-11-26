@@ -26,6 +26,11 @@ namespace Deskbar.App;
 //     own arithmetic (see GroupRow);
 //   * half strength with a dashed outline at rest, full strength under the pointer, so a chip never passes for a
 //     running window ("A chip that could pass for a running window" is a non-goal in the spec);
+//   * a link's chip is drawn OPEN instead, full strength with a solid outline, while the browser window its last open
+//     went into still lives (BookmarkOpener.IsLinkOpen, option B). Deskbar sees windows, not tabs, so a link chip never
+//     hides the way a running program's does: Petre clicked two links, they opened as tabs in a browser already on
+//     that workspace, and the chips still looked "not started". Open is the answer to that, and a click on an open
+//     chip opens the link again, as before. The outline stays (solid) so the chip still reads as a bookmark;
 //   * a link's chip carries a small light dot at the bottom right, so a web page reads apart from a program;
 //   * the row's first chip carries a 1 DIP divider at its own left edge, INSIDE its cell, so the divider costs no
 //     width the wrap would have to know about. Drawn only when windows precede it in the lane: a row holding only
@@ -44,7 +49,21 @@ public partial class FloatingBar
     // Setting it does NOT redraw the rows by itself. The constructor has drawn them before an object initializer gets
     // here, so they first show every bookmark; the redraw that TimeToday's init makes, later in the same initializer
     // (App.xaml.cs), is the one that draws with the opener. A second redraw here would only repeat it at startup.
-    public BookmarkOpener? BookmarkOpener { get; init; }
+    //
+    // It does subscribe the rows to the opener's OpenedLinks: a link's browser window noted after a click, or dropped
+    // when that window closes, redraws the rows so its chip turns open or back to rest. Rebuild's own guard absorbs a
+    // pulse that lands mid-rebuild. The opener lives as long as the bar, so the subscription is not undone.
+    public BookmarkOpener? BookmarkOpener
+    {
+        get => bookmarkOpener;
+        init
+        {
+            bookmarkOpener = value;
+            value?.OpenedLinks.Changed.Subscribe(_ => Rebuild());
+        }
+    }
+
+    readonly BookmarkOpener? bookmarkOpener;
 
     // The disk and shell lookups a drop or a window's "Bookmark this" asks (Task 9). Set by the composition root.
     public IBookmarkSources? BookmarkSources { get; init; }
@@ -77,19 +96,19 @@ public partial class FloatingBar
     Button ChipButton(Guid workspaceId, Bookmark bookmark, bool divider)
     {
         var size = 20 * IconScale;
-        // The picture, the dashed outline and (for a link) the dot. Faded as one, so the divider beside it is not.
-        var face = new Grid { Width = size, Height = size, Opacity = ChipRestingOpacity, IsHitTestVisible = false };
+        // An opened link's chip (see the header): full strength at rest too, and its outline solid. Asked once per chip
+        // per rebuild; the question is two user32 calls (BookmarkOpener.IsLinkOpen, LinkWindowSource.Alive).
+        var open = BookmarkOpener?.IsLinkOpen(bookmark) ?? false;
+        var resting = open ? 1.0 : ChipRestingOpacity;
+        // The picture, the outline and (for a link) the dot. Faded as one, so the divider beside it is not.
+        var face = new Grid { Width = size, Height = size, Opacity = resting, IsHitTestVisible = false };
         var image = new Image { Width = size, Height = size, Source = BookmarkIcons.For(bookmark, Rebuild) };
         RenderOptions.SetBitmapScalingMode(image, BitmapScalingMode.HighQuality);
         face.Children.Add(image);
-        face.Children.Add(new Rectangle
-        {
-            Stroke = ChipOutline,
-            StrokeThickness = 1,
-            StrokeDashArray = [2, 2],
-            RadiusX = 3,
-            RadiusY = 3,
-        });
+        var outline = new Rectangle { Stroke = ChipOutline, StrokeThickness = 1, RadiusX = 3, RadiusY = 3 };
+        // Dashed at rest; an open chip keeps WPF's default, an empty dash array, which is a solid line.
+        if (!open) outline.StrokeDashArray = [2, 2];
+        face.Children.Add(outline);
         if (bookmark.Kind == BookmarkKind.Link)
             face.Children.Add(new Border
             {
@@ -141,7 +160,7 @@ public partial class FloatingBar
         };
         AutomationProperties.SetName(button, bookmark.Name);
         button.MouseEnter += (_, _) => face.Opacity = 1.0;
-        button.MouseLeave += (_, _) => face.Opacity = ChipRestingOpacity;
+        button.MouseLeave += (_, _) => face.Opacity = resting;
 
         // MarkPressConsumed first, as every Button inside a row does: the row's own release handler, further up the
         // same route, would otherwise switch to the row's workspace on top of what the chip does.
