@@ -1470,10 +1470,11 @@ AS5. The button on an empty box adds nothing and starts nothing. With Claude ses
 (Task 3dd07539.) The tasks panel open on the List, with a Claude task waiting on you whose question is already
 settled (it asks you to merge a pull request that is merged), a Claude task in progress, and a note.
 
-RE1. Open the waiting task: the row of buttons at the top of its thread reads Open in window, Open Claude, Reevaluate,
-     Add subtask, and Reevaluate's tooltip starts "Ask Claude to check where this task really stands". The task in
-     progress has it too; the note has none. No line has a Reevaluate button, and no "⋯" menu has the item.
-RE2. Widen the panel past 850 DIP and narrow it to the least: Reevaluate stays in the row at every width.
+RE1. The waiting task's line has a refresh icon right after the orange Claude icon, tooltip "Reevaluate: ask Claude to
+     check where this task really stands...". The task in progress has it too; the note has none, and no "⋯" menu has
+     the item. Opening a task's thread does not add a second Reevaluate under the line.
+RE2. Widen the panel past 850 DIP and narrow it to the least: the icon stays after the Claude icon at every width, and
+     the Claude icons of all lines stay at one x. In the Matrix, an open Claude task's thread row has "Reevaluate".
 RE3. Press it. The thread gets Deskbar's line "Asked Claude to reevaluate the task.", and within a minute the session
      runs `task answered` (the merged pull request settled the question): the task leaves Waiting on you, and its
      status line says where it stands. Its session's prompt starts "Deskbar: the user asked you to reevaluate".

@@ -936,7 +936,12 @@ public partial class TasksWindow : Window
         // OpenClaudeButton), on the full and the slim line. The two never meet: a closed task has no Open Claude. A task no
         // session has joined has Start Claude there instead (task 59b8f613, StartClaudeButton), the menu's other half.
         var openClaude = compactLines ? null : OpenClaudeButton(row) ?? StartClaudeButton(row);
-        Control(At(Part.Action), (full ? ActionOf(row) : null) ?? openClaude);
+        // Reevaluate (task 3dd07539) right after Open Claude, in the same column: Petre's pick, "a refresh icon right after
+        // the orange Claude icon, on every Claude task" (TasksWindow.LineButtons.cs, ReevaluateButton).
+        var reevaluate = compactLines ? null : ReevaluateButton(row);
+        UIElement? claudeButtons = reevaluate is null || openClaude is null ? openClaude
+            : new StackPanel { Orientation = Orientation.Horizontal, Children = { openClaude, reevaluate } };
+        Control(At(Part.Action), (full ? ActionOf(row) : null) ?? claudeButtons);
         var more = Small(new TextBlock { Text = "", FontFamily = IconFont, FontSize = 12, Foreground = Ink }, "More",
             () => OpenMenuFor(row.Id), "Edit, status, move, delete");
         menuButtons[row.Id] = more;
@@ -2064,7 +2069,8 @@ public partial class TasksWindow : Window
     //   Start Claude on this  only where Open Claude is not: a task no session has joined, or one whose session has
     //                         expired, so nothing is left to open;
     //   Reevaluate            beside Open Claude (task 3dd07539, "move it as a button at the top"): the session checks
-    //                         where the task stands and fixes its question, status and status line. No twin on the line;
+    //                         where the task stands and fixes its question, status and status line. Its twin is the
+    //                         line's icon beside Open Claude, so like Open Claude it shows here only when the line can't;
     //   Add subtask          the twin of the menu's "Add subtask…" (task 0eb943d8). While its box is open (Thread puts the
     //                         box right under this row) the button is left out, so the box is the one place to type.
     // ONE CLAUDE BUTTON, NEVER BOTH (task 5e02e99f; Petre, on a screenshot of a done task's thread whose session had ended
@@ -2089,9 +2095,10 @@ public partial class TasksWindow : Window
         if (!openClaude && Actions?.StartClaude is { } start && row.Status != TaskStatus.Closed && !row.Closing)
             buttons.Add(Small(StartClaudeText, StartClaudeText, () => start(row.Id),
                 "Start a background Claude session on this task, with the task as its first message"));
-        // Reevaluate (task 3dd07539, "move it as a button at the top"), right after the Claude button, its neighbour: the
-        // task's session checks where the task stands and fixes it. Only beside Open Claude, where there is a session to
-        // reach (an expired one could not take the request). The line has no twin, so FollowLine never hides it.
+        // Reevaluate (task 3dd07539), right after the Claude button, its neighbour: the task's session checks where the
+        // task stands and fixes it. Only beside Open Claude, where there is a session to reach (an expired one could not
+        // take the request). The line has it as an icon beside Open Claude, so FollowLine hides this one as it hides Open
+        // Claude; it shows under a Matrix line (no action column) and while the line is being edited.
         if (openClaude && Reevaluates(row))
             buttons.Add(Small(ReevaluateText, ReevaluateText, () => Actions?.Reevaluate?.Invoke(row.Id), ReevaluateTip));
         if (addsSubtask && subtaskUnder != row.Id)
