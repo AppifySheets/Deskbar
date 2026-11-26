@@ -112,6 +112,7 @@ public partial class TasksWindow
         inboxPageStack.Clear();
         pageScroller = null;
         pageScrolledFor = null;
+        StopTranscript();
         InboxPage.Child = null;
         InboxPage.Visibility = Visibility.Collapsed;
     }
@@ -218,6 +219,7 @@ public partial class TasksWindow
             Scroller.Visibility = Visibility.Visible;
             pageScroller = null;
             pageScrolledFor = null;
+            StopTranscript();
             return;
         }
         var keep = pageScrolledFor == row.Id && pageScroller is { } old ? old.VerticalOffset : (double?)null;
@@ -242,6 +244,7 @@ public partial class TasksWindow
         // A CHAT READS FROM THE BOTTOM UP (the PM's fix 1 after checkpoint 1). A body shorter than the page sits at its
         // bottom, so the comment box is at the bottom edge and the empty room is on top; a longer one scrolls. The
         // scroller arranges its content at least as tall as the view, so the body's own bottom alignment does it.
+        FollowTranscript(row.Id);
         var body = PageBody(row);
         body.VerticalAlignment = VerticalAlignment.Bottom;
         pageScroller = new ScrollViewer

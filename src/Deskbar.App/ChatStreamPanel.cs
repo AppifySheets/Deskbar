@@ -19,7 +19,7 @@ internal sealed class ChatStreamState
 }
 
 /// <summary>What the stream needs from the window: its look-up of a link, its flat button and its clock.</summary>
-internal sealed record ChatStreamDeps(ControlTemplate Bare, Action<Uri> OpenLink, Func<UIElement, string, Action, Button> Button,
+internal sealed record ChatStreamDeps(ControlTemplate Bare, Action<Uri>? OpenLink, Func<UIElement, string, Action, Button> Button,
     Func<DateTimeOffset> Now, ChatStreamState State);
 
 // THE PAGE'S CHAT: the thread's comments and the session's messages and steps, in one column, newest at the bottom, in the
