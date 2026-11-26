@@ -49,6 +49,14 @@ namespace Deskbar.Core.Tasks;
 // WaitingOnYou-with-that-question; otherwise, inside the loop window, the ledger would still hold the old resumes and
 // the next poll would give up again at once and overwrite his action.
 //
+// A RECURRING TASK BETWEEN RUNS IS NEVER WOKEN (task 0b78269e, spec docs/superpowers/specs/2026-11-26-recurring-tasks-design.md,
+// "A run ends"). Its `task done` puts it back in Backlog, snoozed until the next run, so to the rule above it looks like
+// an open task whose session has gone missing. Resuming it would bring every finished run back two minutes later as an
+// idle session, and the next occurrence, which skips while a session of the task is listed, would then skip for good.
+// So TaskItem.IsBetweenRuns (a repeat, open, Backlog or Done) gets no step at all: no resume, no restart, no give-up.
+// The next run is a FRESH session that the schedule starts. A run that died without marking done is InProgress (or
+// waits on Petre), so it is not between runs and is resumed like any open task's session.
+//
 // A session id on two tasks is resumed once, for the task that comes first in the ordering. Listed sessions that no
 // task knows (open or closed, any entry) are adopted: one step each.
 //
@@ -137,6 +145,8 @@ public static class SessionKeeper
 
         var resumes = board.Tasks
             .Where(task => task.IsClaudes && task.Status is TaskStatus.Backlog or TaskStatus.InProgress or TaskStatus.WaitingOnYou)
+            // A recurring task between runs is never woken (task 0b78269e, see the header): its last run is over.
+            .Where(task => !task.IsBetweenRuns)
             // A task with ANY of its sessions listed is running (final review, item 9). The latest by Joined is not
             // always the one alive: a resumed or rejoined older entry, or a second session started on the task, can be
             // listed while the latest has ended, and waking the ended one would put two sessions on one task.
@@ -160,6 +170,8 @@ public static class SessionKeeper
         // one is left alone, as the rule above leaves it.
         var restarts = board.Tasks
             .Where(task => task.IsClaudes && task.Status is TaskStatus.Backlog or TaskStatus.InProgress or TaskStatus.WaitingOnYou)
+            // Nor restarted: a restart is a resume with a stop before it (task 0b78269e).
+            .Where(task => !task.IsBetweenRuns)
             .Where(task => task.Sessions.Count > 0)
             .OrderBy(task => StatusRank(task.Status))
             .ThenByDescending(task => task.UpdatedAt)
@@ -225,6 +237,17 @@ public static class SessionKeeper
     //     the last of its work (a watch it means to see through), and when the job ends the session's next turn ends
     //     idle and is stopped then.
     // A session on two finished tasks is named once, for the first.
+    //
+    // A RECURRING TASK BETWEEN RUNS counts as finished here too (task 0b78269e, spec
+    // docs/superpowers/specs/2026-11-26-recurring-tasks-design.md, "A run ends": "a finished run leaves nothing running").
+    // Its run said `task done`, which put the task back in Backlog to sleep until the next run, so without this its
+    // session would sit in the daemon until the reboot and the next occurrence would skip while it is listed. It takes
+    // the DONE road, not the Closed one: idle in every read for StopAfter, and never while a Deskbar window is attached
+    // (Petre has the run open; it stays until he closes it, and the next occurrence skips meanwhile, his rule). Two
+    // things keep a run that has just started safe. It is Backlog until its `task join`, so for a few seconds it can look
+    // between runs, but its session is busy on its first turn, and an idle read only counts once idle for StopAfter.
+    // And "between runs" is exactly TaskItem.IsBetweenRuns, so a run waiting on Petre (WaitingOnYou) is never stopped:
+    // it is asking for his feedback. The step says BetweenRuns, so the App can stop it without a line in the thread.
     public static IReadOnlyList<KeeperStep.Stop> Stops(
         TaskBoard board,
         IReadOnlyCollection<ClaudeAgent> live,
@@ -233,9 +256,10 @@ public static class SessionKeeper
         Func<TaskItem, bool> windowOpen,
         DateTimeOffset now)
     {
-        var heldOpen = board.Tasks.Where(task => !Finished(task)).SelectMany(task => task.Sessions).Select(s => s.Id).ToHashSet();
+        // Held by a task whose sessions are not ours to stop: an open task, a recurring one between runs excepted.
+        var heldOpen = board.Tasks.Where(task => !Stoppable(task)).SelectMany(task => task.Sessions).Select(s => s.Id).ToHashSet();
         return board.Tasks
-            .Where(Finished)
+            .Where(Stoppable)
             .SelectMany(task => live
                 .Where(agent => task.Sessions.Any(session => session.Id == agent.SessionId))
                 .Select(agent => (Task: task, Agent: agent)))
@@ -247,9 +271,13 @@ public static class SessionKeeper
                 : !pair.Agent.Busy && now - idleSince(pair.Agent.SessionId) >= StopAfter)
             .Where(pair => pair.Task.Status == TaskStatus.Closed || !windowOpen(pair.Task))
             .DistinctBy(pair => pair.Agent.SessionId)
-            .Select(pair => new KeeperStep.Stop(pair.Task.Id, pair.Agent))
+            .Select(pair => new KeeperStep.Stop(pair.Task.Id, pair.Agent) { BetweenRuns = pair.Task.IsBetweenRuns })
             .ToList();
     }
+
+    // A task whose listed sessions Stops may end: a finished one (Done or Closed), or a recurring one between runs (a
+    // Backlog task here goes the Done task's way above, since only Closed takes the other road).
+    static bool Stoppable(TaskItem task) => Finished(task) || task.IsBetweenRuns;
 
     static bool Finished(TaskItem task) => task.Status is TaskStatus.Done or TaskStatus.Closed;
 
@@ -336,7 +364,16 @@ public abstract record KeeperStep
     public sealed record Adopt(ClaudeAgent Agent) : KeeperStep;
 
     /// <summary>A finished task's idle background session: `claude stop` it (SessionKeeper.Stops).</summary>
-    public sealed record Stop(Guid TaskId, ClaudeAgent Agent) : KeeperStep;
+    public sealed record Stop(Guid TaskId, ClaudeAgent Agent) : KeeperStep
+    {
+        /// <summary>
+        /// The task is a recurring one between runs (TaskItem.IsBetweenRuns; task 0b78269e, spec
+        /// docs/superpowers/specs/2026-11-26-recurring-tasks-design.md, "A run ends"): the stop ends a finished RUN, not a
+        /// finished task. Only a flag; the App uses it to leave the thread alone (Task 7), since a run that stops every
+        /// hour would otherwise write a line there every hour.
+        /// </summary>
+        public bool BetweenRuns { get; init; }
+    }
 }
 
 /// <summary>

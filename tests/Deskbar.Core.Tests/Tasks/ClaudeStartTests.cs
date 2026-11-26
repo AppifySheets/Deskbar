@@ -149,6 +149,38 @@ public class ClaudeStartTests
             || (char.IsLowSurrogate(p.c) && !(p.i > 0 && char.IsHighSurrogate(message[p.i - 1]))));
     }
 
+    // Task 0b78269e (spec docs/superpowers/specs/2026-11-26-recurring-tasks-design.md, "A run starts"): a run's session
+    // is told it is a scheduled run, how to join, when to comment, to finish with `task done` and to ask only when Petre
+    // must act. The last block is kept whole however long the title, so the join command and the schedule always arrive.
+    [Fact]
+    public void A_recurring_task_starts_as_a_scheduled_run()
+    {
+        var repeat = new TaskRepeat(TaskRepeats.Parse("every 1h 09:00-19:00").Value, "sonnet", @"E:\repos\TaskSpaces");
+        var task = Task(taskId, "Check the build", Maybe<Guid>.None) with { Repeat = repeat };
+
+        var message = ClaudeStart.FirstMessage(task);
+
+        Assert.StartsWith($"Deskbar task {taskId}: Check the build\n", message);
+        Assert.Contains($"deskbar task join {taskId}", message);
+        Assert.Contains("scheduled run", message);
+        Assert.Contains("deskbar task done", message);
+        Assert.Contains("deskbar task ask", message);
+        Assert.Contains(repeat.Schedule.Label, message);
+        Assert.DoesNotContain("and start on it", message);
+
+        var lastLine = message[(message.LastIndexOf('\n') + 1)..];
+        var cut = ClaudeStart.FirstMessage(task with { Title = new string('x', 2000) });
+
+        Assert.True(cut.Length <= 1000);
+        Assert.EndsWith("\n" + lastLine, cut);
+    }
+
+    [Fact]
+    public void A_plain_task_starts_as_before() =>
+        Assert.Equal(
+            $"Deskbar task {taskId}: Fix the bar\nJoin this task (deskbar task join {taskId}) and start on it.",
+            ClaudeStart.FirstMessage(Task(taskId, "Fix the bar", Maybe<Guid>.None) with { Repeat = Maybe<TaskRepeat>.None }));
+
     [Fact]
     public void A_task_with_sessions_starts_in_its_latest_sessions_folder()
     {

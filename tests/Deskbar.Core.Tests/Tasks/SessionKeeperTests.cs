@@ -316,6 +316,8 @@ public class SessionKeeperTests
 
         Assert.Equal(task.Id, stop.TaskId);
         Assert.Equal("s1", stop.Agent.SessionId);
+        // A plain finished task is not a recurring one between runs (task 0b78269e): the App keeps its thread line.
+        Assert.False(stop.BetweenRuns);
     }
 
     // Petre: "i don't want to stop sessions that are asking for my feedback, only those that have been finished".
@@ -539,5 +541,105 @@ public class SessionKeeperTests
         Assert.Empty(PlanWith(wokenAfter, [BackgroundAgent("s1")]));
         Assert.Empty(PlanWith(wokenAfter, []));
         Assert.Single(PlanWith(wokenBefore, [BackgroundAgent("s1")]));
+    }
+
+    // --- task 0b78269e: recurring tasks between runs (spec docs/superpowers/specs/2026-11-26-recurring-tasks-design.md,
+    // "A run ends") ------------------------------------------------------------------------------------------------------
+
+    static readonly TaskRepeat Hourly = new(TaskRepeats.Parse("every 1h").Value, "sonnet", @"E:\repos\X");
+
+    static TaskItem Recurring(TaskStatus status, params TaskSession[] sessions) => Task(status, 5, sessions) with { Repeat = Hourly };
+
+    // Resuming a finished run would bring it back two minutes later as an idle session, and the next occurrence would then
+    // skip for good (a session of the task is listed). Not even a give-up: nothing went wrong, the run is over.
+    [Theory]
+    [InlineData(TaskStatus.Backlog)]
+    [InlineData(TaskStatus.Done)]
+    public void A_recurring_task_between_runs_is_never_resumed(TaskStatus status)
+    {
+        Assert.Empty(Plan([Recurring(status, Session("s1"))]));
+        Assert.Empty(Plan([Recurring(status, Session("s1"))], transcriptExists: _ => false));
+        Assert.Empty(Plan([Recurring(status, Session("s1", folder: ""))]));
+    }
+
+    // A run that died without marking done is InProgress (or waits on Petre), so it is not between runs and comes back
+    // like any open task's session (spec: "That is fine for one run").
+    [Theory]
+    [InlineData(TaskStatus.InProgress)]
+    [InlineData(TaskStatus.WaitingOnYou)]
+    public void A_recurring_task_in_progress_is_resumed_like_any_open_task(TaskStatus status)
+    {
+        var task = Recurring(status, Session("s1"));
+
+        var step = Assert.IsType<KeeperStep.Resume>(Assert.Single(Plan([task])));
+
+        Assert.Equal(task.Id, step.TaskId);
+        Assert.Equal("s1", step.Session.Id);
+    }
+
+    // The restart of a session stopped on a usage limit is a resume too, so a finished run is not restarted either. The
+    // same task without its repeat is, which is what makes this test able to fail.
+    [Fact]
+    public void A_limited_session_of_a_recurring_task_between_runs_is_not_restarted()
+    {
+        var task = Recurring(TaskStatus.Backlog, Session("s1"));
+
+        Assert.Empty(PlanLimited([task], Now.AddHours(-1), [BackgroundAgent("s1")]));
+        Assert.IsType<KeeperStep.Resume>(Assert.Single(PlanLimited([task with { Repeat = Maybe<TaskRepeat>.None }], Now.AddHours(-1), [BackgroundAgent("s1")])));
+    }
+
+    // A finished run leaves nothing running: its idle background session is stopped like a Done task's, and the step says
+    // it was a run between runs so the App can leave the thread alone (Task 7).
+    [Theory]
+    [InlineData(TaskStatus.Backlog)]
+    [InlineData(TaskStatus.Done)]
+    public void Stops_names_the_idle_background_session_of_a_recurring_task_between_runs(TaskStatus status)
+    {
+        var task = Recurring(status, Session("s1"));
+
+        var stop = Assert.Single(Stops([task], [Background("s1")]));
+
+        Assert.Equal(task.Id, stop.TaskId);
+        Assert.Equal("s1", stop.Agent.SessionId);
+        Assert.True(stop.BetweenRuns);
+    }
+
+    // Petre has the run open in a Deskbar window: it stays until he closes it, and the next occurrence skips meanwhile.
+    [Fact]
+    public void Stops_leaves_it_while_a_window_is_attached()
+    {
+        var task = Recurring(TaskStatus.Backlog, Session("s1"));
+
+        Assert.Empty(Stops([task], [Background("s1")], windowOpen: t => t.Id == task.Id));
+        Assert.Single(Stops([task], [Background("s1")], windowOpen: _ => false));
+    }
+
+    // A run waiting on Petre's answer, or still working, is not between runs: a session asking for his feedback is never
+    // stopped (SessionKeeper's header).
+    [Theory]
+    [InlineData(TaskStatus.WaitingOnYou)]
+    [InlineData(TaskStatus.InProgress)]
+    public void Stops_leaves_a_recurring_task_that_waits_on_you(TaskStatus status) =>
+        Assert.Empty(Stops([Recurring(status, Session("s1"))], [Background("s1")]));
+
+    // A run that has just started is Backlog until its `task join`, so a brand-new session can look between runs for a few
+    // seconds. It is busy then, or idle for less than StopAfter, and either way left alone.
+    [Fact]
+    public void Stops_leaves_a_run_that_is_busy_or_not_idle_for_StopAfter_yet()
+    {
+        var task = Recurring(TaskStatus.Backlog, Session("s1"));
+
+        Assert.Empty(Stops([task], [Background("s1", busy: true)]));
+        Assert.Empty(Stops([task], [Background("s1")], _ => Now - SessionKeeper.StopAfter + TimeSpan.FromSeconds(1)));
+    }
+
+    // A session another task still runs on is not stopped because one of its tasks is between runs.
+    [Fact]
+    public void Stops_leaves_a_session_an_open_task_also_holds()
+    {
+        var recurring = Recurring(TaskStatus.Backlog, Session("s1"));
+        var open = Task(TaskStatus.InProgress, 5, Session("s1"));
+
+        Assert.Empty(Stops([recurring, open], [Background("s1")]));
     }
 }

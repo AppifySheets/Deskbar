@@ -16,6 +16,14 @@ public abstract record WakePlan
 
     /// <summary>No session can take it; the comment stays in the thread, and Why is said there.</summary>
     public sealed record Nothing(string Why) : WakePlan;
+
+    /// <summary>
+    /// A recurring task between runs with no session listed (task 0b78269e, spec
+    /// docs/superpowers/specs/2026-11-26-recurring-tasks-design.md, "A run ends"): the comment starts a new run, a fresh
+    /// session that reads the thread, as "Wake now" does, instead of reaching an old run's session. The comment is
+    /// already in the thread, so it needs carrying nowhere.
+    /// </summary>
+    public sealed record FreshRun : WakePlan;
 }
 
 // A COMMENT WAKES ITS SESSION. Design: docs/superpowers/specs/2026-11-24-task-images-design.md, "PR 2: a comment wakes its
@@ -39,10 +47,21 @@ public abstract record WakePlan
 // ONE comment goes to ONE session: the one a double-click goes to (TaskViews.SessionToGoTo: live first, then the newest
 // joined), among those whose transcript still exists (an ended session without one cannot be resumed) and that /clear did
 // not replace (its conversation is over; the session id lives on in the new one).
+//
+// A RECURRING TASK BETWEEN RUNS is asked first (task 0b78269e, spec docs/superpowers/specs/2026-11-26-recurring-tasks-design.md,
+// "A run ends"). Its last run is over and its session stopped, so a comment starts a run straight away (FreshRun), as
+// "Wake now" does: a fresh session that reads the thread, comment included, rather than the old run's session resumed
+// with it. Resuming would also bring an old run back that the keeper then leaves running for good, since it never
+// touches a task between runs. Only while NO session of the task is listed: the last run's session can still be there
+// (not yet idle for the keeper's StopAfter, or with Petre's window on it), and then it reads the comment by the usual
+// road, since a fresh run beside it would put two sessions on one task. A run in progress or waiting on Petre is not
+// between runs and takes the usual road too.
 public static class CommentWake
 {
     public static WakePlan Plan(TaskItem task, IReadOnlyList<ClaudeAgent> listed, Func<TaskSession, bool> hasTranscript, Func<string, bool> waiterLapsed) =>
-        PlanFor(task.Sessions, listed, hasTranscript, waiterLapsed);
+        task.IsBetweenRuns && !task.Sessions.Any(session => listed.Any(agent => agent.SessionId == session.Id))
+            ? new WakePlan.FreshRun()
+            : PlanFor(task.Sessions, listed, hasTranscript, waiterLapsed);
 
     /// <summary>
     /// The same roads for sessions that belong to no task: the manager's one session, which Deskbar's event wakes reach

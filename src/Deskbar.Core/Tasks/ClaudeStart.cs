@@ -21,6 +21,7 @@ public static class ClaudeStart
     /// The first message of a new session, exactly: <c>Deskbar task &lt;id&gt;: &lt;title&gt;</c>, the status line when
     /// there is one, then the ask to join. Cut to 1000 characters; the last line is built first and kept whole, and the
     /// title and status line are cut to fit in front of it, so the session can always join the task by its full id.
+    /// A task with a repeat ends on <see cref="ScheduledRun"/> instead of the plain ask to join.
     /// </summary>
     //
     // A TITLE THAT STARTS WITH A SKILL ("/refresh-pr 245", task 3a872301, ClaudeSkills has the measurements) goes first,
@@ -44,7 +45,9 @@ public static class ClaudeStart
 
     static string FirstMessage(TaskItem task, int maxMessage)
     {
-        var join = $"Join this task (deskbar task join {task.Id}) and start on it.";
+        var join = task.Repeat
+            .Map(repeat => ScheduledRun(task.Id, repeat))
+            .GetValueOrDefault($"Join this task (deskbar task join {task.Id}) and start on it.");
         var head = string.Join("\n", new[] { $"Deskbar task {task.Id}: {task.Title}", task.StatusLine }
             .Where(line => !string.IsNullOrWhiteSpace(line)));
         // The room in front of the last line is the limit less that line and the newline that joins them.
@@ -54,6 +57,19 @@ public static class ClaudeStart
         var cut = room > 0 && room < head.Length && char.IsHighSurrogate(head[room - 1]) ? room - 1 : room;
         return (head.Length > room ? head[..cut] : head) + "\n" + join;
     }
+
+    // THE LAST LINE OF A SCHEDULED RUN'S FIRST MESSAGE (task 0b78269e, spec
+    // docs/superpowers/specs/2026-11-26-recurring-tasks-design.md, "A run starts"). Nobody is watching a run: the
+    // schedule starts it quietly, so the session has to be told it is one, with the schedule's own words so it knows how
+    // often it comes round. What it says: join, do what the description says (the title alone is rarely the job), one
+    // comment only when there is something to report (an hourly check that found nothing would otherwise fill the
+    // thread), finish with `task done`, which for a recurring task ends the run and puts it to sleep until the next, and
+    // ask only when the user must act, since a question holds every following occurrence back. It is the line that is
+    // kept whole, so it stays well under the 1000-character cap with any schedule's label.
+    static string ScheduledRun(Guid id, TaskRepeat repeat) =>
+        $"This is a scheduled run of a recurring task ({repeat.Schedule.Label}). Join it (deskbar task join {id}), "
+        + "do what its description says, comment once with the result only if there is something to say, and finish "
+        + "with deskbar task done. Use deskbar task ask only when the user must act.";
 
     // THE MODEL A TASK SESSION RUNS ON (design docs/superpowers/specs/2026-11-25-session-model-pick-design.md). Deskbar
     // names it on every start, so a task session never runs on whatever `~/.claude/settings.json` holds that day:

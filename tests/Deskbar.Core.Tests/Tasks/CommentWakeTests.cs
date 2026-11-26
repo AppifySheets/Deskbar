@@ -141,4 +141,44 @@ public sealed class CommentWakeTests
         Assert.Equal("aaaaaaaa", Assert.IsType<WakePlan.StopThenResume>(background).ShortId);
         Assert.IsType<WakePlan.Resume>(interactive);
     }
+
+    // --- task 0b78269e: recurring tasks (spec docs/superpowers/specs/2026-11-26-recurring-tasks-design.md, "A run ends") --
+
+    static readonly TaskRepeat Hourly = new(TaskRepeats.Parse("every 1h").Value, "sonnet", @"E:\repos\TaskSpaces");
+
+    static TaskItem Recurring(TaskStatus status, params TaskSession[] sessions) => Task(status, sessions) with { Repeat = Hourly };
+
+    // Between runs the old run's session is over; a comment starts a run straight away (a fresh session that reads the
+    // thread), as "Wake now" does, rather than resuming the last run. A task with no sessions yet starts one too.
+    [Theory]
+    [InlineData(TaskStatus.Backlog)]
+    [InlineData(TaskStatus.Done)]
+    public void A_comment_between_runs_with_no_session_listed_starts_a_fresh_run(TaskStatus status)
+    {
+        Assert.IsType<WakePlan.FreshRun>(CommentWake.Plan(Recurring(status, Session("aaaaaaaa-1", 0, live: false)), [], Everyone, NeverLapsed));
+        Assert.IsType<WakePlan.FreshRun>(CommentWake.Plan(Recurring(status), [], Everyone, NeverLapsed));
+        // Not even a session whose transcript has gone is in the way: the fresh run needs none.
+        Assert.IsType<WakePlan.FreshRun>(CommentWake.Plan(Recurring(status, Session("aaaaaaaa-1", 0, live: false)), [], _ => false, NeverLapsed));
+    }
+
+    // The last run's session has not been stopped yet (a minute idle, or a window attached): it is still there to read
+    // the comment, and a fresh run beside it would put two sessions on one task.
+    [Fact]
+    public void A_comment_between_runs_while_the_last_run_is_still_listed_goes_to_its_inbox() =>
+        Assert.Equal(new WakePlan.Inbox("aaaaaaaa-1"),
+            CommentWake.Plan(Recurring(TaskStatus.Backlog, Session("aaaaaaaa-1", 0)), [Listed("aaaaaaaa-1")], Everyone, NeverLapsed));
+
+    // A run in progress, or one waiting on Petre, is not between runs: its session is reached as any task's is.
+    [Theory]
+    [InlineData(TaskStatus.InProgress)]
+    [InlineData(TaskStatus.WaitingOnYou)]
+    public void A_comment_on_a_recurring_task_in_progress_takes_the_usual_road(TaskStatus status)
+    {
+        var ended = Session("aaaaaaaa-1", 0, live: false);
+
+        Assert.Equal(new WakePlan.Resume(ended), CommentWake.Plan(Recurring(status, ended), [], Everyone, NeverLapsed));
+        Assert.Equal(new WakePlan.Inbox("aaaaaaaa-1"),
+            CommentWake.Plan(Recurring(status, Session("aaaaaaaa-1", 0)), [Listed("aaaaaaaa-1")], Everyone, NeverLapsed));
+        Assert.IsType<WakePlan.Nothing>(CommentWake.Plan(Recurring(status), [], Everyone, NeverLapsed));
+    }
 }
