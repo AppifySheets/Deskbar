@@ -208,7 +208,9 @@ public class TasksBoardGoalTests
         t.Controller.Show();
 
         Assert.Equal("The goal is done", t.Controller.SetGoal(id, goal.Id).Error);
-        Assert.Equal("The goal is done", t.Window.ProblemText.Text);
+        // On the task's own line (task 41f08dba), not the panel's problem line at the top.
+        Assert.Equal("", t.Window.ProblemText.Text);
+        Assert.Contains(Inside(t.Window).OfType<TextBlock>(), b => Equals(b.Tag, TasksWindow.ProblemTag) && b.Text == "The goal is done");
     });
 
     // G1: goals exist, but none open this week or month (only last week's): "None" and a disabled line saying so.

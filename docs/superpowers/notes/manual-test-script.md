@@ -702,7 +702,8 @@ S13. Drag to nest. On the bar, drag a note slowly down over another note: over t
     task again, where you dropped it. The same in the tasks panel's List; in the Matrix there is no outline.
 S14. A parent closes last. Give a note two subtasks. Hover its tick, on the bar and in the tasks panel: the tooltip
     says "Close its 2 open subtasks first". Tick it on the bar: a message says the same and the line stays as it was,
-    with no Undo. Tick it in the panel, and pick Close on its menu: the problem line says it and nothing moves.
+    with no Undo. Tick it in the panel, and pick Close on its menu: the parent's own line says it in orange under its title, not the top of the
+    panel, and nothing moves. Close a subtask: the orange line goes.
     `$ts task close <parent>` is refused with the same words. Close one subtask: the tooltip and the refusal say "Close
     its open subtask first". Close the other: the parent's tick closes it as before, with Undo.
 S15. Claude still at it (task 37cd7081). Start Claude on a task and, while it works, hover its tick in the tasks panel:
