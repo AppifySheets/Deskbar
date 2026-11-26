@@ -231,7 +231,8 @@ public partial class TasksWindow
         bool OnLine(Button button, int fitted) => AutomationProperties.GetName(button) switch
         {
             OpenInWindowText => fitted > OpenInWindowSlot && strip.Children[OpenInWindowSlot] is Button,
-            ThreadAddSubtaskText => fitted > AddSubtaskSlot && strip.Children[AddSubtaskSlot] is Button,            OpenClaudeText => !editing,
+            ThreadAddSubtaskText => fitted > AddSubtaskSlot && strip.Children[AddSubtaskSlot] is Button,
+            OpenClaudeText => !editing,
             StartClaudeText => !editing && StartsClaude(row),
             _ => false,
         };
@@ -276,8 +277,8 @@ internal sealed class FitStrip : Panel
     // other than 100% (a device pixel off a column capped at exactly the slots' width) does not drop the last button.
     // A gap at the END of the ones that fit is not shown (task 3dd07539): the last child moves up to right after the last
     // real one. Gaps between real ones stay, so a button keeps its x on every line; only a trailing gap would push the
-    // last child one slot further than on the line above for nothing (the review of task 3dd07539: Reevaluate, the
-    // eighth slot, is a gap on nearly every line, and every full line had a blank slot before "⋯").
+    // last child one slot further than on the line above for nothing (the review of task 3dd07539: a slot that is a gap
+    // on nearly every line left every full line a blank slot before "⋯").
     int SlotsIn(double width)
     {
         var fit = double.IsInfinity(width) ? Children.Count - 1 : Math.Clamp((int)Math.Floor((width + 1) / slot) - 1, 0, Math.Max(0, Children.Count - 1));

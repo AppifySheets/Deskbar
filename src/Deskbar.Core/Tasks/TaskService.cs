@@ -289,7 +289,7 @@ public sealed class TaskService(ITaskStore store, Func<DateTimeOffset> now, Func
     // Reevaluations, and the app's CommentWaker hands its session SessionBriefing.Reevaluate on the roads a comment
     // takes, so an idle or ended session is reached too. A Deskbar line in the thread says it was asked, so the press has
     // a visible effect even before the session answers. Refused for a task no session has worked on (nobody to ask) and
-    // for a closed one (history; Reopen comes first). Every caller, the line's button, its menu, the bar's menu and
+    // for a closed one (history; Reopen comes first). Every caller, the button at the top of an open task, the bar's menu and
     // `task reevaluate <id>`, comes through here.
     public Result Reevaluate(Guid id) =>
         Board.Tasks.TryFirst(t => t.Id == id).ToResult("no such task")
