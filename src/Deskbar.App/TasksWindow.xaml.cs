@@ -155,6 +155,9 @@ public partial class TasksWindow : Window
     // The workspace chosen in the add box, or none chosen yet (the view's AddTarget then).
     TaskPlaceChoice? addChosen;
 
+    // The add box's "/" list of Claude Code skills (task 3a872301, SkillCompletion); kept so it lives with the window.
+    readonly SkillCompletion addSkills;
+
     // Set only when the app is going away; see QuickFindWindow.closingForGood.
     bool closingForGood;
 
@@ -186,6 +189,15 @@ public partial class TasksWindow : Window
         // handler sees handled events too, and runs once the button under it has raised its Click), draws what waited.
         AddHandler(MouseLeftButtonUpEvent, new MouseButtonEventHandler((_, _) => Flush()), handledEventsToo: true);
         AddBox.TextChanged += (_, _) => AddPlaceholder.Visibility = AddBox.Text.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
+        // The "/" list of skills (task 3a872301, SkillCompletion), as on the bar's box: attached BEFORE PressInAdd, so its
+        // Enter, Tab and Esc pick or close while it is open. It lists the skills of the workspace on the add chip, and
+        // only while the panel can hand a note to Claude (AddNoteAndStartClaude wired). Actions is read at the keystroke.
+        addSkills = new SkillCompletion(AddBox,
+            () => Actions?.WorkspaceSkills is { } skills && (addChosen ?? latest?.AddTarget) is { } target
+                ? skills(target.Workspace, Maybe<Guid>.None)
+                : Task.FromResult<IReadOnlyList<SkillChoice>>([]),
+            () => Actions?.WorkspaceSkills is not null && Actions?.AddNoteAndStartClaude is not null,
+            new SkillCompletion.Look(Frozen(0xFF, 0x15, 0x16, 0x1A), PickedEdge, Ink, DimInk, SelectedFill));
         AddBox.PreviewKeyDown += (_, e) => e.Handled = PressInAdd(e.Key, Keyboard.Modifiers) != KeyOutcome.Ignored;
         // The panel resized (or the add row laid out for the first time): the chips go beside the box or under it
         // again, whichever leaves room to type (FitAddEnd, task f212d886). Only a width change can change that answer.
@@ -3438,6 +3450,8 @@ public partial class TasksWindow : Window
         // The subtask box in a thread (TasksWindow.SubtaskAdd.cs) closes first: before the add box, and before the thread
         // it sits in, which the next Esc folds.
         else if (subtaskUnder is not null) EndSubtaskAdd();
+        // The add box's skill list closes before the box does (task 3a872301): the window's Esc runs ahead of the box's.
+        else if (addSkills.Dismiss()) { }
         else if (AddBoxShown) HideAdd();
         // RULING 63: Esc folds the selected line's open thread, the last thing it undoes.
         // Not while a comment box has the keyboard: there Esc belongs to the box (review, M5).

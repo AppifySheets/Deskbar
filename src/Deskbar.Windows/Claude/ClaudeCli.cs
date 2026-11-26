@@ -34,7 +34,7 @@ namespace Deskbar.Windows.Claude;
 // cmd.exe.
 public sealed class ClaudeCli(string? executable = null) : IClaudeCli
 {
-    static readonly IReadOnlyList<string> StrippedVariables =
+    internal static readonly IReadOnlyList<string> StrippedVariables =
         ["CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT", "CLAUDE_CODE_SESSION_ATTENDED", "CLAUDE_JOB_DIR", "CLAUDE_CODE_CHILD_SESSION",
             "ELECTRON_RUN_AS_NODE"];
 

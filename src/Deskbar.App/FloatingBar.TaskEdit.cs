@@ -50,6 +50,12 @@ public partial class FloatingBar
     internal Func<Guid, ContextMenu?>? StartClaude { get; init; }
 
     /// <summary>
+    /// The add box's "/" list (task 3a872301, SkillCompletion): the Claude Code skills of the folders a task on this
+    /// workspace, under this parent, would start in, as the App's SkillCatalog has them. Unset, typing "/" lists nothing.
+    /// </summary>
+    internal Func<Maybe<Guid>, Maybe<Guid>, Task<IReadOnlyList<SkillChoice>>>? WorkspaceSkills { get; init; }
+
+    /// <summary>
     /// Whether going to a Claude task's session can open anything (task 6a57f59b): the App's ClaudeTaskActions.CanOpen.
     /// Decides between a line menu's Open Claude and Start Claude on this. Unset (the tests), every session counts as openable.
     /// </summary>

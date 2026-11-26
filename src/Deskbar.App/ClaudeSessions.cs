@@ -317,8 +317,15 @@ public sealed class ClaudeSessions : IDisposable
     // The start always names a model (ClaudeStart.Arguments): the one given for this session (`task start --model`),
     // otherwise the setting (AppState.ClaudeTaskModelInEffect, read here on the UI thread), never Claude Code's own
     // default. The resumes below pass none, because a session wakes with the model it was started on (measured).
+    /// <summary>
+    /// Whether Claude Code listed this skill in this folder (SkillCatalog.Kept, task 3a872301). Only then does a task
+    /// titled "/<skill> ..." start by running it; no by default.
+    /// </summary>
+    public Func<string, string, bool> KnowsSkill { get; set; } = (_, _) => false;
+
     public Task<Result<string>> Start(TaskItem task, string folder, Maybe<string> model = default) =>
-        Observable.Return(ClaudeStart.Arguments(task, model.GetValueOrDefault(manager.State.ClaudeTaskModelInEffect)))
+        Observable.Return(ClaudeStart.Arguments(task, model.GetValueOrDefault(manager.State.ClaudeTaskModelInEffect),
+                ClaudeSkills.SkillOf(task.Title).Map(skill => KnowsSkill(folder, skill)).GetValueOrDefault(false)))
             .SelectMany(arguments => OffThread(() => cli.Run(arguments, folder, LaunchTimeout)))
             .SelectMany(launched => Launched(task, folder, launched))
             .TakeUntil(stopping)

@@ -22,13 +22,33 @@ public static class ClaudeStart
     /// there is one, then the ask to join. Cut to 1000 characters; the last line is built first and kept whole, and the
     /// title and status line are cut to fit in front of it, so the session can always join the task by its full id.
     /// </summary>
-    public static string FirstMessage(TaskItem task)
+    //
+    // A TITLE THAT STARTS WITH A SKILL ("/refresh-pr 245", task 3a872301, ClaudeSkills has the measurements) goes first,
+    // on a line of its own, so the session's first message runs that skill: Claude Code reads a leading "/<name>" as the
+    // skill and everything after it, these lines included, as its arguments. The rest is as for any task, cut to what
+    // is left after that line (itself cut to MaxSkillLine, so the join line always fits).
+    // Only when the caller knows Claude Code lists that skill in the start folder (`runsSkill`, review of task 3a872301):
+    // a title such as "/logout button does nothing" must never run a command nobody chose.
+    public static string FirstMessage(TaskItem task, bool runsSkill = false) =>
+        runsSkill && ClaudeSkills.SkillOf(task.Title).HasValue ? WithSkill(task, SkillLine(task.Title)) : FirstMessage(task, MaxMessage);
+
+    static string WithSkill(TaskItem task, string skill) => skill + "\n\n" + FirstMessage(task, MaxMessage - skill.Length - 2);
+
+    // The skill's line is the title, cut to this many characters (a title is one line, TaskNote.Split).
+    const int MaxSkillLine = 300;
+
+    static string SkillLine(string title) => title.Length > MaxSkillLine ? Whole(title, MaxSkillLine) : title;
+
+    static string Whole(string text, int length) =>
+        char.IsHighSurrogate(text[length - 1]) ? text[..(length - 1)] : text[..length];
+
+    static string FirstMessage(TaskItem task, int maxMessage)
     {
         var join = $"Join this task (deskbar task join {task.Id}) and start on it.";
         var head = string.Join("\n", new[] { $"Deskbar task {task.Id}: {task.Title}", task.StatusLine }
             .Where(line => !string.IsNullOrWhiteSpace(line)));
         // The room in front of the last line is the limit less that line and the newline that joins them.
-        var room = Math.Max(0, MaxMessage - join.Length - 1);
+        var room = Math.Max(0, maxMessage - join.Length - 1);
         // A cut between the two halves of a surrogate pair (an emoji) would leave a lone high surrogate, which is not
         // valid text on a command line; step back one so the pair goes whole or not at all.
         var cut = room > 0 && room < head.Length && char.IsHighSurrogate(head[room - 1]) ? room - 1 : room;
@@ -71,8 +91,8 @@ public static class ClaudeStart
     /// held off (<see cref="RemoteControlOff"/>), then the first message. A plain `claude --bg --resume` keeps the model
     /// the session started with (measured: it wakes "with its saved options"), so only the start names it.
     /// </summary>
-    public static IReadOnlyList<string> Arguments(TaskItem task, string model) =>
-        ["--bg", "--model", model, "--settings", RemoteControlOff, FirstMessage(task)];
+    public static IReadOnlyList<string> Arguments(TaskItem task, string model, bool runsSkill = false) =>
+        ["--bg", "--model", model, "--settings", RemoteControlOff, FirstMessage(task, runsSkill)];
 
     /// <summary>
     /// Where to start the session, the likeliest first. A task that has had sessions starts at the REPO of its latest
@@ -84,23 +104,32 @@ public static class ClaudeStart
     public static IReadOnlyList<string> Folders(TaskItem task, TaskBoard board, IEnumerable<string> editorFolders) =>
         task.Sessions.Where(s => s.Folder != "").OrderByDescending(s => s.Joined).FirstOrDefault() is { } latest
             ? [RepoOf(latest.Folder)]
-            : ParentRepo(task, board)
-                .Concat(board.Tasks
-                    .Where(other => other.WorkspaceId.Equals(task.WorkspaceId))
-                    .SelectMany(other => other.Sessions)
-                    .Where(s => s.Folder != "")
-                    .OrderByDescending(s => s.Joined)
-                    .Select(s => RepoOf(s.Folder)))
-                .Concat(editorFolders.Where(f => f != ""))
-                // The first spelling of a folder wins, so the one used most recently is the one shown.
-                .DistinctBy(f => f.TrimEnd('\\', '/'), StringComparer.OrdinalIgnoreCase)
-                .ToList();
+            : NewTaskFolders(task.WorkspaceId, task.ParentId, board, editorFolders);
+
+    /// <summary>
+    /// The folders a task with no session yet would start in (the second half of <see cref="Folders"/>), for a task on
+    /// <paramref name="workspaceId"/> under <paramref name="parentId"/>. Also what the add box asks before the task
+    /// exists, to list the skills of the workspace on its chip (ClaudeSkills, task 3a872301).
+    /// </summary>
+    public static IReadOnlyList<string> NewTaskFolders(Maybe<Guid> workspaceId, Maybe<Guid> parentId, TaskBoard board,
+        IEnumerable<string> editorFolders) =>
+        ParentRepo(parentId, board)
+            .Concat(board.Tasks
+                .Where(other => other.WorkspaceId.Equals(workspaceId))
+                .SelectMany(other => other.Sessions)
+                .Where(s => s.Folder != "")
+                .OrderByDescending(s => s.Joined)
+                .Select(s => RepoOf(s.Folder)))
+            .Concat(editorFolders.Where(f => f != ""))
+            // The first spelling of a folder wins, so the one used most recently is the one shown.
+            .DistinctBy(f => f.TrimEnd('\\', '/'), StringComparer.OrdinalIgnoreCase)
+            .ToList();
 
     // A subtask with no session of its own most likely continues in its parent's repo (subtasks spec,
     // docs/superpowers/specs/2026-11-24-subtasks-design.md, "Making subtasks"), so that repo, from the parent's latest
     // session, leads the list. Nothing for a plain task, or a parent with no sessions or no longer on the board.
-    static IEnumerable<string> ParentRepo(TaskItem task, TaskBoard board) =>
-        task.ParentId.Bind(p => board.Tasks.TryFirst(t => t.Id == p))
+    static IEnumerable<string> ParentRepo(Maybe<Guid> parentId, TaskBoard board) =>
+        parentId.Bind(p => board.Tasks.TryFirst(t => t.Id == p))
             .Bind(parent => parent.Sessions.Where(s => s.Folder != "").OrderByDescending(s => s.Joined).TryFirst())
             .Map(s => new[] { RepoOf(s.Folder) })
             .GetValueOrDefault([]);

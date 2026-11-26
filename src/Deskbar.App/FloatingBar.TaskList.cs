@@ -464,6 +464,8 @@ public partial class FloatingBar
     Button? taskMoreButton;
     Button? taskManagerButton;
     TextBox? taskAddBox;
+    // The add box's "/" list of Claude Code skills (task 3a872301, SkillCompletion).
+    SkillCompletion? taskAddSkills;
     TextBlock? taskAddPlaceholder;
     WrapPanel? taskAddChips;
     TaskChipParts? taskAddChip;
@@ -797,9 +799,18 @@ public partial class FloatingBar
             TextWrapping = TextWrapping.Wrap,
             AcceptsReturn = true,
             MaxLines = TaskAddMaxLines,
-            ToolTip = "Enter adds the task, Ctrl+Enter adds it and starts Claude on it, Shift+Enter starts a new line, Esc clears the box. The first line is the title, the rest the description. Ctrl+V or a drop adds a picture",
+            ToolTip = "Enter adds the task, Ctrl+Enter adds it and starts Claude on it, Shift+Enter starts a new line, Esc clears the box. The first line is the title, the rest the description. Ctrl+V or a drop adds a picture. Type / to pick one of the workspace's Claude Code skills",
         };
         AutomationProperties.SetName(taskAddBox, "New task");
+        // The "/" list of skills (task 3a872301). Attached BEFORE OnTaskAddKey, so while the list is open its Enter, Tab
+        // and Esc pick or close instead of adding the task or clearing the box. It lists the skills of the workspace on
+        // the chip (taskAddTarget), under the subtask's parent when there is one, and only while a task can be handed to
+        // Claude at all (StartClaude wired, as for the Add and start Claude button). The properties are read at the
+        // keystroke, since they are set after this list is built.
+        taskAddSkills = new SkillCompletion(taskAddBox,
+            () => WorkspaceSkills is { } skills ? skills(taskAddTarget, taskAddParent) : Task.FromResult<IReadOnlyList<SkillChoice>>([]),
+            () => WorkspaceSkills is not null && StartClaude is not null,
+            new SkillCompletion.Look(TaskFieldFill, TaskPickedEdge, TaskInk, TaskDimInk, TaskSelectedFill));
         taskAddBox.PreviewKeyDown += OnTaskAddKey;
         taskAddBox.PreviewMouseLeftButtonDown += (_, _) =>
         {

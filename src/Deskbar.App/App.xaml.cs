@@ -86,6 +86,9 @@ public partial class App : Application
     // "Start Claude on this", the thread's session list and the pipe's `task go|start|open-session`. Built right after
     // claudeSessions, whose list and starts it uses; disposed with it.
     ClaudeTaskActions? claudeActions;
+    // The skills Claude Code lists for each folder (SkillCatalog, task 3a872301): the add box's "/" list, and where a task
+    // titled with a project's skill starts. Kept for the app's life; nothing to dispose.
+    readonly SkillCatalog skillCatalog = new();
     // The manager session's one click (ManagerActions): the bar's Manager button and the pipe's `task manager`. Built
     // right after claudeActions, whose window it shares; disposed with it.
     ManagerActions? managerActions;
@@ -1047,6 +1050,14 @@ public partial class App : Application
 
     // The folders the VS Code windows on a workspace show, by the names their titles carry (EditorFolder.Of). None for
     // no workspace: a window on an unnamed desktop belongs to no task's workspace.
+    // The add boxes' "/" list (task 3a872301): the skills Claude Code lists in the folders a task on the workspace, under
+    // the parent, would start in (ClaudeTaskActions.NewTaskFolders), through the catalog. Empty while the actions are
+    // not built yet.
+    Task<IReadOnlyList<Deskbar.Core.Tasks.SkillChoice>> WorkspaceSkillsOf(Maybe<Guid> workspace, Maybe<Guid> parent) =>
+        claudeActions is { } actions
+            ? skillCatalog.For(actions.NewTaskFolders(workspace, parent))
+            : Task.FromResult<IReadOnlyList<Deskbar.Core.Tasks.SkillChoice>>([]);
+
     IEnumerable<string> EditorFolderNamesOn(Maybe<Guid> workspace) =>
         workspace.HasNoValue
             ? []
@@ -2018,6 +2029,9 @@ public partial class App : Application
         // icon brings one (WorkspaceManager.JumpTo); the terminals it opens are started through ProgramStarter, like
         // `deskbar.cmd start`, and expected on the task's workspace (StartIn).
         var claudeActivator = new WindowActivator();
+        // A task titled with a skill runs it only where Claude Code listed it (task 3a872301, review finding 1).
+        claudeSessions.KnowsSkill = (folder, skill) =>
+            skillCatalog.Kept(Deskbar.Core.Tasks.ClaudeStart.RepoOf(folder)).Map(skills => skills.Contains(skill)).GetValueOrDefault(false);
         claudeActions = new ClaudeTaskActions(tasks!, manager, claudeSessions.Live, new ClaudeTaskSeams(
                 Start: claudeSessions.Start,
                 Resume: claudeSessions.ResumeNow,
@@ -2035,6 +2049,8 @@ public partial class App : Application
             {
                 Confirm = question => MessageBox.Show(question, "Deskbar", MessageBoxButton.YesNo, MessageBoxImage.Question) == MessageBoxResult.Yes,
                 PickFolder = PickClaudeFolder,
+                // A task titled "/<skill>" starts in a folder that has the skill (task 3a872301).
+                SkillsKept = skillCatalog.Kept,
                 OfferTrustTerminal = message => MessageBox.Show(message, "Deskbar", MessageBoxButton.YesNo, MessageBoxImage.Warning) == MessageBoxResult.Yes,
                 // Task 3641561d: a start that found no claude.exe offers to install Claude Code in a terminal.
                 OfferInstall = message => MessageBox.Show(message, "Deskbar", MessageBoxButton.YesNo, MessageBoxImage.Question) == MessageBoxResult.Yes,
@@ -2295,6 +2311,10 @@ public partial class App : Application
                 SessionWindow = SessionWindowOf,
                 // A line menu's "Start Claude on this" (Task 9): ClaudeTaskActions.Offer, which may open a pick list.
                 StartClaude = id => claudeActions?.Offer(id),
+                // The add box's "/" list (task 3a872301): the skills Claude Code lists in the folders a task on the chip's
+                // workspace would start in (ClaudeTaskActions.NewTaskFolders), through the catalog. Empty while the
+                // actions are not built yet.
+                WorkspaceSkills = WorkspaceSkillsOf,
                 // Whether a line menu offers Open Claude or Start Claude on this (task 6a57f59b): the click's own test.
                 // Before the actions exist, a session counts as openable, as it always did.
                 OpensClaudeSession = task => claudeActions?.CanOpen(task) ?? true,
@@ -2702,6 +2722,8 @@ public partial class App : Application
                 // line menu and in the thread, and a redraw whenever `claude agents --json` gives a new list.
                 sessionsOf: task => claudeActions?.SessionsOf(task) ?? [],
                 startClaude: id => claudeActions?.Offer(id),
+                // The add box's "/" list of skills (task 3a872301), as the bar's (WorkspaceSkillsOf).
+                workspaceSkills: WorkspaceSkillsOf,
                 // A tick on a task Claude is still working on (task 37cd7081): closed, then its sessions stopped.
                 stopClaudeAndClose: task => claudeActions?.StopAndClose(task) ?? Result.Failure(ClaudeActionsNotReady),
                 openSession: (task, session) => claudeActions?.OpenSession(task, session) ?? Result.Failure(ClaudeActionsNotReady),
