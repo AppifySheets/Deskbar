@@ -447,44 +447,6 @@ public sealed class TaskService(ITaskStore store, Func<DateTimeOffset> now, Func
             ? cleared
             : Maybe<TaskItem>.None;
 
-    // --- the session's model, effort and permission mode (TaskBoard's operations, SettingsSwitch) ---
-    // Each saves only when it changed something. The app's ClaudeSessions runs the switch and calls these.
-
-    public Result Want(Guid id, SessionSettings wanted) => ApplyIfChanged(Board.Want(id, wanted, now()));
-
-    public Result Unwant(Guid id) => ApplyIfChanged(Board.Unwant(id, now()));
-
-    public Result SwitchStarted(Guid id, PendingSwitch pending) => ApplyIfChanged(Board.SwitchStarted(id, pending, now()));
-
-    public Result SwitchIssued(Guid id, SessionSettings to, string shortId, DateTimeOffset issuedAt) =>
-        ApplyIfChanged(Board.SwitchIssued(id, to, shortId, issuedAt, now()));
-
-    public Result SessionSwitched(Guid id, string fromSessionId, TaskSession copy) => ApplyIfChanged(Board.SessionSwitched(id, fromSessionId, copy, now()));
-
-    public Result SwitchConfirmed(Guid id) => ApplyIfChanged(Board.SwitchConfirmed(id, now()));
-
-    public Result SwitchReverted(Guid id) => ApplyIfChanged(Board.SwitchReverted(id, now()));
-
-    public Result SessionRelaunched(Guid id, string sessionId, SessionSettings launched) =>
-        ApplyIfChanged(Board.SessionRelaunched(id, sessionId, launched, now()));
-
-    public Result SwitchAbandoned(Guid id, bool keepWanted = false) => ApplyIfChanged(Board.SwitchAbandoned(id, now(), keepWanted));
-
-    /// <summary>
-    /// A session that started with source "fork" (a copy, measured 2026-11-26) and is on no task: when it is the copy a
-    /// switch issued in its folder is waiting for (TaskBoard.SwitchingTaskFor), it joins that task in the original's
-    /// place (TaskBoard.SessionSwitched), launched with what the switch asked for. Returns the task it joined, or none.
-    /// </summary>
-    public Maybe<TaskItem> JoinAfterSwitch(string sessionId, string folder, Func<string, bool> inFolder)
-    {
-        if (Board.SwitchingTaskFor(sessionId, inFolder, now()) is not { HasValue: true } task
-            || task.Value.Switching is not { HasValue: true } pending
-            || SessionSwitched(task.Value.Id, pending.Value.FromSession, NewSession(sessionId, folder) with { LaunchedWith = pending.Value.To }).IsFailure)
-            return Maybe<TaskItem>.None;
-        Note(task.Value.Id, SettingsSwitch.JoinedNote(pending.Value.To));
-        return Board.Tasks.TryFirst(t => t.Id == task.Value.Id);
-    }
-
     // --- which sessions a person is at (Ruling 17) ---
     //
     // `claude agents --json` lists a `claude -p` run as "interactive", so the list cannot tell a person's session from a

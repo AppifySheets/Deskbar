@@ -58,14 +58,6 @@ public sealed record ClaudeAgent(string SessionId, Maybe<string> ShortId, string
     public bool HasProcess { get; init; } = true;
 
     /// <summary>
-    /// status as the list gives it ("busy", "idle", "waiting"), or none when the row has none. <see cref="Busy"/> reads
-    /// only "busy", so a session held by a permission prompt (status "waiting", state "blocked", measured 2026-11-26)
-    /// reads as not busy there; SettingsSwitch must not take that for a pause, so it reads this. An init property for
-    /// the same reason as StartedAt.
-    /// </summary>
-    public Maybe<string> Status { get; init; } = Maybe<string>.None;
-
-    /// <summary>
     /// Whether its turn is over, even if the list calls it busy (task 607af1db). A background session whose turn has
     /// ended while a job of its own runs on (a Bash started with run_in_background, a Monitor) is listed
     /// status "busy" until that job ends, but its state is no longer "working" (measured 2026-11-26, CLI 2.1.332: a
@@ -110,7 +102,7 @@ public static partial class ClaudeAgents
         row.ValueKind == JsonValueKind.Object && Text(row, "sessionId") is { HasValue: true } session
             ? new ClaudeAgent(session.Value, Text(row, "id"), Text(row, "cwd").GetValueOrDefault(""),
                 Text(row, "kind").GetValueOrDefault("") == "background", Text(row, "status").GetValueOrDefault("") == "busy",
-                Text(row, "name").GetValueOrDefault("")) { StartedAt = Started(row), State = Text(row, "state"), Status = Text(row, "status"), HasProcess = row.TryGetProperty("pid", out var pid) && pid.ValueKind == JsonValueKind.Number }
+                Text(row, "name").GetValueOrDefault("")) { StartedAt = Started(row), State = Text(row, "state"), HasProcess = row.TryGetProperty("pid", out var pid) && pid.ValueKind == JsonValueKind.Number }
             : Maybe<ClaudeAgent>.None;
 
     // startedAt as a moment, when it is a whole number of milliseconds a DateTimeOffset can hold; else none.

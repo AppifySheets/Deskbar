@@ -298,10 +298,6 @@ public sealed partial class RemoteControl
     // no task at all that starts with source "clear" takes the place of the session cleared in its folder within the
     // last minute (TaskService.JoinAfterClear), so the task Petre was working on follows him into the fresh conversation.
     //
-    // A SESSION A SWITCH IS MOVING AWAY FROM (TaskBoard.SwitchingAway) does not rejoin its task as a replaced session
-    // otherwise would: while its copy waits for its first reply, the original still runs, and a SessionStart of its own
-    // (a compact) must not put it back on the task beside the copy.
-    //
     // A RESUME ON A CLOSED TASK REOPENS IT (task 327e3cd0, Petre's call, and the one exception to Ruling 34). A closed
     // task has left the list, so a session resumed on it had no task at all: the briefing said there was nothing to join
     // and its first prompt said new work needed a new task, and the session made a duplicate of the task Petre had just
@@ -318,14 +314,10 @@ public sealed partial class RemoteControl
             && service.Board.ClosedLastTaskOf(hook.SessionId)
                 .Map(t => service.Join(t.Id, service.NewSession(hook.SessionId, folder ?? "")).IsSuccess)
                 .GetValueOrDefault(false);
-        if (!reopened && !service.Board.SwitchingAway(hook.SessionId) && (current.HasNoValue || current.Value.Sessions.Any(s => s.Id == hook.SessionId && s.Replaced)))
+        if (!reopened && (current.HasNoValue || current.Value.Sessions.Any(s => s.Id == hook.SessionId && s.Replaced)))
             service.Board.LastTaskOf(hook.SessionId).Tap(t => service.Rejoin(t.Id, service.NewSession(hook.SessionId, folder ?? "")));
         if (service.Board.LastTaskOf(hook.SessionId).HasNoValue && hook.Source.Map(s => s == "clear").GetValueOrDefault(false) && folder is not null)
             service.JoinAfterClear(hook.SessionId, folder, stored => FolderPath.Same(stored, folder, LongPath));
-        // A SWITCH'S COPY (SettingsSwitch): Claude Code starts it with source "fork" (measured 2026-11-26) under a new id
-        // no task holds. It joins the task whose switch is waiting for it, so its briefing names that task, not a choice.
-        if (service.Board.LastTaskOf(hook.SessionId).HasNoValue && hook.Source.Map(s => s == "fork").GetValueOrDefault(false) && folder is not null)
-            service.JoinAfterSwitch(hook.SessionId, folder, stored => FolderPath.Same(stored, folder, LongPath));
         var own = service.Board.TaskOf(hook.SessionId);
         // The workspace whose tasks are offered is found the way `task new` finds one (SessionWorkspace): the VS Code
         // window showing the folder, else the workspace of the latest task worked on in the session's repo. The window

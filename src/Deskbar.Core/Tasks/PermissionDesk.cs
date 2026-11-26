@@ -51,7 +51,7 @@ public sealed class PermissionDesk(string folder, Func<DateTimeOffset> now)
 
     /// <summary>
     /// How long the hook script waits for an answer before it gives up and prints nothing. Long, because the terminal is
-    /// never blocked by the wait: probe Q1 (2026-11-26, the spike's "Picker probes") saw a background session's own dialog
+    /// never blocked by the wait: probe Q1 (a spike's probe, 2026-11-26) saw a background session's own dialog
     /// already drawn 4 s into the hook's wait, and closed with "Allowed by PermissionRequest hook" once the hook answered.
     /// So the terminal is always a parallel way to answer, and the card can stay as long as a person might take to look.
     /// </summary>

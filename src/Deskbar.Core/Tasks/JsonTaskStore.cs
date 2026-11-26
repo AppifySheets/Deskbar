@@ -105,20 +105,8 @@ public sealed class JsonTaskStore(string baseDirectory, Action<string>? trace = 
     // ReplacedAt: TaskSession.ReplacedAt (Ruling 19, /clear). Left out of the file when there is none, so a file
     // written before it existed and one written now read the same way, and every ordinary session stays as short as it
     // was. Still version 2.
-    // ReplacedBy and LaunchedWith: TaskSession.ReplacedBy and TaskSession.LaunchedWith (the session picker). Left out of
-    // the file when there is none, like ReplacedAt, and read tolerantly (TolerantStringConverter, TolerantSettingsConverter),
-    // so a wrong-typed value reads as none instead of failing the file. Still version 2.
     sealed record SessionDto(string? Id, string? Folder, DateTimeOffset Joined, DateTimeOffset? Ended,
-        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] DateTimeOffset? ReplacedAt = null,
-        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull), JsonConverter(typeof(TolerantStringConverter))] string? ReplacedBy = null,
-        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull), JsonConverter(typeof(TolerantSettingsConverter))] SettingsDto? LaunchedWith = null);
-
-    // A session's model, effort and permission mode (SessionSettings), each null when not set.
-    sealed record SettingsDto(string? Model, string? Effort, string? Mode);
-
-    // A switch under way (TaskItem.Switching, PendingSwitch): the session it copies, the settings it switches to, when it
-    // was picked, when the copy's resume went out, the copy's short id once printed, and its full id once joined.
-    sealed record SwitchDto(string From, SettingsDto To, DateTimeOffset At, DateTimeOffset? Issued, string? Copy, string? CopyId);
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] DateTimeOffset? ReplacedAt = null);
 
     // Asks: TaskComment.Asks (task 968c2216), the question an ask wrote into the thread. Left out of the file unless set,
     // so every other comment is written as before and an older build simply drops it (the comment stays, as a plain one).
@@ -195,18 +183,7 @@ public sealed class JsonTaskStore(string baseDirectory, Action<string>? trace = 
         // version 2: an older build's reader skips a property it does not know (the options never fail the load; see the
         // header), and drops it on its next save, which costs the buttons of one open question and never a task.
         [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull), JsonConverter(typeof(TolerantStringListConverter))]
-        IReadOnlyList<string>? QuestionOptions = null,
-        // The session picker: TaskItem.Wanted, the user's pick ({"model":..,"effort":..,"mode":..}, a property left out
-        // when not set, so `{}` is "picked: leave everything to Claude Code" and differs from no `wanted` at all, "never
-        // picked"), and TaskItem.Switching, a switch under way. Both left out of the file when there is none, so a file
-        // with no picks is unchanged, and both read tolerantly: anything that is not the right shape reads as none, and
-        // a value that is not a valid choice is dropped by SessionSettings.Read. Still version 2; an older build ignores
-        // both, as it ignores LaunchedWith and ReplacedBy on a session, and drops them on its next save, which costs the
-        // picks (later starts go back to the setting) and never a task (test: An_older_build_reads_a_file_with_the_picker_fields).
-        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull), JsonConverter(typeof(TolerantSettingsConverter))]
-        SettingsDto? Wanted = null,
-        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull), JsonConverter(typeof(TolerantSwitchConverter))]
-        SwitchDto? Switching = null);
+        IReadOnlyList<string>? QuestionOptions = null);
 
     // TaskItem.Repeat as stored: the schedule's canonical text (RepeatSchedule.Text), the model and the folder. Every part
     // is nullable because the reader fills what it finds and FromDto decides whether that is a repeat.
@@ -302,9 +279,7 @@ public sealed class JsonTaskStore(string baseDirectory, Action<string>? trace = 
             t.Created.ToUniversalTime(), t.UpdatedAt.ToUniversalTime(), t.Raised.ToUniversalTime(),
             t.Sessions.Select(s => new SessionDto(s.Id, s.Folder, s.Joined.ToUniversalTime(),
                 s.Ended.HasValue ? s.Ended.Value.ToUniversalTime() : null,
-                s.ReplacedAt.HasValue ? s.ReplacedAt.Value.ToUniversalTime() : null,
-                s.ReplacedBy.HasValue ? s.ReplacedBy.Value : null,
-                s.LaunchedWith.IsEmpty ? null : SettingsOf(s.LaunchedWith))).ToArray(),
+                s.ReplacedAt.HasValue ? s.ReplacedAt.Value.ToUniversalTime() : null)).ToArray(),
             t.Comments.Select(c => new CommentDto(c.Id, c.SessionId.HasValue ? c.SessionId.Value : null,
                 c.At.ToUniversalTime(), c.Markdown, c.Settled.HasValue ? c.Settled.Value.ToUniversalTime() : null, c.Asks ? true : null)).ToArray(),
             t.Important, t.Urgent, t.Rank,
@@ -326,19 +301,7 @@ public sealed class JsonTaskStore(string baseDirectory, Action<string>? trace = 
             // The schedule is stored as its canonical text, which TaskRepeats.Parse reads back to the same schedule.
             t.Repeat.HasValue ? new RepeatDto(t.Repeat.Value.Schedule.Text, t.Repeat.Value.Model, t.Repeat.Value.Folder) : null,
             t.NextRun.HasValue ? t.NextRun.Value.ToUniversalTime() : null,
-            t.QuestionOptions.Count > 0 ? t.QuestionOptions : null,
-            t.Wanted.HasValue ? SettingsOf(t.Wanted.Value) : null,
-            t.Switching.HasValue
-                ? new SwitchDto(t.Switching.Value.FromSession, SettingsOf(t.Switching.Value.To), t.Switching.Value.At.ToUniversalTime(),
-                    t.Switching.Value.Issued.HasValue ? t.Switching.Value.Issued.Value.ToUniversalTime() : null,
-                    t.Switching.Value.CopyShortId.HasValue ? t.Switching.Value.CopyShortId.Value : null,
-                    t.Switching.Value.CopyId.HasValue ? t.Switching.Value.CopyId.Value : null)
-                : null);
-
-    static SettingsDto SettingsOf(SessionSettings s) =>
-        new(s.Model.HasValue ? s.Model.Value : null, s.Effort.HasValue ? s.Effort.Value : null, s.Mode.HasValue ? s.Mode.Value : null);
-
-    static SessionSettings SettingsFrom(SettingsDto d) => SessionSettings.Read(d.Model, d.Effort, d.Mode);
+            t.QuestionOptions.Count > 0 ? t.QuestionOptions : null);
 
     static TaskItem FromDto(TaskDto d) =>
         new(d.Id, d.Title ?? "",
@@ -349,8 +312,6 @@ public sealed class JsonTaskStore(string baseDirectory, Action<string>? trace = 
                 s.Ended is { } ended ? ended.ToUniversalTime() : Maybe<DateTimeOffset>.None)
             {
                 ReplacedAt = s.ReplacedAt is { } replaced ? replaced.ToUniversalTime() : Maybe<DateTimeOffset>.None,
-                ReplacedBy = string.IsNullOrWhiteSpace(s.ReplacedBy) ? Maybe<string>.None : s.ReplacedBy,
-                LaunchedWith = s.LaunchedWith is { } launched ? SettingsFrom(launched) : SessionSettings.None,
             }).ToArray(),
             (d.Comments ?? []).Select(c => new TaskComment(c.Id, Maybe.From(c.SessionId), c.At.ToUniversalTime(), c.Markdown ?? "")
             { Settled = c.Settled is { } settled ? settled.ToUniversalTime() : Maybe<DateTimeOffset>.None, Asks = c.Asks ?? false }
@@ -389,18 +350,6 @@ public sealed class JsonTaskStore(string baseDirectory, Action<string>? trace = 
             QuestionOptions = !string.IsNullOrWhiteSpace(d.Question) && AnswerOptions.Check(d.QuestionOptions) is { IsSuccess: true } options
                 ? options.Value
                 : [],
-            Wanted = d.Wanted is { } wanted ? SettingsFrom(wanted) : Maybe<SessionSettings>.None,
-            // A switch whose session is gone from the task (a hand edit) names nothing to finish, so it reads as none.
-            Switching = d.Switching is { } switching && (d.Sessions ?? []).Any(s => s.Id == switching.From)
-                ? new PendingSwitch(switching.From, SettingsFrom(switching.To), switching.At.ToUniversalTime())
-                {
-                    Issued = switching.Issued is { } issued ? issued.ToUniversalTime() : Maybe<DateTimeOffset>.None,
-                    CopyShortId = string.IsNullOrWhiteSpace(switching.Copy) ? Maybe<string>.None : switching.Copy,
-                    // A joined copy the task no longer holds (a hand edit) names nothing to confirm or revert.
-                    CopyId = !string.IsNullOrWhiteSpace(switching.CopyId) && (d.Sessions ?? []).Any(s => s.Id == switching.CopyId)
-                        ? switching.CopyId : Maybe<string>.None,
-                }
-                : Maybe<PendingSwitch>.None,
         };
 
     // A stored repeat as a TaskRepeat, or none (task 0b78269e). It needs a schedule that parses (so a minute-level hand edit
@@ -597,92 +546,6 @@ public sealed class JsonTaskStore(string baseDirectory, Action<string>? trace = 
             writer.WriteEndObject();
         }
     }
-
-    // A session's settings (`wanted`, a session's `launchedWith`, a switch's `to`): an object whose `model`, `effort` and
-    // `mode` are strings when set; anything that is not an object reads as absent, and a property that is not a string
-    // reads as not set. Written with only the properties that are set, so an empty pick is `{}`.
-    sealed class TolerantSettingsConverter : JsonConverter<SettingsDto?>
-    {
-        public override SettingsDto? Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
-        {
-            using var document = JsonDocument.ParseValue(ref reader);
-            return SettingsIn(document.RootElement);
-        }
-
-        public override void Write(Utf8JsonWriter writer, SettingsDto? value, JsonSerializerOptions options) => WriteSettings(writer, value);
-    }
-
-    static SettingsDto? SettingsIn(JsonElement element) =>
-        element.ValueKind == JsonValueKind.Object
-            ? new SettingsDto(TextIn(element, "model"), TextIn(element, "effort"), TextIn(element, "mode"))
-            : null;
-
-    static void WriteSettings(Utf8JsonWriter writer, SettingsDto? value)
-    {
-        if (value is null)
-        {
-            writer.WriteNullValue();
-            return;
-        }
-        writer.WriteStartObject();
-        if (value.Model is { } model) writer.WriteString("model", model);
-        if (value.Effort is { } effort) writer.WriteString("effort", effort);
-        if (value.Mode is { } mode) writer.WriteString("mode", mode);
-        writer.WriteEndObject();
-    }
-
-    // A string property's value by its name in any case (as the Web defaults read), or null when missing or not a string.
-    static string? TextIn(JsonElement element, string name) =>
-        element.EnumerateObject().FirstOrDefault(p => p.Name.Equals(name, StringComparison.OrdinalIgnoreCase)) is
-            { Value.ValueKind: JsonValueKind.String } property
-            ? property.Value.GetString()
-            : null;
-
-    // A switch under way (`switching`): an object with a string `from`, a settings object `to` and a date-time string
-    // `at`, and maybe a date-time string `issued` and strings `copy` and `copyId` (an odd-typed one of those reads as not
-    // set); anything short of the first three reads as no switch, since half a record names nothing a restarted Deskbar
-    // could finish.
-    sealed class TolerantSwitchConverter : JsonConverter<SwitchDto?>
-    {
-        public override SwitchDto? Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
-        {
-            using var document = JsonDocument.ParseValue(ref reader);
-            var root = document.RootElement;
-            return root.ValueKind == JsonValueKind.Object
-                && TextIn(root, "from") is { Length: > 0 } from
-                && root.EnumerateObject().FirstOrDefault(p => p.Name.Equals("to", StringComparison.OrdinalIgnoreCase)) is var to
-                && to.Value.ValueKind != JsonValueKind.Undefined && SettingsIn(to.Value) is { } settings
-                && TextIn(root, "at") is { } at
-                && DateTimeOffset.TryParse(at, System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.RoundtripKind, out var when)
-                    ? new SwitchDto(from, settings, when, TimeIn(root, "issued"), TextIn(root, "copy"), TextIn(root, "copyId"))
-                    : null;
-        }
-
-        static DateTimeOffset? TimeIn(JsonElement root, string name) =>
-            TextIn(root, name) is { } text
-            && DateTimeOffset.TryParse(text, System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.RoundtripKind, out var at)
-                ? at
-                : null;
-
-        public override void Write(Utf8JsonWriter writer, SwitchDto? value, JsonSerializerOptions options)
-        {
-            if (value is null)
-            {
-                writer.WriteNullValue();
-                return;
-            }
-            writer.WriteStartObject();
-            writer.WriteString("from", value.From);
-            writer.WritePropertyName("to");
-            WriteSettings(writer, value.To);
-            writer.WriteString("at", value.At);
-            if (value.Issued is { } issued) writer.WriteString("issued", issued);
-            if (value.Copy is { } copy) writer.WriteString("copy", copy);
-            if (value.CopyId is { } copyId) writer.WriteString("copyId", copyId);
-            writer.WriteEndObject();
-        }
-    }
-
     // A time written as a string that parses, or absent.
     sealed class TolerantTimeConverter : JsonConverter<DateTimeOffset?>
     {

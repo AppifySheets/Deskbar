@@ -198,9 +198,6 @@ public static class SessionKeeper
         var adopts = live
             .DistinctBy(agent => agent.SessionId)
             .Where(agent => !known.Contains(agent.SessionId))
-            // The copy a settings switch is making is no stranger: its task claims it (SettingsSwitch.Next), and
-            // adopting it first would leave a duplicate task beside the one it belongs to.
-            .Where(agent => !board.Tasks.Any(task => SettingsSwitch.MayClaim(task, agent)))
             .Select(agent => (KeeperStep)new KeeperStep.Adopt(agent));
 
         return resumes.Concat(restarts).Concat(adopts).ToList();
