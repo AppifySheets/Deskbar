@@ -140,8 +140,12 @@ public partial class TasksWindow
     bool InboxFollowsSelection(bool open)
     {
         if (latest?.Inbox is not { } inbox) return false;
+        // A task just added from the panel (InboxGlow) is no explicit "show": its line is already brought into view.
+        var justAdded = inboxJustAdded;
+        inboxJustAdded = null;
         if (selectedId.HasNoValue) return true;
         var id = selectedId.Value;
+        if (justAdded == id) open = false;
         var row = AllRows(latest).FirstOrDefault(r => r.Id == id);
         if (open && row is { Expanded: true })
         {
@@ -154,6 +158,26 @@ public partial class TasksWindow
         }
         if (inboxPage is null && inboxLines.TryGetValue(id, out var line)) line.Line.BringIntoView();
         return true;
+    }
+
+    // A SUBTASK ADDED FROM A PAGE'S THREAD (the tester's L1). The board does what it does for the List: the thread the box
+    // was in folds and the new subtask opens on its own line (TasksBoard.AddSubtaskInThread). On a page that fold would
+    // close the page, so once the add has worked the page and the tab are put back as they were, and the page's task is
+    // opened again (TasksBoard.OpenPage). Outside a page, or on a refused add, nothing changes.
+    bool WithInboxPageKept(Func<bool> add)
+    {
+        var (page, stack, tab, offset) = (inboxPage, inboxPageStack.Reverse().ToArray(), inboxTab, inboxListOffset);
+        var added = add();
+        if (!added || page is not { } id || latest?.Inbox is null) return added;
+        inboxPage = id;
+        inboxPageStack.Clear();
+        stack.ToList().ForEach(inboxPageStack.Push);
+        inboxTab = tab;
+        inboxListOffset = offset;
+        inboxGlowPending = null;
+        if (Actions?.OpenPage is { } open) open(id);
+        RedrawInbox();
+        return added;
     }
 
     // --- drawing -------------------------------------------------------------------------------------------------------

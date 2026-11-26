@@ -220,7 +220,8 @@ public partial class TasksWindow
             : pictures.Length == 0 ? _ => Result.Success(body)
             : id => TaskImageFiles.Save(StateDir, id, pictures, Now()).Map(saved => TaskImages.Join(body, saved));
         ClearSubtaskBox();
-        if (add(lineId, title, describe, InParentThread(lineId))) return true;
+        // On an Inbox page the page and its tab stay (TasksWindow.InboxPage.cs, task 740a2231).
+        if (WithInboxPageKept(() => add(lineId, title, describe, InParentThread(lineId)))) return true;
         subtaskUnder = lineId;
         subtaskTyped = text;
         subtaskImages.AddRange(pictures);

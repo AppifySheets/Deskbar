@@ -1556,6 +1556,7 @@ public partial class TasksWindow : Window
     /// </summary>
     internal void Glow(Guid id)
     {
+        if (InboxGlow(id)) return; // the Inbox shows it in its tab (TasksWindow.InboxLine.cs, task 740a2231)
         if (Picked(id) && selectionFrames.TryGetValue(id, out var parts)) parts.Frame.Background = TaskGlow.Fading(SelectedFill);
     }
 

@@ -806,4 +806,49 @@ public partial class TasksBoardTests
         Assert.True(t.Window.Press(Key.F2, ModifierKeys.None));
         Assert.NotNull(t.Window.Editor);
     });
+
+    // The tester's L1: a note added from the panel's add box shows in its tab, its line drawn and glowing, while the tab on
+    // show was another; a task added from the bar's box or by a session leaves the tab alone.
+    [Fact]
+    public void A_note_added_from_the_panel_shows_in_its_tab_and_glows() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var k = InboxTasks(t);
+        t.Controller.Show();
+        ChooseInbox(t);
+        Assert.Equal(InboxTab.NeedsYou, t.Window.InboxTabShown);
+
+        t.Tasks.AddNote("Added elsewhere", Maybe<Guid>.None);
+        Assert.Equal(InboxTab.NeedsYou, t.Window.InboxTabShown);
+
+        Click(ButtonNamed(t.Window.InboxHeaderShown!, "New"));
+        Assert.True(t.Window.TypeNote("Pay the rent", Key.Enter));
+        var added = t.Tasks.Board.Tasks.Single(x => x.Title == "Pay the rent").Id;
+
+        Assert.Equal(InboxTab.Notes, t.Window.InboxTabShown);
+        Assert.Contains(added, DrawnInboxLines(t));
+        Assert.True(t.Window.InboxGlowing(added));
+        Assert.Null(t.Window.InboxPageShown);
+    });
+
+    // L1, the page case: a subtask added from a page's thread keeps the page and the tab as they were.
+    [Fact]
+    public void A_subtask_added_from_a_page_keeps_the_page_and_the_tab() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var k = InboxTasks(t);
+        t.Controller.Show();
+        ChooseInbox(t);
+        Click(LineOf(t.Window, k.Asking));
+
+        Click(ButtonNamed(t.Window.InboxPageContent!, "Add subtask"));
+        Assert.True(t.Window.TypeSubtask("A step of it", Key.Enter));
+
+        var sub = t.Tasks.Board.Tasks.Single(x => x.Title == "A step of it");
+        Assert.Equal(k.Asking, sub.ParentId.Value);
+        Assert.Equal(k.Asking, t.Window.InboxPageShown);
+        Assert.NotNull(t.Window.InboxPageContent);
+        Assert.Equal(InboxTab.NeedsYou, t.Window.InboxTabShown);
+        Assert.Contains(Inside(t.Window.InboxPageContent!).OfType<Button>(), b => AutomationProperties.GetName(b) == "Subtask A step of it");
+    });
 }

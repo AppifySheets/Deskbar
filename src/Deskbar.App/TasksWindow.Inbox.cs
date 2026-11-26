@@ -174,6 +174,7 @@ public partial class TasksWindow
         PaintColumnHeader(false);
         PaintAddPlace();
         PaintInboxSelection();
+        ApplyInboxGlow();
         DrawInboxPage(view);
     }
 
