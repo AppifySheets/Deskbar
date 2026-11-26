@@ -135,6 +135,27 @@ public sealed class BookmarkOpenerTests
         Assert.Single(desktops.Switches);
     }
 
+    // The bar asks once per rebuild (Task 8): the open app ids are read when the snapshot is taken, once, however
+    // many rows ask it afterwards, and the answer for each row is Showing's.
+    [Fact]
+    public void A_snapshot_reads_the_open_app_ids_once_and_answers_as_showing_does()
+    {
+        var reads = 0;
+        var counted = new BookmarkOpener(manager, new BookmarkStarts((_, _, _) => Result.Success<int?>(null), _ => Result.Success(), _ => Result.Success()),
+            () => { reads++; return new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "Calc!App" }; });
+        Added(work, new Bookmark(Guid.NewGuid(), "Calc", BookmarkKind.App, "Calc!App"));
+        var link = Added(work, Link("https://a.local/"));
+        Added(home, Link("https://b.local/"));
+
+        var showing = counted.ShowingNow();
+        var forWork = showing(manager.State.Workspaces.Single(w => w.Id == work.Id));
+        var forHome = showing(manager.State.Workspaces.Single(w => w.Id == home.Id));
+
+        Assert.Equal(1, reads);
+        Assert.Equal([link.Id], forWork.Select(b => b.Id));
+        Assert.Single(forHome);
+    }
+
     // Ruling P9: one bad bookmark must not keep the rest of the row from opening.
     [Fact]
     public void Open_all_carries_on_past_a_failure_and_reports_it_by_name()

@@ -11,6 +11,7 @@ using System.Windows.Media;
 using System.Windows.Shapes;
 using CSharpFunctionalExtensions;
 using Deskbar.Core;
+using Deskbar.Core.Bookmarks;
 using Deskbar.Core.Domain;
 using Deskbar.Core.Geometry;
 using Deskbar.Core.Overview;
@@ -2830,6 +2831,10 @@ public partial class FloatingBar : Window
             // builds one row per workspace, in list order.
             int ColourSlotOf(Core.Domain.Group group) => state.ColourSlotOf(group);
 
+            // Which bookmark chips each workspace row shows (FloatingBar.Bookmarks.cs): one reading of the windows and
+            // the open app ids for this whole rebuild, asked once per row in WorkspaceRow below.
+            var showingBookmarks = ShowingBookmarks();
+
             // Petre: "make the children more apparent, maybe group them together with an outline
             // or a ring."
             //
@@ -2922,7 +2927,9 @@ public partial class FloatingBar : Window
                     // The tile mark after the name, on every tiled row and not only the one you are on (Tiling.cs).
                     // TilingGate.Acts, the Tiler's own test, so a workspace left tiled after Pro lapsed shows nothing:
                     // its flag is set but nothing arranges it.
-                    tiled: Core.Tiling.TilingGate.Acts(g.Workspace, IsPro()));
+                    tiled: Core.Tiling.TilingGate.Acts(g.Workspace, IsPro()),
+                    // The workspace's bookmark chips, less the ones whose program is running (FloatingBar.Bookmarks.cs).
+                    bookmarks: showingBookmarks(g.Workspace));
                 // A row an arrange drag can pick up and aim at (FloatingBar.ArrangeDrag.cs).
                 RegisterArrangeRow(g.Workspace.Id, group, built);
                 Phase($"row {g.Workspace.Name}");
@@ -3158,7 +3165,10 @@ public partial class FloatingBar : Window
     // it landed between (see InsertionAt).
     // `isCurrent`: the line belongs to the workspace you are in, so a titled line keeps no workspace third (see
     // the split below).
-    UIElement LineOf(IReadOnlyList<WindowRow> line, ISet<WindowHandle> opensGroup, string groupLabel, string groupKey, Guid? rowKey, List<UIElement> iconButtons, List<Border> washes, List<IconSlot> slots, bool isLastLine, double scale = 1.0, double indent = 0, bool titled = false, bool wholeRow = false, bool isCurrent = false)
+    // `chips`: the bookmark chips this line ends its FIRST lane with (GroupRow worked out which, see ChipLayout), and
+    // `dividedChip` the one that carries the divider. Drawn after the lane's windows, in the same stack, so they sit
+    // where the wrap counted them.
+    UIElement LineOf(IReadOnlyList<WindowRow> line, ISet<WindowHandle> opensGroup, string groupLabel, string groupKey, Guid? rowKey, List<UIElement> iconButtons, List<Border> washes, List<IconSlot> slots, bool isLastLine, double scale = 1.0, double indent = 0, bool titled = false, bool wholeRow = false, bool isCurrent = false, IReadOnlyList<Bookmark>? chips = null, Guid? dividedChip = null)
     {
         // Runs of consecutive icons that share a monitor. `opensGroup` already knows where each
         // one starts -- it is the same set the wrap arithmetic budgets a marker for -- so this
@@ -3300,6 +3310,11 @@ public partial class FloatingBar : Window
         // line makes it free space like every empty half: a wash, lit on hover, and the switch.
         if (lanes.Count == 0) lanes.Add((0, Maybe<int>.None, null));
 
+        // A line with bookmark chips and no window on the first screen still needs that lane's stack to hold them, so
+        // the lane gets an empty run instead of being drawn as an empty half. A new tuple, as for the orphans above.
+        IReadOnlyList<Bookmark> lineChips = rowKey is not null && chips is { Count: > 0 } ? chips : [];
+        if (lineChips.Count > 0 && lanes[0].Run is null) lanes[0] = lanes[0] with { Run = [] };
+
         // SHADED LANES instead of a hairline between them. Petre: "let's also separate the two halves not
         // by hairline but make them ringed", then, seeing the rings, "no, rings are too much", "softer
         // separation", and from five mockups he picked the shade step: every other screen's lane is a
@@ -3379,6 +3394,19 @@ public partial class FloatingBar : Window
                     if (button is Button icon)
                         iconRings.Add(new IconRing(icon, rowKey, r.Window.Handle, r.IsActive, r.WillActivate, Glows(r), Fronted(r)));
                 });
+
+                // The bookmark chips, after the lane's windows (FloatingBar.Bookmarks.cs). Counted with the icons for
+                // the row's hover (iconButtons), so the free-space wash goes dark over a chip as over an icon: a click
+                // there opens the bookmark, it does not switch. Never in `slots`, which places a dropped WINDOW
+                // between two windows, nor in iconRings, which rings windows.
+                if (firstLane && rowKey is { } workspaceId)
+                    lineChips.ToList().ForEach(chip =>
+                    {
+                        var button = ChipButton(workspaceId, chip, chip.Id == dividedChip);
+                        if (scale is not 1.0) button.LayoutTransform = new ScaleTransform(scale, scale);
+                        iconButtons.Add(button);
+                        stack.Children.Add(button);
+                    });
 
                 // THE FIRST SCREEN'S ICONS START AT THE LEFT AND EVERY LATER SCREEN'S ARE PUSHED RIGHT, so
                 // whatever room the lanes do not use collects in the MIDDLE of the row, and that middle is
@@ -4211,8 +4239,13 @@ public partial class FloatingBar : Window
     // instead of an icon row.
     // `fadeStep`: how faded a workspace row's name is drawn, 0 (fresh) to 16 (idle), from FloatingBar.Recency.cs. 0, today's
     // resting colour, for every row that is not a workspace.
-    UIElement GroupRow(string visualLabel, string groupLabel, bool isCurrent, Func<Result>? switchTo, string groupKey, Action<WindowHandle, int?>? onDrop, IEnumerable<WindowRow> rows, Brush? tint = null, Guid? rowKey = null, bool folded = false, bool nested = false, Brush? spine = null, bool pinned = false, Guid? desktopId = null, UIElement? captionContent = null, bool titledList = false, bool asking = false, bool pinnedWorkspace = false, bool tiled = false, int fadeStep = 0)
+    // `bookmarks`: the workspace's bookmark chips to draw after its windows (FloatingBar.Bookmarks.cs), already less
+    // the running ones. Only a workspace row passes any, and only with its `rowKey`, which a chip's click needs.
+    UIElement GroupRow(string visualLabel, string groupLabel, bool isCurrent, Func<Result>? switchTo, string groupKey, Action<WindowHandle, int?>? onDrop, IEnumerable<WindowRow> rows, Brush? tint = null, Guid? rowKey = null, bool folded = false, bool nested = false, Brush? spine = null, bool pinned = false, Guid? desktopId = null, UIElement? captionContent = null, bool titledList = false, bool asking = false, bool pinnedWorkspace = false, bool tiled = false, int fadeStep = 0, IReadOnlyList<Bookmark>? bookmarks = null)
     {
+        // No chips without a workspace to open them in.
+        IReadOnlyList<Bookmark> chips = rowKey is null ? [] : bookmarks ?? [];
+
         // Background MUST be non-null for a panel to take part in hit testing at all --
         // a null Background leaves gaps between icons that swallow nothing and report no
         // DragOver, making drops land unpredictably. Transparent is the standard fix.
@@ -4271,7 +4304,10 @@ public partial class FloatingBar : Window
         // Never the titled list, which keeps its floor of empty lines even with nothing in it (see
         // WindowListLines): a list that collapsed to its name when its last window left would be the very resize
         // the floor exists to stop.
-        var emptyRow = ordered.Count == 0 && !pinned && captionContent is null && !titled;
+        //
+        // Nor a row with bookmark chips: "an empty workspace with bookmarks shows only the chips" (the bookmarks spec),
+        // which is exactly when they are most use, since there is nothing running there yet.
+        var emptyRow = ordered.Count == 0 && chips.Count == 0 && !pinned && captionContent is null && !titled;
 
         // A FOLDED row is drawn the way an empty one is, as its name line alone, and for the opposite reason:
         // it has windows, and you have said you do not want to see them. Not while it is the workspace you are
@@ -4494,19 +4530,53 @@ public partial class FloatingBar : Window
             ? IconRoom()
             : (IconRoom() - (showMonitorMarkers ? (lanes - 1) * LaneGapWidth : 0)) / lanes;
 
+        // One lane's wrap, as a function rather than written inline, so a lane's bookmark chips are wrapped by exactly
+        // the same arithmetic as its windows (ChipLayout): a chip is IconCellWidth wide, like an icon.
+        IReadOnlyList<IReadOnlyList<T>> Wrap<T>(IReadOnlyList<T> cells) =>
+            double.IsNaN(Width)
+                // No width of its own yet: the fixed five-per-line rule, now applied per screen rather
+                // than per row, which is the same rule doing the same job in a narrower space.
+                ? IconRowLimit.Lines(cells)
+                // The 3-icon floor is a rule about a LINE, and the line is split between lanes, so
+                // each lane gets its share of it. Undivided it outvoted the width it was measuring:
+                // a 61 DIP lane holds two cells, the floor said three, and the third was clipped.
+                : IconRowLimit.LinesThatFit(cells, _ => IconCellWidth, share,
+                    Math.Max(1, IconRowLimit.MinimumIconsPerLine / lanes));
+
         var perGroup = groups
             // A titled row puts every window on a line of its own: it is a list, not a strip.
-            .Select(g => titled ? g.Select(r => new List<WindowRow> { r }).ToList() : (double.IsNaN(Width)
-                    // No width of its own yet: the fixed five-per-line rule, now applied per screen rather
-                    // than per row, which is the same rule doing the same job in a narrower space.
-                    ? IconRowLimit.Lines(g.ToList())
-                    // The 3-icon floor is a rule about a LINE, and the line is split between lanes, so
-                    // each lane gets its share of it. Undivided it outvoted the width it was measuring:
-                    // a 61 DIP lane holds two cells, the floor said three, and the third was clipped.
-                    : IconRowLimit.LinesThatFit(g.ToList(), _ => IconCellWidth, share,
-                        Math.Max(1, IconRowLimit.MinimumIconsPerLine / lanes)))
-                .Select(line => line.ToList()).ToList())
+            .Select(g => titled
+                ? g.Select(r => new List<WindowRow> { r }).ToList()
+                : Wrap(g.ToList()).Select(line => line.ToList()).ToList())
             .ToList();
+
+        // THE BOOKMARK CHIPS go after the windows of the row's FIRST screen lane (the spec's option A), wrapped WITH
+        // them: ChipLayout hands the lane's windows and chips to Wrap as one sequence and gives back, per line, which
+        // windows and which chips it holds. So the lane's lines are replaced by those, and chipLines[i] is what line i
+        // of the row adds after its windows (LineOf draws them at the end of the first lane).
+        //
+        // The first lane is the one LineOf fills first: the lowest screen rank when the bar lays rows out per screen
+        // (where a window with no resolved screen joins rank 0 too), the lowest group otherwise. A row with nothing on
+        // that screen still gets the lane, holding only chips.
+        //
+        // A titled row is a list, one window per line, so its chips do not join its lines: they get icon lines of their
+        // own under the list (below, ruling P12), wrapped the same way.
+        IReadOnlyList<IReadOnlyList<Bookmark>> chipLines = [];
+        Guid? dividedChip = null;
+        if (chips.Count > 0 && !titled)
+        {
+            var firstKey = showMonitorMarkers && monitorByRank.Count > 0
+                ? monitorByRank.Keys.Min()
+                : groups.Select(g => g.Key).DefaultIfEmpty(0).Min();
+            var at = groups.FindIndex(g => g.Key == firstKey);
+            var split = ChipLayout.Split<WindowRow>(at >= 0 ? groups[at].ToList() : new List<WindowRow>(), chips, Wrap);
+            var laneLines = split.Windows.Select(line => line.ToList()).ToList();
+            if (at >= 0) perGroup[at] = laneLines;
+            else perGroup.Insert(0, laneLines);
+            chipLines = split.Chips;
+            // The divider sets the chips apart from windows, so only when there are windows in the lane before them.
+            if (at >= 0) dividedChip = chips[0].Id;
+        }
 
         // One row line per deepest group, with each group contributing its own line at that depth. A group
         // that has run out simply adds nothing, so its half of that line is empty -- which is exactly what
@@ -4537,9 +4607,18 @@ public partial class FloatingBar : Window
 
         // isLastLine carries #102's empty tail halves, which belong to the row rather than to each of its
         // wrapped lines.
-        drawnLines.Select((line, at) => (line, last: at == drawnLines.Count - 1)).ToList()
+        // ...and each line's bookmark chips, by the same index (chipLines above; empty on a row without chips).
+        drawnLines.Select((line, at) => (line, at, last: at == drawnLines.Count - 1)).ToList()
             .ForEach(x => icons.Children.Add(LineOf(x.line, showMonitorMarkers ? opensLine : [], groupLabel, groupKey, rowKey, iconButtons, washes, slots, x.last,
-                scale, spine is not null ? NestedIndent : 0, titled, wholeRow, isCurrent)));
+                scale, spine is not null ? NestedIndent : 0, titled, wholeRow, isCurrent,
+                chips: x.at < chipLines.Count ? chipLines[x.at] : null, dividedChip: dividedChip)));
+
+        // A TITLED row's chips: icon lines of their own under the window list (ruling P12), rather than squeezed into
+        // lines that each hold one window and its title. Wrapped by the same Wrap, so they break where a row's would.
+        if (titled && chips.Count > 0)
+            ChipLayout.Split<WindowRow>([], chips, Wrap).Chips.ToList()
+                .ForEach(line => icons.Children.Add(LineOf([], new HashSet<WindowHandle>(), groupLabel, groupKey, rowKey, iconButtons, washes, slots,
+                    isLastLine: false, scale, spine is not null ? NestedIndent : 0, titled: false, wholeRow: false, isCurrent, chips: line)));
 
         // The titled list ends with the items the strips end with: the pinned workspaces' and the previous
         // workspace's (FloatingBar.WorkspaceJumps.cs). Petre: "i want to have pinned workspaces in the workspace, in
@@ -7462,6 +7541,9 @@ public partial class FloatingBar : Window
         // one past it, and InsertWorkspace clamps both.
         Add("✚", "Insert before…", () => InsertAt(IndexOf(), GroupOfRow()));
         Add("✚", "Insert after…", () => InsertAt(IndexOf() + 1, GroupOfRow()));
+
+        // "Open all bookmarks" (with any) and "Bookmark link from clipboard" (FloatingBar.Bookmarks.cs).
+        AddBookmarkItems(menu, workspaceId, Add);
 
         AddGroupItems(menu, workspaceId, Add);
 
