@@ -332,6 +332,7 @@ public partial class TasksWindow : Window
     public void CloseForGood()
     {
         closingForGood = true;
+        StopTranscript();
         ageWatch.Dispose();
         Close();
     }
@@ -2281,7 +2282,7 @@ public partial class TasksWindow : Window
         if (folds.Children.Count > 0) panel.Children.Add(folds);
         // The comments as a chat (task 39bc9c4d, ChatThread): bubbles on two sides, Deskbar's lines as events, a day line
         // above each day's first comment. It replaced the hairline between comments (task aa42794f).
-        ChatThread.WithDays(shown, comment => CommentOf(comment, row.Id)).ToList().ForEach(comment => panel.Children.Add(comment));
+        ChatStreamFor(row, shown, earlier > 0 && !open).ToList().ForEach(comment => panel.Children.Add(comment));
         var box = CommentBox(row.Id);
         authors[row.Id] = shown.Select(c => c.Author).ToArray();
         shownComments[row.Id] = shown.Select(c => c.Id).ToArray();

@@ -97,7 +97,8 @@ public partial class TasksBoardTests
         string edge = "right", double width = Wide, Func<TaskItem, int>? workingOf = null, double? screenDips = null,
         string? stateDir = null, Action<string>? openImage = null, Func<Result>? openManager = null, Action<Uri>? openUri = null,
         Func<TaskItem, Action<string>, ContextMenu?>? pickFolder = null, Func<Guid, Result>? runNow = null,
-        Func<string, Maybe<string>>? askRepeat = null, Func<string, bool>? folderExists = null)
+        Func<string, Maybe<string>>? askRepeat = null, Func<string, bool>? folderExists = null,
+        Func<TaskSession, Maybe<string>>? transcriptOf = null)
     {
         var harness = Harness.Build();
         var minutes = 0;
@@ -128,7 +129,7 @@ public partial class TasksBoardTests
             return activates?.Invoke() ?? true;
         }, undoTimer: timers.Start, now: () => Start.AddHours(1), selection: selection,
             sessionsOf: sessionsOf, startClaude: startClaude, openSession: openSession, sessionsChanged: sessionsChanged,
-            workingOf: workingOf, pickFolder: pickFolder, runNow: runNow)
+            workingOf: workingOf, pickFolder: pickFolder, runNow: runNow, transcriptOf: transcriptOf)
         {
             // The manager line's click (task 61e4d143); none by default, so no manager line is drawn.
             OpenManager = openManager,
