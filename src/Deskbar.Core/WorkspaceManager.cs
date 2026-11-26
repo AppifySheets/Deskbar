@@ -4738,6 +4738,13 @@ public sealed class WorkspaceManager(
             ? Result.Success()
             : Result.Success().Tap(() => Persist(State with { NoClaudeResume = !on }));
 
+    // Whether a background session's permission questions go on its task's page (AppState.ClaudePermissions): Manage's
+    // box and `claude-permissions on|off`. A no-op when unchanged, like SetClaudeTasks.
+    public Result SetClaudePermissions(bool on) =>
+        State.ClaudePermissions == on
+            ? Result.Success()
+            : Result.Success().Tap(() => Persist(State with { ClaudePermissions = on }));
+
     // The model every task session is started on (AppState.ClaudeTaskModel): `claude-model <name>`. A name `claude`
     // could misread is refused (ClaudeStart.Model); an unchanged one writes nothing. ClaudeSessions reads the setting
     // at each start, so it holds from the next session on, and a running session keeps the model it started with.

@@ -56,6 +56,12 @@ public static class ControlUsage
                 + "      registers the session's comment waiter and prints the inbox file it watches, its gen file and\n"
                 + "      its generation, one per line, so a comment you post on the session's task wakes it. Prints\n"
                 + "      nothing for a headless session or with the task events off"),
+            new("claude-permission", "[--entry <value>] [--attended <value>] [--job <value>] [--from <folder>] --slot <req-n-n>",
+                "what claude-permission-hook.cmd runs when Claude Code is about to ask for a permission, with the\n"
+                + "      hook's JSON on stdin: puts the question on the background session's task page and prints the\n"
+                + "      one-time code its answer will carry. Prints nothing when the question stays in the terminal\n"
+                + "      (claude-permissions off, a session that is not a background one with a task, a dialog tool).\n"
+                + "      Only a click in Deskbar answers; no command does"),
         ]),
         new("Tasks", [
             new("task", "list [--closed]",
@@ -339,6 +345,10 @@ public static class ControlUsage
                 "Manage's \"Resume the sessions of open tasks after a restart or a crash\" setting: wake an open task's Claude\n"
                 + "      session with claude --bg --resume when claude agents no longer lists it, or leave it ended (off while\n"
                 + "      claude-tasks is off)"),
+            new("claude-permissions", "on|off",
+                "Manage's \"Answer Claude's permission questions in Deskbar\" setting: put a background session's\n"
+                + "      permission questions on its task's page with Allow and Deny, beside the terminal's own dialog\n"
+                + "      (off by default; off while claude-tasks is off; shown only in the Inbox look)"),
             new("claude-model", "[<model>]",
                 "the model every Claude session started on a task runs on, an alias (opus, sonnet, fable) or a model's\n"
                 + "      full name; opus until set. Without a name it says what is set. A running session keeps its own"),
