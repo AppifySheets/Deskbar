@@ -465,7 +465,7 @@ Tasks 7 to 9). Needs Claude Code installed and both Claude boxes in Manage ticke
     and it reads "Hide 2 settled comments". "Settle" beside any comment folds it away; "Unsettle" brings it back. The
     comments are still in `task list`'s `thread` with their `settled` time, and survive a restart.
 80. Folding a thread (Ruling 63). Click a task's line: its thread opens. Click it again: it closes. Open it and press Esc: it closes.
-    On a task with nine long comments the thread shows the latest three, each cut to about three lines with "Show more"; "3
+    On a task with nine long comments the thread shows the latest three, each cut to six lines with "Show more"; "3
     earlier comments" unfolds the rest, and "Show less" folds a long one back. Add a comment from a script or let a session add
     one: what you unfolded stays unfolded. Close the panel with its x and open it again: all threads are folded again.
 81. Compact lines (Ruling 64). In the tasks panel's List and Matrix, a task with no second line is one text line tall plus
@@ -992,7 +992,7 @@ TI5. A thumbnail in the thread is small (at most 64 DIP tall, 160 wide). Click i
      anywhere, Esc, or Alt+Tab closes it; "Open in viewer" opens the file in the default image viewer.
 TI5a. Two screens with different scaling: click a thumbnail on each screen; the picture opens on the
      screen that was clicked, sharp, filling no more than that screen.
-TI6. A comment with long text and a picture: folded to three lines, the picture still shows in full
+TI6. A comment with super long text and a picture: folded to six lines, the picture still shows in full
      under "Show more".
 TI7. Edit a task (F2): paste a picture into the description box, Enter. The open line shows the
      description's text, then the picture. Edit again: the description box holds only the text and the
@@ -1216,9 +1216,9 @@ TW11. (Task 2088e1ed.) On the TW10 task, a thin band with a short bar in its mid
      the bottom: the whole description shows and "Show all in window" goes if the question is whole too. A press on the
      band neither folds the line nor starts dragging the task. Fold the line and open it again, and close and reopen the
      panel: the heights you left stay. Restart Deskbar: back to four lines.
-TW12. (Task 2088e1ed.) In a thread, a comment cut at three lines has the same band under its text; a short comment has
-     none. Drag it down and up: the comment shows more and less, live. Release halfway: that height stays, and "Show
-     more" still opens it whole. Drag one to its bottom: its button says "Show less". Show less brings it back to three
+TW12. (Task 2088e1ed.) In a thread, a comment cut at six lines has the same band under its text; a comment shown whole
+     has none. Drag it down and up: the comment shows more and less, live. Release halfway: that height stays, and "Show
+     more" still opens it whole. Drag one to its bottom: its button says "Show less". Show less brings it back to six
      lines.
 
 ## The narrow panel's titles
@@ -1760,3 +1760,14 @@ BM22. Bookmark two Portainer instances (100.65.0.11 and 100.65.0.8) in one works
 BM23. Bookmark a Store app or a PWA, drag its chip to screen 2 and click it with the app closed: its window opens on
      screen 2, also when the app names its window a moment after showing it. Open the same app by hand ten seconds or more
      after the click: that window stays where it opens.
+
+## Comments show whole
+
+Task f0168cdd. A comment in the tasks panel's thread shows whole unless it is super long.
+
+CW1. Open the thread of a task with a manager note of about ten lines (a resume message): the whole note shows, with no
+     "Show more" and no grip band under it.
+CW2. Comment twenty paragraphs on a task (`deskbar.cmd task comment` with a long heredoc): the thread shows its first
+     six lines, then "Show more" and the grip. Show more opens it whole; Show less folds it back to six lines.
+CW3. Narrow the panel with its width grip until a twelve-line comment wraps past fifteen lines: it folds to six with
+     "Show more". Widen it again: it shows whole and the button goes.

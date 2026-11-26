@@ -2332,16 +2332,35 @@ public partial class TasksWindow : Window
         return fold;
     }
 
-    // About three lines of a comment show; a longer one ends in "Show more" (Ruling 63). A line is counted by its text, a
-    // hundred characters to a line: the width is not known when the thread is built, and a test needs the same answer.
+    // A comment shows WHOLE unless it is super long (task f0168cdd; Petre: "give comments more space, two times more, if
+    // they need it. actually show the entire comment, don't collapse it, unless it's super long"). Ruling 63 folded every
+    // comment past about three lines behind "Show more"; now only one past SuperLongLines folds, and folded it shows
+    // twice the old three lines (FoldedLines). A line is counted by its text, a hundred characters to a line: the width
+    // is not known when the thread is built, and a test needs the same answer. The laid-out height decides once there is
+    // one (CommentOf's LayoutUpdated).
+    // BLANK LINES DO NOT COUNT (review of task f0168cdd): a session writes a blank line between paragraphs, and counting
+    // them made ten short paragraphs "super long" by the count but not once laid out. Such a comment was built folded and
+    // opened a pass later, growing by a hundred DIP or more after the panel had arranged its scroll, which could pull the
+    // scroll position up. Erring low is the safe side: a comment built whole that turns out super long only shrinks.
     internal static bool IsLong(string markdown) =>
-        markdown.Split('\n').Sum(line => Math.Max(1, (int)Math.Ceiling(line.TrimEnd('\r').Length / 100.0))) > 3;
+        markdown.Split('\n').Select(line => line.TrimEnd('\r')).Where(line => line.Trim().Length > 0)
+            .Sum(line => (int)Math.Ceiling(line.Length / 100.0)) > SuperLongLines;
 
-    // Three lines of 11.5-point text, with a little to spare for a paragraph's spacing.
-    const double ThreeLines = 54;
+    // One line of 11.5-point text, with a little to spare for a paragraph's spacing (Ruling 63 had 54 DIP for three). It
+    // is also the least of a comment its grip can leave showing (task 2088e1ed).
+    const double OneCommentLine = 18;
 
-    // The least of a comment its grip can leave showing (task 2088e1ed): one of those lines.
-    const double OneCommentLine = ThreeLines / 3;
+    // How many lines a comment may run to and still show whole (task f0168cdd). Past this it is "super long": a thread
+    // with one of those would be that comment alone on most of a panel's height, so it folds.
+    const int SuperLongLines = 15;
+
+    // What a super long comment shows folded: six lines, twice Ruling 63's three ("two times more", task f0168cdd). A
+    // preview rather than the fifteen it could have shown whole, so a long report still leaves the thread under it in
+    // sight; "Show more" or the grip opens the rest.
+    const double FoldedLines = 6 * OneCommentLine;
+
+    // The laid-out height past which a comment counts as super long.
+    const double SuperLongHeight = SuperLongLines * OneCommentLine;
 
 
     void ToggleSettled(Guid task)
@@ -2502,7 +2521,7 @@ public partial class TasksWindow : Window
         // A question Deskbar asked is a bubble like a session's, not an event line (task 968c2216).
         var isEvent = comment.Who == CommentAuthor.Deskbar && !comment.Asks;
         // Images in tasks: the body renders the comment's text alone; its pictures are a row of their own after it
-        // (TaskImageRow), outside the clipped box, so folding to three lines cuts text, never a picture.
+        // (TaskImageRow), outside the clipped box, so folding to six lines cuts text, never a picture.
         var split = TaskImages.Split(comment.Markdown);
         // A one-line Deskbar event carries its time at its end ("Resumed. · 09:08"); a longer one has it on a line below.
         var timeInBody = isEvent && split.Images.Count == 0 && ChatThread.TimeFitsInline(split.Text);
@@ -2527,12 +2546,13 @@ public partial class TasksWindow : Window
             Focusable = true,
             Cursor = Cursors.Arrow,
         };
-        // RULING 63: a long comment shows about three lines, clipped, and ends in "Show more", which opens it in place;
-        // "Show less" folds it back. The state is the window's (longOpen), so a redraw keeps it. Whether it is long is
-        // judged by the character count at first (the width is not known while the thread is built), and by the laid-out
-        // height once it has been (review of the batch): a paragraph that fits three lines at the window's width loses its
-        // button, and one that wraps to more gains it.
-        // A HEIGHT DRAGGED (task 2088e1ed, TasksWindow.BodyGrip.cs) replaces the three lines: the grip under a long comment
+        // RULING 63, as task f0168cdd changed it: a comment shows whole unless it is super long (past SuperLongLines),
+        // and a super long one shows FoldedLines, clipped, and ends in "Show more", which opens it in place; "Show less"
+        // folds it back. The state is the window's (longOpen), so a redraw keeps it. Whether it is super long is judged
+        // by the character count at first (the width is not known while the thread is built), and by the laid-out height
+        // once it has been (review of the batch): a comment that fits at the window's width shows whole with no button,
+        // and one that wraps past the limit folds and gains it.
+        // A HEIGHT DRAGGED (task 2088e1ed, TasksWindow.BodyGrip.cs) replaces the six lines: the grip under a long comment
         // shows more or less of it, and the height it was left at is where the comment starts on every later redraw.
         // A comment dragged to its foot is whole (infinity), and reads as one Show more opened.
         var isLong = IsLong(split.Text);
@@ -2540,7 +2560,8 @@ public partial class TasksWindow : Window
         var full = longOpen.Contains(comment.Id) || dragged is double.PositiveInfinity;
         if (!full)
         {
-            body.MaxHeight = dragged ?? ThreeLines;
+            // Not yet laid out: the character count says whether it folds. One that is not super long has no ceiling.
+            body.MaxHeight = dragged ?? (isLong ? FoldedLines : double.PositiveInfinity);
             body.ClipToBounds = true;
         }
         // A comment of pictures alone has no text box to show.
@@ -2561,10 +2582,10 @@ public partial class TasksWindow : Window
                 // By what shows, not by longOpen alone: a comment dragged whole says "Show less" without being in it.
                 if (full) longOpen.Remove(comment.Id);
                 else longOpen.Add(comment.Id);
-                // Either button says how much shows by itself: a dragged height goes (Show less is three lines again).
+                // Either button says how much shows by itself: a dragged height goes (Show less is six lines again).
                 ForgetCommentHeight(comment.Id);
                 if (latest is not null) Draw(latest);
-            }, full ? "Fold the comment back to three lines" : "Show the whole comment");
+            }, full ? "Fold the comment back to six lines" : "Show the whole comment");
         // Collapsed means it takes no room and is not in the tree for a reader, but it is there for the layout to switch on.
         // The grip shows with the button: only a comment long enough to be cut has anything to resize.
         more.Visibility = full || isLong || dragged is not null ? Visibility.Visible : Visibility.Collapsed;
@@ -2575,9 +2596,15 @@ public partial class TasksWindow : Window
             body.LayoutUpdated += (_, _) =>
             {
                 if (body.ActualWidth <= 0 || body.Visibility != Visibility.Visible) return;
+                // Whole up to SuperLongHeight, folded past it (task f0168cdd). ExtentHeight is the whole text's height at
+                // the box's width whatever its MaxHeight, so setting the ceiling here settles in one more pass. A dragged
+                // height is Petre's and stays, and a grip being dragged sets the ceiling itself (its preview).
+                var superLong = body.ExtentHeight > SuperLongHeight + 0.5;
+                var ceiling = superLong ? FoldedLines : double.PositiveInfinity;
+                if (dragged is null && !grip.IsMouseCaptured && !body.MaxHeight.Equals(ceiling)) body.MaxHeight = ceiling;
                 // A comment dragged to a height keeps both however short it gets (a wider panel, an edit), or one dragged
                 // to a line could stay cut with nothing left to undo it (review of task 2088e1ed).
-                var wanted = body.ExtentHeight > ThreeLines + 0.5 || dragged is not null ? Visibility.Visible : Visibility.Collapsed;
+                var wanted = superLong || dragged is not null ? Visibility.Visible : Visibility.Collapsed;
                 if (more.Visibility != wanted) more.Visibility = wanted;
                 // Never collapsed mid-drag, which would take the mouse from it.
                 if (grip.Visibility != wanted && !grip.IsMouseCaptured) grip.Visibility = wanted;

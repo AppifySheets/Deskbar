@@ -3994,19 +3994,34 @@ public class TasksBoardTests
 
     static string Long(int lines) => string.Join("\n\n", Enumerable.Range(1, lines).Select(i => $"line {i} of a long finding"));
 
+    // Task f0168cdd (Petre: "actually show the entire comment, don't collapse it, unless it's super long"): a comment of
+    // seven paragraphs, which Ruling 63 cut at three lines, shows whole with no button; one of thirty folds to six lines
+    // (twice the old three) and has Show more.
     [Fact]
-    public void A_long_comment_shows_about_three_lines_with_show_more_and_show_less() => StaThread.Run(() =>
+    public void Only_a_super_long_comment_folds_to_six_lines_with_show_more_and_show_less() => StaThread.Run(() =>
     {
         using var t = Build();
         var id = t.Tasks.AddNote("note", t.Gepha).Value.Id;
-        t.Tasks.Comment(id, Maybe<string>.None, Long(9));
+        t.Tasks.Comment(id, Maybe<string>.None, Long(30));
+        t.Tasks.Comment(id, Maybe<string>.None, Long(7));
         t.Tasks.Comment(id, Maybe<string>.None, "short");
         t.Controller.Show();
         t.Controller.ToggleThread(id);
+        t.Window.UpdateLayout();
 
-        Assert.Single(ButtonsNamed(t, "Show more")); // the short comment has none
-        var body = Inside(t.Window).OfType<RichTextBox>().First(b => b.IsReadOnly && b.Tag is null);
-        Assert.True(body.MaxHeight < 80, $"clamped to {body.MaxHeight}");
+        Assert.Single(ButtonsNamed(t, "Show more")); // the seven-paragraph and the short comment have none
+        var bodies = Inside(t.Window).OfType<RichTextBox>().Where(b => b.IsReadOnly && b.Tag is null).ToList();
+        var body = bodies[0];
+        Assert.True(body.MaxHeight is > 100 and < 120, $"clamped to {body.MaxHeight}");
+        Assert.True(body.ActualHeight > 100, $"six lines show, {body.ActualHeight} DIP");
+        // The seven paragraphs show whole: no ceiling, and all of the text in sight.
+        Assert.True(double.IsPositiveInfinity(bodies[1].MaxHeight), $"the medium comment is capped at {bodies[1].MaxHeight}");
+        Assert.Equal(bodies[1].ExtentHeight, bodies[1].ActualHeight, 0.5);
+        Assert.Single(VisibleGrips(t.Window));
+        // The blank lines between paragraphs are not counted: twelve short paragraphs are not super long by the count,
+        // so such a comment is built whole rather than folded and opened a pass later (review of task f0168cdd).
+        Assert.False(TasksWindow.IsLong(Long(12)));
+        Assert.True(TasksWindow.IsLong(Long(16)));
 
         Click(ButtonsNamed(t, "Show more")[0]);
         Assert.Empty(ButtonsNamed(t, "Show more"));
@@ -4025,14 +4040,14 @@ public class TasksBoardTests
     static RichTextBox LongCommentBody(Board t) => Inside(t.Window).OfType<RichTextBox>().First(b => b.IsReadOnly && b.Tag is null);
 
     // A long comment has a grip under it and a short one has none. The height a drag ends on stays the comment's through
-    // a redraw; a drag to its foot opens it as Show more does; Show less goes back to three lines and forgets the height.
+    // a redraw; a drag to its foot opens it as Show more does; Show less goes back to six lines and forgets the height.
     // A real mouse drag cannot run on the hidden desktop, so the test keeps heights the way the grip's release does.
     [Fact]
     public void A_long_comments_grip_keeps_the_height_it_was_dragged_to() => StaThread.Run(() =>
     {
         using var t = Build();
         var id = t.Tasks.AddNote("note", t.Gepha).Value.Id;
-        t.Tasks.Comment(id, Maybe<string>.None, Long(9));
+        t.Tasks.Comment(id, Maybe<string>.None, Long(30));
         t.Tasks.Comment(id, Maybe<string>.None, "short");
         var comment = t.Tasks.Board.Tasks.Single().Comments[0].Id;
         t.Controller.Show();
@@ -4041,17 +4056,17 @@ public class TasksBoardTests
 
         Assert.Single(VisibleGrips(t.Window)); // the short comment has none
         var whole = LongCommentBody(t).ExtentHeight;
-        Assert.True(whole > 80, $"the long comment is {whole} DIP");
+        Assert.True(whole > 300, $"the long comment is {whole} DIP");
 
-        // Taller than three lines, short of the whole: that height, kept through a redraw.
-        t.Window.KeepCommentHeight(comment, 90, whole);
+        // Taller than six lines, short of the whole: that height, kept through a redraw.
+        t.Window.KeepCommentHeight(comment, 150, whole);
         t.Window.UpdateLayout();
-        Assert.Equal(90, LongCommentBody(t).MaxHeight);
-        Assert.Equal(90, LongCommentBody(t).ActualHeight, 0.5);
+        Assert.Equal(150, LongCommentBody(t).MaxHeight);
+        Assert.Equal(150, LongCommentBody(t).ActualHeight, 0.5);
         Assert.Single(ButtonsNamed(t, "Show more"));
         Assert.Single(VisibleGrips(t.Window));
 
-        // Smaller than three lines.
+        // Smaller than six lines.
         t.Window.KeepCommentHeight(comment, 20, whole);
         t.Window.UpdateLayout();
         Assert.Equal(20, LongCommentBody(t).MaxHeight);
@@ -4070,10 +4085,10 @@ public class TasksBoardTests
         t.Window.UpdateLayout();
         Assert.True(double.IsPositiveInfinity(LongCommentBody(t).MaxHeight));
 
-        // Show less on a comment dragged whole: three lines, the dragged height forgotten.
+        // Show less on a comment dragged whole: six lines, the dragged height forgotten.
         Click(ButtonsNamed(t, "Show less")[0]);
         Assert.Null(t.Window.BodyHeight(TasksWindow.CommentKey(comment)));
-        Assert.True(LongCommentBody(t).MaxHeight < 80, $"clamped to {LongCommentBody(t).MaxHeight}");
+        Assert.True(LongCommentBody(t).MaxHeight < 120, $"clamped to {LongCommentBody(t).MaxHeight}");
 
         // Shrunk by a drag, then Show more: whole, the dragged height forgotten.
         t.Window.KeepCommentHeight(comment, 40, whole);
@@ -4185,7 +4200,7 @@ public class TasksBoardTests
     {
         using var t = Build();
         var id = t.Tasks.AddNote("note", t.Gepha).Value.Id;
-        t.Tasks.Comment(id, Maybe<string>.None, Long(9));
+        t.Tasks.Comment(id, Maybe<string>.None, Long(30));
         Enumerable.Range(1, 5).ToList().ForEach(i => t.Tasks.Comment(id, Maybe<string>.None, $"comment {i}"));
         t.Controller.Show();
         t.Controller.ToggleThread(id);
@@ -4268,18 +4283,19 @@ public class TasksBoardTests
         Assert.True(t.Window.ThreadShown(other));
     });
 
-    // A long comment is judged by its real width once the thread is laid out: a single paragraph that the heuristic calls long
-    // but that fits three lines at the window's width has no Show more.
+    // A super long comment is judged by its real width once the thread is laid out: a single paragraph that the heuristic
+    // calls super long but that fits fifteen lines at the window's width has no Show more, and shows whole (task f0168cdd).
     [Fact]
     public void Show_more_follows_the_laid_out_height() => StaThread.Run(() =>
     {
         using var t = Build();
         var id = t.Tasks.AddNote("note", t.Gepha).Value.Id;
-        // Wide glyphs: 290 characters, three lines by the character count but many more once laid out.
-        t.Tasks.Comment(id, Maybe<string>.None, string.Join(" ", Enumerable.Repeat("WWWWWWWWW", 29)));
-        // Narrow glyphs: 350 characters, four lines by the count but two once laid out.
-        t.Tasks.Comment(id, Maybe<string>.None, string.Join(" ", Enumerable.Repeat("iiiiiiiii", 35)));
-        t.Tasks.Comment(id, Maybe<string>.None, Long(9));
+        // Wide glyphs: 1490 characters, fifteen lines by the character count but about twenty-two once laid out at the
+        // harness's 1000 DIP panel (Wide), past the fifteen-line limit. A much wider panel would show it whole.
+        t.Tasks.Comment(id, Maybe<string>.None, string.Join(" ", Enumerable.Repeat("WWWWWWWWW", 149)));
+        // Narrow glyphs: 1550 characters, sixteen lines by the count but about nine once laid out.
+        t.Tasks.Comment(id, Maybe<string>.None, string.Join(" ", Enumerable.Repeat("iiiiiiiii", 155)));
+        t.Tasks.Comment(id, Maybe<string>.None, Long(30));
         t.Controller.Show();
         t.Controller.ToggleThread(id);
         static List<bool> Shown(Board t) => Inside(t.Window).OfType<Button>()
@@ -4289,6 +4305,10 @@ public class TasksBoardTests
         t.Window.UpdateLayout();
 
         Assert.Equal([true, false, true], Shown(t)); // after it, the laid-out height does
+        // And the ceiling follows: the wide one folds to six lines, the narrow one shows whole.
+        var bodies = Inside(t.Window).OfType<RichTextBox>().Where(b => b.IsReadOnly && b.Tag is null).ToList();
+        Assert.True(bodies[0].MaxHeight is > 100 and < 120, $"the wide comment is capped at {bodies[0].MaxHeight}");
+        Assert.True(double.IsPositiveInfinity(bodies[1].MaxHeight), $"the narrow comment is capped at {bodies[1].MaxHeight}");
     });
 
     // Task 39bc9c4d, Petre on the chat thread's first build: "it's too much vertical separation". The panel's theme gives a

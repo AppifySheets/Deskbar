@@ -10,7 +10,7 @@ namespace Deskbar.App;
 // Design: docs/superpowers/specs/2026-11-24-task-images-design.md, PR 1 ("Rendering").
 //
 // The spec had MarkdownBlocks render an image line in place. It is a row of its own instead, after the text, for one
-// reason: a comment folds to about three lines behind "Show more" (Ruling 63) by clipping its text box, and a picture
+// reason: a long comment folds to a few lines behind "Show more" (Ruling 63) by clipping its text box, and a picture
 // inside that box would be cut in half or hidden. Kept apart, the text folds as before and the pictures always show.
 // The markdown that reaches MarkdownBlocks is the text alone (TaskImages.Split), so no path is ever shown as text either.
 //
