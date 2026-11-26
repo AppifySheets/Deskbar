@@ -30,8 +30,8 @@ namespace Deskbar.App;
 // re-ask.
 //
 // THE TERMINAL. Followed from the moment the App has pinned it (App.PinManagerWindow calls Follow), and given up when it
-// closes or stops being the manager's (a second tab took its title): the strip is then given back, so no empty column is
-// left. A drag of it by the title bar puts it back; a drag of its edge takes the new width (ManagerDockLayout.Dragged),
+// closes, or stops being the manager's for RetitleGrace (a second tab took its title and kept it): the strip is then given
+// back, so no empty column is left. A drag of it by the title bar puts it back; a drag of its edge takes the new width (ManagerDockLayout.Dragged),
 // saved in AppState.ManagerDockWidth. While a drag is under way nothing moves it, and the 1 s Keep puts it back if
 // something else did (Windows Terminal resizing itself, a DPI change). A minimized or maximized terminal is left alone:
 // both are the user's own doing, and a maximized window's rectangle is the work area's anyway.
@@ -43,10 +43,20 @@ internal sealed class ManagerDock : IDisposable
     readonly TasksPanel strip;
     readonly WorkspaceManager manager;
     readonly IDisposable grants;
+    readonly IDisposable edges;
 
     // The manager's terminal while it is docked, and whether the user is dragging it right now.
     Maybe<WindowHandle> terminal = Maybe<WindowHandle>.None;
     bool dragging;
+
+    // The edge the strip docks on (TasksPanel.Edge): which side of the terminal is its OUTER edge for a drag.
+    PanelEdge edge = PanelEdge.Right;
+
+    // A retitle away from the manager's title gives the strip back only after this long (review finding): a second tab
+    // in the window takes the title while it is shown, and switching tabs back and forth would otherwise give the strip
+    // back and take it again on every switch, reflowing every maximized window on the screen each time.
+    static readonly TimeSpan RetitleGrace = TimeSpan.FromSeconds(5);
+    readonly System.Windows.Threading.DispatcherTimer retitled;
 
     // The strip the shell granted, while one is held.
     Maybe<WindowRect> granted = Maybe<WindowRect>.None;
@@ -73,7 +83,18 @@ internal sealed class ManagerDock : IDisposable
             granted = g;
             Place();
         });
+        edges = strip.Edge.Subscribe(e => edge = e);
+        retitled = new System.Windows.Threading.DispatcherTimer(System.Windows.Threading.DispatcherPriority.Background, placeholder.Dispatcher)
+            { Interval = RetitleGrace };
+        retitled.Tick += (_, _) =>
+        {
+            retitled.Stop();
+            terminal.Tap(GiveBack);
+        };
     }
+
+    /// <summary>Whether this window is the terminal the dock follows, so the panel's clearing leaves it where it is.</summary>
+    public bool Follows(WindowHandle window) => terminal.Map(t => t == window).GetValueOrDefault(false);
 
     // The width the dock is held at: the user's last drag, else the default.
     double Width => manager.State.ManagerDockWidth ?? ManagerDockLayout.DefaultWidth;
@@ -112,8 +133,10 @@ internal sealed class ManagerDock : IDisposable
     /// <summary>The manager's terminal, pinned: dock it (the first time) and put it on the strip.</summary>
     public void Follow(WindowHandle window)
     {
-        if (terminal.Map(t => t == window).GetValueOrDefault(false))
+        if (Follows(window))
         {
+            // Its manager title is back (a tab switched back) before the grace ran out: nothing is given back.
+            retitled.Stop();
             Place();
             return;
         }
@@ -123,30 +146,51 @@ internal sealed class ManagerDock : IDisposable
         else strip.Show(Width);
     }
 
-    /// <summary>A window closed, or was retitled so it is no longer the manager's: when it was the docked terminal, the strip goes back.</summary>
-    public void Lost(WindowHandle window)
+    /// <summary>A window closed: when it was the docked terminal, the strip goes back at once.</summary>
+    public void Gone(WindowHandle window)
     {
-        if (!terminal.Map(t => t == window).GetValueOrDefault(false)) return;
+        if (!Follows(window)) return;
+        retitled.Stop();
+        GiveBack(window);
+    }
+
+    /// <summary>A window was retitled so it is no longer the manager's: the strip goes back if the title stays away (RetitleGrace).</summary>
+    public void Retitled(WindowHandle window)
+    {
+        if (Follows(window) && !retitled.IsEnabled) retitled.Start();
+    }
+
+    void GiveBack(WindowHandle window)
+    {
         terminal = Maybe<WindowHandle>.None;
         dragging = false;
-        ClickTrace.Write($"manager dock: 0x{window.Value:X} gone, strip given back");
+        ClickTrace.Write($"manager dock: 0x{window.Value:X} no longer the manager's, strip given back");
         strip.Hide();
     }
 
     /// <summary>A move or resize of some window began (EVENT_SYSTEM_MOVESIZESTART).</summary>
     public void DragStarted(WindowHandle window)
     {
-        if (terminal.Map(t => t == window).GetValueOrDefault(false)) dragging = true;
+        if (Follows(window)) dragging = true;
     }
 
     /// <summary>A move or resize ended (EVENT_SYSTEM_MOVESIZEEND): the terminal goes back, or the dock takes its new width.</summary>
     public void DragEnded(WindowHandle window)
     {
-        if (!terminal.Map(t => t == window).GetValueOrDefault(false)) return;
+        if (!Follows(window)) return;
         dragging = false;
         if (granted is not { HasValue: true } held || FrameOf(window) is not { } frame) return;
+        // Dragged into a maximize or a Snap (review finding): the shell arranged it, which geometry alone can mistake for
+        // a resize of the inner edge. Restored, and the 1 s Keep puts it back on the strip once the restore has settled
+        // (ShowWindowAsync is asynchronous, CLAUDE.md's Traps).
+        if (NativeMethods.IsZoomed(window.Value) || ScreenLayout.IsShellArranged(window))
+        {
+            ClickTrace.Write("manager dock: maximized or snapped by a drag, restored to go back");
+            NativeMethods.ShowWindowAsync(window.Value, NativeMethods.SW_RESTORE);
+            return;
+        }
         var scale = NativeMethods.GetDpiForWindow(window.Value) / 96.0;
-        switch (ManagerDockLayout.Dragged(held.Value, frame, scale))
+        switch (ManagerDockLayout.Dragged(held.Value, frame, scale, edge))
         {
             case ManagerDockLayout.AfterDrag.Resize resize:
                 var width = ManagerDockLayout.Clamp(resize.WidthDips, double.MaxValue);
@@ -167,6 +211,11 @@ internal sealed class ManagerDock : IDisposable
     public void Keep()
     {
         strip.Keep();
+        // A drag's end event can be lost under load (out-of-context WinEvents, CLAUDE.md's Traps; review finding), which
+        // would leave `dragging` set and the terminal never put back. No mouse button held means no drag is under way.
+        if (dragging && (NativeMethods.GetAsyncKeyState(NativeMethods.VK_LBUTTON) & NativeMethods.KeyDownBit) == 0
+                     && (NativeMethods.GetAsyncKeyState(NativeMethods.VK_RBUTTON) & NativeMethods.KeyDownBit) == 0)
+            dragging = false;
         if (!dragging && granted.HasValue && terminal is { HasValue: true } t && FrameOf(t.Value) is { } frame
             && !Same(frame, granted.Value))
             Place();
@@ -174,6 +223,8 @@ internal sealed class ManagerDock : IDisposable
 
     public void Shutdown()
     {
+        retitled.Stop();
+        edges.Dispose();
         grants.Dispose();
         strip.Shutdown();
     }

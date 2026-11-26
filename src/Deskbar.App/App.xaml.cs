@@ -1052,14 +1052,14 @@ public partial class App : Application
             .Subscribe(e => Later(e.Window.Handle));
 
         // The manager's DOCK (task f171bca6, ManagerDock) follows the same window: it docks it once pinned (PinManagerWindow
-        // calls Follow), gives the strip back when the window closes or is retitled away from the manager's title (a
-        // second tab), and reads the user's drags of it: a move snaps back, a resize takes the new width. Disappeared and
-        // never Hidden: a hidden window is not a gone one (CLAUDE.md, Traps). The dock is built further down, with the
-        // tasks panel, so it is read through the field.
+        // calls Follow), gives the strip back when the window closes, or a few seconds after it is retitled away from the
+        // manager's title (a second tab kept it; a quick tab switch back keeps the strip), and reads the user's drags of
+        // it: a move snaps back, a resize takes the new width. Disappeared and never Hidden: a hidden window is not a gone
+        // one (CLAUDE.md, Traps). The dock is built further down, with the tasks panel, so it is read through the field.
+        monitor.Events.Where(e => e.Kind is WindowEventKind.Disappeared).Subscribe(e => managerDock?.Gone(e.Window.Handle));
         monitor.Events
-            .Where(e => e.Kind is WindowEventKind.Disappeared
-                        || (e.Kind is WindowEventKind.TitleChanged && !Core.Tasks.ManagerSession.IsWindow(e.Window.ProcessPath, e.Window.Title)))
-            .Subscribe(e => managerDock?.Lost(e.Window.Handle));
+            .Where(e => e.Kind is WindowEventKind.TitleChanged && !Core.Tasks.ManagerSession.IsWindow(e.Window.ProcessPath, e.Window.Title))
+            .Subscribe(e => managerDock?.Retitled(e.Window.Handle));
         monitor.Events.Where(e => e.Kind is WindowEventKind.MoveStarted).Subscribe(e => managerDock?.DragStarted(e.Window.Handle));
         monitor.Events.Where(e => e.Kind is WindowEventKind.Moved).Subscribe(e => managerDock?.DragEnded(e.Window.Handle));
         manager!.KnownWindows
@@ -2481,14 +2481,15 @@ public partial class App : Application
             // in a tile on the desktop in view (the Tiler re-lays its grid itself when the work area changes, and a move of
             // ours would read to it as a drag). Nudge keeps each one's z-order and focus.
             //
-            // The manager's terminal is never one of them (task f171bca6): it is docked inside the panel on purpose, and the
-            // manager dock below takes the same list for its own strip, where the terminal is exactly what belongs there.
+            // The manager's terminal is not one of them while the dock follows it (task f171bca6, ManagerDock.Follows): it
+            // is docked inside the panel on purpose, and the dock below takes the same list for its own strip, where the
+            // terminal is exactly what belongs there. Not followed (its pin never worked), it is moved like any window.
             var panelLayout = new ScreenLayout();
             IReadOnlyList<(WindowHandle Window, WindowRect Rect)> RestoredUnderStrips()
             {
                 var facts = panelLayout.Snapshot();
                 return manager.KnownWindows
-                    .Where(w => w.ProcessId != Environment.ProcessId && !Core.Tasks.ManagerSession.IsWindow(w.ProcessPath, w.Title))
+                    .Where(w => w.ProcessId != Environment.ProcessId && !(managerDock?.Follows(w.Handle) ?? false))
                     .Select(w => w.Handle)
                     .Where(w => facts.ZOrder.ContainsKey(w) && !facts.Minimized.Contains(w) && !ScreenLayout.IsShellArranged(w)
                                 && !(tiler?.Board.ScreenOf(w).HasValue ?? false))
