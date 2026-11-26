@@ -329,6 +329,16 @@ public sealed record AppState(
     // above is kept, so turning the tasks back on brings the resume back as it was.
     [JsonIgnore] public bool ClaudeResumeInEffect => ClaudeTasksInEffect && ClaudeResume;
 
+    // Whether a background Claude session's permission questions are put on its task's page, with Allow and Deny, beside
+    // Claude Code's own terminal dialog (Allow / Deny from a task's page; RemoteControl.Permission, PermissionDesk). It
+    // adds a PermissionRequest hook to ~/.claude/settings.json, which decides what Claude may run on the machine, so it is
+    // OFF by default (the PM's ruling) and stored as it reads: every existing state.json lacks the key, which is off.
+    public bool ClaudePermissions { get; init; }
+
+    // What actually happens: the hook lives in the same files as the task hooks and answers only for a session with a
+    // task, so it needs sessions to keep their tasks. The choice above is kept, so turning the tasks back on brings it back.
+    [JsonIgnore] public bool ClaudePermissionsInEffect => ClaudeTasksInEffect && ClaudePermissions;
+
     // The model Deskbar names when it starts a Claude Code session on a task (ClaudeStart.Arguments; design
     // docs/superpowers/specs/2026-11-25-session-model-pick-design.md), what `claude-model <name>` sets. Null in every
     // state.json that predates it, and null or blank means ClaudeStart.DefaultModel: a start always names a model, so

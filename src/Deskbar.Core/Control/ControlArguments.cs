@@ -49,7 +49,7 @@ public sealed record OpenRequest(string Url, string? From);
 
 // `claude-hook`, parsed: CLAUDE_CODE_ENTRYPOINT, CLAUDE_CODE_SESSION_ATTENDED and CLAUDE_JOB_DIR as the hook script passed them (empty
 // or a literal %NAME% when unset; ClaudeHookEvent decides what they mean), the session's folder, and the hook's JSON.
-public sealed record ClaudeHookRequest(string? Entrypoint, string? Attended, string? From, string? Json, string? Job = null);
+public sealed record ClaudeHookRequest(string? Entrypoint, string? Attended, string? From, string? Json, string? Job = null, string? Slot = null);
 
 // The command line after `ctl`, with the parsing kept apart from the doing so both halves can be tested
 // without a pipe or a running app.
@@ -141,7 +141,7 @@ public static class ControlArguments
     // arguments alone. So any of them that does not name a folder gets the client's, which is the folder of the shell
     // that ran deskbar.cmd. Every other command goes through untouched. For `claude-hook`, the hook scripts pass
     // CLAUDE_PROJECT_DIR as --from when Claude Code set it; otherwise the folder the hook was started in is the session's.
-    static readonly string[] AboutTheCaller = ["open", "attention", "task", ClaudeHookVerb, ClaudeWaitVerb];
+    static readonly string[] AboutTheCaller = ["open", "attention", "task", ClaudeHookVerb, ClaudeWaitVerb, ClaudePermissionVerb];
 
     //
     // `task` ALWAYS gets the client's folder, last, even when the caller typed a --from of its own (final review, item 4):
@@ -185,8 +185,16 @@ public static class ControlArguments
     // option and treat the call as a second Stop, blinking the workspace again.
     public const string ClaudeWaitVerb = "claude-wait";
 
+    // Allow / Deny from a task's page (RemoteControl.Permission): `claude-permission` is the permission hook's one call,
+    // registering its question and its slot. A hook in every way the client cares about (its JSON on stdin, silent when
+    // Deskbar is not running, the hooks' short timeouts, and ForTrace writing its JSON as a length only, so the command
+    // asked about never reaches the trace), so IsClaudeHook covers it too. Its own verb, for claude-wait's reason: an
+    // older Deskbar refuses it, the script then prints nothing, and the terminal dialog stays.
+    public const string ClaudePermissionVerb = "claude-permission";
+
     public static bool IsClaudeHook(IReadOnlyList<string> args) =>
-        args.Count > 0 && (args[0].Equals(ClaudeHookVerb, StringComparison.OrdinalIgnoreCase) || args[0].Equals(ClaudeWaitVerb, StringComparison.OrdinalIgnoreCase));
+        args.Count > 0 && (args[0].Equals(ClaudeHookVerb, StringComparison.OrdinalIgnoreCase) || args[0].Equals(ClaudeWaitVerb, StringComparison.OrdinalIgnoreCase)
+            || args[0].Equals(ClaudePermissionVerb, StringComparison.OrdinalIgnoreCase));
 
     // An explicit --json (a person trying the verb by hand) is left as it is.
     public static IReadOnlyList<string> WithHookInput(IReadOnlyList<string> args, Func<string> readInput) =>
@@ -290,6 +298,8 @@ public static class ControlArguments
         ["--job", var value, .. var tail] => HookOptions(so with { Job = value }, tail),
         ["--from", var value, .. var tail] => HookOptions(so with { From = value }, tail),
         ["--json", var value, .. var tail] => HookOptions(so with { Json = value }, tail),
+        // claude-permission only: the hook script's own slot folder (PermissionDesk), which the answer goes into.
+        ["--slot", var value, .. var tail] => HookOptions(so with { Slot = value }, tail),
         // AN OPTION THIS COPY DOES NOT KNOW IS SKIPPED, with its value (final review, item 14). The hook scripts are
         // rewritten by whichever Deskbar starts last, so a newer script that passes one more variable can reach an
         // older Deskbar still running, and refusing it would silence every hook of every session until a restart.
@@ -300,7 +310,7 @@ public static class ControlArguments
         [var unknown, ..] => Result.Failure<ClaudeHookRequest>($"'{unknown}' is not an option of claude-hook, or it is missing its value."),
     };
 
-    static readonly IReadOnlyList<string> HookOptionNames = ["--entry", "--attended", "--job", "--from", "--json"];
+    static readonly IReadOnlyList<string> HookOptionNames = ["--entry", "--attended", "--job", "--from", "--json", "--slot"];
 
     // `create <name> [--group <g> | --position <n> | --before <ws> | --after <ws>] [--folder <path>]`
     //
