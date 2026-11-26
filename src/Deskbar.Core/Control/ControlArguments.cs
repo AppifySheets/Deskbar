@@ -226,7 +226,8 @@ public static class ControlArguments
     // after one, and while every option was taken to have a value that `-` was skipped, stdin was never read and the
     // note was titled "-". --from-claude is the one WithCaller appends. A text form that gains a flag with no value adds
     // it here, or a `-` after it is passed on as a literal title and its text is traced in full (TextForTrace).
-    static readonly string[] ValuelessFlags = ["--important", "--urgent", FromClaude];
+    // `task subtask`'s --no-start (task fa056b2f) is the fourth: `task subtask --no-start -` must still read stdin.
+    static readonly string[] ValuelessFlags = ["--important", "--urgent", "--no-start", FromClaude];
 
     static bool TakesValue(string word) => IsOption(word) && !ValuelessFlags.Contains(word, StringComparer.Ordinal);
 

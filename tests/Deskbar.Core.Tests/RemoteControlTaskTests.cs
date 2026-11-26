@@ -1146,7 +1146,7 @@ public class RemoteControlTaskTests
              "done --session <session>", "comment <markdown>|- --session <session>",
              "later <title>|- --session <session>",
              // Subtasks: a session splits its work and reads its family.
-             "subtask <title>|- --session <session>",
+             "subtask <title>|- [--no-start] [--model <model>] --session <session>",
              // Task e7aa49b1: a pull request the session opened another way than gh pr create.
              "pr <url> --session <session>",
              // Task 8470d176, phase 2: a session reports the deploy it checked.

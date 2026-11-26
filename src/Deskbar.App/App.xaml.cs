@@ -1816,6 +1816,8 @@ public partial class App : Application
             {
                 // `task close --stop-claude` (task 37cd7081), the twin of the ticks' "Stop Claude and close".
                 StopAndClose = task => claudeActions?.StopAndClose(task) ?? Result.Failure(ClaudeActionsNotReady),
+                // A session's `task subtask` starting the subtask's session (task fa056b2f): no window, no message box.
+                StartQuietly = (task, folder, model) => claudeActions?.Start(task, folder, model, quiet: true) ?? Result.Failure(ClaudeActionsNotReady),
                 // The manager session's folder, so a call from it is refused close, delete and done (manager session design).
                 ManagerFolder = Core.Tasks.ManagerSession.FolderIn(AppPaths.NewStateDir),
                 // `task manager`, the Manager button's twin (ManagerActions.Open), read when the command arrives.

@@ -83,7 +83,8 @@ public sealed record TaskBoard(IReadOnlyList<TaskItem> Tasks)
 
     /// <summary>
     /// A session splits its work (`task subtask`): a Backlog subtask assigned to Claude, so the next session on the
-    /// workspace is offered it. Its parent is the session's own task, or, when that is already a subtask, that task's
+    /// workspace is offered it (since task fa056b2f the pipe also starts a session on it at once, unless --no-start,
+    /// RemoteControl.SessionSubtask). Its parent is the session's own task, or, when that is already a subtask, that task's
     /// parent, so the new one is a SIBLING (one level is the limit, and splitting your own piece is exactly when this is
     /// wanted). It takes the parent's workspace. The session does not join it and its own task is untouched. A session
     /// with no open task is refused.

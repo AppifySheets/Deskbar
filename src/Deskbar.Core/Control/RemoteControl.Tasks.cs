@@ -121,7 +121,7 @@ public sealed partial class RemoteControl
             ["ask", var question] when byManager => ManagerAsked(ManagerQuestion.Ask(Maybe.From(manager.State.Manager), question, service.Now)),
             ["answered"] when byManager => ManagerAsked(ManagerQuestion.Answered(Maybe.From(manager.State.Manager))),
             // A session's form typed without its --session: it cannot know whose task is meant.
-            ["done"] or ["answered"] or ["join", _] or ["new", _] or ["status-line", _] or ["ask", _] or ["later", _] or ["subtask", _] or ["pr", _]
+            ["done"] or ["answered"] or ["join", _] or ["new", _] or ["status-line", _] or ["ask", _] or ["later", _] or ["subtask", ..] or ["pr", _]
                 or ["duplicate-of", _] or ["relate", _] or ["unrelate", _] or ["deployed", _] =>
                 ControlReply.Fail($"task {args[0]} is a session's form and needs --session <id>"),
             // In the bar's order, the Done tasks' full discs before their hollow rings (task a1debf34, TaskBoard.Pinned).
@@ -661,4 +661,12 @@ public sealed record TaskSessionCommands(
     /// reason as Transcript; the default refuses, so a copy without it never closes under a running session.
     /// </summary>
     public Func<TaskItem, Result> StopAndClose { get; init; } = _ => Result.Failure("Claude sessions cannot be stopped in this copy of Deskbar");
+
+    /// <summary>
+    /// A start nobody clicked for (task fa056b2f): a session's `task subtask` starting the subtask's own session
+    /// (RemoteControl.SessionSubtask). The app opens no window on it and shows no message; a later failure goes to the
+    /// task's thread only (ClaudeTaskActions.Start, quiet). An init property for the same reason as Transcript; the
+    /// default is <see cref="Start"/> itself, so a copy that does not set it still starts the session.
+    /// </summary>
+    public Func<TaskItem, string, Maybe<string>, Result>? StartQuietly { get; init; }
 }

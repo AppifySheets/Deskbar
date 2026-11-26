@@ -143,7 +143,12 @@ public sealed class ClaudeTaskActions : IDisposable
     public IObservable<Unit> Changed => changed.AsObservable();
 
     /// <summary>The pipe's three verbs (RemoteControl.Tasks.cs), answered by the methods the clicks use.</summary>
-    public TaskSessionCommands Commands => new(Go, Folders, Start, OpenSession) { StopAndClose = StopAndClose };
+    public TaskSessionCommands Commands => new(Go, Folders, (task, folder, model) => Start(task, folder, model), OpenSession)
+    {
+        StopAndClose = StopAndClose,
+        // A session's `task subtask` (task fa056b2f): the start nobody clicked for, with no window and no message.
+        StartQuietly = (task, folder, model) => Start(task, folder, model, quiet: true),
+    };
 
     // The latest list while the feature is on; none while it is off, whatever was read before it was turned off.
     Maybe<IReadOnlyCollection<ClaudeAgent>> Latest =>
@@ -412,21 +417,31 @@ public sealed class ClaudeTaskActions : IDisposable
     /// <summary>
     /// Starts a background session on the task in the folder (ClaudeSessions.Start) and opens its window once it is
     /// found. Answers at once; what `claude` says comes later, into the task's thread when it fails.
+    ///
+    /// <paramref name="quiet"/> is the start nobody clicked for (task fa056b2f: a session's `task subtask` starts the
+    /// subtask's own session at once, RemoteControl.SessionSubtask). Petre is busy with something else, so it opens no
+    /// window on the session and shows no message: the session runs in the background, shows in the tasks panel's
+    /// Claude block, and Open Claude on its line attaches to it. A failure goes to the task's thread only.
     /// </summary>
-    public Result Start(TaskItem task, string folder, Maybe<string> model = default)
+    public Result Start(TaskItem task, string folder, Maybe<string> model = default, bool quiet = false)
     {
         if (!manager.State.ClaudeTasksInEffect) return Result.Failure(FeatureOff);
         // A closed task takes no session (TaskBoard refuses the join), so `claude --bg` would run for nothing (final
         // review, item 12). Judged on the task as the board has it now, not as the caller last saw it.
         if (!Current(task.Id).GetValueOrDefault(task).IsOpen) return Result.Failure(RemoteControl.ClosedTaskRefusal);
+        void Failed(string error)
+        {
+            if (quiet) Say(task.Id, $"Could not start a Claude session in {folder}:\n\n{error}");
+            else StartFailed(task.Id, folder, error);
+        }
         Observable.FromAsync(() => seams.Start(task, folder, model))
             .ObserveOn(scheduler)
             .Subscribe(
                 started => started.Match(
-                    sessionId => Current(task.Id).Tap(t =>
+                    sessionId => Current(task.Id).Where(_ => !quiet).Tap(t =>
                         Attach(t, new ClaudeAgent(sessionId, Maybe<string>.None, folder, Background: true, Busy: false, Name: ""))),
-                    error => StartFailed(task.Id, folder, error)),
-                error => StartFailed(task.Id, folder, error.Message));
+                    Failed),
+                error => Failed(error.Message));
         return Result.Success();
     }
 
