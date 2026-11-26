@@ -393,7 +393,7 @@ public class FloatingBarBookmarksTests
 
         var menu = FloatingBar.MenuOf(Chips(bar.Rows).Single())!;
 
-        Assert.Equal(["Open", "Open all bookmarks", "Rename…", "Remove"], Headers(menu));
+        Assert.Equal(["Open", "Open all bookmarks", "Rename…", "Colour", "Remove"], Headers(menu));
     });
 
     [Fact]
@@ -468,6 +468,114 @@ public class FloatingBarBookmarksTests
         Assert.Equal(Maybe<string>.None, FloatingBar.ClipboardLink(() => "javascript:alert(1)"));
         Assert.Equal("https://x.org", FloatingBar.ClipboardLink(() => " https://x.org\t").Value);
     }
+
+    // --- the bookmark's colour (Petre: "i want to be able to change color of the bookmark", then "not change the icon")
+
+    static IReadOnlyList<Border> Bands(Button chip) =>
+        Descendants(chip).OfType<Border>().Where(b => b.Tag is FloatingBar.ChipBandTag).ToList();
+
+    static Image Picture(Button chip) => Descendants(chip).OfType<Image>().Single();
+
+    // The colour goes AROUND the icon: the outline in it and a rimmed band under the icon. The picture, a letter tile
+    // here, is the very same image an uncoloured chip on that bookmark draws.
+    [Fact]
+    public void A_coloured_chip_draws_its_outline_and_band_in_the_colour_and_leaves_the_picture() => StaThread.Run(() =>
+    {
+        var harness = Harness.Build();
+        var plain = Added(harness, "Sparrow", Link("https://alpha.org", "Alpha"));
+        using var bar = ShowBar(harness);
+        var before = Picture(Chips(bar.Rows).Single()).Source;
+        var resting = ((SolidColorBrush)Outline(Chips(bar.Rows).Single()).Stroke).Color;
+        Assert.Empty(Bands(Chips(bar.Rows).Single()));
+
+        Assert.True(harness.Manager.SetBookmarkColor(Id(harness, "Sparrow"), plain.Id, "#2E86DE").IsSuccess);
+        var chip = Chips(bar.Rows).Single();
+
+        Assert.Equal(Color.FromRgb(0x2E, 0x86, 0xDE), ((SolidColorBrush)Outline(chip).Stroke).Color);
+        Assert.NotEqual(resting, ((SolidColorBrush)Outline(chip).Stroke).Color);
+        Assert.Equal(Color.FromRgb(0x2E, 0x86, 0xDE), ((SolidColorBrush)Assert.Single(Bands(chip)).Background).Color);
+        // Dashed at rest, as before.
+        Assert.NotEmpty(Outline(chip).StrokeDashArray);
+        // The letter tile is untouched: the same cached picture, its host-derived fill and all.
+        Assert.Same(before, Picture(chip).Source);
+    });
+
+    // The Colour submenu is the workspace picker (#97): the palette strip and Custom…, then Default, which clears.
+    [Fact]
+    public void The_colour_submenu_is_the_palette_custom_and_default() => StaThread.Run(() =>
+    {
+        var harness = Harness.Build();
+        var alpha = Added(harness, "Sparrow", Link("https://alpha.org", "Alpha"));
+        Assert.True(harness.Manager.SetBookmarkColor(Id(harness, "Sparrow"), alpha.Id, "#2E86DE").IsSuccess);
+        using var bar = ShowBar(harness);
+
+        var colour = Item(FloatingBar.MenuOf(Chips(bar.Rows).Single())!, "Colour");
+        var entries = colour.Items.OfType<MenuItem>().ToList();
+
+        // The swatch strip (a header that is a panel of buttons), then the two named entries.
+        Assert.IsType<StackPanel>(entries[0].Header);
+        Assert.Equal(WorkspacePalette.Swatches.Count, ((StackPanel)entries[0].Header).Children.Count);
+        Assert.Equal(["Custom…", "Default"], entries.Skip(1).Select(i => i.Header as string));
+        Assert.DoesNotContain(entries, i => i.Header as string is "Transparent" or "By position");
+
+        // A swatch sets the colour; Default clears it.
+        ((Button)((StackPanel)entries[0].Header).Children[0]).RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent));
+        Assert.Equal(WorkspacePalette.Swatches[0].Hex.ToUpperInvariant(),
+            harness.Manager.State.Workspaces.Single(w => w.Name == "Sparrow").Bookmarks.Single().Color);
+        Click(entries[2]);
+        Assert.Null(harness.Manager.State.Workspaces.Single(w => w.Name == "Sparrow").Bookmarks.Single().Color);
+    });
+
+    // --- dragging a chip (the second bookmarks PR) ---------------------------------------------------------------
+
+    static DataObject ChipDrag(Harness harness, string workspace, Bookmark bookmark, FrameworkElement chip) =>
+        new(DraggedBookmark.DragFormat, new DraggedBookmark(Id(harness, workspace), bookmark.Id, chip));
+
+    [Fact]
+    public void A_chip_dropped_on_another_row_moves_the_bookmark_there() => StaThread.Run(() =>
+    {
+        var harness = Harness.Build();
+        var alpha = Added(harness, "GEPHA", Link("https://alpha.org", "Alpha"));
+        using var bar = ShowBar(harness);
+        var chip = Chips(RowNamed(bar.Rows, "GEPHA")).Single();
+
+        var effects = Drag(bar, "Sparrow", ChipDrag(harness, "GEPHA", alpha, chip), DragDrop.DragOverEvent);
+        Assert.Equal("Move", effects);
+        Assert.Equal("→ move to Sparrow", bar.Bar.ReadoutText);
+        Drag(bar, "Sparrow", ChipDrag(harness, "GEPHA", alpha, chip), DragDrop.DropEvent);
+
+        Assert.Empty(harness.Manager.State.Workspaces.Single(w => w.Name == "GEPHA").Bookmarks);
+        Assert.Equal(alpha.Id, harness.Manager.State.Workspaces.Single(w => w.Name == "Sparrow").Bookmarks.Single().Id);
+        Assert.Equal(["Alpha"], ChipNames(RowNamed(bar.Rows, "Sparrow")));
+    });
+
+    [Fact]
+    public void A_chip_over_a_row_that_has_the_same_bookmark_is_refused_and_said() => StaThread.Run(() =>
+    {
+        var harness = Harness.Build();
+        var alpha = Added(harness, "GEPHA", Link("https://alpha.org", "Alpha"));
+        Added(harness, "Sparrow", Link("https://alpha.org", "Same"));
+        using var bar = ShowBar(harness);
+        var chip = Chips(RowNamed(bar.Rows, "GEPHA")).Single();
+
+        var effects = Drag(bar, "Sparrow", ChipDrag(harness, "GEPHA", alpha, chip), DragDrop.DragOverEvent);
+        Drag(bar, "Sparrow", ChipDrag(harness, "GEPHA", alpha, chip), DragDrop.DropEvent);
+
+        Assert.Equal("None", effects);
+        Assert.Equal("can't move: Sparrow already has this bookmark", bar.Bar.ReadoutText);
+        Assert.Single(harness.Manager.State.Workspaces.Single(w => w.Name == "GEPHA").Bookmarks);
+    });
+
+    // A chip is not a window: a row that takes windows only (the pinned row has no workspace) says so and takes nothing,
+    // and a window-only surface never sees the chip's format as a window.
+    [Fact]
+    public void A_chip_drag_is_never_taken_for_a_window_drag() => StaThread.Run(() =>
+    {
+        var data = new DataObject(DraggedBookmark.DragFormat, new DraggedBookmark(Guid.NewGuid(), Guid.NewGuid(), new Button()));
+
+        Assert.False(data.GetDataPresent(DraggedWindow.DragFormat));
+        Assert.True(BookmarkDropData.From(data).HasNoValue);
+    });
 }
 
 // The chips' pictures (BookmarkIcons): a link's favicon is fetched once per origin, decoded on the UI thread, and

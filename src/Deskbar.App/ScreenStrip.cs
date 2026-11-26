@@ -261,13 +261,18 @@ public sealed class ScreenStrip : Window
     // at the end of the list of windows". They keep their own width and the tabs share what is left, so tag, tabs and
     // items together still fit the screen and the strip stays one line. Optional, so every caller that hands over
     // tabs alone is unchanged.
-    public void SetTabs(string name, Brush? colour, IReadOnlyList<FrameworkElement> tabs, IReadOnlyList<FrameworkElement>? jumps = null)
+    //
+    // `chips` are the current workspace's bookmark chips (FloatingBar.FillStrips), placed after the tabs and just before
+    // the jump items, so they sit at the strip's right end ahead of the items (Petre: "maybe on the right somewhere").
+    // Like the items they keep their own width and the tabs share what is left.
+    public void SetTabs(string name, Brush? colour, IReadOnlyList<FrameworkElement> tabs, IReadOnlyList<FrameworkElement>? jumps = null,
+        IReadOnlyList<FrameworkElement>? chips = null)
     {
         nameText.Text = name;
         NameTag.Background = colour ?? NeutralTag;
         Row.Children.RemoveRange(1, Row.Children.Count - 1);
 
-        var items = jumps ?? [];
+        var items = (chips ?? []).Concat(jumps ?? []).ToList();
         NameTag.Measure(new Size(double.PositiveInfinity, HeightDip));
         items.ToList().ForEach(item => item.Measure(new Size(double.PositiveInfinity, HeightDip)));
         var width = StripPlan.TabWidth(WidthDip() - NameTag.DesiredSize.Width - items.Sum(item => item.DesiredSize.Width), tabs.Count);

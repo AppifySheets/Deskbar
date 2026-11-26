@@ -1696,3 +1696,26 @@ BM14. Bookmark Portainer (which answers 404 for /favicon.ico and names its logo 
      %APPDATA%\Deskbar\bookmark-icons and restart Deskbar with tracing on: the chip shows Portainer's logo after a moment,
      and the trace has a `bookmark favicon` line that failed, then one marked `(declared)` that says ok. A site whose page
      names an icon on another host keeps its letter tile.
+
+The next steps need two screens, the window list on the screens (the strips showing) and a pinned workspace or the
+previous workspace's item on the strips.
+
+BM15. In a workspace with a link chip and a RustDesk chip, look at both strips: the chips are there on each, after the
+     window tabs and just before the jump items, faded with a dashed outline. Click the link chip on a strip: it opens as
+     from the row. Right-click it: the chip menu. Switch to a workspace with no bookmarks: no chips on the strips.
+BM16. Drag the RustDesk chip into the second screen's half of its own row: the half lights up and the readout says
+     "→ put on screen 2". Drop: the chip moves to the second screen's part of the row, and on the strips it is now only
+     on screen 2's strip. `deskbar.cmd bookmark list <workspace>` shows `"screen": 2`.
+BM17. Click the RustDesk chip with RustDesk closed: its window opens on screen 2. A quick click on a chip that slips a few
+     pixels still opens it rather than moving it.
+BM18. Drag the link chip into the other screen's half of its own row: the readout says a link keeps its browser's screen,
+     and the drop changes nothing.
+BM19. Drag the link chip onto another workspace's row: the readout says "→ move to <workspace>", and the drop moves the
+     chip there. Drag it back onto a row that already has the same link: the readout says it can't move, and nothing
+     changes.
+BM20. `deskbar.cmd bookmark move <workspace> RustDesk --any-screen`: the chip goes back to the first part of the row and
+     onto every strip. With the second screen unplugged, a chip that remembers screen 2 sits in the first part and opens
+     on whatever screen the window picks.
+BM21. Right-click a chip and pick Colour, then a swatch: the chip's outline and a small bar under its icon take the
+     colour; the icon itself (a letter tile included) does not change. Custom… opens Windows' colour picker. Default
+     clears it. `deskbar.cmd bookmark color <workspace> RustDesk #2E86DE` does the same, and `list` shows the colour.

@@ -36,6 +36,15 @@ namespace Deskbar.App;
 //     into the gap before it, so the divider costs no width the wrap would have to know about. Drawn only when
 //     windows precede it in the lane: a row holding only chips has nothing to divide them from.
 //
+// The second bookmarks PR added three things, each explained where it is built:
+//
+//   * a chip that remembers a screen sits in that screen's lane instead of the first (GroupRow, ChipLayout.LaneOf);
+//   * the current workspace's chips also sit on every screen strip (FloatingBar.Strips.cs, FillStrips), built here
+//     with `onStrip`;
+//   * a chip can be dragged like a window icon, to a screen half of its row or onto another workspace's row
+//     (ChipDropAt, DropChip; the row's DragOver and Drop in FloatingBar.xaml.cs), and wears its bookmark's colour
+//     around the icon, never on it.
+//
 // A click switches to the workspace and starts the bookmark (BookmarkOpener.Open, the same call `deskbar.cmd
 // bookmark open` makes). A middle-drag on a chip moves the bar like a middle-drag anywhere else (the bar's own
 // preview handlers do it), and its right-click is the chip menu below. Failures go to Report, as every other
@@ -100,10 +109,14 @@ public partial class FloatingBar
     Func<Workspace, IReadOnlyList<Bookmark>> ShowingBookmarks() =>
         BookmarkOpener?.ShowingNow() ?? (workspace => workspace.Bookmarks);
 
-    // One chip. `divider`: this is the row's first chip and windows come before it in the lane.
-    Button ChipButton(Guid workspaceId, Bookmark bookmark, bool divider)
+    // The lane key that means "the first lane", whatever its rank (LineOf). For a titled row's chip lines.
+    const int FirstChipLane = int.MinValue;
+
+    // One chip. `divider`: this is the lane's first chip and windows come before it in the lane. `onStrip`: the chip
+    // is for a screen strip (FillStrips), where the strip's 24 DIP height caps the picture at 16 DIP.
+    Button ChipButton(Guid workspaceId, Bookmark bookmark, bool divider, bool onStrip = false)
     {
-        var size = 20 * IconScale;
+        var size = onStrip ? Math.Min(20 * IconScale, StripChipPicture) : 20 * IconScale;
         // An opened link's chip (see the header): full strength at rest too, and its outline solid. Asked once per chip
         // per rebuild; the question is two user32 calls (BookmarkOpener.IsLinkOpen, LinkWindowSource.Alive).
         var open = BookmarkOpener?.IsLinkOpen(bookmark) ?? false;
@@ -118,10 +131,24 @@ public partial class FloatingBar
         var image = new Image { Width = size, Height = size, Source = BookmarkIcons.For(bookmark, Rebuild) };
         RenderOptions.SetBitmapScalingMode(image, BitmapScalingMode.HighQuality);
         face.Children.Add(image);
-        var outline = new Rectangle { Stroke = ChipOutline, StrokeThickness = 1, RadiusX = 3, RadiusY = 3 };
+        // THE BOOKMARK'S OWN COLOUR (Bookmark.Color; Petre: "i want to be able to change color of the bookmark", then
+        // "not change the icon"): it never touches the picture, letter tile included. It shows only AROUND it, as the
+        // outline's colour and a band under the icon, the same rimmed band an ordinal family wears (ColourBand), so a
+        // chip reads as "this one is blue" without its artwork changing. An unreadable colour (only a hand edit could
+        // store one, and Check refuses that) is no colour.
+        var colour = bookmark.Color is { } hex ? Tint(hex, 0xFF) : null;
+        var outline = new Rectangle { Stroke = colour ?? ChipOutline, StrokeThickness = 1, RadiusX = 3, RadiusY = 3 };
         // Dashed at rest; an open chip keeps WPF's default, an empty dash array, which is a solid line.
         if (!open) outline.StrokeDashArray = [2, 2];
         face.Children.Add(outline);
+        if (colour is not null)
+        {
+            // Hung 3 DIP below the picture, into the cell's spare height, so it sits UNDER the icon rather than on it.
+            var band = ColourBand(colour);
+            band.Tag = ChipBandTag;
+            band.Margin = new Thickness(0, 0, 0, -3);
+            face.Children.Add(band);
+        }
         if (bookmark.Kind == BookmarkKind.Link)
             face.Children.Add(new Border
             {
@@ -153,7 +180,8 @@ public partial class FloatingBar
         // whole pixels, so it lands as one full-strength column (0xCD measured) with a dark column either side, and
         // the 2 DIP keep it at least a pixel wide at any scale the bar allows, where a snapped 1 DIP line at 0.9 can
         // round to nothing.
-        var cell = new Grid { Width = IconCellWidth, Height = size + 4 };
+        var cellWidth = onStrip ? size + 4 : IconCellWidth;
+        var cell = new Grid { Width = cellWidth, Height = size + 4 };
         cell.Children.Add(face);
         if (divider)
             cell.Children.Add(new Border
@@ -170,9 +198,11 @@ public partial class FloatingBar
         var button = new Button
         {
             Content = cell,
-            Width = IconCellWidth,
-            // The window icon's vertical margin, so a line of chips is as tall as a line of icons.
-            Margin = new Thickness(0, 1, 0, 1),
+            Width = cellWidth,
+            // The window icon's vertical margin, so a line of chips is as tall as a line of icons. On a strip, a little
+            // air either side instead, and centred in the strip's height.
+            Margin = onStrip ? new Thickness(2, 0, 2, 0) : new Thickness(0, 1, 0, 1),
+            VerticalAlignment = onStrip ? VerticalAlignment.Center : VerticalAlignment.Stretch,
             Padding = new Thickness(0),
             // Transparent, not null: a null background takes no part in hit testing, so the gaps in the chip would
             // fall through to the row and switch workspace instead.
@@ -199,7 +229,69 @@ public partial class FloatingBar
         };
         // Built on the first right-click, not now (FloatingBar.LazyMenus.cs).
         LazyMenu(button, menu => BookmarkMenu(workspaceId, bookmark, menu));
+
+        // DRAGGED LIKE A WINDOW ICON (the second bookmarks PR, Petre's option 2): the same hardened press-drag
+        // (WindowDragSource), with a payload of its own (DraggedBookmark), from a row or from a strip. The row's drop
+        // handler decides what it means (BookmarkDrag.Plan). The bookkeeping around it is the window icon's, for the
+        // same reasons (IconButton): the info line is cleared, the bar holds full strength, rebuilds wait for the drag
+        // to end (#147, which also keeps this chip alive for the slipped-click test at the drop), the stray release
+        // after it is refused, and the held rows are let go. Not while arranging, as a window drag is not.
+        WindowDragSource.Attach(button,
+            () => new DataObject(DraggedBookmark.DragFormat, new DraggedBookmark(workspaceId, bookmark.Id, button)),
+            canStart: () => WindowDragAllowed(onStrip),
+            onDragStarting: () =>
+            {
+                ClearInfo();
+                draggingWindow = true;
+                UpdateFade();
+                if (ClickTrace.On) ClickTrace.Write($"drag-start bookmark {bookmark.Kind}");
+            },
+            onDragFinished: () =>
+            {
+                draggingWindow = false;
+                UpdateFade();
+                ReleaseHeldRows();
+                dragJustFinished = true;
+                if (ClickTrace.On) ClickTrace.Write("drag-end bookmark");
+                FlushDeferredRebuild();
+            });
         return button;
+    }
+
+    // Tag on a coloured chip's band, for the tests.
+    internal const string ChipBandTag = "bookmark-band";
+
+    // The largest picture a chip on a strip draws: the strip is 24 DIP high (ScreenStrip.HeightDip), and the chip's cell
+    // adds 4 DIP and the band hangs 3 below.
+    const double StripChipPicture = 16;
+
+    // WHAT A CHIP DROPPED ON A ROW DOES (the row's DragOver and Drop call this with the same input, so the readout and the
+    // drop agree). `aimed` is the screen half under the pointer (AimedMonitor). A drop that lands back on the chip itself
+    // is the CLICK it started as (#48: a quick click easily passes the system's drag distance, and the press then became
+    // a drag that ended where it began), so it opens the bookmark, and says so.
+    (ChipDrop Plan, bool IsClick) ChipDropAt(DraggedBookmark dragged, Guid rowWorkspace, string rowLabel, UIElement container, Point at, int? aimed)
+    {
+        if (dragged.WorkspaceId == rowWorkspace && BoundsIn(dragged.Chip, container) is { } own && own.Contains(at))
+            return (new ChipDrop(null, ScreenChange.Keep, "→ open it", true), true);
+        var chip = manager.BookmarkOf(dragged.WorkspaceId, dragged.BookmarkId);
+        if (chip.HasNoValue) return (new ChipDrop(null, ScreenChange.Keep, "that bookmark is gone", false), false);
+        var targetHasSame = dragged.WorkspaceId != rowWorkspace
+                            && manager.State.Workspaces.TryFirst(w => w.Id == rowWorkspace)
+                                .Map(w => w.Bookmarks.Any(b => BookmarkRules.SameTarget(b, chip.Value))).GetValueOrDefault(false);
+        return (BookmarkDrag.Plan(chip.Value, dragged.WorkspaceId, rowWorkspace, rowLabel, aimed, targetHasSame), false);
+    }
+
+    // The drop itself: the click, or the move through the manager (the call `bookmark move` makes). A refusal is said
+    // after Drop returns, as the external bookmark drop says its own: a modal box inside OLE's Drop would hold the drag.
+    void DropChip(DraggedBookmark dragged, (ChipDrop Plan, bool IsClick) drop)
+    {
+        if (ClickTrace.On) ClickTrace.Write($"drop bookmark click={drop.IsClick} allowed={drop.Plan.Allowed} readout={drop.Plan.Readout}");
+        var outcome = drop.IsClick
+            ? BookmarkOpener?.Open(dragged.WorkspaceId, dragged.BookmarkId) ?? Result.Failure(NoBookmarkOpener)
+            : drop.Plan.Allowed
+                ? manager.MoveBookmark(dragged.WorkspaceId, dragged.BookmarkId, drop.Plan.To, drop.Plan.Screen).Bind(_ => Result.Success())
+                : Result.Success();
+        Dispatcher.BeginInvoke(() => Report(outcome));
     }
 
     // The name, then what it opens: a program with its arguments, so two chips on one exe can be told apart.
@@ -228,6 +320,16 @@ public partial class FloatingBar
         Add("✏", "Rename…", () =>
             PromptDialog.Ask("Rename bookmark", "Name:", bookmark.Name, owner: this)
                 .Tap(name => Report(manager.RenameBookmark(workspaceId, bookmark.Id, name))));
+        // The bookmark's colour (Petre: "i want to be able to change color of the bookmark"): the workspace picker (#97),
+        // the palette strip and Custom…, as a submenu here, ending with Default instead of the workspace's Transparent
+        // and By position. The colour shown as chosen is read now, from the state, not from the chip the menu was made
+        // for, which a lazy menu can outlive.
+        var colourMenu = new MenuItem { Header = "Colour", Icon = MenuGlyph("🎨") };
+        AddColourPicker(colourMenu,
+            manager.BookmarkOf(workspaceId, bookmark.Id).Match(b => b.Color, () => bookmark.Color),
+            colour => manager.SetBookmarkColor(workspaceId, bookmark.Id, colour).Bind(_ => Result.Success()),
+            close: () => menu.IsOpen = false, forWorkspace: false);
+        menu.Items.Add(colourMenu);
         // No confirmation, as "Unpin from taskbar" has none: a bookmark is put back by a drop or the clipboard item.
         Add("✕", "Remove", () => Report(manager.RemoveBookmark(workspaceId, bookmark.Id)));
         return menu;

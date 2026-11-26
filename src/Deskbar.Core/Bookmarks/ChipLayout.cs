@@ -33,4 +33,20 @@ public static class ChipLayout
             lines.Select(line => (IReadOnlyList<T>)line.Where(c => c.Window.HasValue).Select(c => c.Window.Value).ToList()).ToList(),
             lines.Select(line => (IReadOnlyList<Bookmark>)line.Select(c => c.Chip).OfType<Bookmark>().ToList()).ToList());
     }
+
+    // WHICH LANE a chip sits in (the second bookmarks PR): the lane of the screen it remembers (Bookmark.Screen), when
+    // the row draws a lane for that screen, else the first lane, as before. `screenByRank` is the bar's own rank to
+    // display number map (the lanes it lays every row out over); `firstRank` the lane chips without a screen go to. A
+    // screen that is no longer connected, or one the bar has no lane for, falls back to the first lane, so a chip is
+    // never drawn nowhere.
+    public static int LaneOf(Bookmark chip, IReadOnlyDictionary<int, int> screenByRank, int firstRank) =>
+        chip.Screen is { } screen && screenByRank.Where(lane => lane.Value == screen).Select(lane => (int?)lane.Key).FirstOrDefault() is { } rank
+            ? rank
+            : firstRank;
+
+    // Whether the strip of screen `stripScreen` shows a chip (part A of the second PR, Petre's call in the brief): a chip
+    // that remembers a screen shows only on that screen's strip; one without, or whose screen has no strip now, shows
+    // on every strip. `stripScreens` is every strip's screen number, so the second case can be told from the first.
+    public static bool OnStrip(Bookmark chip, int? stripScreen, IReadOnlySet<int> stripScreens) =>
+        chip.Screen is not { } screen || !stripScreens.Contains(screen) || stripScreen == screen;
 }

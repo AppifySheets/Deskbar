@@ -3165,10 +3165,11 @@ public partial class FloatingBar : Window
     // it landed between (see InsertionAt).
     // `isCurrent`: the line belongs to the workspace you are in, so a titled line keeps no workspace third (see
     // the split below).
-    // `chips`: the bookmark chips this line ends its FIRST lane with (GroupRow worked out which, see ChipLayout), and
-    // `dividedChip` the one that carries the divider. Drawn after the lane's windows, in the same stack, so they sit
-    // where the wrap counted them.
-    UIElement LineOf(IReadOnlyList<WindowRow> line, ISet<WindowHandle> opensGroup, string groupLabel, string groupKey, Guid? rowKey, List<UIElement> iconButtons, List<Border> washes, List<IconSlot> slots, bool isLastLine, double scale = 1.0, double indent = 0, bool titled = false, bool wholeRow = false, bool isCurrent = false, IReadOnlyList<Bookmark>? chips = null, Guid? dividedChip = null)
+    // `chips`: the bookmark chips this line ends its lanes with, keyed by the lane's RANK (GroupRow worked out which,
+    // see ChipLayout; a chip that remembers a screen sits in that screen's lane), and `dividedChips` the ones that carry
+    // the divider. A key with no lane of that rank on this line (FirstChipLane, or any line not laid out per screen)
+    // means the first lane. Drawn after the lane's windows, in the same stack, so they sit where the wrap counted them.
+    UIElement LineOf(IReadOnlyList<WindowRow> line, ISet<WindowHandle> opensGroup, string groupLabel, string groupKey, Guid? rowKey, List<UIElement> iconButtons, List<Border> washes, List<IconSlot> slots, bool isLastLine, double scale = 1.0, double indent = 0, bool titled = false, bool wholeRow = false, bool isCurrent = false, IReadOnlyDictionary<int, IReadOnlyList<Bookmark>>? chips = null, IReadOnlySet<Guid>? dividedChips = null)
     {
         // Runs of consecutive icons that share a monitor. `opensGroup` already knows where each
         // one starts -- it is the same set the wrap arithmetic budgets a marker for -- so this
@@ -3310,10 +3311,17 @@ public partial class FloatingBar : Window
         // line makes it free space like every empty half: a wash, lit on hover, and the switch.
         if (lanes.Count == 0) lanes.Add((0, Maybe<int>.None, null));
 
-        // A line with bookmark chips and no window on the first screen still needs that lane's stack to hold them, so
-        // the lane gets an empty run instead of being drawn as an empty half. A new tuple, as for the orphans above.
-        IReadOnlyList<Bookmark> lineChips = rowKey is not null && chips is { Count: > 0 } ? chips : [];
-        if (lineChips.Count > 0 && lanes[0].Run is null) lanes[0] = lanes[0] with { Run = [] };
+        // Which lane (by its index on this line) each chip goes to: the lane of its rank when the line is laid out per
+        // screen, else the first. A lane with bookmark chips and no window still needs its stack to hold them, so it gets
+        // an empty run instead of being drawn as an empty half. A new tuple, as for the orphans above.
+        var perScreen = showMonitorMarkers && monitorByRank.Count > 0;
+        var chipsAt = (rowKey is not null && chips is not null ? chips : new Dictionary<int, IReadOnlyList<Bookmark>>())
+            .Where(entry => entry.Value.Count > 0)
+            .GroupBy(entry => perScreen ? Math.Max(0, lanes.FindIndex(lane => lane.Rank == entry.Key)) : 0)
+            .ToDictionary(g => g.Key, g => (IReadOnlyList<Bookmark>)g.SelectMany(entry => entry.Value).ToList());
+        chipsAt.Keys.Where(at => lanes[at].Run is null).ToList()
+            .ForEach(at => lanes[at] = lanes[at] with { Run = [] });
+        var laneIndex = 0;
 
         // SHADED LANES instead of a hairline between them. Petre: "let's also separate the two halves not
         // by hairline but make them ringed", then, seeing the rings, "no, rings are too much", "softer
@@ -3399,10 +3407,10 @@ public partial class FloatingBar : Window
                 // the row's hover (iconButtons), so the free-space wash goes dark over a chip as over an icon: a click
                 // there opens the bookmark, it does not switch. Never in `slots`, which places a dropped WINDOW
                 // between two windows, nor in iconRings, which rings windows.
-                if (firstLane && rowKey is { } workspaceId)
-                    lineChips.ToList().ForEach(chip =>
+                if (rowKey is { } workspaceId && chipsAt.TryGetValue(laneIndex, out var laneChips))
+                    laneChips.ToList().ForEach(chip =>
                     {
-                        var button = ChipButton(workspaceId, chip, chip.Id == dividedChip);
+                        var button = ChipButton(workspaceId, chip, dividedChips?.Contains(chip.Id) == true);
                         if (scale is not 1.0) button.LayoutTransform = new ScaleTransform(scale, scale);
                         iconButtons.Add(button);
                         stack.Children.Add(button);
@@ -3544,6 +3552,7 @@ public partial class FloatingBar : Window
             }
 
             firstLane = false;
+            laneIndex++;
             previousShaded = shaded;
         });
 
@@ -4561,21 +4570,51 @@ public partial class FloatingBar : Window
         //
         // A titled row is a list, one window per line, so its chips do not join its lines: they get icon lines of their
         // own under the list (below, ruling P12), wrapped the same way.
-        IReadOnlyList<IReadOnlyList<Bookmark>> chipLines = [];
-        Guid? dividedChip = null;
+        //
+        // A CHIP THAT REMEMBERS A SCREEN (Bookmark.Screen, the second bookmarks PR) goes in THAT screen's lane instead,
+        // after that lane's windows, wrapped with them the same way (ChipLayout.LaneOf; a screen with no lane falls back
+        // to the first). So the split above runs once per lane that has chips, and chipLines holds, per row line, the
+        // chips each lane adds on it, keyed by the lane's rank: LineOf draws them at the end of that lane. A lane
+        // with no windows yet is added as a group of its own, in rank order, so LineOf finds a lane for it.
+        IReadOnlyList<IReadOnlyDictionary<int, IReadOnlyList<Bookmark>>> chipLines = [];
+        var dividedChips = new HashSet<Guid>();
         if (chips.Count > 0 && !titled)
         {
-            var firstKey = showMonitorMarkers && monitorByRank.Count > 0
+            var screenLanes = showMonitorMarkers && monitorByRank.Count > 0;
+            var firstKey = screenLanes
                 ? monitorByRank.Keys.Min()
                 : groups.Select(g => g.Key).DefaultIfEmpty(0).Min();
-            var at = groups.FindIndex(g => g.Key == firstKey);
-            var split = ChipLayout.Split<WindowRow>(at >= 0 ? groups[at].ToList() : new List<WindowRow>(), chips, Wrap);
-            var laneLines = split.Windows.Select(line => line.ToList()).ToList();
-            if (at >= 0) perGroup[at] = laneLines;
-            else perGroup.Insert(0, laneLines);
-            chipLines = split.Chips;
-            // The divider sets the chips apart from windows, so only when there are windows in the lane before them.
-            if (at >= 0) dividedChip = chips[0].Id;
+            var byLane = chips
+                .GroupBy(chip => screenLanes ? ChipLayout.LaneOf(chip, monitorByRank, firstKey) : firstKey)
+                .OrderBy(lane => lane.Key)
+                .ToList();
+            // `keys` is perGroup's key per index, kept in step as lanes without windows are inserted; the windows of a
+            // lane are found in `groups` by KEY, since its indexes stop matching perGroup's after an insert.
+            var keys = groups.Select(g => g.Key).ToList();
+            var perLane = byLane.Select(lane =>
+            {
+                var at = keys.IndexOf(lane.Key);
+                var windows = groups.FirstOrDefault(g => g.Key == lane.Key)?.ToList() ?? new List<WindowRow>();
+                var split = ChipLayout.Split<WindowRow>(windows, lane.ToList(), Wrap);
+                var laneLines = split.Windows.Select(line => line.ToList()).ToList();
+                if (at >= 0) perGroup[at] = laneLines;
+                else
+                {
+                    // Kept in rank order with the groups, so the row's lines still read lane by lane.
+                    var insertAt = keys.Count(k => k < lane.Key);
+                    keys.Insert(insertAt, lane.Key);
+                    perGroup.Insert(insertAt, laneLines);
+                }
+                // The divider sets the chips apart from windows, so only when there are windows in the lane before them.
+                if (at >= 0) dividedChips.Add(lane.First().Id);
+                return (Rank: lane.Key, Lines: split.Chips);
+            }).ToList();
+            var deepest = perLane.Max(lane => lane.Lines.Count);
+            chipLines = Enumerable.Range(0, deepest)
+                .Select(i => (IReadOnlyDictionary<int, IReadOnlyList<Bookmark>>)perLane
+                    .Where(lane => i < lane.Lines.Count && lane.Lines[i].Count > 0)
+                    .ToDictionary(lane => lane.Rank, lane => lane.Lines[i]))
+                .ToList();
         }
 
         // One row line per deepest group, with each group contributing its own line at that depth. A group
@@ -4611,14 +4650,15 @@ public partial class FloatingBar : Window
         drawnLines.Select((line, at) => (line, at, last: at == drawnLines.Count - 1)).ToList()
             .ForEach(x => icons.Children.Add(LineOf(x.line, showMonitorMarkers ? opensLine : [], groupLabel, groupKey, rowKey, iconButtons, washes, slots, x.last,
                 scale, spine is not null ? NestedIndent : 0, titled, wholeRow, isCurrent,
-                chips: x.at < chipLines.Count ? chipLines[x.at] : null, dividedChip: dividedChip)));
+                chips: x.at < chipLines.Count ? chipLines[x.at] : null, dividedChips: dividedChips)));
 
         // A TITLED row's chips: icon lines of their own under the window list (ruling P12), rather than squeezed into
         // lines that each hold one window and its title. Wrapped by the same Wrap, so they break where a row's would.
         if (titled && chips.Count > 0)
             ChipLayout.Split<WindowRow>([], chips, Wrap).Chips.ToList()
                 .ForEach(line => icons.Children.Add(LineOf([], new HashSet<WindowHandle>(), groupLabel, groupKey, rowKey, iconButtons, washes, slots,
-                    isLastLine: false, scale, spine is not null ? NestedIndent : 0, titled: false, wholeRow: false, isCurrent, chips: line)));
+                    isLastLine: false, scale, spine is not null ? NestedIndent : 0, titled: false, wholeRow: false, isCurrent,
+                    chips: new Dictionary<int, IReadOnlyList<Bookmark>> { [FirstChipLane] = line })));
 
         // The titled list ends with the items the strips end with: the pinned workspaces' and the previous
         // workspace's (FloatingBar.WorkspaceJumps.cs). Petre: "i want to have pinned workspaces in the workspace, in
@@ -5064,6 +5104,32 @@ public partial class FloatingBar : Window
             container.AllowDrop = true;
             container.DragOver += (_, e) =>
             {
+                // A BOOKMARK CHIP dragged from a row or a strip (the second bookmarks PR): to a screen half of its own
+                // row it remembers that screen, onto another workspace's row it moves there. What it would do, and the
+                // readout, come from ChipDropAt (BookmarkDrag.Plan), which the Drop below asks again with the same
+                // input. The aimed half is lit as for a window; a whole-row move lights the row. A row with no workspace
+                // (pinned, an unnamed desktop) takes no chip.
+                if (e.Data.GetData(DraggedBookmark.DragFormat) is DraggedBookmark chipDrag)
+                {
+                    e.Handled = true;
+                    if (rowKey is not { } chipRow)
+                    {
+                        e.Effects = DragDropEffects.None;
+                        ShowReadout("a bookmark goes on a workspace's bar");
+                        return;
+                    }
+                    var chipAt = e.GetPosition(container);
+                    var chipScreen = AimedMonitor(groupKey, container, chipAt);
+                    var chipDrop = ChipDropAt(chipDrag, chipRow, groupLabel, container, chipAt, chipScreen);
+                    var moves = chipDrop.Plan.Allowed && !chipDrop.IsClick;
+                    e.Effects = chipDrop.Plan.Allowed ? DragDropEffects.Move : DragDropEffects.None;
+                    if (moves && chipScreen is not null) ArmAim(groupKey, container, chipAt);
+                    else ClearAim(groupKey);
+                    container.Background = moves && chipScreen is null ? DropHighlight : idle;
+                    ShowReadout(chipDrop.Plan.Readout);
+                    return;
+                }
+
                 // A link, program or shortcut dragged in from outside (Task 9 of the bookmarks plan). Keyed on the
                 // WORKSPACE ID, not on whether the row shows chips: a workspace with no bookmarks yet must accept
                 // its first. Rows without an id (pinned, unnamed desktops) fall through to the window-only path.
@@ -5127,6 +5193,18 @@ public partial class FloatingBar : Window
                 ClearAim(groupKey);
                 ShowMarker(null);
                 ClearInfo();
+
+                // A bookmark chip (see DragOver): the same plan, carried out (FloatingBar.Bookmarks.cs, DropChip).
+                if (e.Data.GetData(DraggedBookmark.DragFormat) is DraggedBookmark droppedChip)
+                {
+                    e.Handled = true;
+                    if (rowKey is { } chipRow)
+                    {
+                        var chipAt = e.GetPosition(container);
+                        DropChip(droppedChip, ChipDropAt(droppedChip, chipRow, groupLabel, container, chipAt, AimedMonitor(groupKey, container, chipAt)));
+                    }
+                    return;
+                }
 
                 // The bookmark drop: parse what was dropped (reading a .lnk or .url from disk happens here, not in
                 // DragOver), add it through the manager (which runs BookmarkRules.Check) and say any refusal.
@@ -7291,17 +7369,7 @@ public partial class FloatingBar : Window
         // disappears on Chrome, green on GitExtensions. A band needs to be legible against artwork nobody
         // chose, which is exactly the problem the attention dot solved with a dark rim -- so it gets the
         // same treatment rather than a cleverer colour.
-        var band = new Border
-        {
-            Width = 16,
-            Height = 4,
-            CornerRadius = new CornerRadius(2),
-            Background = OrdinalBands[(ordinal.Value - 1) % OrdinalBands.Count],
-            BorderBrush = AttentionDotRim,
-            BorderThickness = new Thickness(1),
-            HorizontalAlignment = HorizontalAlignment.Center,
-            VerticalAlignment = VerticalAlignment.Bottom,
-        };
+        var band = ColourBand(OrdinalBands[(ordinal.Value - 1) % OrdinalBands.Count]);
 
         // Fixed size in a Grid cell shared with the artwork, so it overlays rather than occupies
         // -- a row of icons measures exactly as it did before, which on a SizeToContent bar is
@@ -7367,6 +7435,21 @@ public partial class FloatingBar : Window
     // TOP of arbitrary artwork and have to survive it, so they keep all of their alpha. Ordered so
     // the first two -- by far the commonest case, two windows of one app -- are as far apart in hue
     // as the list allows.
+    // The band itself, shared by the ordinal family (above) and a coloured bookmark chip (FloatingBar.Bookmarks.cs), so
+    // the two read as the same mark: a 16 x 4 bar on the icon's bottom edge, centred, with the attention dot's dark rim
+    // that keeps any colour legible on artwork nobody chose. A new element per call; an element has one parent.
+    internal static Border ColourBand(Brush fill) => new()
+    {
+        Width = 16,
+        Height = 4,
+        CornerRadius = new CornerRadius(2),
+        Background = fill,
+        BorderBrush = AttentionDotRim,
+        BorderThickness = new Thickness(1),
+        HorizontalAlignment = HorizontalAlignment.Center,
+        VerticalAlignment = VerticalAlignment.Bottom,
+    };
+
     static readonly IReadOnlyList<Brush> OrdinalBands =
     [
         Frozen(0xFF, 0x4F, 0xC3, 0xF7), // sky
@@ -7972,8 +8055,16 @@ public partial class FloatingBar : Window
         && !WorkspacePalette.IsNone(colour)
         && !WorkspacePalette.Swatches.Any(s => string.Equals(s.Hex, WorkspacePalette.Current(colour), StringComparison.OrdinalIgnoreCase));
 
-    void AddColourPicker(ContextMenu menu, string? stored, Func<string?, Result> choose)
+    void AddColourPicker(ContextMenu menu, string? stored, Func<string?, Result> choose) =>
+        AddColourPicker(menu, stored, choose, close: () => menu.IsOpen = false, forWorkspace: true);
+
+    // The picker into any menu or submenu (`into`), closing through `close` (the root menu: a swatch's click keeps the
+    // menu open, see StaysOpenOnClick below). `forWorkspace` ends it with the workspace's own two entries, Transparent
+    // and By position; without it (a bookmark chip's Colour submenu, FloatingBar.Bookmarks.cs) it ends with Default,
+    // which clears the colour, since a chip has no lane to be transparent over and no position colour to fall back to.
+    void AddColourPicker(ItemsControl into, string? stored, Func<string?, Result> choose, Action close, bool forWorkspace)
     {
+        var menu = into;
         var chosen = WorkspacePalette.Current(stored);
         var strip = new StackPanel
         {
@@ -8000,7 +8091,7 @@ public partial class FloatingBar : Window
                 Report(choose(swatch.Hex));
                 // Closed by hand. The wrapper below stays open on click so this handler runs at
                 // all, which means nothing else is going to close it.
-                menu.IsOpen = false;
+                close();
             };
             strip.Children.Add(button);
         });
@@ -8040,6 +8131,18 @@ public partial class FloatingBar : Window
                 Report(choose(picked));
         };
         menu.Items.Add(custom);
+
+        if (!forWorkspace)
+        {
+            var byDefault = new MenuItem
+            {
+                Header = "Default",
+                Icon = MenuGlyph(string.IsNullOrWhiteSpace(chosen) ? "●" : "○"),
+            };
+            byDefault.Click += (_, _) => Report(choose(null));
+            menu.Items.Add(byDefault);
+            return;
+        }
 
         // Petre: "add transparent as an option for color". A row that opts out keeps its icons and
         // its label and simply has no lane behind them -- worth having on a bar where the tint's
