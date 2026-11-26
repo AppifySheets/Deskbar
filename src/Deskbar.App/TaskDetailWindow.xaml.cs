@@ -514,7 +514,7 @@ public partial class TaskDetailWindow : Window
     // One comment: a bubble (Petre's on the right, a session's or the manager's on the left) or, for Deskbar's own lines,
     // a centred event, with Edit and Settle by its time on hover (ChatThread). Being edited, it is the editor at the
     // thread's full width under its author and time, as before.
-    UIElement CommentOf(TaskCommentView comment, bool named)
+    UIElement CommentOf(TaskCommentView comment)
     {
         var split = TaskImages.Split(comment.Markdown);
         if (editingComment == comment.Id)
@@ -550,7 +550,7 @@ public partial class TaskDetailWindow : Window
             parts.Children.Add(body);
         }
         if (TaskImageRow.Of(StateDir, split.Images, OpenImage) is { } pictures) parts.Children.Add(pictures);
-        var placed = isEvent ? ChatThread.Event(comment, parts, timeInBody, actions) : ChatThread.Message(comment, named, parts, actions);
+        var placed = isEvent ? ChatThread.Event(comment, parts, timeInBody, actions) : ChatThread.Message(comment, parts, actions);
         placed.Tag = CommentTag;
         // A settled comment, when unfolded, is dim: it is history.
         placed.Opacity = comment.Settled ? 0.55 : 1;

@@ -18,7 +18,7 @@ public class ChatThreadTests
         };
 
     [Fact]
-    public void A_day_line_heads_each_day_and_a_run_by_one_author_is_named_once() => StaThread.Run(() =>
+    public void A_day_line_heads_each_day() => StaThread.Run(() =>
     {
         var comments = new[]
         {
@@ -27,21 +27,30 @@ public class ChatThreadTests
             Comment(CommentAuthor.You, "25 Nov"),
             Comment(CommentAuthor.Claude, "Today"),
         };
-        var named = new List<bool>();
-        var drawn = ChatThread.WithDays(comments, (_, isNamed) =>
-        {
-            named.Add(isNamed);
-            return new Border();
-        });
+        var drawn = ChatThread.WithDays(comments, _ => new Border());
 
         // Two day lines (25 Nov, Today) around the four comments.
         var days = drawn.OfType<TextBlock>().Where(t => Equals(t.Tag, ChatThread.DayTag)).Select(t => t.Text).ToArray();
         Assert.Equal(["25 Nov", "Today"], days);
         Assert.Equal(6, drawn.Count);
         Assert.Same(drawn[0], drawn.OfType<TextBlock>().First());
-        // The second of Claude's two comments carries no name; a new author, or a new day, names it again.
-        Assert.Equal([true, false, true, true], named);
     });
+
+    // Petre, on the first build: "doesn't say it's me". Every bubble, his included, names its author beside its time.
+    // The author goes in as its name: CommentAuthor is internal to the app, and a public test method cannot take it.
+    [Theory]
+    [InlineData("you")]
+    [InlineData("Claude")]
+    public void Every_bubble_names_its_author_under_it(string name) => StaThread.Run(() =>
+    {
+        var comment = Comment(name == "you" ? CommentAuthor.You : CommentAuthor.Claude, "Today") with { Author = name };
+        var message = ChatThread.Message(comment, new Border(), []);
+        var author = Inside(message).OfType<TextBlock>().Single(t => Equals(t.Tag, ChatThread.AuthorTag));
+        Assert.Equal(name, author.Text);
+    });
+
+    static IEnumerable<object> Inside(object node) =>
+        new[] { node }.Concat(node is DependencyObject d ? LogicalTreeHelper.GetChildren(d).Cast<object>().SelectMany(Inside) : []);
 
     [Fact]
     public void A_short_paragraph_measures_snug_and_a_list_keeps_the_full_width() => StaThread.Run(() =>

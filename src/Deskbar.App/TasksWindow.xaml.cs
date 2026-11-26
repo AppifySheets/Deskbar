@@ -2086,7 +2086,7 @@ public partial class TasksWindow : Window
         if (folds.Children.Count > 0) panel.Children.Add(folds);
         // The comments as a chat (task 39bc9c4d, ChatThread): bubbles on two sides, Deskbar's lines as events, a day line
         // above each day's first comment. It replaced the hairline between comments (task aa42794f).
-        ChatThread.WithDays(shown, (comment, named) => CommentOf(comment, row.Id, named)).ToList().ForEach(comment => panel.Children.Add(comment));
+        ChatThread.WithDays(shown, comment => CommentOf(comment, row.Id)).ToList().ForEach(comment => panel.Children.Add(comment));
         panel.Children.Add(CommentBox(row.Id));
         authors[row.Id] = shown.Select(c => c.Author).ToArray();
         shownComments[row.Id] = shown.Select(c => c.Id).ToArray();
@@ -2343,10 +2343,10 @@ public partial class TasksWindow : Window
     // `taskId` is the task the comment is on, the one whose workspace a link in it opens in (LinkOpener): the subtask's
     // own for a subtask's thread drawn inside its parent's.
     // One comment of a thread, drawn as a chat (task 39bc9c4d, ChatThread): Petre's a bubble on the right, a session's or
-    // the manager's a bubble on the left (named when `named`, see ChatThread.WithDays), Deskbar's own lines a small
-    // centred event. Edit and Settle sit by the time under it and show on hover. While one of his comments is being edited
-    // it is the editor box at the thread's full width instead, under its author and time, as before.
-    UIElement CommentOf(TaskCommentView comment, Guid taskId, bool named = true)
+    // the manager's a bubble on the left, each with its author and time under it, Deskbar's own lines a small centred
+    // event. Edit and Settle sit by the time and show on hover. While one of his comments is being edited it is the
+    // editor box at the thread's full width instead, under its author and time, as before.
+    UIElement CommentOf(TaskCommentView comment, Guid taskId)
     {
         // RULING 58 ("i should only be able to edit my own comments, not claude's"): his own comments, and only those, have
         // an Edit button beside the time; the board refuses a session's comment too (TaskBoard.EditComment).
@@ -2427,7 +2427,7 @@ public partial class TasksWindow : Window
                 if (more.Visibility != wanted) more.Visibility = wanted;
             };
         if (isEvent) more.HorizontalAlignment = HorizontalAlignment.Center;
-        var placed = isEvent ? ChatThread.Event(comment, parts, timeInBody, actions) : ChatThread.Message(comment, named, parts, actions);
+        var placed = isEvent ? ChatThread.Event(comment, parts, timeInBody, actions) : ChatThread.Message(comment, parts, actions);
         // A settled comment, when unfolded, is dim: it is history.
         placed.Opacity = comment.Settled ? 0.55 : 1;
         return placed;
