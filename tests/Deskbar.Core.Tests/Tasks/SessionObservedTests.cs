@@ -73,4 +73,24 @@ public class SessionObservedTests
         Assert.Equal("claude-sonnet-5-5", ClaudeTranscript.LastModel(lines).Value);
         Assert.True(ClaudeTranscript.LastModel(["""{"type":"user","message":{"content":"hi"}}"""]).HasNoValue);
     }
+
+    // A switch's copy starts with the old conversation; only a real reply written after it joined counts.
+    [Fact]
+    public void A_copy_has_replied_only_with_a_real_reply_after_it_joined()
+    {
+        var joined = new DateTimeOffset(2026, 11, 26, 19, 0, 0, TimeSpan.Zero);
+        string[] copied =
+        [
+            """{"type":"assistant","timestamp":"2026-11-26T18:50:00.000Z","message":{"model":"claude-haiku-5-5","stop_reason":"end_turn"}}""",
+            """{"type":"user","timestamp":"2026-11-26T19:01:00.000Z","message":{"content":"go on"}}""",
+            """{"type":"assistant","isApiErrorMessage":true,"timestamp":"2026-11-26T19:01:05.000Z","message":{"model":"<synthetic>"}}""",
+            """{"type":"assistant","isSidechain":true,"timestamp":"2026-11-26T19:01:06.000Z","message":{"model":"claude-haiku-5-5"}}""",
+            """{"type":"assistant","message":{"model":"claude-sonnet-5-5"}}""",
+        ];
+
+        Assert.False(ClaudeTranscript.RepliedSince(copied, joined));
+        Assert.True(ClaudeTranscript.RepliedSince(
+            [.. copied, """{"type":"assistant","timestamp":"2026-11-26T19:01:10.000Z","message":{"model":"claude-sonnet-5-5","stop_reason":"end_turn"}}"""],
+            joined));
+    }
 }

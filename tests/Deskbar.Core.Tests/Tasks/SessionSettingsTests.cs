@@ -130,4 +130,12 @@ public class SessionSettingsTests
                 "--settings", ClaudeStart.RemoteControlOff, "Please look again"],
             ClaudeStart.SwitchArguments(id, Settings(mode: "plan"), "Please look again"));
     }
+
+    [Fact]
+    public void Settings_are_described_in_the_menus_words()
+    {
+        Assert.Equal("Sonnet · Extra high · Edit by itself", SessionChoices.Describe(Settings("sonnet", "xhigh", "acceptEdits")));
+        Assert.Equal("claude-opus-5-5 · Plan first", SessionChoices.Describe(Settings("claude-opus-5-5", mode: "plan")));
+        Assert.Equal("Claude Code's own settings", SessionChoices.Describe(SessionSettings.None));
+    }
 }

@@ -106,26 +106,51 @@ public static class ClaudeTranscript
     public static Maybe<string> LastModel(IEnumerable<string> jsonLines) =>
         jsonLines.Select(ModelOf).LastOrDefault(model => model is not null) is { } found ? found : Maybe<string>.None;
 
-    static string? ModelOf(string line)
+    // WHETHER A SWITCH'S COPY HAS ANSWERED (SettingsSwitch.Next, the JOINED phase): an assistant entry from a real reply
+    // (as LastModel counts one) written after the copy joined its task. A copy's transcript starts with the whole old
+    // conversation, written before the copy was listed and so before it joined; only its own turns come after. An API
+    // error's entry (a model the account cannot use, a usage limit) and a subagent's are not a reply, and an entry with no
+    // timestamp says nothing.
+    public static bool RepliedSince(IEnumerable<string> jsonLines, DateTimeOffset since) =>
+        jsonLines.Any(line => ReplyAt(line) is { } at && at > since);
+
+    static DateTimeOffset? ReplyAt(string line)
     {
         if (string.IsNullOrWhiteSpace(line)) return null;
         try
         {
             using var document = JsonDocument.Parse(line);
             var root = document.RootElement;
-            return root.ValueKind == JsonValueKind.Object
-                && root.TryGetProperty("type", out var type) && type.ValueKind == JsonValueKind.String && type.GetString() == "assistant"
-                && !IsTrue(root, "isSidechain") && !IsTrue(root, "isApiErrorMessage")
-                && At(root, "message", "model") is { ValueKind: JsonValueKind.String } model
-                && model.GetString() is { Length: > 0 } name && name != "<synthetic>"
-                    ? name
-                    : null;
+            return ModelIn(root) is not null && TimestampOf(root) is { HasValue: true } at ? at.Value : null;
         }
         catch (JsonException)
         {
             return null;
         }
     }
+
+    static string? ModelOf(string line)
+    {
+        if (string.IsNullOrWhiteSpace(line)) return null;
+        try
+        {
+            using var document = JsonDocument.Parse(line);
+            return ModelIn(document.RootElement);
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    static string? ModelIn(JsonElement root) =>
+        root.ValueKind == JsonValueKind.Object
+        && root.TryGetProperty("type", out var type) && type.ValueKind == JsonValueKind.String && type.GetString() == "assistant"
+        && !IsTrue(root, "isSidechain") && !IsTrue(root, "isApiErrorMessage")
+        && At(root, "message", "model") is { ValueKind: JsonValueKind.String } model
+        && model.GetString() is { Length: > 0 } name && name != "<synthetic>"
+            ? name
+            : null;
 
     static Turn? LastEntry(IEnumerable<string> jsonLines) =>
         jsonLines
