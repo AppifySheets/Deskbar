@@ -52,12 +52,14 @@ public static class SessionBriefing
     /// What the Stop hook tells a session whose question Deskbar set aside while it worked after the user's reply
     /// (task 8bd18246, RepliedTasks; RemoteControl.ClaudeHook). Once per turn. It leaves no "say nothing" way out, unlike
     /// <see cref="ParkedNudge"/>: the question is open until the session settles it or asks again, and a session that
-    /// does neither gets it back on the user's board as it stood, as soon as no session of the task is busy
-    /// (RepliedTasks.Restore).
+    /// does neither is asked once more, by Deskbar, to write it afresh (<see cref="Regenerate"/>, task 0cac3082), and
+    /// only then gets the old text back on the user's board (RepliedTasks.Restore, TaskService.RegenerateGrace).
     /// </summary>
     public static string SetAsideNudge(string question) =>
         $"While you worked after the user's reply, Deskbar took your task out of Waiting on you and set your question aside: \"{Cut(question)}\". " +
-        $"If it still holds, or the next move is the user's in another way, run {Shim} task ask with what they must do, the text on stdin, and the pull request or page as a markdown link to click. " +
+        // Task 0cac3082: "previous messages are not good enough". The session is told to write the question afresh from
+        // the facts, not to repeat it, since repeating it word for word is what put a merged pull request back on the bar.
+        $"If the user still has to act, write the question afresh rather than repeating it: check each pull request it names with gh pr view, leave out what is already done, and run {Shim} task ask with what they must do now, the text on stdin, and the pull request or page as a markdown link to click. " +
         $"If the reply settled it, run {Shim} task answered (and {Shim} task done if the work is finished). Then stop.";
 
     // The first words of a comment delivered to a session (Commented), named so the prompt hook can tell Deskbar's own
@@ -82,6 +84,9 @@ public static class SessionBriefing
             || text.StartsWith(ReevaluateOpening, StringComparison.Ordinal)
             // The stalled task's ask (task 8710ac09) is Deskbar's, not the user replying.
             || text.StartsWith(StalledOpening, StringComparison.Ordinal)
+            // So is the request to write a set-aside question afresh (task 0cac3082). Counted as a reply, it would only
+            // matter to a task waiting on the user, which a set-aside task is not, but it is not the user either way.
+            || (text.StartsWith(RegenerateOpening, StringComparison.Ordinal) && text.Contains("Deskbar will not put your old question back", StringComparison.Ordinal))
             || text.TrimEnd() == SessionKeeper.ContinueMessage);
 
     // How Claude Code opens the prompts it delivers itself (task b846f5ad). Each one fires UserPromptSubmit like a message
@@ -191,6 +196,30 @@ public static class SessionBriefing
         + $"- you are waiting on something else (a CI run, a background job, another session, a time): run {Shim} task status-line - --session <your session id> with what and until when, even if the line already says it\n"
         + $"- your pull request is merged or the work is finished: run {Shim} task done --session <your session id>, with what to try in the status line\n"
         + "Then stop without saying anything more.\n";
+
+    const string RegenerateOpening = "Deskbar: your task ";
+
+    /// <summary>
+    /// What a session reads when its turn ended with its question still set aside (task 0cac3082, TaskService's
+    /// `regenerating`): neither asked again nor settled, so the task is about to wait on the user again. Rather than put
+    /// the old text back, Deskbar asks the session to write it afresh from the facts as they are now. Delivered on a
+    /// comment's roads (the app's CommentWaker). A session that does nothing within TaskService.RegenerateGrace gets the
+    /// old text back on the user's board.
+    /// </summary>
+    // WHY IT INSISTS ON gh: the old question is what the session remembers, and the case that started this (task f7ac687c)
+    // was a session asking for the merge of a pull request that had merged twenty minutes earlier. Only a fresh look at
+    // each pull request it names keeps a merged one out of the new text.
+    public static string Regenerate(TaskItem task) =>
+        $"{RegenerateOpening}{task.Id.ToString()[..8]} \"{Cut(task.Title)}\" is about to wait on the user again, and Deskbar will not put your old question back as it was. "
+        + "Write it afresh from where things stand now.\n"
+        + (task.QuestionSetAside.HasValue ? $"Your old question: \"{Cut(task.QuestionSetAside.Value, QuestionLength)}\"\n" : "")
+        + "Check every pull request, run and decision it names against the facts (gh pr view, gh run list), not from memory, and leave out whatever is already done.\n"
+        + $"- the user still has to act: run {Shim} task ask - --session <your session id>, on stdin what they must do now in the first words, with the pull request or page as a markdown link to click\n"
+        + $"- nothing waits on the user any more: run {Shim} task answered --session <your session id> (and {Shim} task done --session <your session id> if the work is finished, with what to try in the status line)\n"
+        + $"If you do neither within {RegenerateGrace} minutes, the old question goes back to the user as it was. Then stop without saying anything more.\n";
+
+    // TaskService.RegenerateGrace in whole minutes, for the message above.
+    static string RegenerateGrace => TaskService.RegenerateGrace.TotalMinutes.ToString("0", System.Globalization.CultureInfo.InvariantCulture);
 
     /// <summary>
     /// What a session reads when it starts, resumes, clears or compacts: its own task when it has one, otherwise the

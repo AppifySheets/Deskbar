@@ -415,6 +415,8 @@ public sealed class QuestionSetAsideTests : IDisposable
     public void Stalled_restores_a_set_aside_question_when_its_session_is_not_busy_and_leaves_it_while_busy()
     {
         var (service, store, move, id, trace) = Asked();
+        var regenerations = new List<Guid>();
+        using var watch = service.Regenerations.Subscribe(regenerations.Add);
         move(12);
         service.Prompted("s1");
         move(13);
@@ -425,7 +427,21 @@ public sealed class QuestionSetAsideTests : IDisposable
         service.Stalled(S1Works, S1Works);
         Assert.Equal(TaskStatus.InProgress, Get(service.Board, id).Status);
 
+        // Task 0cac3082: the first quiet poll asks the session to write the question afresh and leaves it set aside.
         move(15);
+        service.Stalled(NobodyWorks, NobodyWorks);
+        Assert.Equal([id], regenerations);
+        Assert.Equal(TaskStatus.InProgress, Get(service.Board, id).Status);
+        Assert.Contains(trace, line => line.Contains("afresh"));
+
+        // Within the grace, quiet or busy, nothing more happens: no second ask, no restore.
+        move(16);
+        service.Stalled(NobodyWorks, NobodyWorks);
+        Assert.Equal(TaskStatus.InProgress, Get(service.Board, id).Status);
+        Assert.Single(regenerations);
+
+        // The grace is over and the session is quiet again without having asked or answered: the old text comes back.
+        move(15 + (int)TaskService.RegenerateGrace.TotalMinutes);
         var saves = store.Saves;
         service.Stalled(NobodyWorks, NobodyWorks);
 
@@ -437,9 +453,78 @@ public sealed class QuestionSetAsideTests : IDisposable
         Assert.Contains(trace, line => line.Contains("restored"));
 
         // The reply that set it aside does not set it aside a second time.
-        move(16);
+        move(30);
         service.Stalled(S1Works, S1Works);
         Assert.Equal(TaskStatus.WaitingOnYou, Get(service.Board, id).Status);
+        Assert.Single(regenerations);
+    }
+
+    // Task 0cac3082: the session asked to write the question afresh does so, and the new text is what waits on Petre.
+    [Fact]
+    public void A_session_asked_to_write_the_question_afresh_asks_the_new_text_and_nothing_is_restored()
+    {
+        var (service, _, move, id, _) = Asked();
+        var regenerations = new List<Guid>();
+        using var watch = service.Regenerations.Subscribe(regenerations.Add);
+        move(12);
+        service.Prompted("s1");
+        move(13);
+        service.Stalled(S1Works, S1Works);
+        move(15);
+        service.Stalled(NobodyWorks, NobodyWorks);
+        Assert.Single(regenerations);
+        Assert.True(service.IsRegenerating(id));
+
+        move(16);
+        Assert.True(service.Ask(id, "Merge PR 629 once CI is green").IsSuccess);
+        // A request still queued in the waker is no longer due once the session asked.
+        Assert.False(service.IsRegenerating(id));
+        move(30);
+        service.Stalled(NobodyWorks, NobodyWorks);
+
+        var task = Get(service.Board, id);
+        Assert.Equal(TaskStatus.WaitingOnYou, task.Status);
+        Assert.Equal("Merge PR 629 once CI is green", task.Question.Value);
+        Assert.Single(regenerations);
+    }
+
+    // Task 0cac3082: when no session can be reached, the old question comes back at once rather than after the grace.
+    [Fact]
+    public void A_request_to_write_afresh_that_reaches_no_session_restores_the_question_at_once()
+    {
+        var (service, _, move, id, trace) = Asked();
+        move(12);
+        service.Prompted("s1");
+        move(13);
+        service.Stalled(S1Works, S1Works);
+        move(15);
+        service.Stalled(NobodyWorks, NobodyWorks);
+        Assert.Equal(TaskStatus.InProgress, Get(service.Board, id).Status);
+
+        service.RegenerateUndelivered(id);
+
+        var task = Get(service.Board, id);
+        Assert.Equal(TaskStatus.WaitingOnYou, task.Status);
+        Assert.Equal(Question, task.Question.Value);
+        Assert.Contains(trace, line => line.Contains("no session could be asked"));
+        // A second call, or one for a task never asked, changes nothing.
+        var board = service.Board;
+        service.RegenerateUndelivered(id);
+        Assert.Same(board, service.Board);
+    }
+
+    // Task 0cac3082: the message quotes the old question and sends the session to gh, not to its memory.
+    [Fact]
+    public void The_regenerate_message_quotes_the_old_question_and_names_both_ways_out()
+    {
+        var (board, id) = Aside();
+
+        var message = SessionBriefing.Regenerate(Get(board, id));
+
+        Assert.Contains(Question, message);
+        Assert.Contains("gh pr view", message);
+        Assert.Contains("task ask", message);
+        Assert.Contains("task answered", message);
     }
 
     [Fact]
