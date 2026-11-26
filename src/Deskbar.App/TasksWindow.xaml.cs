@@ -536,6 +536,8 @@ public partial class TasksWindow : Window
         StatsScroller.Visibility = statsShown ? Visibility.Visible : Visibility.Collapsed;
         SearchRow.Visibility = statsShown ? Visibility.Collapsed : Visibility.Visible;
         Filters.Visibility = statsShown ? Visibility.Collapsed : Visibility.Visible;
+        // The Inbox's header and footer in the toolbar's place, or the toolbar back (TasksWindow.Inbox.cs, task 740a2231).
+        PaintInboxChrome(view);
         if (view.Stats is { } stats)
         {
             LeaveList();
@@ -572,6 +574,14 @@ public partial class TasksWindow : Window
         SizeColumns(view, linedRows);
         fullGrids.Clear();
         fullGrids.Add(ColumnHeader);
+        // The Inbox draws the same rows its own way (TasksWindow.Inbox.cs, task 740a2231). LeaveList first: it empties Rows
+        // and lets go of the List's kept blocks, which the Inbox does not use.
+        if (view.Inbox is not null)
+        {
+            LeaveList();
+            DrawInbox(view, shownRows);
+            return;
+        }
         if (view.Matrix)
         {
             LeaveList();
@@ -632,7 +642,9 @@ public partial class TasksWindow : Window
                 $"{r.Delivery.Stage}|{r.Delivery.Note}|{r.Problem}|" +
                 SubtasksSignature(r) + "|" +
                 string.Join('\u0004', r.Comments.Select(c => $"{c.Id}{c.Author}{c.When}{c.Markdown}{c.Settled}")))))),
-            string.Join('\u0002', view.Groups.Select(g => $"{g.Header}:" + string.Join('\u0003', g.Rows.Select(ListRowSignature)))));
+            string.Join('\u0002', view.Groups.Select(g => $"{g.Header}:" + string.Join('\u0003', g.Rows.Select(ListRowSignature)))),
+            // The Inbox's tabs, its page and its own state (TasksWindow.Inbox.cs, task 740a2231); "" in every other view.
+            InboxSignature(view));
 
     // One List row as the signature reads it. A subtask open in place in its parent's thread (task 0eb943d8) carries its
     // own row, read the same way inside braces, so a comment or a session on it redraws the parent's thread.
@@ -793,6 +805,7 @@ public partial class TasksWindow : Window
         statsSwitch = Flat(new TextBlock { Text = "Stats", Foreground = Ink, FontSize = 11 }, "Stats", () => Actions?.ShowStats?.Invoke(), new Thickness(8, 2, 8, 2));
         statsSwitch.ToolTip = "Added, finished and open tasks per day, each task a link";
         statsSwitch.Margin = new Thickness(4, 0, 10, 0);
+        ToolbarEnd.Children.Add(InboxSwitch()); // task 740a2231, TasksWindow.Inbox.cs
         ToolbarEnd.Children.Add(listSwitch);
         ToolbarEnd.Children.Add(matrixSwitch);
         ToolbarEnd.Children.Add(statsSwitch);
@@ -1451,6 +1464,7 @@ public partial class TasksWindow : Window
         });
         // A slim line's age is in its tooltip (Task 8).
         slimTips.Values.ToList().ForEach(tip => WriteSlimTip(tip, now));
+        RefreshInboxTimes(now);
     }
 
     internal string AgeText(Guid id) => ages.TryGetValue(id, out var age) ? age.Text.Text : "";
@@ -1497,6 +1511,7 @@ public partial class TasksWindow : Window
     {
         selectedId = selected;
         selectionFrames.Keys.ToList().ForEach(PaintFrame);
+        PaintInboxSelection();
         // In the Matrix the selected task's cell becomes the active one (TasksWindow.AddFlags.cs).
         if (selected.HasValue) FollowSelectionToCell(selected.Value);
     }
@@ -3562,6 +3577,7 @@ public partial class TasksWindow : Window
     bool FocusSearch()
     {
         if (renaming is not null || editingComment is not null) return false;
+        ShowInboxSearch();
         SearchBox.Focus();
         SearchBox.SelectAll();
         return true;
