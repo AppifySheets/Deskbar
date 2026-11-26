@@ -52,9 +52,6 @@ internal sealed class ChatStreamPanel : StackPanel
     /// <summary>The Tag of the line at the top that counts what is not drawn, for the tests.</summary>
     internal const string EarlierTag = "chat-earlier";
 
-    // About three lines of 11.5-point text, as the thread's comments (TasksWindow.ThreeLines).
-    const double ThreeLines = 54;
-
     readonly ChatStreamDeps deps;
     IReadOnlyList<(string Key, DateTimeOffset At, UIElement Element)> comments;
     bool earlierFolded;
@@ -313,7 +310,7 @@ internal sealed class ChatStreamPanel : StackPanel
     // ---- a message ---------------------------------------------------------------------------------------------------
 
     // The owner's message on the right, Claude's on the left, as the comments are (ChatThread.Message), with the same
-    // markdown, the same snug width and the same three-line clip with "Show more". "Show more" opens in place, by this
+    // markdown and the same snug width, and every message in full: only one past about forty lines is cut, with "Show all"\n    // (FullBubble). "Show all" opens in place, by this
     // stream's own state, and does not redraw the page the way a comment's does.
     UIElement MessageOf(ChatMessage message)
     {
@@ -348,31 +345,11 @@ internal sealed class ChatStreamPanel : StackPanel
                 HorizontalAlignment = HorizontalAlignment.Left,
             };
             ChatThread.FitWidth(body);
-            var open = deps.State.OpenMessages.Contains(message.Id);
-            if (!open)
-            {
-                body.MaxHeight = ThreeLines;
-                body.ClipToBounds = true;
-            }
-            var more = new TextBlock { FontSize = 10.5, Foreground = InboxLook.Ink3, Text = open ? "Show less" : "Show more" };
-            var toggle = deps.Button(more, "Show more", () =>
-            {
-                var nowOpen = !deps.State.OpenMessages.Remove(message.Id);
-                if (nowOpen) deps.State.OpenMessages.Add(message.Id);
-                body.MaxHeight = nowOpen ? double.PositiveInfinity : ThreeLines;
-                body.ClipToBounds = !nowOpen;
-                more.Text = nowOpen ? "Show less" : "Show more";
-            });
-            toggle.HorizontalAlignment = HorizontalAlignment.Left;
-            toggle.Visibility = open || TasksWindow.IsLong(message.Text) ? Visibility.Visible : Visibility.Collapsed;            if (!open)
-                body.LayoutUpdated += (_, _) =>
-                {
-                    if (body.ActualWidth <= 0 || deps.State.OpenMessages.Contains(message.Id)) return;
-                    var wanted = body.ExtentHeight > ThreeLines + 0.5 ? Visibility.Visible : Visibility.Collapsed;
-                    if (toggle.Visibility != wanted) toggle.Visibility = wanted;
-                };
+            // IN FULL (the owner, 2026-11-27): no clip to three lines, no inner scroll; only a message taller than about
+            // forty lines is cut, with "Show all" under it (FullBubble.Guard), opened for good by the stream's state.
+            var showAll = FullBubble.Guard(body, 11.5, deps.State.OpenMessages, message.Id, deps.Button);
             parts.Children.Add(body);
-            parts.Children.Add(toggle);
+            parts.Children.Add(showAll);
         }
         if (message.Images > 0)
         {
