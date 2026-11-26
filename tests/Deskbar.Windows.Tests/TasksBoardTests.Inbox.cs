@@ -851,4 +851,44 @@ public partial class TasksBoardTests
         Assert.Equal(InboxTab.NeedsYou, t.Window.InboxTabShown);
         Assert.Contains(Inside(t.Window.InboxPageContent!).OfType<Button>(), b => AutomationProperties.GetName(b) == "Subtask A step of it");
     });
+
+    // The tester's L2: a task shown from outside replaces the open page, so back goes to the list.
+    [Fact]
+    public void A_task_shown_from_outside_replaces_the_page_and_back_goes_to_the_list() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var k = InboxTasks(t);
+        t.Controller.Show();
+        ChooseInbox(t);
+        Click(LineOf(t.Window, k.Asking));
+
+        t.Controller.ShowTask(k.Note);
+        Assert.Equal(k.Note, t.Window.InboxPageShown);
+
+        Click(ButtonNamed(t.Window.InboxPageContent!, TasksWindow.InboxPageBackText));
+        Assert.Null(t.Window.InboxPageShown);
+        Assert.Null(t.Window.InboxPageContent);
+    });
+
+    // L2: parent page, its subtask's page, Open parent (back to the page under it on the stack), then back: the list.
+    [Fact]
+    public void Open_parent_from_a_subtasks_page_goes_back_to_the_parent_and_then_the_list() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var parent = t.Tasks.AddNote("Parent errand", t.Gepha).Value.Id;
+        var sub = t.Tasks.AddNote("Child errand", t.Gepha).Value.Id;
+        t.Tasks.SetParent(sub, parent);
+        t.Controller.Show();
+        ChooseInbox(t);
+        t.Window.ChooseInboxTab(InboxTab.Notes);
+        Click(LineOf(t.Window, parent));
+        Click(Inside(t.Window.InboxPageContent!).OfType<Button>().Single(b => AutomationProperties.GetName(b) == "Subtask Child errand"));
+        Assert.Equal(sub, t.Window.InboxPageShown);
+
+        t.Controller.OpenParent(parent);
+        Assert.Equal(parent, t.Window.InboxPageShown);
+
+        Click(ButtonNamed(t.Window.InboxPageContent!, TasksWindow.InboxPageBackText));
+        Assert.Null(t.Window.InboxPageShown);
+    });
 }
