@@ -1040,6 +1040,30 @@ public class ClaudeSessionsTests
         Assert.Equal(TaskStatus.Done, rig.Task(taskId).Status);
     }
 
+    // A recurring task between runs (task 0b78269e, spec docs/superpowers/specs/2026-11-26-recurring-tasks-design.md, "A run
+    // ends"): its finished run's session is stopped like a Done task's, but the thread gets no line for it, since an
+    // hourly job would add one an hour. The stop is traced. A plain Done task's stop still says so in its thread.
+    [Fact]
+    public void A_stop_between_runs_is_traced_but_not_said_in_the_thread()
+    {
+        using var rig = new Rig();
+        var (recurring, recurringSession) = rig.Running("Hourly check");
+        Assert.True(rig.Tasks.SetRepeat(recurring, new TaskRepeat(TaskRepeats.Parse("every 1h").Value, TaskRepeat.DefaultModel, @"E:\repos\Work")).IsSuccess);
+        Assert.True(rig.Tasks.SetStatus(recurring, TaskStatus.Backlog).IsSuccess);
+        Assert.True(rig.Task(recurring).IsBetweenRuns);
+        var (done, doneSession) = rig.Running("Finished work");
+        Assert.True(rig.Tasks.SetStatus(done, TaskStatus.Done).IsSuccess);
+        rig.Begin();
+
+        rig.RunTo(SessionKeeper.StopAfter);
+
+        Assert.Equal(new[] { $"stop {doneSession[..8]}", $"stop {recurringSession[..8]}" }.Order(),
+            rig.Cli.Stops.Select(stop => string.Join(" ", stop.Arguments)).Order());
+        Assert.Contains(rig.Traces, t => t.Contains(recurringSession) && t.Contains("between runs"));
+        Assert.DoesNotContain(rig.Task(recurring).Comments, c => c.ByDeskbar);
+        Assert.Contains(rig.Task(done).Comments, c => c.Markdown.StartsWith("Stopped, since the task is finished"));
+    }
+
     // "only those that have been finished": a session waiting on Petre, or working on any open task, is left running.
     [Theory]
     [InlineData(TaskStatus.Backlog)]

@@ -93,6 +93,10 @@ public partial class App : Application
     // The skills Claude Code lists for each folder (SkillCatalog, task 3a872301): the add box's "/" list, and where a task
     // titled with a project's skill starts. Kept for the app's life; nothing to dispose.
     readonly SkillCatalog skillCatalog = new();
+    // Recurring tasks' runs (RecurringRunner, task 0b78269e): the snooze sweep and a comment between runs start them.
+    // Built right after claudeActions, whose quiet start it uses; nothing in it to dispose. Null until then, and in the
+    // modes that build no Claude actions, where nothing runs.
+    RecurringRunner? recurringRunner;
     // The manager session's one click (ManagerActions): the bar's Manager button and the pipe's `task manager`. Built
     // right after claudeActions, whose window it shares; disposed with it.
     ManagerActions? managerActions;
@@ -1663,15 +1667,29 @@ public partial class App : Application
         // A failed load is traced and leaves the board empty, never fatal. The state folder is also where pasted images
         // live (task-images\<task id>\; docs/superpowers/specs/2026-11-24-task-images-design.md).
         tasks = new Core.Tasks.TaskService(new Core.Tasks.JsonTaskStore(stateDir, ClickTrace.On ? ClickTrace.Write : null, saves.Write),() => DateTimeOffset.UtcNow,
-            trace: ClickTrace.On ? ClickTrace.Write : null, filesRoot: stateDir);
+            trace: ClickTrace.On ? ClickTrace.Write : null, filesRoot: stateDir,
+            // A repeat's "daily 09:00" is 09:00 on this machine's clock (recurring tasks spec, task 0b78269e), named here
+            // rather than left to the default so the choice is visible where the board is made.
+            zone: TimeZoneInfo.Local);
         tasks.Load().TapError(err => ClickTrace.Write($"tasks.json not loaded: {err}"));
         // SNOOZED TASKS COME BACK BY THEMSELVES (task 6da8d7eb, TaskBoard.WakeDue): once now, for a snooze that ran out
         // while Deskbar was not running, then every SnoozeSweep on the UI thread, where every task change runs. A snooze
         // ends up to that much late, which nobody snoozing for an hour notices; a sweep that finds nothing due saves and
         // redraws nothing. Lives as long as the app, like the other sweeps here.
+        // RECURRING TASKS' RUNS START ON THE SAME SWEEP (task 0b78269e, RecurringRunner), and before WakeDue: a task whose
+        // run is due is started (which ends its snooze) rather than first woken onto the bar for a sweep, and a skipped
+        // occurrence puts it back to sleep before WakeDue could show it. The runner is built further down, with the Claude
+        // actions it starts through, so the call at start-up finds none and the first run waits for the first sweep. By
+        // then `claude agents` (read every 15 seconds) has normally answered, so a run still alive from before the restart
+        // counts as running; before any answer, ClaudeTaskActions.HasRunningSession goes by the hooks' word instead.
+        recurringRunner?.RunDue();
         tasks.WakeDue();
         Observable.Interval(SnoozeSweep).ObserveOn(new System.Windows.Threading.DispatcherSynchronizationContext(Dispatcher))
-            .Subscribe(_ => tasks?.WakeDue());
+            .Subscribe(_ =>
+            {
+                recurringRunner?.RunDue();
+                tasks?.WakeDue();
+            });
 
         // The goals (goals spec, "Calls made": a file of their own, goals.json, so an older build that drops what it
         // does not know never touches them). Two clocks: the UTC instant for UpdatedAt, and the LOCAL date, which alone
@@ -2033,7 +2051,10 @@ public partial class App : Application
             ClickTrace.Write($"running changes: no watch, the version {UpdateService.RunningVersion} names no commit");
 
         commentWaker = new CommentWaker(tasks!, () => manager.State.ClaudeTasksInEffect, claudeSessions.Live, claudeSessions.Resumable, claudeSessions.EndedOnApiError, commentInbox,
-            claudeSessions.ResumeWith, claudeSessions.StopNow, ClickTrace.On ? ClickTrace.Write : null);
+            claudeSessions.ResumeWith, claudeSessions.StopNow, ClickTrace.On ? ClickTrace.Write : null,
+            // A comment on a recurring task between runs starts a run (WakePlan.FreshRun, task 0b78269e). The runner is
+            // built just below, after the Claude actions; this is read when a comment arrives.
+            startRun: id => recurringRunner?.RunNow(id) ?? Result.Failure("Deskbar is still starting up"));
 
         // ...and what a click on a task does with those sessions (ClaudeTaskActions, Task 9): the double-click's session
         // window, "Start Claude on this", the thread's list and Open, the pipe's three verbs. Its answers land on this
@@ -2086,6 +2107,17 @@ public partial class App : Application
                         : new Dictionary<string, string>()),
             },
             new System.Reactive.Concurrency.SynchronizationContextScheduler(new System.Windows.Threading.DispatcherSynchronizationContext(Dispatcher)),
+            trace: ClickTrace.On ? ClickTrace.Write : null);
+
+        // ...and recurring tasks' runs (RecurringRunner; task 0b78269e, docs/superpowers/specs/2026-11-26-recurring-tasks-design.md),
+        // started by the snooze sweep above and by a comment between runs (CommentWaker's startRun). A run is the quiet
+        // start a session's `task subtask` uses (no window, no focus, no workspace switch) in the repeat's own folder and
+        // model, with its failure handed back so the runner can ask its own question. "Running" is the same judgement
+        // the menus use (a session of the task listed by `claude agents`), and nothing runs while Claude sessions do not
+        // keep their tasks.
+        var actions = claudeActions;
+        recurringRunner = new RecurringRunner(tasks!, () => manager.State.ClaudeTasksInEffect, actions.HasRunningSession, Directory.Exists,
+            (task, folder, model, failed) => actions.Start(task, folder, model, quiet: true, failed),
             trace: ClickTrace.On ? ClickTrace.Write : null);
 
         // ...and the manager session (ManagerActions; docs/superpowers/specs/2026-11-25-manager-session-design.md): the

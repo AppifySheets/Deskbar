@@ -19,6 +19,8 @@ namespace Deskbar.App;
 //      it running after all falls back to the inbox, so the comment is never dropped.
 //      StopThenResume: `claude stop`, which returns once the process is gone (measured 2026-11-23), then the same resume.
 //      Nothing: one line of Deskbar's in the thread saying why.
+//      FreshRun: a recurring task between runs with no session listed starts a run now (startRun, RecurringRunner.RunNow;
+//      task 0b78269e, spec docs/superpowers/specs/2026-11-26-recurring-tasks-design.md), even one that never had a session.
 //
 // A plain note (no session ever) is skipped without a word: Petre commenting on his own note is not asking Claude.
 // The message is SessionBriefing.Commented, with pasted pictures' paths made absolute (TaskService.ExpandImages).
@@ -32,11 +34,16 @@ sealed class CommentWaker : IDisposable
     readonly Func<Guid, TaskSession, string, Task<Result>> resumeWith;
     readonly Func<string, Task<Result>> stop;
     readonly Action<string>? trace;
+    readonly Func<Guid, Result>? startRun;
     readonly IDisposable subscription;
 
+    // startRun: a run of a recurring task between runs, started now (RecurringRunner.RunNow in the App; task 0b78269e,
+    // spec docs/superpowers/specs/2026-11-26-recurring-tasks-design.md, "A run ends"). CommentWake.Plan answers FreshRun
+    // for such a task when none of its sessions is listed, and the comment then starts a fresh run that reads the thread,
+    // as "Wake now" does. Without one (tests that do not need it), such a comment starts nothing and the thread says so.
     public CommentWaker(TaskService tasks, Func<bool> enabled, IObservable<IReadOnlyCollection<ClaudeAgent>> live, Func<TaskSession, bool> hasTranscript,
         Func<TaskSession, bool> endedOnApiError, CommentInbox inbox, Func<Guid, TaskSession, string, Task<Result>> resumeWith, Func<string, Task<Result>> stop,
-        Action<string>? trace = null)
+        Action<string>? trace = null, Func<Guid, Result>? startRun = null)
     {
         this.tasks = tasks;
         this.live = live;
@@ -46,6 +53,7 @@ sealed class CommentWaker : IDisposable
         this.resumeWith = resumeWith;
         this.stop = stop;
         this.trace = trace;
+        this.startRun = startRun;
         // One comment at a time, in order, each with the latest list (Take(1) of the replay).
         // Only while sessions keep their tasks (AppState.ClaudeTasksInEffect): otherwise there is no waiter and no list.
         // REEVALUATE (task 3dd07539) rides the same roads: a press of a task's Reevaluate button (TaskService.Reevaluations)
@@ -108,7 +116,11 @@ sealed class CommentWaker : IDisposable
     async Task<System.Reactive.Unit> Deliver(Delivery delivery, IReadOnlyCollection<ClaudeAgent> listed)
     {
         var taskId = delivery.TaskId;
-        if (tasks.Board.Tasks.FirstOrDefault(t => t.Id == taskId) is not { Sessions.Count: > 0 } task) return System.Reactive.Unit.Default;
+        // A recurring task between runs passes even with no session at all (task 0b78269e): one that has never run has
+        // none, and the comment still starts its first run (FreshRun below). Any other task without a session is a plain
+        // note, which has nothing to wake.
+        if (tasks.Board.Tasks.FirstOrDefault(t => t.Id == taskId) is not { } task || (task.Sessions.Count == 0 && !task.IsBetweenRuns))
+            return System.Reactive.Unit.Default;
         // A delivery that waited in the queue can be moot by now (StillDue, set by the regenerate request only).
         if (delivery.StillDue is { } due && !due())
         {
@@ -141,6 +153,13 @@ sealed class CommentWaker : IDisposable
             case WakePlan.Nothing(var why):
                 delivery.Undelivered?.Invoke();
                 tasks.Note(taskId, delivery.Unsent ?? why);
+                break;
+            // A recurring task between runs (see startRun at the constructor): the comment is already in the thread, which
+            // the new run reads, so nothing is carried. A run that cannot start says why in the thread, as Nothing does.
+            case WakePlan.FreshRun:
+                (startRun?.Invoke(taskId) ?? Result.Failure("Deskbar cannot start runs yet"))
+                    .Tap(() => trace?.Invoke($"comment waker: {delivery.What} on {taskId} starts a run of the recurring task"))
+                    .TapError(e => tasks.Note(taskId, $"No run was started for {delivery.What} between runs: {e}"));
                 break;
         }
         return System.Reactive.Unit.Default;

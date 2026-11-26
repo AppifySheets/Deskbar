@@ -570,6 +570,44 @@ public class ClaudeTaskActionsTests
         Assert.Single(rig.Told);
     }
 
+    // A recurring task's scheduled run (task 0b78269e, spec docs/superpowers/specs/2026-11-26-recurring-tasks-design.md,
+    // "A run starts"): nobody clicked, so a failure is the caller's (RecurringRunner notes it and asks its own question).
+    // Nothing is said in the thread from here, no message box, no install or trust offer, and no window.
+    [Fact]
+    public void A_quiet_start_hands_its_failure_to_the_caller_and_says_nothing_else()
+    {
+        using var rig = new Rig { TrustsTerminal = true, Installs = true };
+        var task = rig.ClaudeTask();
+        rig.Listed();
+        rig.StartAnswer = folder => Result.Failure<string>($"Workspace not trusted. Run `claude` in {folder} once and accept the trust prompt, then retry.");
+        var failed = new List<string>();
+
+        Assert.True(rig.Actions.Start(task, Folder, Maybe.From("sonnet"), quiet: true, failed: failed.Add).IsSuccess);
+        rig.Settle();
+
+        Assert.StartsWith("Workspace not trusted.", Assert.Single(failed), StringComparison.Ordinal);
+        Assert.Equal([Maybe.From("sonnet")], rig.Models);
+        Assert.Empty(rig.TaskOf(task.Id).Comments);
+        Assert.Empty(rig.Told);
+        Assert.Empty(rig.Asked);
+        Assert.Empty(rig.Launches);
+    }
+
+    // PickFolder is Offer's folder half, which a repeat set from the menu uses too (task 0b78269e): one folder is the
+    // answer at once, with no menu.
+    [Fact]
+    public void PickFolder_with_one_folder_answers_at_once()
+    {
+        using var rig = new Rig();
+        var task = rig.ClaudeTask();
+        var chosen = new List<string>();
+
+        Assert.Null(rig.Actions.PickFolder(task, chosen.Add));
+
+        Assert.Equal([Folder], chosen);
+        Assert.Empty(rig.Starts);
+    }
+
     // With the feature off, nothing starts and Petre is told why.
     [Fact]
     public void Nothing_starts_while_the_feature_is_off() => StaThread.Run(() =>

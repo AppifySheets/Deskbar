@@ -429,18 +429,31 @@ public sealed class ClaudeTaskActions : IDisposable
             return null;
         }
         if (HasRunningSession(task) && !seams.Confirm(AnotherSessionQuestion)) return null;
+        return PickFolder(task, folder => Told(Start(task, folder)));
+    }
 
+    /// <summary>
+    /// The folder half of <see cref="Offer"/>: the task's one folder goes to <paramref name="chosen"/> at once and no menu
+    /// opens (null); several, or none, open the pick list at the pointer, ending with <see cref="ChooseFolderItem"/>, and
+    /// <paramref name="chosen"/> gets the pick. A pick list closed without a pick calls nothing.
+    /// </summary>
+    // Split out of Offer for recurring tasks (task 0b78269e, spec docs/superpowers/specs/2026-11-26-recurring-tasks-design.md,
+    // "A run starts"): a repeat set from the menu records its folder with "the same folder pick Start Claude shows", so the
+    // two cannot drift apart. A task titled with a skill keeps only the folders that have it (SkillFolders, task 3a872301),
+    // for the repeat's pick as much as for Start Claude's.
+    public ContextMenu? PickFolder(TaskItem task, Action<string> chosen)
+    {
         var folders = SkillFolders(task, Folders(task));
         if (folders is [var only])
         {
-            Told(Start(task, only));
+            chosen(only);
             return null;
         }
         // At the pointer, on the screen of the window under it (OwnMenus.AtPointer says why a bare menu is not enough).
         var menu = OwnMenus.AtPointer();
-        folders.ToList().ForEach(folder => menu.Items.Add(Item(folder, () => Told(Start(task, folder)))));
+        folders.ToList().ForEach(folder => menu.Items.Add(Item(folder, () => chosen(folder))));
         if (folders.Count > 0) menu.Items.Add(new Separator());
-        menu.Items.Add(Item(ChooseFolderItem, () => seams.PickFolder().Tap(folder => Told(Start(task, folder)))));
+        menu.Items.Add(Item(ChooseFolderItem, () => seams.PickFolder().Tap(chosen)));
         menu.IsOpen = true;
         return menu;
     }
@@ -463,8 +476,13 @@ public sealed class ClaudeTaskActions : IDisposable
     /// subtask's own session at once, RemoteControl.SessionSubtask). Petre is busy with something else, so it opens no
     /// window on the session and shows no message: the session runs in the background, shows in the tasks panel's
     /// Claude block, and Open Claude on its line attaches to it. A failure goes to the task's thread only.
+    ///
+    /// <paramref name="failed"/>, on a quiet start, takes that failure instead of the thread: Claude's words, on the UI
+    /// thread, and nothing else is said. A recurring task's scheduled run (RecurringRunner; task 0b78269e, spec
+    /// docs/superpowers/specs/2026-11-26-recurring-tasks-design.md) gives one, because its failure is a note of its own
+    /// plus a question that holds the next runs back, and the line here would say the same thing twice.
     /// </summary>
-    public Result Start(TaskItem task, string folder, Maybe<string> model = default, bool quiet = false)
+    public Result Start(TaskItem task, string folder, Maybe<string> model = default, bool quiet = false, Action<string>? failed = null)
     {
         if (!manager.State.ClaudeTasksInEffect) return Result.Failure(FeatureOff);
         // A closed task takes no session (TaskBoard refuses the join), so `claude --bg` would run for nothing (final
@@ -472,7 +490,8 @@ public sealed class ClaudeTaskActions : IDisposable
         if (!Current(task.Id).GetValueOrDefault(task).IsOpen) return Result.Failure(RemoteControl.ClosedTaskRefusal);
         void Failed(string error)
         {
-            if (quiet) Say(task.Id, $"Could not start a Claude session in {folder}:\n\n{error}");
+            if (quiet && failed is not null) failed(error);
+            else if (quiet) Say(task.Id, $"Could not start a Claude session in {folder}:\n\n{error}");
             else StartFailed(task.Id, folder, error);
         }
         Observable.FromAsync(() => seams.Start(task, folder, model))

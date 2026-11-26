@@ -632,18 +632,25 @@ public sealed class ClaudeSessions : IDisposable
     // `claude stop <short id>` off the UI thread. The short id is what the stop takes (`claude --bg` prints it, and it is
     // the first eight characters of the session id, also after a resume: measured). Success is said in the task's
     // thread, so the session shown as ended there has its reason; a failure is traced only, and retried after StopRetry.
+    // A recurring task's run that is over (KeeperStep.Stop.BetweenRuns; task 0b78269e, spec
+    // docs/superpowers/specs/2026-11-26-recurring-tasks-design.md, "A run ends") is stopped the same way, but its stop is
+    // only traced: every run ends in one, so an hourly job would add a line to the thread every hour, and the task is not
+    // finished, so the line would also be wrong. The next run starts fresh; nothing needs resuming.
     void Stop(KeeperStep.Stop stop)
     {
         var sessionId = stop.Agent.SessionId;
         var shortId = stop.Agent.ShortId.GetValueOrDefault(sessionId[..Math.Min(8, sessionId.Length)]);
         var at = scheduler.Now;
         stopSent = stopSent.SetItem(sessionId, at);
-        trace?.Invoke($"claude sessions: stopping {sessionId}, its task {stop.TaskId} is finished");
+        trace?.Invoke($"claude sessions: stopping {sessionId}, its task {stop.TaskId} is {(stop.BetweenRuns ? "between runs" : "finished")}");
         OffThread(() => cli.Run(["stop", shortId], null, LaunchTimeout))
             .TakeUntil(stopping)
             .Subscribe(
                 result => result
-                    .Tap(() => Say(stop.TaskId, "Stopped, since the task is finished. Open the task to resume it."))
+                    .Tap(() =>
+                    {
+                        if (!stop.BetweenRuns) Say(stop.TaskId, "Stopped, since the task is finished. Open the task to resume it.");
+                    })
                     .TapError(e => trace?.Invoke($"claude sessions: stop of {sessionId} failed: {e}")),
                 error => trace?.Invoke($"claude sessions: stop of {sessionId} threw: {error.Message}"));
     }

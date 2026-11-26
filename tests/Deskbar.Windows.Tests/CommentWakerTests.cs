@@ -63,7 +63,15 @@ public sealed class CommentWakerTests : IDisposable
         {
             stopped.Add(shortId);
             return Task.FromResult(Result.Success());
+        },
+        startRun: id =>
+        {
+            runs.Add(id);
+            return Result.Success();
         });
+
+    // The recurring runs a comment asked for (CommentWaker's startRun, task 0b78269e), by task.
+    readonly List<Guid> runs = [];
 
     Guid ClaudeTask(string sessionId) => tasks.Create("paste images", Maybe<Guid>.None, tasks.NewSession(sessionId, @"E:\repos\Work")).Value.Id;
 
@@ -210,5 +218,45 @@ public sealed class CommentWakerTests : IDisposable
 
         Assert.Empty(resumed);
         Assert.DoesNotContain(tasks.Board.Tasks.Single(t => t.Id == note).Comments, c => c.ByDeskbar);
+    }
+
+    // --- recurring tasks between runs (task 0b78269e, spec docs/superpowers/specs/2026-11-26-recurring-tasks-design.md) ---
+
+    static TaskRepeat Hourly => new(TaskRepeats.Parse("every 1h").Value, TaskRepeat.DefaultModel, @"E:\repos\Work");
+
+    // "A run ends": a comment on a recurring task between runs starts a run (a fresh session that reads the thread, the
+    // comment included), as Wake now does. The last run's session, stopped and not listed, is not resumed with it.
+    [Fact]
+    public void A_comment_between_runs_starts_a_run_and_resumes_nothing()
+    {
+        var id = ClaudeTask("aaaaaaaa-1");
+        Assert.True(tasks.SetRepeat(id, Hourly).IsSuccess);
+        Assert.True(tasks.SetStatus(id, Deskbar.Core.Tasks.TaskStatus.Backlog).IsSuccess);
+        Assert.True(tasks.Board.Tasks.Single().IsBetweenRuns);
+        live.OnNext([]);
+        using var waker = Waker();
+
+        tasks.Comment(id, Maybe<string>.None, "check the staging one too");
+
+        Assert.Equal([id], runs);
+        Assert.Empty(resumed);
+        Assert.Empty(stopped);
+        Assert.DoesNotContain(tasks.Board.Tasks.Single().Comments, c => c.ByDeskbar);
+    }
+
+    // A recurring task that has never run has no session at all, and a comment on it still starts its first run: the
+    // "no session, nothing to wake" shortcut is for plain notes only.
+    [Fact]
+    public void A_comment_on_a_recurring_task_that_never_ran_starts_a_run()
+    {
+        var id = tasks.AddNote("check the deploy", Maybe<Guid>.None).Value.Id;
+        Assert.True(tasks.SetRepeat(id, Hourly).IsSuccess);
+        live.OnNext([]);
+        using var waker = Waker();
+
+        tasks.Comment(id, Maybe<string>.None, "start with the logs");
+
+        Assert.Equal([id], runs);
+        Assert.DoesNotContain(tasks.Board.Tasks.Single().Comments, c => c.ByDeskbar);
     }
 }
