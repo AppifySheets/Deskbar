@@ -32,7 +32,7 @@ public class SettingsSwitchTests
         new(id, shortId, Folder, true, false, "") { Status = "idle", State = "done" };
 
     static SwitchStep Plan(TaskItem task, params ClaudeAgent[] listed) =>
-        SettingsSwitch.Plan(task, listed, _ => true, _ => false);
+        SettingsSwitch.Plan(new TaskBoard([task]), task, listed, _ => true, _ => false);
 
     // --- Plan -------------------------------------------------------------------------------------------------------
 
@@ -91,7 +91,7 @@ public class SettingsSwitchTests
     [Fact]
     public void A_session_woken_a_moment_ago_waits()
     {
-        var step = SettingsSwitch.Plan(Task(wanted: SonnetLow), [Idle()], _ => true, id => id == Original);
+        var step = SettingsSwitch.Plan(Board(Task(wanted: SonnetLow)), Task(wanted: SonnetLow), [Idle()], _ => true, id => id == Original);
         Assert.Equal(SettingsSwitch.JustWoken, Assert.IsType<SwitchStep.Wait>(step).Why);
     }
 
@@ -120,15 +120,53 @@ public class SettingsSwitchTests
         Assert.Equal(SettingsSwitch.NotDeskbars, Assert.IsType<SwitchStep.ReadOnly>(Plan(Task(wanted: SonnetLow), interactive)).Why);
     }
 
+    // Review H2: an ended entry is not the task's session. The pick waits for the next start; nothing is resumed.
     [Fact]
-    public void A_session_that_does_not_run_takes_the_pick_at_its_next_wake_or_the_next_start_when_it_cannot_be_woken()
+    public void An_ended_session_is_not_switched_and_the_pick_waits_for_the_next_start()
     {
-        var task = Task(wanted: SonnetLow, sessions: Session(Original, 0, live: false));
+        var ended = Task(wanted: SonnetLow, sessions: Session(Original, 0, live: false));
 
-        var wake = Assert.IsType<SwitchStep.AtNextWake>(SettingsSwitch.Plan(task, [], _ => true, _ => false));
-        Assert.Equal(SonnetLow, wake.To);
-        Assert.Equal(SonnetLow, Assert.IsType<SwitchStep.NextStart>(SettingsSwitch.Plan(task, [], _ => false, _ => false)).To);
+        Assert.Equal(SonnetLow, Assert.IsType<SwitchStep.NextStart>(SettingsSwitch.Plan(Board(ended), ended, [], _ => true, _ => false)).To);
+        Assert.IsType<SwitchStep.NextStart>(Plan(ended, Idle()));
         Assert.Equal(SonnetLow, Assert.IsType<SwitchStep.NextStart>(Plan(Task(wanted: SonnetLow) with { Sessions = [] })).To);
+        // Live on the task but not listed yet (its process went a moment ago): resumed on the pick, nothing to stop.
+        Assert.IsType<SwitchStep.AtNextWake>(Plan(Task(wanted: SonnetLow)));
+        Assert.IsType<SwitchStep.NextStart>(SettingsSwitch.Plan(Board(Task(wanted: SonnetLow)), Task(wanted: SonnetLow), [], _ => false, _ => false));
+    }
+
+    // Review H2: session S moved from task A to task B. A pick on A touches nothing of S, now and at every later step.
+    [Fact]
+    public void A_session_that_moved_to_another_task_is_never_switched_for_the_old_one()
+    {
+        var b = new TaskItem(Guid.NewGuid(), "Task B", Maybe<Guid>.None, TaskStatus.InProgress, "", Maybe<string>.None, T0, T0, T0,
+            [Session(Original, 10)], []);
+        var a = Task(wanted: SonnetLow, sessions: Session(Original, 0, live: false));
+        var board = new TaskBoard([a, b]);
+
+        Assert.IsType<SwitchStep.NextStart>(SettingsSwitch.Plan(board, a, [Idle()], _ => true, _ => false));
+        Assert.True(SettingsSwitch.SessionOf(board, a).HasNoValue);
+        // Even an entry still marked live on A: the board says S works on B now.
+        var stale = a with { Sessions = [Session(Original, 0)] };
+        Assert.True(SettingsSwitch.SessionOf(new TaskBoard([stale, b]), stale).HasNoValue);
+        // A request A had before S moved is given up, nothing issued.
+        var requested = a with { Switching = Requested };
+        var moved = Assert.IsType<SwitchAction.Abandon>(SettingsSwitch.Next(new TaskBoard([requested, b]), requested, [Idle()], T0, _ => true, _ => false, _ => false));
+        Assert.Equal(SettingsSwitch.SessionMoved, moved.Why);
+        // A joined switch whose original then joined B: the original is B's, never stopped for A.
+        var joined = Switched();
+        var bWithOriginal = b with { Sessions = [Session(Original, 10)] };
+        var confirm = Assert.IsType<SwitchAction.Confirm>(SettingsSwitch.Next(new TaskBoard([joined, bWithOriginal]), joined,
+            [Idle(), Idle(CopyId, "8c42135c")], T0.AddMinutes(20), _ => true, _ => false, _ => true));
+        Assert.True(confirm.StopOriginal.HasNoValue);
+    }
+
+    // Review M3: only a background session Deskbar started is ever copied, so only Deskbar's own original is ever stopped.
+    [Fact]
+    public void A_background_session_Deskbar_did_not_start_is_read_only()
+    {
+        var notOurs = Task(wanted: SonnetLow, sessions: Session(Original, 0, launched: SessionSettings.None));
+
+        Assert.Equal(SettingsSwitch.NotStartedByDeskbar, Assert.IsType<SwitchStep.ReadOnly>(Plan(notOurs, Idle())).Why);
     }
 
     // The session a comment goes to: never a replaced one; live first, then the latest joined.
@@ -140,7 +178,7 @@ public class SettingsSwitchTests
         var replaced = Session("33333333-0000-0000-0000-000000000003", 9) with { ReplacedAt = T0, ReplacedBy = "x" };
         var task = Task(wanted: SonnetLow, sessions: [older, ended, replaced]);
 
-        Assert.Equal(older.Id, SettingsSwitch.Current(task).Value.Id);
+        Assert.Equal(older.Id, SettingsSwitch.SessionOf(new TaskBoard([task]), task).Value.Id);
         var step = Assert.IsType<SwitchStep.CopyNow>(Plan(task, Idle(older.Id, "11111111")));
         Assert.Equal(older.Id, step.Session.Id);
     }
@@ -150,7 +188,7 @@ public class SettingsSwitchTests
     static TaskBoard Board(TaskItem task) => new([task]);
 
     static PendingSwitch Requested => new(Original, SonnetLow, T0);
-    static PendingSwitch Issued => Requested with { Issued = T0.AddSeconds(1) };
+    static PendingSwitch Issued => Requested with { Issued = T0.AddSeconds(1), CopyShortId = "8c42135c" };
 
     static TaskSession CopySession(int minute = 5) =>
         new(CopyId, Folder, T0.AddMinutes(minute), Maybe<DateTimeOffset>.None) { LaunchedWith = SonnetLow };
@@ -221,7 +259,7 @@ public class SettingsSwitchTests
         Assert.Equal(now, original.ReplacedAt.Value);
         Assert.Equal(CopyId, original.ReplacedBy.Value);
         Assert.Equal(SonnetLow, task.Sessions.Single(s => s.Id == CopyId).LaunchedWith);
-        Assert.Equal(CopyId, SettingsSwitch.Current(task).Value.Id);
+        Assert.Equal(CopyId, SettingsSwitch.SessionOf(new TaskBoard([task]), task).Value.Id);
         // Joined twice (the app's look and the copy's own hook): the second changes nothing.
         Assert.Same(joined, joined.SessionSwitched(TaskId, Original, CopySession(), now).Value);
         Assert.True(board.SessionSwitched(TaskId, "not-on-it", CopySession(), now).IsFailure);
@@ -260,9 +298,9 @@ public class SettingsSwitchTests
         var copy = task.Sessions.Single(s => s.Id == CopyId);
         Assert.Equal(Original, copy.ReplacedBy.Value);
         Assert.Equal(now, copy.Ended.Value);
-        Assert.Equal(Original, SettingsSwitch.Current(task).Value.Id);
-        // The list makes the original live again, and comments reach it.
+        // The list makes the original live again, and comments reach it: it is the task's session once more.
         var listed = new TaskBoard([task]).Reconcile([Idle()], now);
+        Assert.Equal(Original, SettingsSwitch.SessionOf(listed, listed.Tasks.Single()).Value.Id);
         Assert.Equal(TaskId, listed.TaskOf(Original).Value.Id);
         Assert.True(Board(Task(wanted: SonnetLow) with { Switching = Issued }).SwitchReverted(TaskId, now).IsFailure);
     }
@@ -361,18 +399,18 @@ public class SettingsSwitchTests
         Idle(id, shortId) with { Folder = folder, StartedAt = T0.AddSeconds(startedSecond) };
 
     static SwitchAction Next(TaskItem task, IReadOnlyCollection<ClaudeAgent> listed, DateTimeOffset? now = null,
-        Func<TaskSession, bool>? resumable = null, Func<string, bool>? known = null, Func<TaskSession, bool>? replied = null) =>
-        SettingsSwitch.Next(task, listed, now ?? T0.AddSeconds(5), resumable ?? (_ => true), _ => false, known ?? (_ => false), replied ?? (_ => false));
+        Func<TaskSession, bool>? resumable = null, Func<TaskSession, bool>? replied = null, TaskBoard? board = null) =>
+        SettingsSwitch.Next(board ?? new TaskBoard([task]), task, listed, now ?? T0.AddSeconds(5), resumable ?? (_ => true), _ => false, replied ?? (_ => false));
 
     [Fact]
-    public void Next_does_nothing_without_a_switch_and_gives_one_up_on_a_closed_task_keeping_the_pick()
+    public void Next_does_nothing_without_a_switch_and_gives_a_request_up_on_a_closed_task_keeping_the_pick()
     {
         Assert.IsType<SwitchAction.Nothing>(Next(Task(wanted: SonnetLow), [Idle()]));
         var closed = Assert.IsType<SwitchAction.Abandon>(Next(Task(TaskStatus.Closed, SonnetLow) with { Switching = Requested }, [Idle()]));
         Assert.True(closed.KeepWanted);
     }
 
-    // REQUESTED: the pause is waited for, then the copy's resume is issued; a session not running is resumed at once.
+    // REQUESTED: the pause is waited for, then the copy's resume is issued; a live session not listed is resumed at once.
     [Fact]
     public void A_request_is_issued_at_the_first_pause()
     {
@@ -395,6 +433,9 @@ public class SettingsSwitchTests
         var moved = Assert.IsType<SwitchAction.Abandon>(Next(WithSwitch(Requested) with { Sessions = [Session(Original, 0), newer] }, [Idle()]));
         Assert.Equal(SettingsSwitch.SessionMoved, moved.Why);
         Assert.True(moved.KeepWanted);
+        // Ended meanwhile: not the task's session any more either.
+        Assert.Equal(SettingsSwitch.SessionMoved,
+            Assert.IsType<SwitchAction.Abandon>(Next(WithSwitch(Requested) with { Sessions = [Session(Original, 0, live: false)] }, [Idle()])).Why);
 
         var interactive = new ClaudeAgent(Original, Maybe<string>.None, Folder, false, false, "");
         var readOnly = Assert.IsType<SwitchAction.Abandon>(Next(WithSwitch(Requested), [interactive]));
@@ -406,23 +447,23 @@ public class SettingsSwitchTests
     [Fact]
     public void An_issued_switch_joins_the_copy_by_its_short_id()
     {
-        var join = Assert.IsType<SwitchAction.Join>(Next(WithSwitch(Issued with { CopyShortId = "8c42135c" }), [Idle(), Copy()]));
+        var join = Assert.IsType<SwitchAction.Join>(Next(WithSwitch(Issued), [Idle(), Copy()]));
         Assert.Equal(CopyId, join.Copy.SessionId);
+        // Another session in the same folder, started meanwhile (a VS Code panel), is never taken for it.
+        Assert.IsType<SwitchAction.Wait>(Next(WithSwitch(Issued), [Idle(), Copy("99999999-0000-0000-0000-000000000009", "99999999")]));
     }
 
-    // Deskbar closed before Claude named the copy: the one new unknown session in the original's folder is it.
+    // Review M3: no printed short id, no claim. The switch is given up at once, whatever runs in the folder; the original
+    // is untouched and nothing is stopped.
     [Fact]
-    public void Without_a_short_id_the_one_new_unknown_session_in_the_folder_is_the_copy()
+    public void Without_a_printed_short_id_nothing_is_claimed_and_the_switch_is_given_up_at_once()
     {
-        var task = WithSwitch(Issued);
+        var task = WithSwitch(Issued with { CopyShortId = Maybe<string>.None });
 
-        Assert.IsType<SwitchAction.Join>(Next(task, [Idle(), Copy(folder: @"c:/repos/PROJ/")]));
-        // Older than the resume, in another folder, or already a task's: not the copy.
-        Assert.IsType<SwitchAction.Wait>(Next(task, [Copy(startedSecond: -60)]));
-        Assert.IsType<SwitchAction.Wait>(Next(task, [Copy(folder: @"C:\repos\other")]));
-        Assert.IsType<SwitchAction.Wait>(Next(task, [Copy()], known: id => id == CopyId));
-        // Two candidates cannot be told apart.
-        Assert.IsType<SwitchAction.Wait>(Next(task, [Copy(), Copy("99999999-0000-0000-0000-000000000009", "99999999")]));
+        var given = Assert.IsType<SwitchAction.Abandon>(Next(task, [Idle(), Copy()]));
+        Assert.Equal(SettingsSwitch.NoShortId, given.Why);
+        Assert.False(SettingsSwitch.MayClaim(task, Copy()));
+        Assert.True(new TaskBoard([task]).SwitchingTaskFor(CopyId, _ => true, T0.AddSeconds(10)).HasNoValue);
     }
 
     // A session Claude Code held no saved options for is resumed under its own id with the flags (measured): no copy.
@@ -432,16 +473,17 @@ public class SettingsSwitchTests
         var sameId = Copy(Original, "eea5466c", startedSecond: 3);
 
         Assert.IsType<SwitchAction.Relaunched>(Next(WithSwitch(Issued with { CopyShortId = "eea5466c" }), [sameId]));
-        Assert.IsType<SwitchAction.Relaunched>(Next(WithSwitch(Issued), [sameId]));
+        // Claude printed another id: the original listed again is no relaunch of ours.
+        Assert.IsType<SwitchAction.Wait>(Next(WithSwitch(Issued), [sameId]));
         // Listed since before the resume: the original itself, still running, not a relaunch.
-        Assert.IsType<SwitchAction.Wait>(Next(WithSwitch(Issued), [Copy(Original, "eea5466c", startedSecond: -10)]));
+        Assert.IsType<SwitchAction.Wait>(Next(WithSwitch(Issued with { CopyShortId = "eea5466c" }), [Copy(Original, "eea5466c", startedSecond: -10)]));
     }
 
     // The original was never stopped, so giving up loses nothing.
     [Fact]
     public void A_copy_that_never_appears_is_given_up_after_a_minute_and_the_pick_with_it()
     {
-        var task = WithSwitch(Issued with { CopyShortId = "8c42135c" });
+        var task = WithSwitch(Issued);
         var issued = Issued.Issued.Value;
 
         Assert.IsType<SwitchAction.Wait>(Next(task, [Idle()], issued + SettingsSwitch.RecoverWithin));
@@ -450,7 +492,7 @@ public class SettingsSwitchTests
         Assert.False(given.KeepWanted);
     }
 
-    // JOINED: the original runs on until the copy has answered once; then it is stopped.
+    // JOINED: the original runs on until the copy has answered once; then it is stopped at a read that shows it at a pause.
     [Fact]
     public void A_joined_switch_waits_for_the_copy_s_first_reply_then_stops_the_original()
     {
@@ -466,16 +508,70 @@ public class SettingsSwitchTests
         Assert.IsType<SwitchAction.Confirm>(Next(task, []));
     }
 
-    // A model the account cannot use fails the copy's first turn (measured: idle, state failed).
+    // Review H1: the copy has answered, but the original is busy (it woke on its own job, or someone types in its window),
+    // waits on a question, or is still in its turn: it is not stopped, at any later read either, until a read shows a pause.
     [Fact]
-    public void A_copy_that_failed_reverts_to_the_original()
+    public void The_original_is_stopped_only_at_a_pause_never_while_busy()
+    {
+        var task = Switched();
+        var copy = Idle(CopyId, "8c42135c");
+        foreach (var original in new[]
+                 {
+                     Idle() with { Busy = true, Status = "busy", State = "working" },
+                     Idle() with { Busy = true, Status = "busy", State = "done" },
+                     Idle() with { Status = "waiting", State = "blocked" },
+                     Idle() with { State = "working" },
+                 })
+            Assert.Equal(SettingsSwitch.OriginalStopsAtPause,
+                Assert.IsType<SwitchAction.Wait>(Next(task, [original, copy], T0.AddDays(3), replied: _ => true)).Why);
+
+        Assert.Equal("eea5466c", Assert.IsType<SwitchAction.Confirm>(Next(task, [Idle(), copy], replied: _ => true)).StopOriginal.Value);
+    }
+
+    // A model the account cannot use fails the copy's first turn (measured: idle, state failed). Once the copy has
+    // answered, the switch is final, so a later failed turn is no reason to go back.
+    [Fact]
+    public void A_copy_that_failed_before_answering_reverts_to_the_original()
     {
         var failed = Idle(CopyId, "8c42135c") with { State = "failed" };
 
-        var revert = Assert.IsType<SwitchAction.Revert>(Next(Switched(), [Idle(), failed], replied: _ => true));
-
-        Assert.Equal("8c42135c", revert.StopCopy.Value);
+        var revert = Assert.IsType<SwitchAction.Revert>(Next(Switched(), [Idle(), failed]));
+        Assert.Equal("8c42135c", revert.StopCopy);
         Assert.Equal(SettingsSwitch.CopyFailed, revert.Why);
+
+        Assert.IsType<SwitchAction.Confirm>(Next(Switched(), [Idle(), failed], replied: _ => true));
+    }
+
+    // Review L3: a task closed during a switch. Before the copy answered: the copy goes, the original stays. After: the
+    // copy stays and the original is stopped at its next pause. A copy that never joined is stopped and the switch given up.
+    [Fact]
+    public void A_task_closed_during_a_switch_never_leaves_a_replaced_session_running()
+    {
+        var closed = Switched() with { Status = TaskStatus.Closed };
+        var both = new[] { Idle(), Idle(CopyId, "8c42135c") };
+
+        Assert.Equal("8c42135c", Assert.IsType<SwitchAction.Revert>(Next(closed, both)).StopCopy);
+        Assert.Equal("eea5466c", Assert.IsType<SwitchAction.Confirm>(Next(closed, both, replied: _ => true)).StopOriginal.Value);
+        Assert.IsType<SwitchAction.Wait>(Next(closed, [Idle() with { Busy = true, Status = "busy", State = "working" }, both[1]], replied: _ => true));
+
+        var issued = WithSwitch(Issued) with { Status = TaskStatus.Closed };
+        Assert.Equal("8c42135c", Assert.IsType<SwitchAction.Discard>(Next(issued, [Idle(), Copy()])).StopCopy);
+    }
+
+    // Review M3: a switch stops only the copy Claude printed for our resume, or an original Deskbar itself started.
+    [Fact]
+    public void A_switch_may_stop_only_its_printed_copy_or_an_original_Deskbar_started()
+    {
+        var pending = Issued;
+        var ours = Task(wanted: SonnetLow) with { Switching = pending };
+        var notOurs = Task(wanted: SonnetLow, sessions: Session(Original, 0, launched: SessionSettings.None)) with { Switching = pending };
+
+        Assert.True(SettingsSwitch.MayStop(ours, pending, "8c42135c"));
+        Assert.True(SettingsSwitch.MayStop(ours, pending, "eea5466c"));
+        Assert.False(SettingsSwitch.MayStop(notOurs, pending, "eea5466c"));
+        Assert.False(SettingsSwitch.MayStop(ours, pending, "99999999"));
+        Assert.False(SettingsSwitch.MayStop(ours, pending with { CopyShortId = Maybe<string>.None }, "8c42135c"));
+        Assert.False(SettingsSwitch.MayStop(ours, pending, ""));
     }
 
     // --- the copy's own SessionStart hook, and the keeper's adoption ------------------------------------------------
@@ -483,7 +579,7 @@ public class SettingsSwitchTests
     [Fact]
     public void The_copy_s_hook_finds_its_task_by_folder_short_id_and_time()
     {
-        var board = new TaskBoard([WithSwitch(Issued with { CopyShortId = "8c42135c" })]);
+        var board = new TaskBoard([WithSwitch(Issued)]);
         var now = T0.AddSeconds(10);
 
         Assert.Equal(TaskId, board.SwitchingTaskFor(CopyId, _ => true, now).Value.Id);
@@ -501,9 +597,9 @@ public class SettingsSwitchTests
         var steps = SessionKeeper.Plan(new TaskBoard([WithSwitch(Issued)]), [Idle(), Copy()], ResumeLedger.Empty, _ => true, _ => false, T0.AddMinutes(1));
         Assert.DoesNotContain(steps, step => step is KeeperStep.Adopt);
 
-        var stranger = Copy(folder: @"C:\repos\other");
+        var stranger = Copy("99999999-0000-0000-0000-000000000009", "99999999");
         var adopted = SessionKeeper.Plan(new TaskBoard([WithSwitch(Issued)]), [Idle(), stranger], ResumeLedger.Empty, _ => true, _ => false, T0.AddMinutes(1));
-        Assert.Contains(adopted, step => step is KeeperStep.Adopt adopt && adopt.Agent.SessionId == CopyId);
+        Assert.Contains(adopted, step => step is KeeperStep.Adopt adopt && adopt.Agent.SessionId == stranger.SessionId);
     }
 
     // --- Drifted ------------------------------------------------------------------------------------------------------
