@@ -3381,6 +3381,56 @@ public class FloatingBarTaskListTests
         plainMenu.IsOpen = false;
     });
 
+    // Task 3c40dec9 (Petre: "when adding a task, have a button to start immediately with claude"): the add row's Start
+    // Claude button, after the flag toggles, adds the typed note as Enter does and hands it to "Start Claude on this"
+    // (the App's ClaudeTaskActions.Offer) once the add has settled. An empty box adds and starts nothing. A bar the App
+    // gave no such seam shows no such button.
+    [Fact]
+    public void The_add_rows_Start_Claude_button_adds_the_note_and_starts_Claude_on_it() => StaThread.Run(() =>
+    {
+        var started = new List<Guid>();
+        var handedBack = new List<nint>();
+        using var t = Build(handedBack: handedBack, startClaude: id =>
+        {
+            started.Add(id);
+            return null;
+        });
+        var button = t.Bar.TaskAddStartClaudeButton!;
+        Assert.Equal(Visibility.Visible, button.Visibility);
+        Assert.Equal(FloatingBar.AddAndStartClaudeText, AutomationProperties.GetName(button));
+
+        // Nothing typed: the board refuses the note, and nothing starts.
+        ClickBox(t);
+        Click(button);
+        t.Bar.Dispatcher.Invoke(() => { }, DispatcherPriority.ApplicationIdle);
+        Assert.Empty(t.Tasks.Board.Tasks);
+        Assert.Empty(started);
+
+        t.Box.Text = "Fix the build";
+        Click(button);
+        var task = Assert.Single(t.Tasks.Board.Tasks);
+        Assert.Equal("Fix the build", task.Title);
+        Assert.Equal(t.Gepha, task.WorkspaceId.Value);
+        Assert.Equal("", t.Box.Text);
+        // The keyboard stays with the bar until "Start Claude on this" has had its say, so a pick list it opens has it.
+        Assert.Empty(handedBack);
+        // Run once the add has settled (an Input-priority dispatch): a lower priority runs after it.
+        t.Bar.Dispatcher.Invoke(() => { }, DispatcherPriority.ApplicationIdle);
+        Assert.Equal([task.Id], started);
+        // No pick list (one folder): the keyboard goes back to the editor.
+        Assert.Equal([Editor], handedBack);
+
+        // A second press on the idle, empty box (a double-click's): nothing added, nothing started, keyboard left alone.
+        Click(button);
+        t.Bar.Dispatcher.Invoke(() => { }, DispatcherPriority.ApplicationIdle);
+        Assert.Single(t.Tasks.Board.Tasks);
+        Assert.Equal([task.Id], started);
+        Assert.Equal([Editor], handedBack);
+
+        using var plain = Build();
+        Assert.Equal(Visibility.Collapsed, plain.Bar.TaskAddStartClaudeButton!.Visibility);
+    });
+
     // Task 7f61af2e (Petre: "make it possible to open claude without opening the task first"): a Claude line's menu has
     // "Open Claude" right after Edit. It goes where the double-click goes (GoToTask), once the menu has closed, and the
     // tasks panel never opens on the way: no single click on the line was made. A note's menu has no such item.

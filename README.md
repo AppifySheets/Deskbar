@@ -445,7 +445,9 @@ The bottom of the bar carries a short task list, for the things you want to reme
 Type a note into the box at its top and press Enter (Shift+Enter starts a new line, which goes into
 the note's description), and it lands on the workspace you are on (or on
 none, or another one, by the chip under the box). The new note is selected and glows blue for a moment,
-so you can see where it landed; the tasks panel's own add box does the same. Tick a note to close it,
+so you can see where it landed; the tasks panel's own add box does the same. To hand the note to Claude
+straight away, press the play button after the flag toggles, or Ctrl+Enter, instead of Enter: the note is
+added and "Start Claude on this" runs on it. Tick a note to close it,
 with six seconds to undo.
 An important task's title is bold and an urgent one's italic, which sorts the list into Covey's four
 quadrants; set them from a line's right-click menu or the toggles in the tasks panel, and drag a line up

@@ -4228,6 +4228,48 @@ public class TasksBoardTests
         Assert.DoesNotContain(Inside(plain.Window).OfType<Button>(), b => AutomationProperties.GetName(b) == "Start Claude on this");
     });
 
+    // Task 3c40dec9 (Petre: "when adding a task, have a button to start immediately with claude"): the add box has a Start
+    // Claude button after its flag toggles, and Ctrl+Enter in the box does what it does: the note is added as Enter adds
+    // it, the box closes, and the new task goes to `startClaude` (the App's ClaudeTaskActions.Offer) once the key press
+    // is over. An empty box adds and starts nothing. Without the seam there is no button and Ctrl+Enter only adds.
+    [Fact]
+    public void The_add_box_starts_Claude_on_the_note_with_its_button_or_Ctrl_Enter() => StaThread.Run(() =>
+    {
+        var started = new List<Guid>();
+        using var t = Build(startClaude: started.Add);
+        t.Controller.Show();
+        Click(ButtonNamed(t.Window, "Add"));
+
+        // The button on an empty box: nothing is added, nothing starts, and the box stays open.
+        Click(ButtonNamed(t.Window, TasksWindow.AddAndStartClaudeText));
+        t.Window.Dispatcher.Invoke(() => { }, System.Windows.Threading.DispatcherPriority.ApplicationIdle);
+        Assert.Empty(t.Tasks.Board.Tasks);
+        Assert.Empty(started);
+        Assert.True(t.Window.AddBoxShown);
+
+        Assert.True(t.Window.TypeNote("Fix the build", Key.Enter, ModifierKeys.Control));
+        var task = Assert.Single(t.Tasks.Board.Tasks);
+        Assert.Equal("Fix the build", task.Title);
+        Assert.False(t.Window.AddBoxShown);
+        // Queued past the key press (an Input-priority dispatch): a lower priority runs after it.
+        t.Window.Dispatcher.Invoke(() => { }, System.Windows.Threading.DispatcherPriority.ApplicationIdle);
+        Assert.Equal([task.Id], started);
+
+        // Plain Enter still only adds.
+        Click(ButtonNamed(t.Window, "Add"));
+        Assert.True(t.Window.TypeNote("Pay rent", Key.Enter));
+        t.Window.Dispatcher.Invoke(() => { }, System.Windows.Threading.DispatcherPriority.ApplicationIdle);
+        Assert.Equal([task.Id], started);
+
+        // Without the seam (a copy without Claude sessions): no button, and Ctrl+Enter adds as Enter does.
+        using var plain = Build();
+        plain.Controller.Show();
+        Click(ButtonNamed(plain.Window, "Add"));
+        Assert.False(HasButtonNamed(plain.Window, TasksWindow.AddAndStartClaudeText));
+        Assert.True(plain.Window.TypeNote("Errand", Key.Enter, ModifierKeys.Control));
+        Assert.Single(plain.Tasks.Board.Tasks);
+    });
+
     // Spec, "Task history": the thread lists the task's sessions, newest first, each with when it joined and whether it
     // is working, idle, ended or expired, and an Open that does what going to that session does; an expired one (its
     // transcript gone) has no Open. A new list from `claude agents` redraws an open thread.
