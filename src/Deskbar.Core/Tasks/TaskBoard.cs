@@ -511,11 +511,23 @@ public sealed record TaskBoard(IReadOnlyList<TaskItem> Tasks)
     public Result<TaskBoard> Reopen(Guid id, DateTimeOffset now, TimeZoneInfo? zone = null) =>
         Tasks.FirstOrDefault(t => t.Id == id) is { IsOpen: true }
             ? Result.Failure<TaskBoard>(TaskIsNotClosed)
-            : Change(id, t => t.Repeat.HasValue
-                    ? Reopened(t, now) with { Assignee = Assignee.Claude, NextRun = t.Repeat.Value.Schedule.Next(now, zone ?? TimeZoneInfo.Local) }
-                    : Reopened(t, now))
-                .Bind(board => board.WithParentReopened(id, now))
+            : Change(id, t => Resumed(t, Reopened(t, now), now, zone))
+                .Bind(board => board.WithParentReopened(id, now, zone))
                 .Map(board => board.SleepUntilNextRun(id, now));
+
+    // EVERY WAY OUT OF CLOSED RESUMES A REPEAT FROM NOW (recurring tasks spec, Task 3 review): Reopen, UndoClose, a status
+    // set by hand and a parent brought back by its subtask all pass through here. Without it a recurring task reopened by
+    // any route but Reopen kept the NextRun it had when it was closed, long past, and the sweep would have started a run
+    // at once. `was` is the task before the change and `now` the task after it; a task that was already open, or has no
+    // repeat, comes back as it is. The assignee goes to Claude only when it lands in Backlog or In progress (a status set
+    // by hand to Waiting on you or Done is his). The caller then snoozes it in a second step (SleepUntilNextRun).
+    static TaskItem Resumed(TaskItem was, TaskItem after, DateTimeOffset at, TimeZoneInfo? zone) =>
+        was.IsOpen || !after.Repeat.HasValue ? after
+        : after with
+        {
+            NextRun = after.Repeat.Value.Schedule.Next(at, zone ?? TimeZoneInfo.Local),
+            Assignee = after.Status is TaskStatus.Backlog or TaskStatus.InProgress ? Assignee.Claude : after.Assignee,
+        };
 
     // What a reopening makes of a closed task, shared by Reopen and by a parent coming back with its subtask. The
     // assignee is derived from what the task is now (Ruling 57 review): a session still live on it is Claude's work in
@@ -535,15 +547,18 @@ public sealed record TaskBoard(IReadOnlyList<TaskItem> Tasks)
     /// never left the screen. A task that is not closed is refused, and so is Closed as the status to come back to. A
     /// subtask whose parent was closed in those six seconds brings the parent back (<see cref="WithParentReopened"/>).
     /// </summary>
-    public Result<TaskBoard> UndoClose(Guid id, TaskStatus was, Maybe<string> question, DateTimeOffset now) =>
+    // A recurring task undone from a close resumes its repeat from now (Resumed), like every way out of Closed.
+    public Result<TaskBoard> UndoClose(Guid id, TaskStatus was, Maybe<string> question, DateTimeOffset now, TimeZoneInfo? zone = null) =>
         Tasks.FirstOrDefault(t => t.Id == id) is { IsOpen: true } ? Result.Failure<TaskBoard>(TaskIsNotClosed)
         : was == TaskStatus.Closed ? Result.Failure<TaskBoard>("A closed task cannot come back closed")
-        : Change(id, t => t with
+        : Change(id, t => Resumed(t, t with
         {
             Status = was,
             Question = was == TaskStatus.WaitingOnYou ? question : Maybe<string>.None,
             UpdatedAt = now,
-        }).Bind(board => board.WithParentReopened(id, now));
+        }, now, zone))
+            .Bind(board => board.WithParentReopened(id, now, zone))
+            .Map(board => board.SleepUntilNextRun(id, now));
 
     /// <summary>
     /// Any status but Closed, by hand, from any status (a closed task set to Done is reopened as Done, at the top of
@@ -552,10 +567,10 @@ public sealed record TaskBoard(IReadOnlyList<TaskItem> Tasks)
     /// no session asked anything. Becoming Done by hand stamps it, as <see cref="MarkDone"/> does. A closed subtask
     /// set to a status is open again, so its closed parent comes back too (<see cref="WithParentReopened"/>).
     /// </summary>
-    public Result<TaskBoard> SetStatus(Guid id, TaskStatus status, DateTimeOffset now) =>
+    public Result<TaskBoard> SetStatus(Guid id, TaskStatus status, DateTimeOffset now, TimeZoneInfo? zone = null) =>
         status == TaskStatus.Closed
             ? Result.Failure<TaskBoard>(UseClose)
-            : Change(id, t => (status == TaskStatus.Done ? BecameDone(OnTopIfClosed(t), now) : OnTopIfClosed(t)) with
+            : Change(id, t => Resumed(t, (status == TaskStatus.Done ? BecameDone(OnTopIfClosed(t), now) : OnTopIfClosed(t)) with
             {
                 Status = status,
                 Question = status == TaskStatus.WaitingOnYou ? t.Question : Maybe<string>.None,
@@ -572,7 +587,11 @@ public sealed record TaskBoard(IReadOnlyList<TaskItem> Tasks)
                 Pin = status.IsPinned() && t.Status != status ? TopPin(status, id) : t.Pin,
                 Adopted = false,
                 UpdatedAt = now,
-            }).Bind(board => board.WithParentReopened(id, now));
+            }, now, zone))
+            // A recurring task leaving Closed resumes its repeat from now and sleeps (Resumed, SleepUntilNextRun); a task
+            // that was already open is left as it is, so a status set by hand never puts a running one to sleep.
+            .Bind(board => board.WithParentReopened(id, now, zone))
+            .Map(board => Tasks.First(t => t.Id == id).IsOpen ? board : board.SleepUntilNextRun(id, now));
 
     // --- the flags and the order (Task 12; TaskOrder.cs) -------------------------------------------
 
@@ -768,6 +787,11 @@ public sealed record TaskBoard(IReadOnlyList<TaskItem> Tasks)
                 SnoozedUntil = task.SnoozedUntil.HasValue && task.NextRun.HasValue && task.SnoozedUntil.Value == task.NextRun.Value
                     ? Maybe<DateTimeOffset>.None
                     : task.SnoozedUntil,
+                // A task between runs was Claude's only to run the repeat; without it nothing is running and nothing is
+                // asked of Claude, so it goes back to Petre (the board hands a finished piece of work to him: Done and
+                // waiting are his). A task in progress or waiting keeps its assignee. Note SessionKeeper keys on the
+                // task having sessions, not on the assignee, so this does not by itself stop a resume (see the report).
+                Assignee = task.IsBetweenRuns ? Assignee.Me : task.Assignee,
                 UpdatedAt = now,
             }));
 
@@ -970,12 +994,13 @@ public sealed record TaskBoard(IReadOnlyList<TaskItem> Tasks)
     // SetParent, Reopen, UndoClose and SetStatus on a closed subtask. Anything else (a closed subtask, a plain task, a
     // parent already open) returns this same board. A board from before the rule that already holds an open subtask
     // under a closed parent is left as it is until one of those changes touches that subtask.
-    Result<TaskBoard> WithParentReopened(Guid id, DateTimeOffset now) =>
+    // A recurring parent resumes its repeat from now and sleeps, like every way out of Closed (Resumed).
+    Result<TaskBoard> WithParentReopened(Guid id, DateTimeOffset now, TimeZoneInfo? zone = null) =>
         Tasks.TryFirst(t => t.Id == id)
             .Where(t => t.IsOpen)
             .Bind(ParentOf)
             .Where(up => !up.IsOpen)
-            .Map(up => Change(up.Id, t => Reopened(t, now)))
+            .Map(up => Change(up.Id, t => Resumed(t, Reopened(t, now), now, zone)).Map(board => board.SleepUntilNextRun(up.Id, now)))
             .GetValueOrDefault(Result.Success(this));
 
     /// <summary>
