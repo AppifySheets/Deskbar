@@ -5396,6 +5396,7 @@ public class TasksBoardTests
         var parent = t.Tasks.AddNote("Ship the release", t.Gepha).Value.Id;
         var child = t.Tasks.AddNote("Write the notes", t.Gepha, Quadrant.IV, parent).Value.Id;
         t.Controller.Show();
+        t.Window.DragMouse = ArrangeMouse.Held; // see FoldedSubtaskInOpenThread
         Click(ButtonNamed(t.Window, "Matrix"));
         t.Controller.ToggleThread(parent);
         t.Window.UpdateLayout();
@@ -5427,6 +5428,10 @@ public class TasksBoardTests
         var parent = t.Tasks.AddNote("Ship the release", t.Gepha).Value.Id;
         var child = t.Tasks.AddNote("Write the notes", t.Gepha, Quadrant.IV, parent).Value.Id;
         t.Controller.Show();
+        // The held mouse, as every drag test here has it. With the real one a started drag takes the real capture, WPF
+        // answers with a mouse move of its own, and on a machine where no button is down (the CI runner) that move
+        // reads "the button came up" and calls the drag off: these tests failed on main for it (PR 582).
+        t.Window.DragMouse = ArrangeMouse.Held;
         Click(ButtonNamed(t.Window, "Subtasks"));
         t.Controller.ToggleThread(parent);
         t.Window.UpdateLayout();
