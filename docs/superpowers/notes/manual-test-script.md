@@ -495,6 +495,13 @@ Manage ticked. Use a throwaway folder Claude Code already trusts, not a real rep
     stays usable throughout.
 86. Stop a session in the middle of a long reply (kill its `claude.exe` from Task Manager while it is working). Its
     resume says "its last turn was cut off, so it was told to continue", and the session carries on by itself.
+86a. A session stopped on the usage limit (task daeaa26c). Hard to stage on purpose: wait for a background task session
+    to hit a limit. Its thread gets "Stopped on the usage limit. Deskbar resumes it once the limit resets at HH:mm."
+    once, and its status line on the bar reads "Stopped on the usage limit until HH:mm". Comment on the task before
+    the reset: the session is stopped and resumed with the comment at once (`claude agents` shows the same id, not a
+    copy); it hits the limit again, and the thread gets no second "Stopped on the usage limit" line. A few minutes after the reset, with no window
+    open on it: the thread says "Resumed, since the usage limit it stopped on has reset", and the session carries on
+    and writes its own status line. With its window open, nothing is restarted: type in the window.
 87. Untick the resume box and stop a task's session: the task shows the session ended and nothing resumes it; start a
     new `claude --bg` in another folder and it still gets a task. Tick the box again: the ended session is resumed at
     the next poll (once it has been gone two minutes).

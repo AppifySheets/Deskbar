@@ -23,6 +23,7 @@ public sealed class CommentWakerTests : IDisposable
 
     Func<string, Result> resumeAnswer = _ => Result.Success();
     bool transcripts = true;
+    bool endedOnApiError;
 
     public CommentWakerTests() => inbox = new CommentInbox(folder, () => At);
 
@@ -52,7 +53,7 @@ public sealed class CommentWakerTests : IDisposable
         Assert.DoesNotContain(tasks.Board.Tasks.Single().Comments, c => c.ByDeskbar);
     }
 
-    CommentWaker Waker() => new(tasks, () => enabled, live, _ => transcripts, inbox,
+    CommentWaker Waker() => new(tasks, () => enabled, live, _ => transcripts, _ => endedOnApiError, inbox,
         (task, session, message) =>
         {
             resumed.Add((task, session.Id, message));
@@ -127,6 +128,25 @@ public sealed class CommentWakerTests : IDisposable
 
         Assert.Equal(["aaaaaaaa"], stopped);
         Assert.Single(resumed);
+    }
+
+    // Task daeaa26c, session 152ba85d: its waiter fired, the turn it woke died on the usage limit, and a turn that ends on
+    // an API error runs no Stop hook, so no waiter followed. The gen file still says one is alive; the comment must not
+    // go into an inbox nobody reads.
+    [Fact]
+    public void A_background_session_whose_last_turn_died_on_an_api_error_is_stopped_then_resumed()
+    {
+        var id = ClaudeTask("aaaaaaaa-1");
+        inbox.Register("aaaaaaaa-1");
+        endedOnApiError = true;
+        live.OnNext([Running("aaaaaaaa-1")]);
+        using var waker = Waker();
+
+        tasks.Comment(id, Maybe<string>.None, "carry on");
+
+        Assert.Equal(["aaaaaaaa"], stopped);
+        Assert.Contains("carry on", Assert.Single(resumed).Message);
+        Assert.False(File.Exists(Path.Combine(folder, "aaaaaaaa-1.md")));
     }
 
     // A resume refused because the list still shows the session (it came back meanwhile): the comment waits in its inbox.

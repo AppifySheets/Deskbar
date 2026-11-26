@@ -31,7 +31,17 @@ namespace Deskbar.Core.Tasks;
 //   * transcript gone: a give-up; Claude Code keeps sessions 30 days.
 //   * already resumed <see cref="MaxResumesInWindow"/> times within <see cref="LoopWindow"/>: a give-up. A session that
 //     ends again straight after waking is crashing, and waking it forever helps nobody.
+//   * last turn died on a usage limit that has not reset yet (task daeaa26c): nothing yet, see LimitMargin.
 //   * otherwise a resume, with a continue message when the last turn was cut off.
+//
+// THE ONE CASE WHERE A LISTED SESSION IS TOUCHED (task daeaa26c, 2026-11-26). A session whose turn died on the usage
+// limit stays in the list, idle, and nothing ever wakes it: the daemon does not, since nothing crashed, and Deskbar's
+// comment waiter is not running, since a turn that ends on an API error runs no Stop hook (ClaudeTranscript.LastTurnError).
+// Petre: "it was dead and waiting for limits". So once the limit has reset, the latest session of an open task that is
+// listed as an idle BACKGROUND session and whose transcript still ends on that limit is restarted: `claude stop`, then
+// the same resume with the continue message (KeeperStep.Resume.StopFirst). Resuming it without the stop would start a
+// copy (measured 2026-11-23); the stop keeps the conversation. An interactive one (a VS Code panel, a terminal) is
+// Petre's window and cannot be restarted from outside, so it is only shown as stopped (ClaudeSessions.NoteLimits).
 // A give-up is said ONCE and is STICKY: the board shows it as the task waiting on Petre with the reason as its question,
 // and a task in that state gets no step at all (no repeat, and no resume either, even after the loop window has passed
 // and the ledger's count has fallen). It stays that way until Petre acts on it. The caller (Task 8) must call
@@ -92,10 +102,24 @@ public static class SessionKeeper
     /// </summary>
     public static readonly TimeSpan Settle = TimeSpan.FromMinutes(2);
 
+    /// <summary>
+    /// How long after a usage limit's reset moment a session stopped on it is woken (task daeaa26c). The moment comes
+    /// from the API's own answer, but the clock that answered is not this one, and a wake a few seconds early only hits
+    /// the limit again and costs a loop-guard resume.
+    /// </summary>
+    public static readonly TimeSpan LimitMargin = TimeSpan.FromMinutes(2);
+
+    /// <summary>When a session stopped on a usage limit may be woken: its reset moment plus <see cref="LimitMargin"/>.</summary>
+    public static DateTimeOffset WakeAfterLimit(DateTimeOffset resetsAt) => resetsAt + LimitMargin;
+
     /// <param name="absentSince">
     /// Since when a session has been missing from every list that could be read (Ruling 18; ClaudeSessions keeps it).
     /// A session gets no step at all until <see cref="Settle"/> has passed since then. Left out, every session counts as
     /// long gone, which is what the tests of the other rules want.
+    /// </param>
+    /// <param name="limitedUntil">
+    /// When the session's last turn died on a usage limit, the moment that limit resets (ClaudeTranscript.LastTurnError);
+    /// None otherwise. Left out, no session is limited.
     /// </param>
     public static IReadOnlyList<KeeperStep> Plan(
         TaskBoard board,
@@ -104,10 +128,12 @@ public static class SessionKeeper
         Func<TaskSession, bool> transcriptExists,
         Func<TaskSession, bool> cutOff,
         DateTimeOffset now,
-        Func<string, DateTimeOffset>? absentSince = null)
+        Func<string, DateTimeOffset>? absentSince = null,
+        Func<TaskSession, Maybe<DateTimeOffset>>? limitedUntil = null)
     {
         var listed = live.Select(agent => agent.SessionId).ToHashSet();
         var missingSince = absentSince ?? (_ => DateTimeOffset.MinValue);
+        var limited = limitedUntil ?? (_ => Maybe<DateTimeOffset>.None);
 
         var resumes = board.Tasks
             .Where(task => task.IsClaudes && task.Status is TaskStatus.Backlog or TaskStatus.InProgress or TaskStatus.WaitingOnYou)
@@ -125,7 +151,24 @@ public static class SessionKeeper
             .Where(pair => !pair.Session.Replaced)
             // Ruling 18: missing for less than Settle, it may still come back by itself.
             .Where(pair => now - missingSince(pair.Session.Id) >= Settle)
-            .Select(pair => StepFor(pair.Task, pair.Session, ledger, transcriptExists, cutOff, now))
+            .Select(pair => StepFor(pair.Task, pair.Session, ledger, transcriptExists, cutOff, limited, now))
+            .Where(step => step.HasValue)
+            .Select(step => step.Value);
+
+        // The listed session stopped on a usage limit that has since reset (see the header): stopped, then resumed. Only
+        // the task's LATEST session, and only when it is the one listed: an older session listed beside an ended latest
+        // one is left alone, as the rule above leaves it.
+        var restarts = board.Tasks
+            .Where(task => task.IsClaudes && task.Status is TaskStatus.Backlog or TaskStatus.InProgress or TaskStatus.WaitingOnYou)
+            .Where(task => task.Sessions.Count > 0)
+            .OrderBy(task => StatusRank(task.Status))
+            .ThenByDescending(task => task.UpdatedAt)
+            .Select(task => (Task: task, Session: task.Sessions.MaxBy(session => session.Joined)!))
+            .Where(pair => !pair.Session.Replaced)
+            .Select(pair => (pair.Task, pair.Session, Agent: live.FirstOrDefault(agent => agent.SessionId == pair.Session.Id)))
+            .Where(triple => triple.Agent is { Background: true, Busy: false, ShortId.HasValue: true })
+            .DistinctBy(triple => triple.Session.Id)
+            .Select(triple => RestartFor(triple.Task, triple.Session, triple.Agent!, ledger, limited, now))
             .Where(step => step.HasValue)
             .Select(step => step.Value);
 
@@ -137,7 +180,7 @@ public static class SessionKeeper
             .Where(agent => !known.Contains(agent.SessionId))
             .Select(agent => (KeeperStep)new KeeperStep.Adopt(agent));
 
-        return resumes.Concat(adopts).ToList();
+        return resumes.Concat(restarts).Concat(adopts).ToList();
     }
 
     /// <summary>
@@ -219,15 +262,35 @@ public static class SessionKeeper
 
     static Maybe<KeeperStep> StepFor(
         TaskItem task, TaskSession session, ResumeLedger ledger,
-        Func<TaskSession, bool> transcriptExists, Func<TaskSession, bool> cutOff, DateTimeOffset now) =>
+        Func<TaskSession, bool> transcriptExists, Func<TaskSession, bool> cutOff,
+        Func<TaskSession, Maybe<DateTimeOffset>> limited, DateTimeOffset now)
+    {
         // Sticky: a task the keeper has given up on gets no step at all, not even a resume once the loop window has
         // passed and the ledger's count has fallen. It waits for Petre; see the comment on Forget.
-        GivenUp(task) ? Maybe<KeeperStep>.None
-        : ledger.Within(session.Id, now, Grace) > 0 ? Maybe<KeeperStep>.None
-        : string.IsNullOrEmpty(session.Folder) ? GiveUp(task, NoFolder)
-        : !transcriptExists(session) ? GiveUp(task, TranscriptGone)
-        : ledger.Within(session.Id, now, LoopWindow) >= MaxResumesInWindow ? GiveUp(task, LoopGaveUp)
-        : new KeeperStep.Resume(task.Id, session, cutOff(session));
+        if (GivenUp(task) || ledger.Within(session.Id, now, Grace) > 0) return Maybe<KeeperStep>.None;
+        // Asked only past the cheap checks above, since it reads the transcript's tail.
+        var limit = limited(session);
+        // Woken before its usage limit resets, it only hits the limit again (and three of those in ten minutes would end
+        // in a loop give-up). It waits, and the first poll after the reset wakes it.
+        if (limit.Map(resetsAt => now < WakeAfterLimit(resetsAt)).GetValueOrDefault(false)) return Maybe<KeeperStep>.None;
+        return string.IsNullOrEmpty(session.Folder) ? GiveUp(task, NoFolder)
+            : !transcriptExists(session) ? GiveUp(task, TranscriptGone)
+            : ledger.Within(session.Id, now, LoopWindow) >= MaxResumesInWindow ? GiveUp(task, LoopGaveUp)
+            : new KeeperStep.Resume(task.Id, session, cutOff(session)) { AfterLimit = limit.HasValue };
+    }
+
+    // The restart of a listed session stopped on a usage limit (see the header). Nothing for one not limited, or limited
+    // until later; the same grace and loop guard as a resume, since a restart is a resume with a stop before it.
+    static Maybe<KeeperStep> RestartFor(
+        TaskItem task, TaskSession session, ClaudeAgent agent, ResumeLedger ledger,
+        Func<TaskSession, Maybe<DateTimeOffset>> limited, DateTimeOffset now)
+    {
+        if (GivenUp(task) || ledger.Within(session.Id, now, Grace) > 0) return Maybe<KeeperStep>.None;
+        if (!limited(session).Map(resetsAt => now >= WakeAfterLimit(resetsAt)).GetValueOrDefault(false)) return Maybe<KeeperStep>.None;
+        return string.IsNullOrEmpty(session.Folder) ? GiveUp(task, NoFolder)
+            : ledger.Within(session.Id, now, LoopWindow) >= MaxResumesInWindow ? GiveUp(task, LoopGaveUp)
+            : new KeeperStep.Resume(task.Id, session, SendContinue: true) { StopFirst = agent.ShortId, AfterLimit = true };
+    }
 
     static Maybe<KeeperStep> GiveUp(TaskItem task, string reason) => new KeeperStep.GiveUp(task.Id, reason);
 
@@ -245,7 +308,17 @@ public static class SessionKeeper
 public abstract record KeeperStep
 {
     /// <summary>Wake the task's session; <paramref name="SendContinue"/> when its last turn was cut off.</summary>
-    public sealed record Resume(Guid TaskId, TaskSession Session, bool SendContinue) : KeeperStep;
+    public sealed record Resume(Guid TaskId, TaskSession Session, bool SendContinue) : KeeperStep
+    {
+        /// <summary>
+        /// The short id to `claude stop` before the resume: set only for a LISTED idle background session stopped on a
+        /// usage limit that has reset (SessionKeeper's header), which a bare resume would copy.
+        /// </summary>
+        public Maybe<string> StopFirst { get; init; } = Maybe<string>.None;
+
+        /// <summary>The session's last turn died on a usage limit that has since reset; the thread says so.</summary>
+        public bool AfterLimit { get; init; }
+    }
 
     /// <summary>Stop trying for this task and tell Petre why, as the task's question.</summary>
     public sealed record GiveUp(Guid TaskId, string Reason) : KeeperStep;

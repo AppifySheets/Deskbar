@@ -1,4 +1,5 @@
 using System.Text.Json;
+using CSharpFunctionalExtensions;
 
 namespace Deskbar.Core.Tasks;
 
@@ -73,13 +74,37 @@ public static class ClaudeTranscript
     //     starts with <command-message>/<command-name>, and one cut off before its reply is then read as finished;
     //     that errs toward not continuing, the safe side.
     public static bool WasCutOff(IEnumerable<string> jsonLines) =>
+        LastEntry(jsonLines) is { } last && !last.Finished;
+
+    // WHETHER THE LAST TURN DIED ON AN API ERROR, and if it was a usage limit, when that limit resets (task daeaa26c).
+    //
+    // Claude Code writes an API error as an assistant entry of its own with "isApiErrorMessage": true, a made-up model
+    // ("<synthetic>") and stop_reason "stop_sequence", so WasCutOff already reads it as cut off. What it could not tell is
+    // the two things that make such a session different from one killed mid-reply:
+    //   * A TURN THAT ENDS ON AN API ERROR RUNS NO STOP HOOK. Claude Code runs StopFailure in its place and ignores that
+    //     hook's exit code (hooks docs, "StopFailure"), so Deskbar's comment waiter, which each Stop starts, is not started
+    //     again. The waiter before it may already have fired (it is what woke the session for the turn that failed), so
+    //     the gen file says "a waiter is alive" while none is, and a comment put in the inbox is read by nobody.
+    //     Measured on 2026-11-26, session 152ba85d: a comment woke it at 00:08 through its waiter, the turn hit the
+    //     weekly limit, no Stop hook ran, and the manager's comments at 09:29 and 09:56 sat in its inbox until Petre typed
+    //     in its window at 10:56.
+    //   * A USAGE LIMIT SAYS WHEN IT ENDS. Every such entry measured on Petre's machine (509 of 509, 2026-11-26) carries
+    //     "apiErrorParams": {"rate_limit_info": {"resetsAt": <unix seconds>, ...}} (also under "quotaLimits"), the moment
+    //     the text's "resets 6am (Asia/Tbilisi)" names. Waking the session before then only hits the limit again.
+    // Only the LAST user or assistant entry decides, the same entry WasCutOff reads: an error followed by a reply that
+    // finished is history, not the session's state.
+    public static Maybe<TurnError> LastTurnError(IEnumerable<string> jsonLines) =>
+        LastEntry(jsonLines) is { Error: { } error } ? error : Maybe<TurnError>.None;
+
+    static Turn? LastEntry(IEnumerable<string> jsonLines) =>
         jsonLines
             .Select(Entry)
             .Where(e => e is not null)
-            .LastOrDefault() is { } last && !last.Finished;
+            .LastOrDefault();
 
-    // What matters about one line: whether it is a user or assistant entry and, if so, whether it ends a turn.
-    sealed record Turn(bool Finished);
+    // What matters about one line: whether it is a user or assistant entry and, if so, whether it ends a turn, and whether
+    // it is Claude Code's own report of an API error (Error, see LastTurnError).
+    sealed record Turn(bool Finished, TurnError? Error = null);
 
     static Turn? Entry(string line)
     {
@@ -99,6 +124,7 @@ public static class ClaudeTranscript
                     { } text when LocalCommandPrefixes.Any(p => text.StartsWith(p, StringComparison.Ordinal)) => null,
                     _ => new Turn(false),
                 },
+                "assistant" when IsTrue(root, "isApiErrorMessage") => new Turn(false, new TurnError(ResetsAtOf(root))),
                 "assistant" => new Turn(root.TryGetProperty("message", out var message)
                     && message.ValueKind == JsonValueKind.Object
                     && message.TryGetProperty("stop_reason", out var reason)
@@ -117,6 +143,19 @@ public static class ClaudeTranscript
     // is listed in case a version writes it without the flag.
     static readonly IReadOnlyList<string> LocalCommandPrefixes =
         ["<command-name>", "<command-message>", "<local-command-stdout>", "<local-command-stderr>", "<local-command-caveat>"];
+
+    // A usage limit's reset moment, from apiErrorParams.rate_limit_info.resetsAt or else quotaLimits.resetsAt (unix
+    // seconds, see LastTurnError). An error that names none (an overloaded server, a lost connection) has no reset.
+    static Maybe<DateTimeOffset> ResetsAtOf(JsonElement root) =>
+        new[] { At(root, "apiErrorParams", "rate_limit_info", "resetsAt"), At(root, "quotaLimits", "resetsAt") }
+            .Where(value => value is { ValueKind: JsonValueKind.Number })
+            .Select(value => value!.Value.TryGetInt64(out var seconds) ? DateTimeOffset.FromUnixTimeSeconds(seconds) : (DateTimeOffset?)null)
+            .FirstOrDefault(at => at is not null) is { } found ? found : Maybe<DateTimeOffset>.None;
+
+    // The element at the end of a chain of object properties, or null when any step is missing or not an object.
+    static JsonElement? At(JsonElement root, params string[] names) =>
+        names.Aggregate((JsonElement?)root, (at, name) =>
+            at is { ValueKind: JsonValueKind.Object } o && o.TryGetProperty(name, out var next) ? next : null);
 
     static bool IsTrue(JsonElement root, string name) =>
         root.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.True;
@@ -139,3 +178,9 @@ public static class ClaudeTranscript
                 _ => null,
             };
 }
+
+/// <summary>
+/// The last turn of a session ended on an API error (ClaudeTranscript.LastTurnError). <paramref name="ResetsAt"/> is set
+/// when the error was a usage limit: the moment the limit lifts.
+/// </summary>
+public sealed record TurnError(Maybe<DateTimeOffset> ResetsAt);

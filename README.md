@@ -680,6 +680,11 @@ minutes after it starts, and a session must have been gone for two minutes, beca
 sessions back by itself after a restart or a window reload. After a reboot that means the sessions come back
 two minutes after Deskbar next starts. A session you cleared with `/clear` is not resumed; the new one takes
 its place on the task.
+A session whose turn died on your Claude usage limit is shown as stopped: its task's thread and status line say
+so and name the time the limit resets. Deskbar resumes it a couple of minutes after that time and tells it to
+continue, also when Claude Code still lists it, as long as it runs in the background and no Deskbar window is
+open on it. A session in a VS Code panel or a terminal cannot be restarted from outside, so you type in it. A
+comment on such a task reaches the session straight away, even before the limit resets.
 A session that keeps stopping straight after being woken, whose transcript Claude Code no longer keeps, or
 whose resume fails (Claude's message goes into the thread), is left alone and its task waits on you with the
 reason until you act on it: set its status and it tries again, or double-click it to bring the session back
