@@ -39,6 +39,37 @@ public sealed class BookmarkDragTests
         Assert.True(ChipLayout.OnStrip(Tool(screen: 3), 2, strips));
     }
 
+    // Chips drawn with the same picture get the windows' ordinal band: 1, 2, ... in bar order among those without a
+    // colour of their own; a unique picture, an unknown one or an own colour gets none.
+    [Fact]
+    public void Chips_that_look_alike_are_numbered_in_bar_order_skipping_own_colours()
+    {
+        var portainerA = BookmarkRules.Link("https://100.65.0.11:9443/", "Portainer A").Value;
+        var coloured = BookmarkRules.Link("https://100.65.0.9:9443/", "Portainer C").Value with { Color = "#2E86DE" };
+        var portainerB = BookmarkRules.Link("https://100.65.0.8:9443/", "Portainer B").Value;
+        var github = BookmarkRules.Link("https://github.com/", "GitHub").Value;
+        var loading = BookmarkRules.Link("https://slow.example/", "Slow").Value;
+        var keys = new Dictionary<Guid, string?>
+        {
+            [portainerA.Id] = "portainer", [coloured.Id] = "portainer", [portainerB.Id] = "portainer",
+            [github.Id] = "github", [loading.Id] = null,
+        };
+
+        var ordinals = ChipLayout.Ordinals([portainerA, github, coloured, loading, portainerB], chip => keys[chip.Id]);
+
+        Assert.Equal(new Dictionary<Guid, int> { [portainerA.Id] = 1, [portainerB.Id] = 2 }, ordinals);
+    }
+
+    [Fact]
+    public void A_chip_that_shares_its_picture_only_with_a_coloured_chip_still_gets_a_band()
+    {
+        var plain = Tool();
+        var coloured = Tool() with { Color = "#2E86DE" };
+
+        Assert.Equal(new Dictionary<Guid, int> { [plain.Id] = 1 }, ChipLayout.Ordinals([coloured, plain], _ => "same"));
+        Assert.Empty(ChipLayout.Ordinals([plain], _ => "same"));
+    }
+
     [Fact]
     public void On_its_own_row_a_screen_half_sets_the_screen()
     {

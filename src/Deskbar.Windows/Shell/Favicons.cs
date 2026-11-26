@@ -42,6 +42,10 @@ public sealed class FaviconFetcher(HttpMessageHandler? handler = null, TimeSpan?
             PreAuthenticate = false,
             // A redirect leaves the origin or lands on a login page, so it counts as no icon rather than being followed.
             AllowAutoRedirect = false,
+            // A response read only up to its cap must not go on being read off the wire after it is disposed: by
+            // default the handler drains up to 1 MB of what is left to reuse the connection, which would break the
+            // cap the privacy page states. Nothing is drained; the connection is simply closed.
+            MaxResponseDrainSize = 0,
             SslOptions =
             {
                 // THE ONE PLACE CERTIFICATE CHECKS ARE RELAXED. Home-lab services (Portainer, a router, a NAS) very
@@ -72,7 +76,10 @@ public sealed class FaviconFetcher(HttpMessageHandler? handler = null, TimeSpan?
         var icon = DeclaredIcon.Of(Encoding.UTF8.GetString(html.Value), page);
         return icon.HasNoValue
             ? Result.Failure<byte[]>("The page declares no icon on its own site that Deskbar can show.")
-            : await Image(icon.Value, cancel);
+            // The page naming /favicon.ico itself, which is what already failed: asking again would only repeat it.
+            : string.Equals(icon.Value.AbsolutePath, "/favicon.ico", StringComparison.OrdinalIgnoreCase) && icon.Value.Query.Length == 0
+                ? Result.Failure<byte[]>("The page declares the /favicon.ico that already failed.")
+                : await Image(icon.Value, cancel);
     }
 
     Task<Result<byte[]>> Image(Uri url, CancellationToken cancel) =>

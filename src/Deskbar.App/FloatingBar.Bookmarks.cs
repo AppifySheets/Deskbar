@@ -114,7 +114,10 @@ public partial class FloatingBar
 
     // One chip. `divider`: this is the lane's first chip and windows come before it in the lane. `onStrip`: the chip
     // is for a screen strip (FillStrips), where the strip's 24 DIP height caps the picture at 16 DIP.
-    Button ChipButton(Guid workspaceId, Bookmark bookmark, bool divider, bool onStrip = false)
+    //
+    // `ordinal`: this chip shares its picture with another chip of its row and has no colour of its own, so it wears the
+    // windows' ordinal band in that number's colour (ChipOrdinals).
+    Button ChipButton(Guid workspaceId, Bookmark bookmark, bool divider, bool onStrip = false, int? ordinal = null)
     {
         var size = onStrip ? Math.Min(20 * IconScale, StripChipPicture) : 20 * IconScale;
         // An opened link's chip (see the header): full strength at rest too, and its outline solid. Asked once per chip
@@ -126,8 +129,16 @@ public partial class FloatingBar
         // An open chip sits on a light rounded backing, a small lit tile. Full strength alone was not enough: the GitHub
         // favicon is black, and on the dark row it looked the same opened as at rest (Petre: "github is started vs
         // isn't, i think it needs something"; he picked the backing, option A). Drawn first, under the picture.
+        //
+        // In the bookmark's OWN colour when it has one (Petre: "let's make it the color i set"): a 0x60 tint of it, enough
+        // to read as that colour, not a solid block that would bury the icon. Without one, the faint white lift. The
+        // automatic ordinal band (below) never tints the backing: it shows only as the band, as a window's does.
         if (open)
-            face.Children.Add(new Border { Background = ChipOpenBacking, CornerRadius = new CornerRadius(3) });
+            face.Children.Add(new Border
+            {
+                Background = bookmark.Color is { } own ? Tint(own, ChipOpenTint) ?? ChipOpenBacking : ChipOpenBacking,
+                CornerRadius = new CornerRadius(3),
+            });
         var image = new Image { Width = size, Height = size, Source = BookmarkIcons.For(bookmark, Rebuild) };
         RenderOptions.SetBitmapScalingMode(image, BitmapScalingMode.HighQuality);
         face.Children.Add(image);
@@ -147,6 +158,15 @@ public partial class FloatingBar
             var band = ColourBand(colour);
             band.Tag = ChipBandTag;
             band.Margin = new Thickness(0, 0, 0, -3);
+            face.Children.Add(band);
+        }
+        // SAME PICTURE TWICE IN THE ROW (ChipOrdinals): exactly the windows' ordinal band, its palette, rim and place on
+        // the icon's bottom edge, and nothing else (Petre: "like with running apps that are repeated on the same
+        // workspace"). Only for a chip with no colour of its own, so the two bands never meet.
+        else if (ordinal is { } number)
+        {
+            var band = ColourBand(OrdinalBands[(number - 1) % OrdinalBands.Count]);
+            band.Tag = ChipOrdinalTag;
             face.Children.Add(band);
         }
         if (bookmark.Kind == BookmarkKind.Link)
@@ -258,8 +278,19 @@ public partial class FloatingBar
         return button;
     }
 
-    // Tag on a coloured chip's band, for the tests.
+    // Tag on a coloured chip's band, and on the automatic ordinal band, for the tests.
     internal const string ChipBandTag = "bookmark-band";
+    internal const string ChipOrdinalTag = "bookmark-ordinal";
+
+    // The alpha of an open chip's backing in its own colour.
+    const byte ChipOpenTint = 0x60;
+
+    // Which chips of one row share their picture with another and so wear the ordinal band, and its number
+    // (ChipLayout.Ordinals, pure, with its rule). The picture's key is BookmarkIcons.ArtworkKeyOf: the fingerprint the
+    // windows' band groups by (IconCache.Fingerprint) for an icon, the letter and fill for a letter tile. The strips
+    // ask it of the same chips the current row shows, so a chip wears the same band on both.
+    IReadOnlyDictionary<Guid, int> ChipOrdinals(IReadOnlyList<Bookmark> chips) =>
+        chips.Count < 2 ? new Dictionary<Guid, int>() : ChipLayout.Ordinals(chips, chip => BookmarkIcons.ArtworkKeyOf(chip, Rebuild));
 
     // The largest picture a chip on a strip draws: the strip is 24 DIP high (ScreenStrip.HeightDip), and the chip's cell
     // adds 4 DIP and the band hangs 3 below.
@@ -595,9 +626,30 @@ sealed class BookmarkIcons
             ? link.Host
             : bookmark.Target;
         var (letter, hue) = LetterTile.Of(bookmark.Name, host);
-        if (!tiles.TryGetValue((letter, hue), out var tile)) tiles[(letter, hue)] = tile = DrawTile(letter, hue);
+        if (!tiles.TryGetValue((letter, hue), out var tile))
+        {
+            tiles[(letter, hue)] = tile = DrawTile(letter, hue);
+            // Two tiles with the same letter on the same fill ARE the same picture, so they share one key.
+            pictureKeys[tile] = $"tile:{letter}:{hue:F1}";
+        }
         return tile;
     }
+
+    // The key of the picture a chip draws NOW, for the ordinal band (FloatingBar.ChipOrdinals): the pixel fingerprint the
+    // windows' band groups by (IconCache.Fingerprint, see IconCache.ArtworkKeyOf for why pixels and nothing cheaper) for
+    // an icon, the letter and fill for a letter tile. Kept per picture, so a rebuild hashes nothing it hashed before. A
+    // picture whose pixels cannot be read answers null and is in no family. UI thread only, like For.
+    internal string? ArtworkKeyOf(Bookmark bookmark, Action arrived)
+    {
+        var picture = For(bookmark, arrived);
+        if (pictureKeys.TryGetValue(picture, out var known)) return known;
+        var key = picture is BitmapSource bitmap ? IconCache.Fingerprint(bitmap) : null;
+        pictureKeys[picture] = key;
+        return key;
+    }
+
+    // Picture -> key, by reference: the caches above hand out one frozen instance per picture.
+    readonly Dictionary<ImageSource, string?> pictureKeys = new(ReferenceEqualityComparer.Instance);
 
     // A 32-unit rounded square in the host's colour with the letter in white, as a vector image so it is sharp at
     // every icon size and screen scale.

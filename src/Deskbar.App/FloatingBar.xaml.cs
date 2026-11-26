@@ -3169,7 +3169,7 @@ public partial class FloatingBar : Window
     // see ChipLayout; a chip that remembers a screen sits in that screen's lane), and `dividedChips` the ones that carry
     // the divider. A key with no lane of that rank on this line (FirstChipLane, or any line not laid out per screen)
     // means the first lane. Drawn after the lane's windows, in the same stack, so they sit where the wrap counted them.
-    UIElement LineOf(IReadOnlyList<WindowRow> line, ISet<WindowHandle> opensGroup, string groupLabel, string groupKey, Guid? rowKey, List<UIElement> iconButtons, List<Border> washes, List<IconSlot> slots, bool isLastLine, double scale = 1.0, double indent = 0, bool titled = false, bool wholeRow = false, bool isCurrent = false, IReadOnlyDictionary<int, IReadOnlyList<Bookmark>>? chips = null, IReadOnlySet<Guid>? dividedChips = null)
+    UIElement LineOf(IReadOnlyList<WindowRow> line, ISet<WindowHandle> opensGroup, string groupLabel, string groupKey, Guid? rowKey, List<UIElement> iconButtons, List<Border> washes, List<IconSlot> slots, bool isLastLine, double scale = 1.0, double indent = 0, bool titled = false, bool wholeRow = false, bool isCurrent = false, IReadOnlyDictionary<int, IReadOnlyList<Bookmark>>? chips = null, IReadOnlySet<Guid>? dividedChips = null, IReadOnlyDictionary<Guid, int>? chipOrdinals = null)
     {
         // Runs of consecutive icons that share a monitor. `opensGroup` already knows where each
         // one starts -- it is the same set the wrap arithmetic budgets a marker for -- so this
@@ -3410,7 +3410,8 @@ public partial class FloatingBar : Window
                 if (rowKey is { } workspaceId && chipsAt.TryGetValue(laneIndex, out var laneChips))
                     laneChips.ToList().ForEach(chip =>
                     {
-                        var button = ChipButton(workspaceId, chip, dividedChips?.Contains(chip.Id) == true);
+                        var button = ChipButton(workspaceId, chip, dividedChips?.Contains(chip.Id) == true,
+                            ordinal: chipOrdinals is not null && chipOrdinals.TryGetValue(chip.Id, out var ordinal) ? ordinal : null);
                         if (scale is not 1.0) button.LayoutTransform = new ScaleTransform(scale, scale);
                         iconButtons.Add(button);
                         stack.Children.Add(button);
@@ -4578,6 +4579,9 @@ public partial class FloatingBar : Window
         // with no windows yet is added as a group of its own, in rank order, so LineOf finds a lane for it.
         IReadOnlyList<IReadOnlyDictionary<int, IReadOnlyList<Bookmark>>> chipLines = [];
         var dividedChips = new HashSet<Guid>();
+        // Chips of this row drawn with the same picture wear the windows' ordinal band (ChipOrdinals), counted within
+        // the row as a window's ordinal is counted within its group.
+        var chipOrdinals = ChipOrdinals(chips);
         if (chips.Count > 0 && !titled)
         {
             var screenLanes = showMonitorMarkers && monitorByRank.Count > 0;
@@ -4650,7 +4654,7 @@ public partial class FloatingBar : Window
         drawnLines.Select((line, at) => (line, at, last: at == drawnLines.Count - 1)).ToList()
             .ForEach(x => icons.Children.Add(LineOf(x.line, showMonitorMarkers ? opensLine : [], groupLabel, groupKey, rowKey, iconButtons, washes, slots, x.last,
                 scale, spine is not null ? NestedIndent : 0, titled, wholeRow, isCurrent,
-                chips: x.at < chipLines.Count ? chipLines[x.at] : null, dividedChips: dividedChips)));
+                chips: x.at < chipLines.Count ? chipLines[x.at] : null, dividedChips: dividedChips, chipOrdinals: chipOrdinals)));
 
         // A TITLED row's chips: icon lines of their own under the window list (ruling P12), rather than squeezed into
         // lines that each hold one window and its title. Wrapped by the same Wrap, so they break where a row's would.
@@ -4658,7 +4662,7 @@ public partial class FloatingBar : Window
             ChipLayout.Split<WindowRow>([], chips, Wrap).Chips.ToList()
                 .ForEach(line => icons.Children.Add(LineOf([], new HashSet<WindowHandle>(), groupLabel, groupKey, rowKey, iconButtons, washes, slots,
                     isLastLine: false, scale, spine is not null ? NestedIndent : 0, titled: false, wholeRow: false, isCurrent,
-                    chips: new Dictionary<int, IReadOnlyList<Bookmark>> { [FirstChipLane] = line })));
+                    chips: new Dictionary<int, IReadOnlyList<Bookmark>> { [FirstChipLane] = line }, chipOrdinals: chipOrdinals)));
 
         // The titled list ends with the items the strips end with: the pinned workspaces' and the previous
         // workspace's (FloatingBar.WorkspaceJumps.cs). Petre: "i want to have pinned workspaces in the workspace, in

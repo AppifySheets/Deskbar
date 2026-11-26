@@ -346,7 +346,9 @@ After a restart every link chip starts faded.
 Right-click a chip for **Open**, **Open all bookmarks**, **Rename…**, **Colour** and **Remove**. **Open all
 bookmarks** switches once and opens every chip that is showing, so a program already running is not started again.
 **Colour** offers the same palette and **Custom…** as a workspace, plus **Default** to clear it. The colour goes
-around the icon, never on it: the chip's outline turns that colour and a small bar appears under the icon.
+around the icon, never on it: the chip's outline turns that colour, a small bar appears under the icon, and an open
+chip sits on a tint of it. Two chips in one row that show the same icon (two Portainer instances, say) get the
+small coloured underline that repeated windows get, automatically, unless one has a colour of its own.
 
 The workspace you are in also shows its chips on the screen strips, after the window tabs and just before the
 pinned workspaces' items. They look and work the same as on the row.

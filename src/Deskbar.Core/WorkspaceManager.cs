@@ -522,9 +522,9 @@ public sealed class WorkspaceManager(
                     // not ready yet. A screen no longer connected fails inside the move, and the window stays where it
                     // opened, which is the brief's "opens without placement". Traced, never reported: nobody clicked
                     // anything at this moment.
-                    if (decided.Screen is { } screen)
-                        MoveWindowToMonitor(window.Handle, screen)
-                            .TapError(error => trace?.Invoke($"start: screen {screen} for {window.ProcessName} 0x{window.Handle.Value:X}: {error}"));
+                    // Then kept under watch for a moment, against an app that restores its own bounds after showing
+                    // (PutOnStartedScreen).
+                    if (decided.Screen is { } screen) PutOnStartedScreen(window, screen);
                 });
 
         // Fire-and-forget for the same reason as above. WantedName rather than the rules directly, so an
@@ -589,6 +589,11 @@ public sealed class WorkspaceManager(
         // this timer rather than owning one because what it waits for -- a window becoming reachable --
         // is exactly the kind of OS state this method already exists to re-read (#89).
         ApplyPendingMonitorMoves();
+        // The two halves of a bookmark start that named a screen, each free when nothing is awaited: an app whose
+        // window took its app id late (RecheckAppStarts), and a started window that drifted off its screen
+        // (WatchStartedScreens).
+        RecheckAppStarts();
+        WatchStartedScreens();
     }
 
     // The window list, reconciled against the OS. Rides the same 5s sweep ResyncActiveWindow does.
@@ -3786,6 +3791,10 @@ public sealed class WorkspaceManager(
     // expectation is gone before anything unrelated could match it by name.
     internal static readonly TimeSpan ExpectationLifetime = TimeSpan.FromSeconds(30);
 
+    // An app start (ExpectAppWindow): long enough for a Store app or a PWA to show its window, short enough that a
+    // window of that app opened by hand afterwards is not taken for the one the chip started.
+    public static readonly TimeSpan AppExpectationLifetime = TimeSpan.FromSeconds(10);
+
     public Guid ExpectWindow(string program, Guid workspaceId, int? screen = null)
     {
         var expectation = new Expectation(Guid.NewGuid(), Path.GetFileNameWithoutExtension(program.Trim()), workspaceId, now() + ExpectationLifetime, Screen: screen);
@@ -3797,9 +3806,19 @@ public sealed class WorkspaceManager(
     // An installed app's window, recognised by `matches` rather than by its exe name (see Matches above). `label` names
     // it in the trace. An empty ProcessName, so AwaitsAny and AwaitedProcesses (quick find's "already on its way")
     // never take it for a program's.
+    //
+    // SHORTER-LIVED than a program's (AppExpectationLifetime): a test that never answers must not still be waiting when
+    // the user opens a window of that app by hand. Within it, a window that did not answer on arrival is asked again on
+    // the resync tick (RecheckAppStarts), since its app id can arrive after the window does; only windows that appeared
+    // after the start are ever asked.
+    //
+    // RE-ENTRANCY: `matches` asks the shell for the window's AppUserModelID (SHGetPropertyStoreForWindow), a COM call
+    // made from the new-window path and the tick on the UI thread. It is an in-process property read, but any COM call on
+    // an STA thread may pump messages, so nothing here holds a half-made change across it: the expectation list is read
+    // before the call and only replaced after it, and a window that vanished meanwhile simply does not answer (Answers).
     public Guid ExpectAppWindow(string label, Func<WindowInfo, bool> matches, Guid workspaceId, int? screen = null)
     {
-        var expectation = new Expectation(Guid.NewGuid(), "", workspaceId, now() + ExpectationLifetime, Screen: screen, Matches: matches);
+        var expectation = new Expectation(Guid.NewGuid(), "", workspaceId, now() + AppExpectationLifetime, Screen: screen, Matches: matches);
         expectations.Add(expectation);
         trace?.Invoke($"start: expecting app {label} for {NameOf(workspaceId)}{(screen is { } s ? $", screen {s}" : "")}");
         return expectation.Id;
@@ -3902,7 +3921,18 @@ public sealed class WorkspaceManager(
                 ? Answers(matches, window)
                 : e.ProcessName.Equals(window.ProcessName, StringComparison.OrdinalIgnoreCase)))
             : null;
-        if ((byProcess ?? byName) is not { } match) return Maybe<Decision>.None;
+        if ((byProcess ?? byName) is not { } match)
+        {
+            // An app's window may carry its AppUserModelID only a moment after it appears (a PWA's msedge window, an
+            // ApplicationFrameHost frame), so a miss now is not the answer: the window is kept as a CANDIDATE and asked
+            // again on the resync tick (RecheckAppStarts). Only windows that appear while an app start is awaited.
+            if (expectations.Any(e => e.Matches is not null && !e.NameSpent))
+            {
+                appCandidates.Add(window);
+                trace?.Invoke($"start: {window.ProcessName} 0x{window.Handle.Value:X} is not the awaited app yet; asked again on the next tick");
+            }
+            return Maybe<Decision>.None;
+        }
 
         if (byName is not null) expectations[expectations.IndexOf(byName)] = byName with { NameSpent = true };
 
@@ -3917,6 +3947,75 @@ public sealed class WorkspaceManager(
         trace?.Invoke($"start: {window.ProcessName}({window.ProcessId}) 0x{window.Handle.Value:X} -> {NameOf(match.WorkspaceId)} " +
                       $"by {(byProcess is not null ? "process" : "name")}{(unseen ? ", marked for attention" : "")}");
         return new Decision(Placement.In(match.WorkspaceId), Roster: false, match.Screen);
+    }
+
+    // Windows that appeared while an app start was awaited and did not answer it yet (StartedFor), asked again by
+    // RecheckAppStarts until the expectation lapses. Never a window that was already open before the start.
+    readonly List<WindowInfo> appCandidates = [];
+
+    // On the resync tick: each awaited app start is asked again of the candidates, in the order they appeared. The first
+    // that answers is placed as StartedFor would have placed it (the workspace, then the screen, then the screen
+    // watch). A lapsed expectation takes its candidates with it, so nothing it never matched can be claimed later.
+    // `matches` is the shell's app id lookup, so this runs on the UI thread like the rest of the manager.
+    void RecheckAppStarts()
+    {
+        expectations.RemoveAll(e => e.Until < now());
+        var awaited = expectations.Where(e => e.Matches is not null && !e.NameSpent).ToList();
+        if (awaited.Count == 0)
+        {
+            appCandidates.Clear();
+            return;
+        }
+        appCandidates.RemoveAll(w => !IsKnown(w.Handle));
+        awaited.ForEach(expectation =>
+        {
+            var found = appCandidates.FirstOrDefault(w => Answers(expectation.Matches!, w));
+            if (found is null)
+            {
+                trace?.Invoke($"start: still no window of the awaited app among {appCandidates.Count} new window(s)");
+                return;
+            }
+            appCandidates.Remove(found);
+            expectations[expectations.IndexOf(expectation)] = expectation with { NameSpent = true };
+            trace?.Invoke($"start: {found.ProcessName} 0x{found.Handle.Value:X} answered the awaited app late -> {NameOf(expectation.WorkspaceId)}");
+            ApplyPlacement(found, Placement.In(expectation.WorkspaceId), roster: false);
+            if (expectation.Screen is { } screen) PutOnStartedScreen(found, screen);
+        });
+    }
+
+    bool IsKnown(WindowHandle window) => KnownWindows.Any(w => w.Handle == window);
+
+    // THE SCREEN A START ASKED FOR, held for a moment (review of the second bookmarks PR). The move is made when the
+    // window appears, but an app that shows its window and THEN restores its own saved bounds (VS Code, Office) puts it
+    // back where it was last time, after the move read back as done. So a window started for a screen stays under watch
+    // for ScreenWatch after the move; on each resync tick, a window that has drifted off its screen is moved back, and
+    // each such move is traced, so a live try can tell whether it was ever needed.
+    readonly Dictionary<WindowHandle, (int Screen, DateTimeOffset Until)> startedScreens = [];
+
+    public static readonly TimeSpan ScreenWatch = TimeSpan.FromSeconds(5);
+
+    void PutOnStartedScreen(WindowInfo window, int screen)
+    {
+        MoveWindowToMonitor(window.Handle, screen)
+            .Tap(() => startedScreens[window.Handle] = (screen, now() + ScreenWatch))
+            .TapError(error => trace?.Invoke($"start: screen {screen} for {window.ProcessName} 0x{window.Handle.Value:X}: {error}"));
+    }
+
+    void WatchStartedScreens()
+    {
+        if (startedScreens.Count == 0 || screenLayout is null) return;
+        startedScreens.Where(s => s.Value.Until < now() || !IsKnown(s.Key)).Select(s => s.Key).ToList()
+            .ForEach(window => startedScreens.Remove(window));
+        // A move still held (the window is on another desktop) is the pending queue's to finish, not this watch's.
+        var placement = screenLayout.Snapshot().MonitorPlacement;
+        if (placement is null) return;
+        startedScreens.Where(s => !pendingMonitor.ContainsKey(s.Key)).ToList().ForEach(s =>
+        {
+            var on = screenLayout.RectOf(s.Key).Map(rect => MonitorMove.MonitorOf(rect, placement)).GetValueOrDefault();
+            if (on is null || on == s.Value.Screen) return;
+            trace?.Invoke($"start: 0x{s.Key.Value:X} drifted to screen {on} after its move, moving it back to screen {s.Value.Screen}");
+            MoveWindowToMonitor(s.Key, s.Value.Screen);
+        });
     }
 
     static bool Answers(Func<WindowInfo, bool> matches, WindowInfo window)

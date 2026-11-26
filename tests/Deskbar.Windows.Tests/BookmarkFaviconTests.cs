@@ -84,6 +84,8 @@ public sealed class BookmarkFaviconTests : IDisposable
         Assert.Null(handler.Credentials);
         Assert.False(handler.PreAuthenticate);
         Assert.False(handler.AllowAutoRedirect);
+        // A capped response is not drained off the wire after it is disposed.
+        Assert.Equal(0, handler.MaxResponseDrainSize);
         // The one relaxed certificate check: a self-signed home-lab certificate must not stop the icon.
         Assert.True(handler.SslOptions.RemoteCertificateValidationCallback!(this, null, null, default));
     }
@@ -190,6 +192,15 @@ public sealed class BookmarkFaviconTests : IDisposable
             Assert.Null(r.Headers.Authorization);
             Assert.False(r.Headers.Contains("Cookie"));
         });
+    }
+
+    [Fact]
+    public async Task The_fallback_does_not_ask_again_for_the_favicon_ico_that_failed()
+    {
+        var server = new SiteServer(path => path == "/" ? Page("""<link rel="shortcut icon" href="/favicon.ico">""") : Picture());
+
+        Assert.True((await new FaviconFetcher(server).FetchDeclared(new Uri("https://portainer.local/"), default)).IsFailure);
+        Assert.Single(server.Seen);
     }
 
     [Fact]
