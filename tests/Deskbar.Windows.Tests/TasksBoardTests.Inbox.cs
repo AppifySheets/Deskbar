@@ -2,6 +2,7 @@ using System.Windows;
 using System.Windows.Automation;
 using System.Windows.Controls;
 using System.Windows.Input;
+using System.Windows.Media;
 using CSharpFunctionalExtensions;
 using Deskbar.App;
 using Deskbar.Core.Tasks;
@@ -303,8 +304,10 @@ public partial class TasksBoardTests
         Assert.True(t.Window.InboxFilterSheetOpen);
         Assert.True(t.Window.FiltersInSheet);
         Assert.Equal(chips, t.Window.FilterLabels);
-        foreach (var name in new[] { "Filter: Claude", "Subtasks", "Current workspace", "Workspace filter", "Assignee filter" })
+        foreach (var name in new[] { "Filter: Claude", "Subtasks", "Workspace filter", "Assignee filter" })
             Assert.True(HasButtonNamed(t.Window.InboxHeaderShown!, name), name);
+        // "Current workspace" is the header's "This workspace | Everywhere", so the sheet leaves its box out.
+        Assert.False(HasButtonNamed(t.Window.InboxHeaderShown!, "Current workspace"));
 
         Click(ButtonNamed(t.Window.InboxHeaderShown!, $"Filter: {chips.Single(c => c.StartsWith("Done"))}"));
         Assert.Equal([k.Done], t.Window.InboxShown!.Lines.Select(l => l.Id));
@@ -610,7 +613,7 @@ public partial class TasksBoardTests
     {
         using var t = Build(width: 460);
         var k = InboxTasks(t);
-        Enumerable.Range(0, 12).ToList().ForEach(i => t.Tasks.Comment(k.Asking, Maybe<string>.None, $"Comment {i}, long enough to take a line of its own in the thread"));
+        t.Tasks.Describe(k.Asking, string.Join("\n\n", Enumerable.Range(0, 60).Select(i => $"Step {i} of a long brief, long enough to take a line of its own.")));
         t.Controller.Show();
         ChooseInbox(t);
         t.Window.UpdateLayout();
@@ -619,6 +622,149 @@ public partial class TasksBoardTests
         t.Window.UpdateLayout();
 
         var (offset, extent) = t.Window.InboxPageScroll;
+        Assert.True(extent > 0);
         Assert.Equal(extent, offset, 1);
     });
+
+    // A short page reads like a chat from the bottom up: the comment box at the bottom edge, the empty room on top.
+    [Fact]
+    public void A_short_page_sits_at_the_bottom() => StaThread.Run(() =>
+    {
+        using var t = Build(width: 460);
+        var k = InboxTasks(t);
+        t.Controller.Show();
+        ChooseInbox(t);
+        Click(LineOf(t.Window, k.Done));
+        t.Window.UpdateLayout();
+
+        var scroller = t.Window.InboxPageScroller!;
+        Assert.Equal(0, scroller.ScrollableHeight, 1);
+        var box = t.Window.CommentBoxOf(k.Done)!;
+        var bottom = box.TranslatePoint(new Point(0, box.ActualHeight), scroller).Y;
+        Assert.True(scroller.ViewportHeight - bottom < 40, $"box ends at {bottom} of {scroller.ViewportHeight}");
+        Assert.True(scroller.ViewportHeight > 200);
+    });
+
+    // The manager's violet line stays in sight on a page too.
+    [Fact]
+    public void The_manager_line_stays_on_a_page() => StaThread.Run(() =>
+    {
+        using var t = Build(openManager: () => CSharpFunctionalExtensions.Result.Success());
+        t.Harness.Manager.SetManagerSession(new ManagerRecord("mgr", new DateOnly(2026, 11, 22), Question: "Which comes first?", AskedAt: Start));
+        var k = InboxTasks(t);
+        t.Controller.Show();
+        ChooseInbox(t);
+        var host = (Border)LogicalTreeHelper.FindLogicalNode(t.Window, "ManagerLineHost");
+        Assert.Equal(Visibility.Visible, host.Visibility);
+
+        Click(LineOf(t.Window, k.Asking));
+        Assert.NotNull(t.Window.InboxPageContent);
+        Assert.Equal(Visibility.Visible, host.Visibility);
+    });
+
+    // The page's thread in the Inbox's colours; the List's thread keeps its own.
+    [Fact]
+    public void The_pages_bubbles_take_the_inbox_colours_and_the_lists_keep_theirs() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var k = InboxTasks(t);
+        t.Tasks.Comment(k.Asking, "s3", "An answer");
+        t.Controller.Show();
+        t.Controller.ToggleThread(k.Asking);
+        static IReadOnlyList<Color> Fills(DependencyObject scope) =>
+            Inside(scope).OfType<Border>().Select(b => b.Background).OfType<SolidColorBrush>().Select(b => b.Color).ToArray();
+        var inbox = Color.FromRgb(0x1F, 0x25, 0x31);
+        Assert.DoesNotContain(inbox, Fills(t.Window));
+        t.Controller.ToggleThread(k.Asking);
+
+        ChooseInbox(t);
+        Click(LineOf(t.Window, k.Asking));
+        Assert.Contains(inbox, Fills((DependencyObject)t.Window.InboxPageContent!));
+        Assert.DoesNotContain(Color.FromRgb(0x2B, 0x26, 0x20), Fills((DependencyObject)t.Window.InboxPageContent!));
+    });
+
+    // The working mark turns while it is on screen; nothing else does.
+    [Fact]
+    public void Only_the_working_mark_turns() => StaThread.Run(() =>
+    {
+        using var t = Build(workingOf: task => task.Title == "Review the diff" ? 1 : 0);
+        var k = InboxTasks(t);
+        t.Controller.Show();
+        ChooseInbox(t);
+        t.Window.ChooseInboxTab(InboxTab.Claude);
+
+        static int Turning(DependencyObject line) => Inside(line).OfType<Canvas>().Count(c => Equals(c.Tag, InboxMarks.TurningTag));
+        Assert.Equal(1, Turning(LineOf(t.Window, k.Working)));
+        Assert.Equal(0, Turning(LineOf(t.Window, k.Idle)));
+    });
+
+    // Ctrl+F and the search button show the search row under the Inbox's header and put the keyboard in it.
+    [Fact]
+    public void Ctrl_f_and_the_search_button_show_and_focus_the_search_box() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        InboxTasks(t);
+        t.Controller.Show();
+        ChooseInbox(t);
+        Assert.False(t.Window.InboxSearchShown);
+
+        Assert.True(t.Window.Press(Key.F, ModifierKeys.Control));
+        Assert.True(t.Window.InboxSearchShown);
+        Assert.True(t.Window.SearchBox.IsKeyboardFocused);
+
+        Click(ButtonNamed(t.Window.InboxHeaderShown!, "Search"));
+        Assert.False(t.Window.InboxSearchShown);
+        Click(ButtonNamed(t.Window.InboxHeaderShown!, "Search"));
+        Assert.True(t.Window.InboxSearchShown);
+        Assert.True(t.Window.SearchBox.IsKeyboardFocused);
+    });
+
+    // A pull request's number finds its task in the Inbox, past the tabs.
+    [Fact]
+    public void Search_by_a_pull_request_number_finds_its_task() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var k = InboxTasks(t);
+        t.Tasks.AddPullRequest(k.Done, new PullRequestLink("AppifySheets", "Deskbar", 523));
+        t.Controller.Show();
+        ChooseInbox(t);
+
+        t.Window.SearchBox.Text = "#523";
+
+        Assert.False(t.Window.InboxShown!.Tabbed);
+        Assert.Equal([k.Done], DrawnInboxLines(t));
+    });
+
+    // Every text colour of the Inbox look reads at 4.5 to 1 or better on what it is drawn on (spec, "The frame").
+    [Fact]
+    public void Every_inbox_text_colour_has_a_contrast_of_at_least_4_5()
+    {
+        static double Luminance(Brush brush)
+        {
+            var c = ((SolidColorBrush)brush).Color;
+            static double Channel(byte v) => v / 255.0 is var s && s <= 0.03928 ? s / 12.92 : Math.Pow((s + 0.055) / 1.055, 2.4);
+            return 0.2126 * Channel(c.R) + 0.7152 * Channel(c.G) + 0.0722 * Channel(c.B);
+        }
+        static double Contrast(Brush a, Brush b)
+        {
+            var (x, y) = (Luminance(a), Luminance(b));
+            return (Math.Max(x, y) + 0.05) / (Math.Min(x, y) + 0.05);
+        }
+        var chat = new SolidColorBrush(Color.FromRgb(0x2A, 0x52, 0xB0));
+        var lightInk = new SolidColorBrush(Color.FromRgb(0xE6, 0xE6, 0xE6));
+        var pairs = new (string Name, Brush Text, Brush Back)[]
+        {
+            ("ink on background", InboxLook.Ink, InboxLook.Background), ("second ink on background", InboxLook.Ink2, InboxLook.Background),
+            ("third ink on background", InboxLook.Ink3, InboxLook.Background), ("amber on background", InboxLook.Amber, InboxLook.Background),
+            ("blue on background", InboxLook.Blue, InboxLook.Background), ("violet on background", InboxLook.Violet, InboxLook.Background),
+            ("ink on surface", InboxLook.Ink, InboxLook.Surface), ("second ink on surface", InboxLook.Ink2, InboxLook.Surface),
+            ("third ink on surface", InboxLook.Ink3, InboxLook.Surface), ("ink on raised", InboxLook.Ink, InboxLook.Raised),
+            ("second ink on raised", InboxLook.Ink2, InboxLook.Raised), ("third ink on raised", InboxLook.Ink3, InboxLook.Raised),
+            ("amber on raised", InboxLook.Amber, InboxLook.Raised), ("second ink on the sheet", InboxLook.Ink2, InboxLook.Sheet),
+            ("ink on the question", InboxLook.Ink, InboxLook.AskFill), ("amber on the question", InboxLook.Amber, InboxLook.AskFill),
+            ("background on Close task", InboxLook.Background, InboxLook.Ink), ("bubble text on your bubble", lightInk, chat),
+            ("bubble text on Claude's bubble", lightInk, InboxLook.Raised),
+        };
+        Assert.All(pairs, p => Assert.True(Contrast(p.Text, p.Back) >= 4.5, $"{p.Name}: {Contrast(p.Text, p.Back):0.00}"));
+    }
 }

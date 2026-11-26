@@ -35,6 +35,23 @@ static class ChatThread
     static readonly Brush MineName = Frozen(0xFF, 0x9D, 0xBB, 0xEB);
     static readonly Brush Dim = Frozen(0xFF, 0x8B, 0x8F, 0x99);
 
+    // A thread's colours. Today's are Default, for the List and the task window; the tasks panel's Inbox page draws its
+    // thread inside Using(InboxLook), blue-black on the Inbox's background (task 740a2231), so no other host changes.
+    internal sealed record Look(Brush MineFill, Brush ClaudeFill, Brush ManagerFill, Brush MineName, Brush ClaudeName, Brush ManagerName, Brush Dim);
+    static readonly Look Default = new(MineFill, ClaudeFill, ManagerFill, MineName, ClaudeName, ManagerName, Dim);
+    internal static readonly Look InboxLook = new(Frozen(0xFF, 0x2A, 0x52, 0xB0), Frozen(0xFF, 0x1F, 0x25, 0x31), Frozen(0xFF, 0x1F, 0x25, 0x31),
+        Frozen(0xFF, 0xB6, 0xBE, 0xCC), Frozen(0xFF, 0xB6, 0xBE, 0xCC), Frozen(0xFF, 0xB6, 0xBE, 0xCC), Frozen(0xFF, 0x8A, 0x94, 0xA6));
+    [ThreadStatic] static Look? using_;
+    static Look L => using_ ?? Default;
+
+    /// <summary>Draws the threads built until the result is disposed in <paramref name="look"/>.</summary>
+    internal static IDisposable Using(Look look)
+    {
+        var before = using_;
+        using_ = look;
+        return System.Reactive.Disposables.Disposable.Create(() => using_ = before);
+    }
+
     // The share of the thread's width a bubble may take: the rest stays empty on the other side, which is what makes
     // the two sides read as two people. Five sixths, set as a 5:1 star split.
     const double BubbleShare = 5;
@@ -83,7 +100,7 @@ static class ChatThread
         Tag = DayTag,
         Text = day,
         FontSize = 10,
-        Foreground = Dim,
+        Foreground = L.Dim,
         HorizontalAlignment = HorizontalAlignment.Center,
         Margin = new Thickness(0, 1, 0, 3),
     };
@@ -97,7 +114,7 @@ static class ChatThread
         var mine = comment.Who == CommentAuthor.You;
         var bubble = new Border
         {
-            Background = mine ? MineFill : comment.Who == CommentAuthor.Manager ? ManagerFill : ClaudeFill,
+            Background = mine ? L.MineFill : comment.Who == CommentAuthor.Manager ? L.ManagerFill : L.ClaudeFill,
             // Rounded all round but for the corner nearest its author's side, the "tail" of a chat bubble.
             CornerRadius = mine ? new CornerRadius(12, 12, 3, 12) : new CornerRadius(12, 12, 12, 3),
             Padding = new Thickness(10, 4, 10, 4),
@@ -181,9 +198,9 @@ static class ChatThread
         FontWeight = FontWeights.SemiBold,
         Foreground = comment.Who switch
         {
-            CommentAuthor.You => MineName,
-            CommentAuthor.Manager => ManagerName,
-            _ => ClaudeName,
+            CommentAuthor.You => L.MineName,
+            CommentAuthor.Manager => L.ManagerName,
+            _ => L.ClaudeName,
         },
         VerticalAlignment = VerticalAlignment.Center,
         Margin = new Thickness(4, 0, 0, 0),
@@ -195,7 +212,7 @@ static class ChatThread
         Text = (signed ? "· " : "") + (comment.Time.Length > 0 ? comment.Time : comment.When),
         ToolTip = comment.FullWhen.Length > 0 ? comment.FullWhen : null,
         FontSize = 10,
-        Foreground = Dim,
+        Foreground = L.Dim,
         VerticalAlignment = VerticalAlignment.Center,
         HorizontalAlignment = alignment,
         Margin = new Thickness(4, 0, 4, 0),
