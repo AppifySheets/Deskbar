@@ -440,7 +440,8 @@ public sealed class JsonTaskStoreTests : IDisposable
         new(board.Tasks.Select((t, i) => i != 1 ? t : t with
         {
             Wanted = new SessionSettings("sonnet", "low", Maybe<string>.None),
-            Switching = new PendingSwitch("s2", new SessionSettings("sonnet", "low", Maybe<string>.None), T0.AddMinutes(6)) { CopyShortId = "8c42135c" },
+            Switching = new PendingSwitch("s2", new SessionSettings("sonnet", "low", Maybe<string>.None), T0.AddMinutes(6))
+                { Issued = T0.AddMinutes(6).AddSeconds(1), CopyShortId = "8c42135c", CopyId = "s1" },
             Sessions = t.Sessions.Select(s => s.Id == "s1"
                 ? s with { ReplacedAt = T0.AddMinutes(3), ReplacedBy = "s2" }
                 : s with { LaunchedWith = new SessionSettings("opus", Maybe<string>.None, "acceptEdits") }).ToArray(),

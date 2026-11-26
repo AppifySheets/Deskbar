@@ -420,11 +420,11 @@ public sealed record TaskItem(
     public Maybe<SessionSettings> Wanted { get; init; }
 
     /// <summary>
-    /// A switch to <see cref="Wanted"/> under way (SettingsSwitch): which session it copies, to what, since when, and the
-    /// copy's short id once Claude named it. Stored, not kept in memory, so a Deskbar that closes in the middle of one
-    /// can finish it when it starts again (SettingsSwitch.Recover) instead of leaving the copy to be adopted as a task
-    /// of its own. Cleared when the copy joins the task (TaskBoard.SessionSwitched) or the switch is given up
-    /// (TaskBoard.SwitchAbandoned). An init property, stored as an optional `switching` object; absent means none.
+    /// A switch the user's pick began (SettingsSwitch, PendingSwitch has its three phases): which session it copies, to
+    /// what, and how far it got. Stored, not kept in memory, so a Deskbar that closes in the middle of one carries on
+    /// with it when it starts again (SettingsSwitch.Next) instead of leaving the copy to be adopted as a task of its own.
+    /// Cleared when the switch is done (TaskBoard.SwitchConfirmed, SessionRelaunched), undone (SwitchReverted) or given
+    /// up (SwitchAbandoned). An init property, stored as an optional `switching` object; absent means none.
     /// </summary>
     public Maybe<PendingSwitch> Switching { get; init; }
 

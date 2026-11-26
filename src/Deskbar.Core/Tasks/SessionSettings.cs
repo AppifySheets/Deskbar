@@ -139,6 +139,20 @@ public static class SessionChoices
             .ToResult($"'{given}' is not a permission mode. Give one of {string.Join(", ", Modes.Select(m => m.Value))}.");
 
     /// <summary>
+    /// Settings in the menus' words, for a thread line: "Sonnet · Low · Edit by itself". A model that is not one of the
+    /// aliases is shown as given; a value not set is left out; nothing set at all is "Claude Code's own settings".
+    /// </summary>
+    public static string Describe(SessionSettings settings) =>
+        new[]
+        {
+            settings.Model.Map(m => Models.TryFirst(c => c.Value == m).Map(c => c.Label).GetValueOrDefault(m)),
+            settings.Effort.Map(e => Efforts.TryFirst(c => c.Value == e).Map(c => c.Label).GetValueOrDefault(e)),
+            settings.Mode.Map(p => Modes.TryFirst(c => c.Value == p).Map(c => c.Label).GetValueOrDefault(p)),
+        }.Where(part => part.HasValue).Select(part => part.Value).ToList() is { Count: > 0 } parts
+            ? string.Join(" · ", parts)
+            : "Claude Code's own settings";
+
+    /// <summary>
     /// Settings from three typed values, each blank for "not set"; the first value that is not a valid choice fails the
     /// whole, with its reason (for a command a person typed, where a silent drop would hide his mistake).
     /// </summary>
