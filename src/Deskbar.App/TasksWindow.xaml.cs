@@ -2200,7 +2200,7 @@ public partial class TasksWindow : Window
     // One subtask in its parent's thread: "↳ title · status · status line", dim when it is done or closed. The whole line
     // is a button that opens the subtask's own thread right under it, in place, and folds it again (task 0eb943d8,
     // Petre: "let subtasks stay where they are, expand their current place"). It used to pick the subtask and show it
-    // (TasksBoard.ShowTaskPastFilters), which unfolded it onto a line of its own below the parent's whole thread, two
+    // (TasksBoard.ShowTask), which unfolded it onto a line of its own below the parent's whole thread, two
     // threads open one above the other. The selection is left alone, since picking the subtask is what unfolds it.
     UIElement SubtaskEntry(SubtaskView sub, Guid parent)
     {

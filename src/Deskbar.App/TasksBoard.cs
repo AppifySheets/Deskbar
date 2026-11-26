@@ -307,7 +307,7 @@ public sealed class TasksBoard : IDisposable
             // A subtask in its parent's thread that has a line of its own elsewhere (SubtaskView.HasLine; one without opens
             // in place, task 0eb943d8) and the task window's "Show in the tasks panel": both ask for that very task, so it
             // is let past a filter that hides it (task b0526e18), as "Subtask of" lets a parent through.
-            ShowTask = ShowTaskPastFilters,
+            ShowTask = ShowTask,
             SetParent = (id, parent) => Report(tasks.SetParent(id, parent), id).IsSuccess,
             NestTargets = id => tasks.Board.ParentCandidates(id).Select(t => t.Id).ToHashSet(),
             Snooze = (id, choice) => Snooze(id, choice),
@@ -785,10 +785,6 @@ public sealed class TasksBoard : IDisposable
     }
 
     /// <summary>
-    /// The bar's single click on a task line (Ruling 54): the panel comes forward (opening when it was hidden) on that
-    /// task, picked, scrolled into view and expanded to its thread. It goes nowhere.
-    /// </summary>
-    /// <summary>
     /// The selected task's line scrolled into view while the panel is open (TasksWindow.RevealSelected); closed, nothing
     /// happens and the panel is not opened. For a selection made from outside the panel (task 4846fde1: a Claude task's
     /// terminal brought to the front).
@@ -798,12 +794,19 @@ public sealed class TasksBoard : IDisposable
         if (IsOpen) window.RevealSelected();
     }
 
+    /// <summary>
+    /// The bar's single click on a task line (Ruling 54), a Stats line, a subtask's "Open parent" and a task link: the
+    /// panel comes forward (opening when it was hidden) on that task, picked, scrolled into view and expanded to its
+    /// thread. It goes nowhere.
+    /// </summary>
     public void ShowTask(Guid id)
     {
-        // A linked task in a thread can be closed (task links): show it under the Closed filter, and an open one away
-        // from it, or the click picks a task the panel does not draw.
-        tasks.Board.Tasks.TryFirst(t => t.Id == id).Tap(t =>
-            filter = !t.IsOpen ? TaskFilter.Closed : filter == TaskFilter.Closed ? TaskFilter.Open : filter);
+        // EVERY FILTER THAT WOULD HIDE THE TASK LETS IT THROUGH (task acd76fbe, Petre: "clicking a task will open it in
+        // the tasks list"). The bar shows tasks of every workspace, so with the panel open on "this workspace", a status,
+        // an assignee or a goal, a click on a line could pick a task the panel does not draw, and the click looked like it
+        // did nothing. It used to let only a closed task through (task links); now it is LetPastFilters, as a Stats line
+        // and "Open parent" already were, and the search and the Claude working chip after it (RevealPastSearch).
+        LetPastFilters(id);
         selection.Select(id);
         RevealPastSearch(id);
         Show();
@@ -836,16 +839,16 @@ public sealed class TasksBoard : IDisposable
     public void OpenFromStats(Guid id)
     {
         statsShown = false;
-        ShowTaskPastFilters(id);
+        ShowTask(id);
     }
 
     /// <summary>
     /// A subtask's way to its parent (task 54b39c4c; Petre: "subtask should show its parent and have a way to open the
     /// parent easily"): the "Subtask of" link at the top of a subtask's open thread, and "Open parent" in the line's menu
-    /// here and on the bar. The parent is shown the way a Stats line's task is (ShowTaskPastFilters): picked, scrolled
+    /// here and on the bar. The parent is shown the way a Stats line's task is (ShowTask): picked, scrolled
     /// to, its thread open, and let through any filter that would hide it, since Petre asked for that very task.
     /// </summary>
-    public void OpenParent(Guid parentId) => ShowTaskPastFilters(parentId);
+    public void OpenParent(Guid parentId) => ShowTask(parentId);
 
     // A LINK IN A TASK'S TEXT (task 26f15d70, Petre: "when opening links from the tasks, they should be opened in the
     // task's workspace"). The panel shows the tasks of every workspace, so a link on a Services task clicked while Petre
@@ -898,14 +901,6 @@ public sealed class TasksBoard : IDisposable
             id => manager.State.Workspaces.TryFirst(w => w.Id == id).Map(w => w.Name).GetValueOrDefault(id.ToString()[..8]),
             () => "none");
 
-    // OpenFromStats's and OpenParent's shared half: a filter that would hide the task is let through first (see
-    // OpenFromStats for which and how), then the task is shown (ShowTask).
-    void ShowTaskPastFilters(Guid id)
-    {
-        LetPastFilters(id);
-        ShowTask(id);
-    }
-
     // Every filter that would hide the task is let through: the status filter switches to one that lists it, and the
     // workspace, assignee and goal filters go back to all. Nothing is drawn here; the caller's redraw shows the change.
     void LetPastFilters(Guid id) =>
@@ -920,8 +915,9 @@ public sealed class TasksBoard : IDisposable
     // THE TASK PETRE CLICKED ON THE BAR IS ON SCREEN (Task 7 review, ruling on ShowTask). On an open panel the search and
     // the Claude working chip stay as they were, and either could hide the very task asked for, so the one that hides it
     // is cleared: the search (emptied in the box too, TasksWindow.ClearSearch) when it does not admit the task, the chip
-    // when the task has no live session. Only those two: the status, workspace, goal and assignee filters keep their
-    // behaviour, as ruled. On a hidden panel this is moot, since OpenFresh resets everything anyway.
+    // when the task has no live session. The status, workspace, goal and assignee filters are LetPastFilters' business
+    // (task acd76fbe; they used to keep their behaviour, as first ruled). On a hidden panel this is moot, since OpenFresh
+    // resets everything anyway.
     void RevealPastSearch(Guid id)
     {
         var task = tasks.Board.Tasks.TryFirst(t => t.Id == id);
@@ -1954,7 +1950,7 @@ internal sealed record TasksWindowActions(
 
     /// <summary>
     /// Shows one task: picked, its thread open, scrolled into view, past any filter that hides it
-    /// (TasksBoard.ShowTaskPastFilters). A subtask in a thread and the task window's "Show in the tasks panel" use it.
+    /// (TasksBoard.ShowTask). A subtask in a thread and the task window's "Show in the tasks panel" use it.
     /// </summary>
     public Action<Guid>? ShowTask { get; init; }
 

@@ -47,11 +47,11 @@ namespace Deskbar.App;
 //                   "don't say claude", took the CLAUDE tag off), the VS Code icon of its session's window when one is
 //                   found, then the task's title in a tan ink and, after a dot,
 //                   the question while it waits on Petre, else its status line, with "no live session" when every
-//                   session has ended. Every line, a note or a Claude task in any status, has a plain tick box that
-//                   closes it (Ruling 40; the Done task's close button went so all lines look alike). Every line ends
-//                   with its workspace's chip in that row's own colour, or "none".
-//                   A line just closed stays in its place for six seconds, struck through, with "Undo" where its
-//                   tick box was (Petre: "when i click on done, there should be undo"; Ruling 10).
+//                   session has ended. No tick box (task acd76fbe): a line is closed from its right-click menu
+//                   or in the tasks panel. Every line ends its first row with its workspace's chip in that row's own
+//                   colour, or "none", and its second row runs on under the chip to the line's end (TaskLineFace).
+//                   A line just closed stays in its place for six seconds, struck through, with "Undo" at its
+//                   start (Petre: "when i click on done, there should be undo"; Ruling 10).
 //   the flags       (Task 12, Rulings 25, 28 and 59.) Important and urgent name the task's Covey quadrant, and on the
 //                   bar they show in the title alone: bold for important, italic for urgent. No sign and no toggle
 //                   on the line (Petre, 2026-11-24: "important is bold; urgent is italic; no need for extra signs";
@@ -76,8 +76,9 @@ namespace Deskbar.App;
 //
 // CLICKS. A line goes to its task through GoToTask, which the App points at the workspace switch and then the task's
 // Claude session (ClaudeTaskActions.Go, Task 9), the same path the tasks window's lines take; a note
-// on no workspace has nowhere to go, so its click does nothing. The tick box and the close button call TaskService.Close at once (the store stays the truth; only Petre
-// closes, and these are his clicks), and "Undo" calls TaskService.UndoClose, which brings the task back exactly as it
+// on no workspace has nowhere to go, so its click does nothing. A single click opens the task in the tasks panel
+// (OnTaskLineOpen). The menu's Close calls TaskService.Close at once (the store stays the truth; only Petre
+// closes, and this is his click), and "Undo" calls TaskService.UndoClose, which brings the task back exactly as it
 // was (Ruling 31).
 //
 // WHEN IT IS DRAWN. The lines are rebuilt when TaskService.Changed pulses and after every rebuild of the bar (the
@@ -1639,32 +1640,17 @@ public partial class FloatingBar
         OnTaskMoreClick();
     }
 
-    // Left of the text: the tick box, or "Undo" in its place on a line just closed, and nothing else. No CLAUDE tag since
-    // Ruling 42 (Petre: "don't say claude"): the orange edge at the line's start is the mark. No VS Code icon either since
-    // Ruling 47 (Petre: "not sure on the vscode icon and surely the space between icon and text is huge"): it was the same
-    // on every Claude line and told him nothing, and it took 19 DIP before the title. The title now starts right after the
-    // tick box with the same spacing a note has; no column is reserved for it.
+    // Left of the text: nothing, or "Undo" on a line just closed. No CLAUDE tag since Ruling 42 (Petre: "don't say
+    // claude"): the orange edge at the line's start is the mark. No VS Code icon since Ruling 47 (it was the same on every
+    // Claude line and told him nothing).
     //
-    // A CLAUDE TASK HAS THE TICK BOX TOO (Ruling 40, Petre: "how do i mark claude as done?"). Only Petre closes, and a
-    // tick is Petre: it closes the task at once with the note's six seconds of Undo, and Undo gives back exactly what
-    // the task had (its status, its question, its place and the selection; Ruling 31). A Done Claude task has the same
-    // box (2026-11-23: all lines look alike), so the close button it used to carry on the right is gone.
+    // NO TICK BOX (task acd76fbe, Petre: "remove the checkbox and utilize the second row fully; clicking a task will open
+    // it in the tasks list"). The box was on every line since Ruling 40; it took 13 DIP of every line and a misplaced
+    // click on it closed a task. A task is closed from its line's right-click menu (Close, with the same six seconds of
+    // Undo, FloatingBar.TaskEdit.cs) or in the tasks panel, which a single click on the line opens on that task
+    // (OnTaskLineOpen). The title now starts at the line's left edge.
     IEnumerable<UIElement> LeftOf(TaskLine line) =>
-        new UIElement?[]
-        {
-            line.Closing ? UndoButton(line)
-            : TaskButton("Tick off", new Border
-            {
-                Width = 11,
-                Height = 11,
-                BorderBrush = TaskTickEdge,
-                BorderThickness = new Thickness(1),
-                CornerRadius = new CornerRadius(3),
-                Background = Brushes.Transparent,
-                Margin = new Thickness(1, 0, 1, 0),
-            // A parent with open subtasks will not close (task 842e1ba4): the tip names why before the click.
-            }, () => CloseWithUndo(line), TaskViews.TickTip(line.Claudes, line.SubtaskCount, ClaudeStillWorking(line.Id)), ignoredWhen: TaskClickIgnored),
-        }.OfType<UIElement>();
+        line.Closing ? [UndoButton(line)] : [];
 
     // The workspace as a dot in its colour, for a line too narrow for the chip (TaskLineFace): its name in the tooltip,
     // and the chip's click (the move menu) on a line that is not closing.
@@ -1721,9 +1707,9 @@ public partial class FloatingBar
     // TWO LINES AT MOST (Ruling 41, which overrides Ruling 38's "the bar stays one line"; Petre: "give long tasks two
     // lines, when needed"). The text wraps onto a second line when it does not fit, and an ellipsis ends the second when
     // even two are not enough; a short one stays one line. The line height is fixed (BlockLineHeight), so two lines are
-    // exactly 2 x TaskTextLineHeight and MaxHeight cuts at the second line's foot. The parts beside the text (the tick,
-    // the chip) stay in the first line's row (TaskLineFace.FirstRow). The tooltip keeps the whole
-    // text.
+    // exactly 2 x TaskTextLineHeight and MaxHeight cuts at the second line's foot. The chip stays in the first line's row
+    // (TaskLineFace.FirstRow), and the second line runs on under it to the line's end (TaskLineFace, TitleRows; task
+    // acd76fbe). The tooltip keeps the whole text.
     TextBlock TextOf(TaskLine line)
     {
         var lineHeight = TaskTextLineHeight;
@@ -1737,7 +1723,8 @@ public partial class FloatingBar
             LineHeight = lineHeight,
             MaxHeight = 2 * lineHeight,
             VerticalAlignment = VerticalAlignment.Top,
-            Margin = new Thickness(4, 0, 4, 0),
+            // No space on the left with nothing before the title (the tick box is gone, task acd76fbe); Undo keeps it.
+            Margin = new Thickness(line.Closing ? 4 : 0, 0, 4, 0),
         };
         // A closed line in its undo window is struck through.
         if (line.Closing) text.TextDecorations = TextDecorations.Strikethrough;

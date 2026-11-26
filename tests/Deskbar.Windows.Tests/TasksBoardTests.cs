@@ -2886,6 +2886,26 @@ public class TasksBoardTests
         Assert.Empty(t.WentTo);
     });
 
+    // Task acd76fbe: a click on the bar's line puts the task on screen past the panel's status, workspace, assignee and goal
+    // filters too (TasksBoard.LetPastFilters), as a Stats line or a parent link does. Here the workspace filter shows only
+    // GEPHA and the clicked task lives on Sparrow: it is shown and picked, with its thread open.
+    [Fact]
+    public void The_bars_click_shows_a_task_the_workspace_filter_hides() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        t.Tasks.AddNote("here", t.Gepha);
+        var there = t.Tasks.AddNote("there", t.Sparrow).Value.Id;
+        t.Controller.Show();
+        t.Controller.FilterWorkspace(TaskWorkspaceFilter.On(t.Gepha));
+        Assert.DoesNotContain(there, t.Window.Keys);
+
+        t.Controller.ShowTask(there);
+
+        Assert.Contains(there, t.Window.Keys);
+        Assert.True(t.Window.IsSelected(there));
+        Assert.True(t.Window.ThreadShown(there));
+    });
+
     // RULING 52 (Petre's screenshot, "better alignment": the right-hand parts zigzagged, the lines had different widths,
     // Claude lines had no tick box and Done ones an X). In the List every line spans the list, and each column, the
     // flags, the sessions, the age, the chip, the comments and the menu button, starts at the same x on every line,

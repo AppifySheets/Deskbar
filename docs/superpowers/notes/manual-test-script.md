@@ -201,10 +201,10 @@ The task list at the bottom of the bar (spec `docs/superpowers/specs/2026-11-22-
 42. The list has no header: the text box is its first line, reading "Add to <the workspace you are on>…".
     Under it, always, "on" and ONE chip with a small arrow, naming the current workspace. Switch desktops:
     the box names the new one ("Add…" on an unnamed desktop) and the chip follows, and nothing in the
-    list jumps. Click in the box, type "probe", press Enter: the note appears as a line with an empty tick box
-    and the workspace's chip, the add chip stays where it is, and the keyboard is back in the window you were
-    typing in. Click the tick box: the line stays for six seconds, struck through, with
-    "Undo" in the tick box's place, then leaves.
+    list jumps. Click in the box, type "probe", press Enter: the note appears as a line with no tick box, its
+    title at the left edge and the workspace's chip at the right, the add chip stays where it is, and the keyboard
+    is back in the window you were typing in. Right-click the line and pick Close: the line stays for six seconds,
+    struck through, with "Undo" at its start, then leaves.
 43. `$ts task add "a"`, "b", "c", "d" and "e" (five tasks). The list shows three lines and a small "+2 more"
     at the right end of the chip row under the box (no line of its own at the bottom). Click it: all five show and "Less" is at the end. Click "Less": back to three.
 44. With the five tasks of step 43 open, `$ts task status <id> waiting` on all five. They sort to the top, three
@@ -230,11 +230,14 @@ The task list at the bottom of the bar (spec `docs/superpowers/specs/2026-11-22-
     widen for a long title (it trims with an ellipsis), and `$ts task list` agrees with what is shown.
 51. Add twelve notes and click "+9": eight lines show and the wheel over the list scrolls to the rest, while the
     workspace rows above stay where they were. Click "Less": three lines again.
-52. Double-click the tick box of the first note: only that note closes; its line stays struck through with
-    "Undo" where the tick box was, and the second click does not undo it or close the next note. Click "Undo"
-    within six seconds: the note is back as it was. Tick two notes in a row: both lines stay in place, each with
-    its own Undo, and leave after their six seconds. A done Claude task's tick box does the same, and Undo
-    brings it back done. After the six seconds, `$ts task list --closed` lists the closed note first and
+52. Close the first note from its line's menu: only that note closes; its line stays struck through with
+    "Undo" at its start. Click "Undo" within six seconds: the note is back as it was. Close two notes in a row:
+    both lines stay in place, each with its own Undo, and leave after their six seconds. A done Claude task's
+    Close does the same, and Undo brings it back done.
+52a. (Task acd76fbe.) Give a note a title long enough to wrap: its first row stops before the workspace chip and
+    its second row runs on under the chip to the line's right edge, ending in an ellipsis when even that is not
+    enough. A short title stays one row. In the tasks panel, tick "Current workspace" while on another workspace,
+    then click the note's line on the bar: the panel lets it through and shows it selected and expanded. After the six seconds, `$ts task list --closed` lists the closed note first and
     `$ts task reopen <id>` brings it back.
 53. Make the bar as narrow as it goes (drag its edge in). Nothing in the list is cut off at the right: the box,
     "+N more", the lines' chips, and the add row (the chip, the two toggles and the play button), which wraps onto a second
@@ -414,7 +417,7 @@ Tasks 7 to 9). Needs Claude Code installed and both Claude boxes in Manage ticke
     terminal: the task goes back to in progress and the question goes. Do it again and press Esc instead: record
     whether the question stays until the session runs `task answered` (Claude Code's docs do not say whether a
     dismissed dialog runs the hook).
-69. Ask the session to finish and mark its task done: the line has the same tick box as the rest. Send the session another
+69. Ask the session to finish and mark its task done: the line stays on the bar until you close it. Send the session another
     message: the task is in progress again. Mark it done again and close it yourself, then send a message: the
     session says its task was closed and makes a new one only for new work.
 70. Close the session's VS Code tab: the task stays open with "no live session". Resume the session (the history
