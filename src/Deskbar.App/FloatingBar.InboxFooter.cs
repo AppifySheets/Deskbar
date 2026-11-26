@@ -96,7 +96,8 @@ public partial class FloatingBar
         Grid.SetColumn(inboxManager, 1);
         var row = inboxFooterButtons = new Grid
         {
-            ColumnDefinitions = { new ColumnDefinition(), new ColumnDefinition() },
+            // "All tasks" takes what Manager leaves: on a narrow bar its count trims before Manager does.
+            ColumnDefinitions = { new ColumnDefinition(), new ColumnDefinition { Width = GridLength.Auto } },
             Children = { inboxAllTasks, inboxManager },
         };
         inboxFooter = new Border

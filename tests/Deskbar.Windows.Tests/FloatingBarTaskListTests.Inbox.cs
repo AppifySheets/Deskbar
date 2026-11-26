@@ -483,6 +483,8 @@ public partial class FloatingBarTaskListTests
         Assert.NotSame(oldChipFace, chip.Content);
         Assert.NotSame(t.Chips, play.Parent);
         Assert.True(AddRow(t).Children.Contains(play));
+        // The play glyph itself, the old button's (U+E768), in its quiet round face.
+        Assert.Contains(Inside(play).OfType<TextBlock>(), b => b.Text == "");
 
         InboxLook(t, on: false);
         Assert.False(t.Bar.AddRowInInboxLook);

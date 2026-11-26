@@ -235,7 +235,8 @@ public partial class FloatingBar
     // The play button's face: its glyph in a quiet round button of the raised fill.
     Border InboxStartFace()
     {
-        inboxStartGlyph = new TextBlock { Text = "", FontFamily = IconFont, Foreground = InboxLook.Ink2, VerticalAlignment = VerticalAlignment.Center, HorizontalAlignment = HorizontalAlignment.Center };
+        // Segoe's "Play" (U+E768), the old button's own glyph.
+        inboxStartGlyph = new TextBlock { Text = "", FontFamily = IconFont, Foreground = InboxLook.Ink2, VerticalAlignment = VerticalAlignment.Center, HorizontalAlignment = HorizontalAlignment.Center };
         inboxStartFace = new Border { Background = InboxLook.Raised, CornerRadius = new CornerRadius(10), Padding = new Thickness(6, 3, 5, 3), Child = inboxStartGlyph, Margin = new Thickness(4, 0, 0, 0) };
         return inboxStartFace;
     }
