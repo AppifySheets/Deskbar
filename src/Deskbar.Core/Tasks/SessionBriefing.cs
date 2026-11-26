@@ -44,6 +44,7 @@ public static class SessionBriefing
     // Task b326761d: a turn that ends In progress after the user merged the pull request is finished work, not a hand-off,
     // so the nudge names `task done` for that case instead of letting "something to try" read as an ask to test it.
     public const string ParkedNudge =
+        StopNudgeOpening +
         $"If the next move is the user's (a pull request to merge, something to try before it merges, a decision), run {Shim} task ask with " +
         $"what they must do, the text on stdin, and the pull request or page as a markdown link to click. If your pull request is merged, the task is done: run {Shim} task done with what to try in the status line. " +
         "Otherwise stop without saying anything.";
@@ -56,11 +57,29 @@ public static class SessionBriefing
     /// only then gets the old text back on the user's board (RepliedTasks.Restore, TaskService.RegenerateGrace).
     /// </summary>
     public static string SetAsideNudge(string question) =>
+        StopNudgeOpening +
         $"While you worked after the user's reply, Deskbar took your task out of Waiting on you and set your question aside: \"{Cut(question)}\". " +
         // Task 0cac3082: "previous messages are not good enough". The session is told to write the question afresh from
         // the facts, not to repeat it, since repeating it word for word is what put a merged pull request back on the bar.
         $"If the user still has to act, write the question afresh rather than repeating it: check each pull request it names with gh pr view, leave out what is already done, and run {Shim} task ask with what they must do now, the text on stdin, and the pull request or page as a markdown link to click. " +
         $"If the reply settled it, run {Shim} task answered (and {Shim} task done if the work is finished). Then stop.";
+
+    // The first words of both Stop nudges (task 8710ac09). Delivered by the waiter, a nudge arrives as a new message, so it
+    // says who is speaking, and the prompt hook finds these words in it (IsStopNudge) to keep the turn it starts from
+    // being nudged again (RemoteControl.Nudge).
+    const string StopNudgeOpening = "Deskbar, as your turn ended: ";
+
+    /// <summary>Whether a prompt carries one of Deskbar's Stop nudges (delivered by the session's waiter).</summary>
+    public static bool IsStopNudge(string prompt) => prompt.Contains(StopNudgeOpening, StringComparison.Ordinal);
+
+    /// <summary>
+    /// Whether a prompt is a Stop nudge and nothing more: a comment, a reevaluate request or the stalled ask that shared
+    /// the waiter's wake with it (the inbox joins whatever waits there) is work, so its turn may be nudged as usual.
+    /// </summary>
+    public static bool OnlyStopNudge(string prompt) =>
+        IsStopNudge(prompt)
+        && !new[] { ManagerCommentOpening, UserCommentOpening, ReevaluateOpening, StalledOpening }
+            .Any(opening => prompt.Contains(opening, StringComparison.Ordinal));
 
     // The first words of a comment delivered to a session (Commented), named so the prompt hook can tell Deskbar's own
     // deliveries from Petre typing (DeliveredByDeskbar).
@@ -84,6 +103,9 @@ public static class SessionBriefing
             || text.StartsWith(ReevaluateOpening, StringComparison.Ordinal)
             // The stalled task's ask (task 8710ac09) is Deskbar's, not the user replying.
             || text.StartsWith(StalledOpening, StringComparison.Ordinal)
+            // A Stop nudge the waiter delivered (task 8710ac09). It arrives wrapped in Claude Code's own notice, which
+            // DeliveredByClaudeCode already catches; this holds even if that wrapping changes.
+            || IsStopNudge(text)
             // So is the request to write a set-aside question afresh (task 0cac3082). Counted as a reply, it would only
             // matter to a task waiting on the user, which a set-aside task is not, but it is not the user either way.
             || (text.StartsWith(RegenerateOpening, StringComparison.Ordinal) && text.Contains("Deskbar will not put your old question back", StringComparison.Ordinal))

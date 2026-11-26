@@ -175,8 +175,15 @@ static class ClaudeHooks
                 ["command"] = command,
                 ["asyncRewake"] = true,
                 ["timeout"] = (long)Core.Tasks.CommentInbox.WaiterTimeout.TotalSeconds,
+                // The one line Claude Code shows the user when the waiter wakes the session (task 8710ac09). Without it
+                // the line reads "Stop hook feedback". Measured 2026-11-26 on Claude Code 2.1.332: shown as
+                // "● <summary>". Claude Code marks the option internal, so a version without it simply shows its default.
+                ["rewakeSummary"] = WakeSummary,
             }),
         };
+
+    /// <summary>The waiter's line in the session's terminal when a comment or a Stop nudge wakes it.</summary>
+    internal const string WakeSummary = "Deskbar";
 
     // The change itself, on the parsed file: whether anything changed, and whether every event could be kept in step
     // (false when an event's value is not an array and was left alone).

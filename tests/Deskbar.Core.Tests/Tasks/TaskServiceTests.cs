@@ -334,6 +334,27 @@ public sealed class TaskServiceTests
 
     // Task 8710ac09: no session could be reached to ask, so nobody can answer, and the task comes to Petre at once.
     [Fact]
+    public void A_session_just_handed_a_stop_nudge_counts_as_busy_for_the_grace()
+    {
+        // Task 8710ac09, review of the branch: a Stop nudge put in the inbox leaves the session idle for a second or two
+        // until its waiter wakes it, and a poll in that gap must not read it as a quiet session.
+        var s = new TaskService(store, () => clock);
+        s.Create("Tasks redesign", ws, Session("s1", clock));
+        var asked = new List<Guid>();
+        using var _ = s.StalledNudges.Subscribe(asked.Add);
+        var nobody = new HashSet<string>();
+
+        clock = clock.AddMinutes(15);
+        s.NudgeSent("s1");
+        s.Stalled(nobody, nobody);
+        Assert.Empty(asked);
+
+        clock = clock.Add(TaskService.NudgeGrace).AddMinutes(15);
+        s.Stalled(nobody, nobody);
+        Assert.Single(asked);
+    }
+
+    [Fact]
     public void An_undelivered_ask_hands_the_task_back_at_once()
     {
         var s = new TaskService(store, () => clock);

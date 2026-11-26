@@ -93,8 +93,8 @@ public sealed partial class RemoteControl
         // A question Deskbar set aside while the session worked (SetAside, below) is asked about first, since it names the
         // question; otherwise a parked session is asked to say so (Parked).
         "Stop" => Quietly(Attention(Folder(from), SessionTitle.Read(hook.Transcript.GetValueOrDefault()))) is var blinked
-            && SetAside(hook) is { HasValue: true } setAside ? Said(SetAsideBlock(setAside.Value))
-            : Parked(hook) ? Said(ParkedBlock) : blinked,
+            && SetAside(hook) is { HasValue: true } setAside ? Nudge(hook, SessionBriefing.SetAsideNudge(setAside.Value), blinked)
+            : Parked(hook) ? Nudge(hook, SessionBriefing.ParkedNudge, blinked) : blinked,
         _ => tasks is { } service && !hook.Headless && manager.State.ClaudeTasksInEffect
             ? TaskEvent(service, hook, Folder(from) ?? Folder(hook.Folder))
             : Quiet,
@@ -198,15 +198,16 @@ public sealed partial class RemoteControl
     //   * the session has no background work or scheduled wake-up of its own (it is waiting on that, not on Petre);
     //   * the session's task is open, In progress and Claude's (an ask or done already moved it, and a task Petre took
     //     is his).
-    // The cost: one short extra turn on most replies of a session with a task. Claude Code shows it in yellow as "Stop hook
-    // reported a problem" (seen 2026-11-26, task 8710ac09); it is this nudge, not a failure, and Petre chose to keep it. What
-    // this misses, StalledTasks catches after 15 quiet minutes: it asks the session again, and hands the task back to
-    // Petre only if the session does not answer.
+    //   * the turn did not itself begin with a nudge (TaskService.TurnFromNudge, see Nudge below).
+    // The cost: one short extra turn on most replies of a session with a task, delivered quietly where it can be (Nudge,
+    // task 8710ac09). What this misses, StalledTasks catches after 15 quiet minutes: it asks the session again, and hands
+    // the task back to Petre only if the session does not answer.
     bool Parked(ClaudeHookEvent hook) =>
         tasks is { } service
         && manager.State.ClaudeTasksInEffect
         && !hook.Headless
         && !hook.StopHookActive
+        && !service.TurnFromNudge(hook.SessionId)
         && !hook.BackgroundWork
         && service.Board.TaskOf(hook.SessionId)
             .Map(t => t is { IsOpen: true, Status: TaskStatus.InProgress } && t.Assignee.IsClaude)
@@ -223,16 +224,41 @@ public sealed partial class RemoteControl
         && manager.State.ClaudeTasksInEffect
         && !hook.Headless
         && !hook.StopHookActive
+        && !service.TurnFromNudge(hook.SessionId)
             ? service.Board.TaskOf(hook.SessionId)
                 .Where(t => t is { IsOpen: true, Status: TaskStatus.InProgress })
                 .Bind(t => t.QuestionSetAside)
             : Maybe<string>.None;
 
-    static string SetAsideBlock(string question) =>
-        System.Text.Json.JsonSerializer.Serialize(new { decision = "block", reason = SessionBriefing.SetAsideNudge(question) });
+    // HOW A STOP NUDGE REACHES THE SESSION (task 8710ac09). Two roads, the quiet one first:
+    //   * INBOX: the session has a waiter that can still be alive (CommentInbox.Lapsed is false; this very Stop also
+    //     starts a new one, which takes over the inbox). The nudge goes into its inbox, the Stop itself is let through,
+    //     and the waiter wakes the session a moment later with the nudge as a new message. Claude Code shows that as ONE
+    //     line, the waiter's summary ("Deskbar", ClaudeHooks.WaitEntry), then the session's short reply.
+    //   * BLOCK: no waiter (a Claude Code without asyncRewake, a session just resumed whose waiter Deskbar retired, no
+    //     inbox at all): {"decision":"block","reason":...}, as before. Claude Code shows every Stop hook that blocks as
+    //     "Stop hook reported a problem" in yellow with the whole text under it, whatever the text says.
+    // Measured 2026-11-26 on Claude Code 2.1.332, a throwaway session in a pseudo console with one hook of each kind: the
+    // block rendered as "Ran 2 stop hooks / Stop hook reported a problem / <reason>", the waiter's wake as
+    // "● Deskbar: probe summary" and the reply. Petre saw the yellow line twice and read it as a failure ("what's the
+    // problem?"), so the quiet road is the one he asked to try.
+    //
+    // THE LOOP GUARD MOVES WITH IT. A block's next Stop carries stop_hook_active, which is what lets Parked and SetAside
+    // nudge a turn once. A waiter's wake is a NEW turn, whose Stop does not carry it, so without a guard every nudged turn
+    // would be nudged again. TaskService.TurnFromNudge says whether the session's current turn began with a nudge
+    // (Prompted records it), and Parked and SetAside stand down for such a turn.
+    // A nudge put in the inbox is told to the task service (NudgeSent), which counts the session busy until the waiter has
+    // woken it, so the poll does not read the second of idleness in between as a quiet session (review of the branch).
+    ControlReply Nudge(ClaudeHookEvent hook, string nudge, ControlReply blinked) =>
+        inbox is { } box && !box.Lapsed(hook.SessionId) && box.Deliver(hook.SessionId, nudge).IsSuccess
+            ? Delivered(hook.SessionId, blinked)
+            : Said(System.Text.Json.JsonSerializer.Serialize(new { decision = "block", reason = nudge }));
 
-    static readonly string ParkedBlock =
-        System.Text.Json.JsonSerializer.Serialize(new { decision = "block", reason = SessionBriefing.ParkedNudge });
+    ControlReply Delivered(string sessionId, ControlReply blinked)
+    {
+        tasks?.NudgeSent(sessionId);
+        return blinked;
+    }
 
     static readonly ControlReply Quiet = new(ControlReply.Ok, "");
 
@@ -315,6 +341,8 @@ public sealed partial class RemoteControl
         // EVERY prompt, whoever put it there, starts a turn: the tasks panel's working part takes it as proof the session
         // is working, past the resume grace (ClaudeActivity, task 10b49554).
         service.TurnStarted(sessionId);
+        // Whether this turn began with a Stop nudge the waiter delivered (Nudge): such a turn is not nudged again.
+        service.NudgedTurn(sessionId, hook.Prompt.Map(SessionBriefing.OnlyStopNudge).GetValueOrDefault(false));
         if (hook.Prompt.Map(SessionBriefing.FromTheUser).GetValueOrDefault(true)) service.Prompted(sessionId);
         var own = service.Board.TaskOf(sessionId);
         return SessionBriefing.Prompt(sessionId, own, own.HasValue ? Maybe<TaskItem>.None : service.Board.ClosedTaskOf(sessionId), service.ExpandImages);

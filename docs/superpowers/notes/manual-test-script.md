@@ -540,6 +540,11 @@ Manage ticked. Use a throwaway folder Claude Code already trusts, not a real rep
     in it first), its status line names that, the task stays off the bar, and 15 quiet minutes later it is asked again,
     never handed back while it keeps answering. A task whose sessions have no transcript left, so nothing can be
     resumed: the task comes to you right at the ask, and its thread says no session could be reached.
+89c. Quiet Stop nudge (task 8710ac09). In a VS Code or terminal session with a task, let a turn end without
+    `task ask` or `task done`. Under the reply there is no yellow "Stop hook reported a problem": one line reads
+    "● Deskbar", then the session's short answer, and the session then stops (no second "Deskbar" line after it).
+    Reply to a question of the session's, let it work, and let that turn end: the set-aside nudge arrives the same
+    way. In a session resumed a moment ago (its waiter retired) the first nudge may still show the yellow block.
 
 ## Going to a Claude session, and starting one
 

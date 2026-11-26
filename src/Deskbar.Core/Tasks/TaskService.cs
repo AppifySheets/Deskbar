@@ -390,6 +390,30 @@ public sealed class TaskService(ITaskStore store, Func<DateTimeOffset> now, Func
     // (ClaudeActivity). In memory only, kept per session until Deskbar restarts, like `prompted` above.
     ImmutableDictionary<string, DateTimeOffset> turnsStarted = ImmutableDictionary<string, DateTimeOffset>.Empty;
 
+    // The sessions whose current turn began with a Stop nudge their waiter delivered (task 8710ac09; RemoteControl.Nudge).
+    // In memory only: a restart forgets it, and the worst that costs is one more nudge on one turn.
+    ImmutableHashSet<string> turnsFromNudge = ImmutableHashSet<string>.Empty;
+
+    // When each session was last handed a Stop nudge through its inbox (NudgeSent), for Stalled's grace.
+    ImmutableDictionary<string, DateTimeOffset> nudgesSent = ImmutableDictionary<string, DateTimeOffset>.Empty;
+
+    /// <summary>How long a session handed a Stop nudge counts as busy while its waiter wakes it (measured: under 2 s).</summary>
+    public static readonly TimeSpan NudgeGrace = TimeSpan.FromSeconds(30);
+
+    /// <summary>A Stop nudge went into the session's inbox now (RemoteControl.Nudge).</summary>
+    public void NudgeSent(string sessionId)
+    {
+        var at = now();
+        ImmutableInterlocked.Update(ref nudgesSent, map => map.SetItem(sessionId, at));
+    }
+
+    /// <summary>Records whether the turn that just started in this session began with a Stop nudge.</summary>
+    public void NudgedTurn(string sessionId, bool byNudge) =>
+        ImmutableInterlocked.Update(ref turnsFromNudge, set => byNudge ? set.Add(sessionId) : set.Remove(sessionId));
+
+    /// <summary>Whether the session's current turn began with a Stop nudge, so its Stop must not nudge again.</summary>
+    public bool TurnFromNudge(string sessionId) => turnsFromNudge.Contains(sessionId);
+
     /// <summary>A prompt of any kind was submitted in this session (RemoteControl.Prompted): a turn started.</summary>
     public void TurnStarted(string sessionId)
     {
@@ -488,8 +512,13 @@ public sealed class TaskService(ITaskStore store, Func<DateTimeOffset> now, Func
     /// StalledTasks.After goes to Petre, a handed-back task whose session works again goes back to Claude. Saves and
     /// pulses only when a task changed hands, and traces each move.
     /// </summary>
-    public void Stalled(IReadOnlySet<string> busy, IReadOnlySet<string> working)
+    public void Stalled(IReadOnlySet<string> polledBusy, IReadOnlySet<string> working)
     {
+        // A session just handed a Stop nudge through its inbox (task 8710ac09, RemoteControl.Nudge) is idle for a second or
+        // two until its waiter wakes it. Counted busy for NudgeGrace, so a poll in that gap does not take it for a session
+        // that went quiet without settling its question and set off a second ask on top of the nudge (review of the branch).
+        var since = now() - NudgeGrace;
+        var busy = polledBusy.Union(nudgesSent.Where(pair => pair.Value > since).Select(pair => pair.Key)).ToHashSet();
         // First the questions Deskbar set aside whose sessions are quiet again without having asked or settled them
         // (RepliedTasks.Restore, task 8bd18246). The session is asked once to write the question afresh (task 0cac3082, see
         // `regenerating`); only when that ask has had RegenerateGrace and the sessions are quiet again does the question
