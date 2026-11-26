@@ -525,6 +525,10 @@ public sealed record AppState(
     // read it as TasksPanelState.Default (closed, default width) via `State.TasksPanel ?? TasksPanelState.Default`.
     public TasksPanelState? TasksPanel { get; init; }
 
+    // The width of the manager's dock (task f171bca6, ManagerDockLayout), in DIPs, as the user last dragged it. Null
+    // until the first drag, which is every state.json written before this key: read it as ManagerDockLayout.DefaultWidth.
+    public double? ManagerDockWidth { get; init; }
+
     // Where a task window (the app's TaskDetailWindow, task dca4ebeb: "a separate view that will open a task in,
     // especially for longer tasks") was last left. ONE place shared by every task window (Petre: "remember size and
     // position"): the next task opened lands where the last one was closed or moved to. Null until a task window is first

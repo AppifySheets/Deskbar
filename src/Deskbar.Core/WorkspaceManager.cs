@@ -4430,6 +4430,13 @@ public sealed class WorkspaceManager(
             ? Result.Success()
             : Result.Success().Tap(() => Persist(State with { TasksPanel = state }));
 
+    // The manager dock's width (AppState.ManagerDockWidth, task f171bca6), saved at the end of a drag of its inner edge. A
+    // no-op when unchanged. Only the record: the app's ManagerDock re-docks at the new width itself.
+    public Result SaveManagerDockWidth(double widthDips) =>
+        State.ManagerDockWidth == widthDips
+            ? Result.Success()
+            : Result.Success().Tap(() => Persist(State with { ManagerDockWidth = widthDips }));
+
     // Where the task windows open (AppState.TaskWindow, one place shared by all of them): saved when one is moved, resized
     // or closed. A no-op when unchanged, so a window closed where it already was writes nothing.
     public Result SaveTaskWindow(TaskWindowState state) =>

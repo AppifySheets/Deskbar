@@ -541,9 +541,12 @@ tasks. A dot on the Manager button means a session stopped again after its nudge
 When the manager needs a decision from you, its question shows as a violet line at the top of the bar's task list and
 of the tasks panel, above every task's question. Click it to open the manager; your reply clears it.
 
-The manager's window is pinned to every desktop, so it is there whichever workspace you are on, and the bar shows it
-in the pinned row. It carries Claude's icon in violet instead of the plain one every task session has, a violet ring
-while it has focus, and its icon glows while the manager's question waits on you.
+The manager's window is docked: it sits in a full-height column just inside the tasks panel (just inside the bar while
+the panel is closed), and maximized and snapped windows keep clear of it, as they do of the panel. It is pinned to every
+desktop, so it is there whichever workspace you are on. Drag its inner edge to make it wider or narrower; Deskbar
+remembers the width. Dragged by its title bar, it goes back to its place. Closing it gives the space back. It carries
+Claude's icon in violet instead of the plain one every task session has, a violet ring while it has focus, and its icon
+glows while the manager's question waits on you.
 
 The tasks screencast shows the old floating window and needs filming again for the panel.
 
