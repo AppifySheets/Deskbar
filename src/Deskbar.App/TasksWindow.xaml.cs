@@ -2635,8 +2635,9 @@ public partial class TasksWindow : Window
         // shows more or less of it, and the height it was left at is where the comment starts on every later redraw.
         // A comment dragged to its foot is whole (infinity), and reads as one Show more opened.
         var isLong = IsLong(split.Text);
-        var dragged = BodyHeight(CommentKey(comment.Id));
-        var full = longOpen.Contains(comment.Id) || dragged is double.PositiveInfinity;
+        // On the Inbox page every bubble shows in full (FullBubble): no clip, no grip, only the forty-line guard.
+        var dragged = FullBubbles ? null : BodyHeight(CommentKey(comment.Id));
+        var full = FullBubbles || longOpen.Contains(comment.Id) || dragged is double.PositiveInfinity;
         if (!full)
         {
             // Not yet laid out: the character count says whether it folds. One that is not super long has no ceiling.
@@ -2670,6 +2671,7 @@ public partial class TasksWindow : Window
         more.Visibility = full || isLong || dragged is not null ? Visibility.Visible : Visibility.Collapsed;
         grip.Visibility = more.Visibility;
         parts.Children.Add(more);
+        if (FullBubbles) FullInPage(parts, body, grip, more, "comment:" + comment.Id, document.FontSize);
         if (TaskImageRow.Of(StateDir, split.Images, OpenImage) is { } pictures) parts.Children.Add(pictures);
         if (!full)
             body.LayoutUpdated += (_, _) =>

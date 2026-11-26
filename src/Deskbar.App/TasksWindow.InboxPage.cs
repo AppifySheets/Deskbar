@@ -381,7 +381,7 @@ public partial class TasksWindow
                 description.Document.Foreground = InboxLook.Ink2;
                 description.Margin = new Thickness(0, 0, 0, 8);
                 description.IsHitTestVisible = true;
-                body.Children.Add(description);
+                body.Children.Add(FullText(description, "description:" + row.Id, 13));
             }
             if (TaskImageRow.Of(StateDir, parts.Images, OpenImage) is { } pictures) body.Children.Add(pictures);
         }
