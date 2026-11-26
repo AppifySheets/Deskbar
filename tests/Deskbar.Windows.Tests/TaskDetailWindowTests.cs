@@ -109,6 +109,26 @@ public class TaskDetailWindowTests
         Assert.Equal([new Uri("https://example.com/browse/SHAR-13")], t.Opened);
     });
 
+    // Task 3757a3e1: the window's workspace chip offers the move, the compact workspace menu under the chip, and a pick
+    // moves the task.
+    [Fact]
+    public void The_windows_workspace_chip_moves_the_task() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var sparrow = t.Harness.Manager.State.Workspaces.Single(w => w.Name == "Sparrow");
+        var id = t.Tasks.AddNote("Services ticket", Maybe<Guid>.None).Value.Id;
+        Assert.True(t.Board.OpenWindow(id).IsSuccess);
+        var window = t.Board.WindowOf(id)!;
+
+        var chip = Inside(window).OfType<Button>().Single(b => AutomationProperties.GetName(b) == TaskDetailWindow.PlaceChipName);
+        chip.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        var move = Assert.IsAssignableFrom<ContextMenu>(window.MoveMenu);
+        Assert.Same(chip, move.PlacementTarget);
+        WorkspaceChipMenu.Chips(move).Single(c => AutomationProperties.GetName(c) == "Sparrow").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+
+        Assert.Equal(sparrow.Id, t.Tasks.Board.Tasks.Single(x => x.Id == id).WorkspaceId.Value);
+    });
+
     // One window per task: asking again brings the same window forward, and an unknown task opens nothing.
     [Fact]
     public void Opening_a_task_again_brings_its_window_forward() => StaThread.Run(() =>

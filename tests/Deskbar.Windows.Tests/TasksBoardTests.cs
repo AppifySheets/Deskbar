@@ -4477,6 +4477,31 @@ public class TasksBoardTests
         Assert.DoesNotContain(t.Tasks.Board.Tasks, x => x.Id == id);
     });
 
+    // Task 3757a3e1: a click on a line's workspace chip offers the move, the same workspace menu the Move to button opens,
+    // under the chip, with the task's own workspace outlined; a pick moves the task. A line in its undo window keeps a
+    // plain chip.
+    [Fact]
+    public void A_lines_workspace_chip_moves_the_task() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var id = t.Tasks.AddNote("Dishwasher tablets", t.Gepha).Value.Id;
+        t.Controller.Show();
+        t.Window.UpdateLayout();
+
+        var chip = ButtonNamed(LineOf(t.Window, id), TasksWindow.PlaceChipName);
+        Click(chip);
+        var move = Assert.IsAssignableFrom<ContextMenu>(t.Window.OpenedMenu);
+        Assert.Same(chip, move.PlacementTarget);
+        Assert.Equal("GEPHA", AutomationProperties.GetName(WorkspaceChipMenu.StartChip(move).GetValueOrThrow()));
+        Click(WorkspaceChipMenu.Chips(move).Single(c => AutomationProperties.GetName(c) == "Sparrow"));
+        Assert.Equal(t.Sparrow, t.Tasks.Board.Tasks.Single(x => x.Id == id).WorkspaceId.Value);
+
+        Assert.True(t.Controller.Close(id).IsSuccess);
+        t.Window.UpdateLayout();
+        Assert.True(t.Window.IsClosing(id));
+        Assert.False(HasButtonNamed(LineOf(t.Window, id), TasksWindow.PlaceChipName));
+    });
+
     // The open thread's row of buttons (task 1c17b7d6) leaves out each button its line right above already shows, and the
     // row goes once none is left. On a full line all are there, so the row goes. At the narrowest panel the line has room
     // for Edit and Open in window only (measured: 2 shown), so Add subtask stays in the row, Open in window leaves it, and
@@ -6445,7 +6470,7 @@ public class TasksBoardTests
         var comments = Grid.GetColumn(ButtonNamed(line, "Comments"));
         // "⋯" ends the strip of the menu's actions since task 59b8f613: the strip's column is "⋯"'s.
         var more = Grid.GetColumn((UIElement)LogicalTreeHelper.GetParent(ButtonNamed(line, "More")));
-        var chip = Grid.GetColumn(Inside(line).OfType<Border>().First(b => b.Child is TextBlock { Text: "GEPHA" }));
+        var chip = Grid.GetColumn(ButtonNamed(line, TasksWindow.PlaceChipName));
         Assert.True(chip < flags && flags < comments && comments < more, $"chip {chip}, flags {flags}, comments {comments}, more {more}");
         // A note with no comments, on a board with no Claude task and nothing closed: the comments column is the glyph's
         // and the action column is gone. 22: the glyph, 4 DIP of padding each side and the button's 1 DIP border each side

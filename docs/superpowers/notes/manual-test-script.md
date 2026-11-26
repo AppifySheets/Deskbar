@@ -1563,3 +1563,16 @@ above.
 
 Re-run this script by hand before each release and replace the table above with actual
 pass/fail results plus notes on the Windows build tested.
+
+## The workspace chip moves a task
+
+(Task 3757a3e1.) The tasks panel open, a note on some workspace.
+
+WC1. Point at the note's workspace chip: it dims a little and its tooltip reads "<workspace>: move it to another
+     workspace". Click it: the compact workspace menu opens under the chip, the task's own workspace outlined, the same
+     menu the line's Move to button opens. Pick another workspace: the note moves there and its chip changes.
+WC2. The click on the chip does not open or select the task (the line's thread stays as it was).
+WC3. Close the note with its tick: during the six seconds of Undo the chip is a plain label again, and a click on it
+     opens nothing.
+WC4. Open the note in its own window (Open in window): the workspace chip in the header does the same, the menu under
+     the chip, and a pick moves the task.
