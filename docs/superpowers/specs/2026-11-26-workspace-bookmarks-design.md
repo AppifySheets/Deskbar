@@ -193,11 +193,21 @@ After a link opens (a chip click, its menu's Open, Open all, `bookmark open` or 
 notes which browser window received it (`OpenedLinks`, `LinkWindowWatch` in Core,
 `LinkWindowSource` in the app):
 
-- the first window to come to the front within 5 seconds whose process is a browser (the Chromium
-  family `RosterIdentity` knows, plus `firefox.exe`) and which sits on the bookmark's workspace;
+- the first window to come to the front within 5 seconds that receives links and sits on the
+  bookmark's workspace. A window receives links when its process is a browser (the Chromium family
+  `RosterIdentity` knows, plus `firefox.exe`), it is not an app window, and, when the default
+  browser for https can be read, its exe is that browser's. An app window is one whose
+  AppUserModelID has the packaged `!` form or Chromium's `_crx_` form; only when the window gives no
+  AppUserModelID does an `--app-id` in the process's command line decide, because an Edge PWA shares
+  the browser's process and the probe found that process carrying another PWA's `--app-id`. This
+  matters because a click from another workspace switches first, and the switch brings that
+  workspace's last active window forward before the link arrives: a PWA or a second browser there
+  must not be taken for the link's window;
 - if none comes forward in that time (the browser on that desktop was already in front, so the tab
   opened without a focus change), the window in front when the 5 seconds end, if it is such a window;
 - otherwise nothing, and the chip stays at rest.
+
+A lookup that fails for one window passes that window over and the watch carries on.
 
 The watch starts just before the link is handed to the browser and ends at its first answer; a link
 that fails to open watches for nothing. Open all opening two links into one window notes that window

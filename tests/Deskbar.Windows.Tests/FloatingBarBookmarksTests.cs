@@ -351,6 +351,11 @@ public class FloatingBarBookmarksTests
         Chip("Alpha").RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent));
         receiver.OnNext(new LinkWindow(new WindowHandle(0x123), 1));
 
+        // The redraw is posted, not run inside the note (it can come from inside a WinEvent callback): nothing changes
+        // until the dispatcher runs it.
+        Assert.Equal(0.5, Face(Chip("Alpha")).Opacity);
+        bar.Bar.Dispatcher.Invoke(() => { }, System.Windows.Threading.DispatcherPriority.ContextIdle);
+
         Assert.Equal(1.0, Face(Chip("Alpha")).Opacity);
         Assert.Empty(Outline(Chip("Alpha")).StrokeDashArray);
         Assert.Equal(0.5, Face(Chip("Beta")).Opacity);
