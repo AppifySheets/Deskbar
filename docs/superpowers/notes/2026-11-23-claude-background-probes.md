@@ -49,6 +49,20 @@ resume a session that is still listed; to show it, attach.
 `claude --bg "x"` in a folder never trusted exits with code 1, prints nothing on stdout, and writes to stderr:
 "Workspace not trusted. Run `claude` in <folder> once and accept the trust prompt, then retry."
 
+## A turn that ends with a background job still running (2026-11-26, CLI 2.1.332)
+
+Task 607af1db. A probe `claude --bg` session (`258ba9da`) started `sleep 240` with `run_in_background`, replied
+"started" and ended its turn (`end_turn` in the transcript at 05:30:51). `claude agents --json`, read every 2 seconds:
+
+- during the turn: `status: busy`, `state: working`;
+- from the end of the turn until the sleep finished, about four minutes: `status: busy`, `state: done`;
+- at 05:34:51, as the sleep ended and its notification started a new turn: `busy`, `working`, with no read in between
+  still showing `done`;
+- at 05:35:00, that turn over: `idle`, `done`.
+
+So `status` alone cannot tell a turn in flight from a session that only waits on a job of its own; `state` can.
+`ClaudeAgent.TurnOver` reads it, and a Closed task's session is stopped by it (`SessionKeeper.Stops`).
+
 ## Not measured
 
 - Font fallback in a Windows Terminal profile (`"face": "JetBrains Mono, Cascadia Mono"`): not checked. The plan
