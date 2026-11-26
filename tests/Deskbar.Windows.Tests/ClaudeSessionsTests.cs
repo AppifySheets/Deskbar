@@ -479,6 +479,29 @@ public class ClaudeSessionsTests
         Assert.Equal(2, rig.Cli.Resumes.Count);
     }
 
+    // Task 0b78269e, final review: a recurring task that starts waiting on its own repeat question while its resume waits in
+    // the queue. The re-check before the resume goes out applies the keeper's own rule (SessionKeeper.LeftAlone), so the
+    // resume is dropped, exactly as Plan would not have queued it. The other queued resume still goes out.
+    [Fact]
+    public void A_queued_resume_for_a_task_now_waiting_on_its_repeat_question_is_dropped()
+    {
+        using var rig = new Rig();
+        var dead = Enumerable.Range(1, 3).Select(i => rig.Dead($"Dead {i}")).ToList();
+        rig.Begin();
+
+        rig.RunTo(Settle + Seconds(1));
+        Assert.Single(rig.Cli.Resumes);
+        var waiting = dead.Where(d => rig.Cli.Resumes.All(c => c.Arguments[2] != d.SessionId)).ToList();
+        Assert.True(rig.Tasks.SetRepeat(waiting[0].TaskId, new TaskRepeat(TaskRepeats.Parse("every 1h").Value, TaskRepeat.DefaultModel, @"E:\repos\Work")).IsSuccess);
+        Assert.True(rig.Tasks.Ask(waiting[0].TaskId, RecurringRuns.FolderGoneQuestion).IsSuccess);
+
+        rig.RunTo(Settle + Seconds(120));
+
+        Assert.DoesNotContain(rig.Cli.Resumes, c => c.Arguments[2] == waiting[0].SessionId);
+        Assert.Contains(rig.Cli.Resumes, c => c.Arguments[2] == waiting[1].SessionId);
+        Assert.Equal(2, rig.Cli.Resumes.Count);
+    }
+
     // Ruling 13: `claude --bg --resume` can take longer than the keeper's 30 s grace, which counts from the issue. The polls
     // that come meanwhile see the session neither listed nor in grace; they must not queue it again, and once it answers
     // it is left alone for the grace from the ANSWER, since the list read before then does not show it yet. One resume.

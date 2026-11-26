@@ -894,12 +894,16 @@ public sealed class ClaudeSessions : IDisposable
     // The re-check before a queued resume goes out (Review Focus 5, Global Constraints): the setting is still on, the
     // task is still open and not given up, the session is still its latest, the latest list does not show it, and its
     // last resume did not answer within the grace (Ruling 13, see Settled).
+    // A recurring task the keeper leaves alone (SessionKeeper.LeftAlone: between runs, or waiting on its own repeat
+    // question; task 0b78269e, final review) is dropped too: it may have become one while its resume waited in the queue,
+    // and the keeper's own rule is asked rather than a copy of it.
     bool StillWanted(KeeperStep.Resume resume) =>
         manager.State.ClaudeResumeInEffect
         && !AnsweredWithinGrace(resume.Session.Id)
         && tasks.Board.Tasks.TryFirst(t => t.Id == resume.TaskId)
             .Map(t => t.Status is TaskStatus.Backlog or TaskStatus.InProgress or TaskStatus.WaitingOnYou
                 && !SessionKeeper.GivenUp(t)
+                && !SessionKeeper.LeftAlone(t)
                 && LatestSession(t).Map(s => s.Id == resume.Session.Id).GetValueOrDefault(false)
                 // A restart: still no window on it, and still stopped on the limit (Petre may have typed in it since).
                 && (resume.StopFirst.HasNoValue || (!windowOpen(t) && LimitedUntil(resume.Session).HasValue)))

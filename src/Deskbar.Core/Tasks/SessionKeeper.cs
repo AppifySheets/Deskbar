@@ -154,7 +154,7 @@ public static class SessionKeeper
             .Where(task => task.IsClaudes && task.Status is TaskStatus.Backlog or TaskStatus.InProgress or TaskStatus.WaitingOnYou)
             // A recurring task between runs is never woken (task 0b78269e, see the header): its last run is over. Nor is one
             // waiting on its own repeat question: the run it asks about never started (final review, item 1).
-            .Where(task => !task.IsBetweenRuns && !RepeatAsked(task))
+            .Where(task => !LeftAlone(task))
             // A task with ANY of its sessions listed is running (final review, item 9). The latest by Joined is not
             // always the one alive: a resumed or rejoined older entry, or a second session started on the task, can be
             // listed while the latest has ended, and waking the ended one would put two sessions on one task.
@@ -179,7 +179,7 @@ public static class SessionKeeper
         var restarts = board.Tasks
             .Where(task => task.IsClaudes && task.Status is TaskStatus.Backlog or TaskStatus.InProgress or TaskStatus.WaitingOnYou)
             // Nor restarted: a restart is a resume with a stop before it (task 0b78269e).
-            .Where(task => !task.IsBetweenRuns && !RepeatAsked(task))
+            .Where(task => !LeftAlone(task))
             .Where(task => task.Sessions.Count > 0)
             .OrderBy(task => StatusRank(task.Status))
             .ThenByDescending(task => task.UpdatedAt)
@@ -294,6 +294,14 @@ public static class SessionKeeper
     // the keeper leaves its last run's session down. Only with a repeat: a question is the repeat's only while it repeats.
     static bool RepeatAsked(TaskItem task) =>
         task.Repeat.HasValue && task.Status == TaskStatus.WaitingOnYou && RecurringRuns.IsRepeatQuestion(task.Question);
+
+    /// <summary>
+    /// A recurring task whose last run's session the keeper never wakes (task 0b78269e): one between runs, or one waiting
+    /// on its own repeat question (see the header). Plan skips it for resumes and restarts; public so the App's re-check
+    /// of a queued resume (ClaudeSessions.StillWanted) applies this same rule instead of a copy of it, and drops a resume
+    /// whose task has become one of these since it was queued.
+    /// </summary>
+    public static bool LeftAlone(TaskItem task) => task.IsBetweenRuns || RepeatAsked(task);
 
     static int StatusRank(TaskStatus status) => status switch
     {
