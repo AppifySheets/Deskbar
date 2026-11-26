@@ -216,14 +216,41 @@ public sealed record TaskBoard(IReadOnlyList<TaskItem> Tasks)
     /// Without <paramref name="written"/> nothing is written, which is what the board's older callers (and their tests) expect.
     /// </para>
     /// </summary>
-    public Result<TaskBoard> Ask(Guid id, string question, DateTimeOffset now, Maybe<(string By, Guid CommentId)> written = default) =>
-        CleanText(question, "An ask needs a question").Bind(q =>
+    //
+    // THE ANSWER OPTIONS (AnswerOptions.cs) are the ask's own, stored with the question (TaskItem.QuestionOptions): an ask
+    // that gives none leaves the question with none, even one that repeats a question already open with buttons, since
+    // the latest ask is what the session offers now. They are checked first, so a bad list refuses the whole ask and
+    // nothing is stored, not even the question. Every other way the question goes takes the options with it (OptionsKept).
+    public Result<TaskBoard> Ask(Guid id, string question, DateTimeOffset now, Maybe<(string By, Guid CommentId)> written = default,
+        IReadOnlyList<string>? options = null) =>
+        AnswerOptions.Check(options).Bind(given => CleanText(question, "An ask needs a question").Bind(q =>
             ChangeOpen(id, t => WithQuestionComment(t, IsSetAside(t, q.Trim())
                 // The session asks again the very question Deskbar set aside (task 8bd18246): the question never stopped
                 // holding, so it comes back as it was (Restored) rather than as a new one on top of the block.
-                ? Restored(t, now)
-                : t with { Status = TaskStatus.WaitingOnYou, Question = q.Trim(), Raised = now, UpdatedAt = now, Assignee = Assignee.Me, WaitingSince = now, Pin = TopPin(TaskStatus.WaitingOnYou, id) },
-                q.Trim(), written, now)));
+                ? Restored(t, now) with { QuestionOptions = given }
+                : t with { Status = TaskStatus.WaitingOnYou, Question = q.Trim(), QuestionOptions = given, Raised = now, UpdatedAt = now, Assignee = Assignee.Me, WaitingSince = now, Pin = TopPin(TaskStatus.WaitingOnYou, id) },
+                q.Trim(), written, now))));
+
+    /// <summary>Why an answer button does nothing once its options are no longer the open question's (see <see cref="OptionText"/>).</summary>
+    public const string OptionsChanged = "That question or its answers changed; nothing was sent. Look at the task again.";
+
+    /// <summary>
+    /// The text an answer button posts: option <paramref name="index"/> (0-based) of the question the task waits on now,
+    /// exactly as the session gave it, or the reason there is none. THE BUTTON'S CLAIM IS CHECKED, not trusted:
+    /// <paramref name="drawn"/> is the list the button was drawn from, and it must still equal the task's options, in
+    /// order and to the letter. A session may ask again, or the user answer in another window, between the drawing and
+    /// the click, and the click must then answer nothing rather than send "Merge it" to a question that no longer offers
+    /// it. An index outside the list, a task with no open question or no options, and a closed task refuse the same way.
+    /// Nothing changes here: the caller posts the text through the one road a typed comment takes (TasksBoard.Comment),
+    /// so the session is woken and the question set aside exactly as for typed words.
+    /// </summary>
+    public Result<string> OptionText(Guid id, int index, IReadOnlyList<string> drawn) =>
+        Lookup(id).Bind(task =>
+            !task.IsOpen ? Result.Failure<string>(TaskIsClosed)
+            : task.Question.HasNoValue || task.QuestionOptions.Count == 0 || !task.QuestionOptions.SequenceEqual(drawn ?? [], StringComparer.Ordinal)
+                ? Result.Failure<string>(OptionsChanged)
+            : index < 0 || index >= task.QuestionOptions.Count ? Result.Failure<string>($"There is no answer number {index + 1}; this question has {task.QuestionOptions.Count}.")
+            : Result.Success(task.QuestionOptions[index]));
 
     // The asked task (`asked`, made from `before`) with its question written into the thread (see Ask).
     static TaskItem WithQuestionComment(TaskItem before, TaskItem asked, string question, Maybe<(string By, Guid CommentId)> written, DateTimeOffset now) =>
@@ -1563,12 +1590,20 @@ public sealed record TaskBoard(IReadOnlyList<TaskItem> Tasks)
     // Both ways a task changes end in TaskItem.WithSetAsideNotesFolded (task aa42794f): a "Set aside while Claude works
     // on your reply" line folds the moment its task no longer holds a set-aside question, whichever change cleared it
     // (Restored, Answered, SettleQuestion, an ask of a different question, done, a close, an assign).
-    TaskBoard Replaced(TaskItem updated) => new(Tasks.Select(t => t.Id == updated.Id ? Woken(t, updated.WithSetAsideNotesFolded()) : t).ToArray());
+    TaskBoard Replaced(TaskItem updated) => new(Tasks.Select(t => t.Id == updated.Id ? Woken(t, OptionsKept(updated).WithSetAsideNotesFolded()) : t).ToArray());
 
     Result<TaskBoard> Change(Guid id, Func<TaskItem, TaskItem> change) =>
         Tasks.Any(t => t.Id == id)
-            ? new TaskBoard(Tasks.Select(t => t.Id == id ? Woken(t, Unmarked(t, change(t)).WithSetAsideNotesFolded()) : t).ToArray())
+            ? new TaskBoard(Tasks.Select(t => t.Id == id ? Woken(t, OptionsKept(Unmarked(t, change(t))).WithSetAsideNotesFolded()) : t).ToArray())
             : Result.Failure<TaskBoard>(NoTask(id.ToString()));
+
+    // THE ANSWER OPTIONS LIVE AS LONG AS THEIR QUESTION (TaskItem.QuestionOptions), and this is the one place that says so:
+    // both ways a task changes end here, so whichever change takes the question (answered, settled by a merge, set aside
+    // by the user's reply, done, a close, a status set by hand, an undo of a close) takes the options with it, and no
+    // change has to remember them. Only Ask sets them, together with the question, so a new question never inherits the
+    // last one's. A task without options comes back as this same instance.
+    static TaskItem OptionsKept(TaskItem task) =>
+        task.Question.HasNoValue && task.QuestionOptions.Count > 0 ? task with { QuestionOptions = [] } : task;
 
     // The handed-back mark (StalledTasks) means "Deskbar gave this to Petre because it went quiet". Once anything else
     // moves the assignee or the status (an ask, done, close, a status by hand, a session joining), that is no longer why
