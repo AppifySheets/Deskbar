@@ -320,10 +320,37 @@ public partial class TasksWindow
     //   - a page open (a subtask added from the page's thread): the page and the tab stay as they are.
     // The ScrollToSelected that follows is no explicit "show this task", so it opens no page (inboxJustAdded). A task
     // added from the bar's box or by a session does not come through here, and changes nothing in the panel's tab.
-    // NOT FOLLOWED: "Add and start Claude" adds the note, and Claude starts on it a moment later, which moves its line
-    // from Notes to Claude. Following it there would need a timer or a hook in the add box; the line stays in Notes.
+    // FOLLOWED INTO ITS NEXT TAB, ONCE (the owner's ask): "Add and start Claude" adds the note, and Claude starts on it a
+    // moment later, which moves its line from Notes to Claude; Start Claude pressed later on the same line does the same.
+    // So the task just added stays followed (inboxFollowed), and the first draw that finds it in another tab than the one
+    // on show switches there, and its line glows again (FollowAddedTask). No timer and no hook in the add box: it is read
+    // from the view on each draw. The follow ends, with no switch, as soon as the user takes over: a tab button, a page,
+    // a search or a filter (the filters as they were when it was added), the selection moving to another task, the task
+    // leaving the view, or another view.
     Guid? inboxGlowPending;
     Guid? inboxJustAdded;
+    Guid? inboxFollowed;
+    string inboxFollowedFilters = "";
+
+    // What the follow keeps an eye on: a change in any of these is the user taking over.
+    static string FollowFilters(TasksView view) =>
+        $"{view.FiltersOn}|{view.Where}|{view.Search}|{string.Join(",", view.Filters.Where(f => f.On).Select(f => f.Filter))}|{view.ClaudeFilter}";
+
+    // DrawInbox, before it picks the tab's lines: the followed task's tab, once it is no longer the tab on show.
+    void FollowAddedTask(TasksView view, InboxView inbox)
+    {
+        if (inboxFollowed is not { } id) return;
+        if (inboxPage is not null || !inbox.Tabbed || selectedId.HasNoValue || selectedId.Value != id
+            || FollowFilters(view) != inboxFollowedFilters || inbox.TabOf(id) is not { HasValue: true } tab)
+        {
+            inboxFollowed = null;
+            return;
+        }
+        if (tab.Value == inboxTab) return;
+        inboxTab = tab.Value;
+        inboxGlowPending = id;
+        inboxFollowed = null;
+    }
 
     // Glow's Inbox half: whether the Inbox answered for it.
     bool InboxGlow(Guid id)
@@ -332,6 +359,8 @@ public partial class TasksWindow
         inboxJustAdded = id;
         if (inboxPage is not null) return true;
         if (inbox.Tabbed && inbox.TabOf(id) is { HasValue: true } tab) inboxTab = tab.Value;
+        inboxFollowed = id;
+        inboxFollowedFilters = FollowFilters(latest);
         inboxGlowPending = id;
         RedrawInbox();
         ApplyInboxGlow();

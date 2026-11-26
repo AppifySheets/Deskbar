@@ -79,6 +79,8 @@ public partial class TasksWindow
     internal void ChooseInboxTab(InboxTab tab)
     {
         inboxTab = tab;
+        // The user picked a tab: a task just added is no longer followed into another (FollowAddedTask).
+        inboxFollowed = null;
         RedrawInbox();
     }
 
@@ -123,6 +125,7 @@ public partial class TasksWindow
             InboxHeader.Child = null;
             InboxFooter.Child = null;
             EmptyText.Foreground = HeaderInk;
+            inboxFollowed = null;
             LeaveInboxPage();
         }
     }
@@ -145,6 +148,9 @@ public partial class TasksWindow
         MatrixGrid.Visibility = Visibility.Collapsed;
         inboxTimes.Clear();
         inboxLines.Clear();
+        // A task just added and followed, moved to another tab since (TasksWindow.InboxLine.cs): that tab, before the
+        // header and the lines are drawn for the one on show.
+        FollowAddedTask(view, inbox);
         InboxHeader.Child = InboxHeaderOf(view, inbox);
         InboxFooter.Child = InboxFooterOf(view);
         var rows = view.Groups.SelectMany(g => g.Rows).ToDictionary(r => r.Id);
