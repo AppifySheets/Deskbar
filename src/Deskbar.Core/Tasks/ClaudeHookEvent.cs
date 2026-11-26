@@ -101,6 +101,23 @@ public sealed record ClaudeHookEvent(string Event, string SessionId, string Fold
     /// </summary>
     public Maybe<string> Prompt { get; init; }
 
+    // WHAT THE SESSION RUNS ON, AS ITS OWN HOOKS SAY IT (the Inbox page's picker shows it for a session Deskbar did not
+    // start, and SettingsSwitch.Drifted compares it after a wake). Claude Code's hooks docs, "Common input fields":
+    // every hook gets `permission_mode` ("default", "plan", "acceptEdits", "auto", "dontAsk" or "bypassPermissions") and
+    // `effort`, an object whose `level` is the effort; seen live on 2026-11-26 as
+    // "permission_mode":"default","effort":{"level":"medium"}. The model is rarer: "Only SessionStart hooks can receive a
+    // `model` field, and Claude Code doesn't always include it". Kept as given, unchecked: these are shown, never put
+    // on a command line (SessionSettings.Read is the gate for that).
+
+    /// <summary>permission_mode, every event: the session's permission mode as Claude Code names it, or none.</summary>
+    public Maybe<string> PermissionMode { get; init; }
+
+    /// <summary>effort.level, every event: the session's effort level, or none (a bare string is taken too).</summary>
+    public Maybe<string> Effort { get; init; }
+
+    /// <summary>model, SessionStart only and not always: the model the session starts on, or none.</summary>
+    public Maybe<string> Model { get; init; }
+
     public static Result<ClaudeHookEvent> Parse(string json, string? entrypoint, string? attended, string? job = null)
     {
         try
@@ -130,6 +147,14 @@ public sealed record ClaudeHookEvent(string Event, string SessionId, string Fold
                     ? Tasks.DialogQuestion.From(asked)
                     : Maybe<string>.None,
                 Prompt = Text(root, "prompt"),
+                PermissionMode = Text(root, "permission_mode"),
+                Effort = root.TryGetProperty("effort", out var effort) && effort.ValueKind == JsonValueKind.Object
+                    ? Text(effort, "level")
+                    : Text(root, "effort"),
+                // The docs do not show the field's shape; a string is read, and an object's "id" in case it is one.
+                Model = root.TryGetProperty("model", out var model) && model.ValueKind == JsonValueKind.Object
+                    ? Text(model, "id")
+                    : Text(root, "model"),
             };
         }
         catch (JsonException e)
