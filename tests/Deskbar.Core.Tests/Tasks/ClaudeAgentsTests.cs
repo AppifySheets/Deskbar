@@ -41,7 +41,7 @@ public class ClaudeAgentsTests
     }
 
     // Task 607af1db, measured 2026-11-26: a session whose turn ended with a Bash of its own still running in the
-    // background is listed busy, with state "done", until the job ends. Its turn is over; one busy and working is not,
+    // background is listed busy, with state "done" ("blocked" when the turn ended with a question), until the job ends. Its turn is over; one busy and working is not,
     // and neither is a busy row with no state, which says nothing about its turn.
     [Theory]
     [InlineData("""{"status":"busy","state":"done"}""", true)]

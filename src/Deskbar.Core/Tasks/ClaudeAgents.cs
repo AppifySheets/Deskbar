@@ -51,7 +51,8 @@ public sealed record ClaudeAgent(string SessionId, Maybe<string> ShortId, string
     /// ended while a job of its own runs on (a Bash started with run_in_background, a Monitor) is listed
     /// status "busy" until that job ends, but its state is no longer "working" (measured 2026-11-26, CLI 2.1.332: a
     /// probe that started `sleep 240` in the background and ended its turn read busy/working during the turn and
-    /// busy/done from the end of it until the sleep finished). So busy alone cannot tell a turn in flight from a
+    /// busy/done from the end of it until the sleep finished; a second, whose turn ended with a question, read
+    /// busy/blocked instead, and both read busy/working again for the turn the job's end started). So busy alone cannot tell a turn in flight from a
     /// session that is only waiting on its own job; busy with a state of "done" or "blocked" is the second. A busy row
     /// with no state (interactive) counts as working, since nothing says otherwise.
     /// </summary>
