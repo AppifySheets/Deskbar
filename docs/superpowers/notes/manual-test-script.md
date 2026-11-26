@@ -1641,3 +1641,32 @@ QT2. Type a word and press Enter at once, before the results move: Enter takes t
 QT3. Leave the box open with text in it for a few seconds, then type: no letter waits about a second before showing.
 QT4. A search that took 100 ms or more writes a `quick find:` line to the trace naming the catalogue, ranking and draw
      times and how long it waited after the key.
+
+## Workspace bookmarks
+
+(Task f7ac687c.) A named workspace with a few windows, a second workspace to start from, Portainer reachable on your
+network, RustDesk installed, and the iam.ge PWA installed in Edge.
+
+BM1. Drag the address-bar URL of a Portainer page onto the workspace's row: the readout says "→ bookmark in <workspace>"
+     while you hold it over the row. Drop: a chip appears after the windows, named by the page title, faded, with a
+     dashed outline and a small dot on its icon.
+BM2. Point at the chip: it comes to full strength and the tooltip gives the name and the URL.
+BM3. From another workspace, click the chip: Deskbar switches to the bookmark's workspace and the page opens in a
+     browser window on that desktop.
+BM4. Drop `rustdesk.exe` on the row: a chip named "RustDesk". Click it: RustDesk starts in that workspace. While its
+     window is open the chip is hidden; close it to the tray and the chip comes back.
+BM5. Drop the Start menu shortcut (.lnk) of a Store app or a PWA on the row: an app chip, named after the shortcut.
+BM6. Right-click the iam.ge PWA window and pick "Bookmark in this workspace": an app chip in that workspace. It is hidden
+     while the PWA is open, also when Edge was already running with other windows, and shows again when the PWA closes.
+BM7. With RustDesk running, right-click the row and pick "Open all bookmarks": one switch, the links open, RustDesk is not
+     started a second time. The item is not on the menu of a workspace with no bookmarks.
+BM8. Right-click a chip: Open, Open all bookmarks, Rename… and Remove. Rename… changes the chip's name and tooltip;
+     Remove takes the chip away, with no confirmation.
+BM9. Fold the row: no chips. Unfold it. In a workspace with no windows and some bookmarks, the row shows only the chips.
+BM10. Copy a web address: the row menu's "Bookmark link from clipboard" is enabled and adds a chip named after the host.
+     Copy plain text: the item is disabled. Run it twice with the same address: the second is refused with a message.
+BM11. The Portainer chip shows its favicon after a moment (the site has a self-signed certificate); a site with no
+     favicon keeps its letter tile. Restart Deskbar with the network off: icons already fetched stay, the others are
+     letter tiles, and nothing breaks. Switch the network on and restart: the missing icons arrive.
+BM12. `deskbar.cmd bookmark list Work`, then `add Work --url <url>`, `open`, `open-all` and `remove`: each does what the
+     menu item of the same name does, and `list` shows the change.

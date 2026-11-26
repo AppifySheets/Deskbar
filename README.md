@@ -270,6 +270,7 @@ on Manage → Settings. A fully opaque setting means it never dims.
 ### The workspace row menu
 
 Right-click a row for: **Rename…**; **Insert before…** and **Insert after…**;
+**Open all bookmarks** (only when the workspace has bookmarks) and **Bookmark link from clipboard**;
 the group items (next section); **Fold row**, which flips to **Unfold row**; **Pin to strip**, which
 flips to **Unpin from strip**; the **Window list** submenu; the colour strip; **Delete workspace…**; and the bar items,
 **Arrange workspaces**, where you drag rows to reorder or group them (it reads **Done arranging** while the mode is on), **Dock to screen edge**,
@@ -309,6 +310,44 @@ windows it names the apps and closes them with it, the way their own close butto
 killed; if an app refuses to close (an unsaved document, usually) nothing is deleted and it tells
 you which one. The alternative, letting Windows delete the desktop, scatters those windows onto a
 neighbouring desktop where you find them days later, so this app does not do that.
+
+### Bookmarks
+
+A workspace can keep bookmarks for the things you start there: a web link (an internal dashboard), a program
+(a remote desktop tool) or an installed app (a PWA or a Store app). They show as chips after the row's
+windows, behind a thin divider, drawn faded with a dashed outline. A link's icon carries a small dot, so it
+reads apart from a program. Point at a chip and it comes to full strength; its tooltip gives the name and what
+it opens. A folded row shows no chips, and a workspace with no windows shows only its chips.
+
+There are three ways to add one:
+
+- Drop a link, an `.exe`, a `.lnk` or a `.url` on the row. The readout says `→ bookmark in <workspace>` while
+  the thing is over the row. A dragged address-bar link is named after the page title when the browser offers
+  it, else after the site. An `.exe` is named after its file description. A Start menu shortcut of a Store app
+  or PWA becomes an app bookmark. Only the first file of a drop is taken.
+- Right-click a window and pick **Bookmark in this workspace**. A PWA or Store app window gives an app
+  bookmark; any other window gives a program bookmark.
+- Copy a link, right-click the row and pick **Bookmark link from clipboard**. The item is enabled only while
+  the clipboard holds a web address.
+
+Only `http` and `https` links are accepted, and adding the same thing twice is refused.
+
+A click on a chip switches to its workspace and opens it there, so a link opens in a browser window on that
+desktop and a program's window lands in that workspace. Nothing opens on its own: switching to a workspace
+starts none of its bookmarks. A program or app chip is hidden while it has a window open anywhere, and comes
+back when the window closes. A program that lives only in the tray has no window, so its chip stays and a click
+starts it. A link chip is never hidden.
+
+Right-click a chip for **Open**, **Open all bookmarks**, **Rename…** and **Remove**. **Open all bookmarks**
+switches once and opens every chip that is showing, so a program already running is not started again.
+
+`deskbar.cmd bookmark` has the same commands (`list`, `add`, `rename`, `remove`, `open` and `open-all`);
+`deskbar.cmd help` lists them.
+
+A link chip shows the site's own icon. For each web-link bookmark Deskbar asks that site, once, for
+`/favicon.ico`, with no cookies or credentials, and keeps the icon under `%APPDATA%\Deskbarookmark-icons`.
+Until it arrives, or if the site has none, the chip shows a coloured tile with the first letter of its name. A
+failed fetch is tried again at the next start. See [the privacy page](https://deskbar.app/privacy).
 
 ### Groups
 
