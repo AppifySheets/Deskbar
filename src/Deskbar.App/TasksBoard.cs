@@ -1523,6 +1523,7 @@ public sealed class TasksBoard : IDisposable
         RepeatText = task.Repeat.Map(r => r.Schedule.Text).GetValueOrDefault(),
         RepeatLabel = task.Repeat.Map(r => r.Schedule.Label).GetValueOrDefault(),
         NextRun = task.NextRun.Map(next => (DateTimeOffset?)next).GetValueOrDefault(),
+        RepeatModel = task.Repeat.Map(r => r.Model).GetValueOrDefault(),
         PullRequests = task.PullRequests,
         // Whether a Done task's change runs in this Deskbar yet: the ring and the outlined chip until it does (task 8470d176).
         Delivery = tasks.DeliveryOf(task),
@@ -1835,6 +1836,9 @@ internal sealed record TaskRowView(Guid Id, string Title, string Detail, TaskSta
 
     /// <summary>When the next run is due (TaskItem.NextRun), or null.</summary>
     public DateTimeOffset? NextRun { get; init; }
+
+    /// <summary>The model the repeat's runs use (TaskRepeat.Model), or null: the repeat mark's tooltip names it (Task 9).</summary>
+    public string? RepeatModel { get; init; }
 
     /// <summary>
     /// The pull requests the task's sessions opened (task e7aa49b1, TaskItem.PullRequests), oldest first: the task window's

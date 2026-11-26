@@ -1341,8 +1341,26 @@ public partial class TasksWindow : Window
                 panel.Children.Add(toggle);
             });
         if (SnoozeButton(row) is { } snooze) panel.Children.Add(snooze);
+        if (RepeatMark(row) is { } mark) panel.Children.Add(mark);
         return panel;
     }
+
+    // THE REPEAT MARK (task 0b78269e, Task 9; Petre picked candidate A of the mockup): Segoe Fluent's RepeatAll, U+E8EE,
+    // in the dim ink, after the snooze moon. It is a mark, not a button: a plain glyph whose tooltip says the schedule, the
+    // next run and the model ("Repeats every hour, 09:00-19:00 · next run Thu 09:00 · sonnet"; TaskRepeats.MarkTip, shared
+    // with the bar). Always shown (RepeatMarkTag, which Quieten leaves at full strength): it says what the task IS, where
+    // the toggles only answer a hover. Margin 3 and 1 DIP below make it a toggle's 18 DIP wide (ToggleWidth) so it
+    // fits the flags column. None on a Matrix line, which has no room (the same as the moon), nor on a plain task.
+    TextBlock? RepeatMark(TaskRowView row) =>
+        compactLines || row.RepeatLabel is not { } label ? null
+            : new TextBlock
+            {
+                Text = "", FontFamily = IconFont, FontSize = 12, Foreground = DimInk, VerticalAlignment = VerticalAlignment.Center,
+                Margin = new Thickness(3, 0, 3, 1), Tag = RepeatMarkTag,
+                ToolTip = TaskRepeats.MarkTip(label, row.NextRun, row.RepeatModel ?? TaskRepeat.DefaultModel, Now()),
+            };
+
+    internal const string RepeatMarkTag = "task-repeat-mark";
 
     // THE SNOOZE BUTTON (task 6da8d7eb, Petre: "task should have a snooze button, which will hide it from view for a while";
     // and on the task, "only in the large tasks view", so the bar's lines have none). Third after the two toggles and
@@ -1556,7 +1574,7 @@ public partial class TasksWindow : Window
     void Quieten(IEnumerable<UIElement> parts, bool loud) => parts.ToList().ForEach(part => part.Opacity =
         (part as FrameworkElement)?.Tag switch
         {
-            FlagOnTag => 1,
+            FlagOnTag or RepeatMarkTag => 1,
             FlagOffTag => slimLines ? (loud ? 1 : OffFlagAtRestOnSlim) : loud ? 0.55 : 0,
             _ => loud ? 1 : 0.5,
         });

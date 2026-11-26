@@ -2133,6 +2133,37 @@ public class FloatingBarTaskListTests
 
     static string TitleOf(Button line) => ((TaskLine)line.Tag).Title;
 
+    // Task 9 (task 0b78269e): a recurring task's bar line carries the repeat mark in TaskLineFace's Right slot, so it sits
+    // before the chip; a plain line has none.
+    [Fact]
+    public void A_recurring_bar_line_shows_the_mark_in_its_right_slot() => StaThread.Run(() =>
+    {
+        using var t = Build(openWindow: () => { });
+        var plain = t.Tasks.AddNote("plain", t.Gepha).Value.Id;
+        var repeating = t.Tasks.AddNote("repeating", t.Gepha).Value.Id;
+        Assert.True(t.Tasks.SetRepeat(repeating, new TaskRepeat(TaskRepeats.Parse("every 1h 09:00-19:00").Value, TaskRepeat.DefaultModel, @"C:\repos\x")).IsSuccess);
+        // A repeat sleeps until its next run, which keeps it off the bar; a run that has started and is asking something
+        // is on it, in the waiting block.
+        Assert.True(t.Tasks.RunStarted(repeating).IsSuccess);
+        t.Tasks.SetStatus(repeating, Deskbar.Core.Tasks.TaskStatus.WaitingOnYou);
+        Settle(t);
+
+        static TextBlock? MarkOf(Button line) =>
+            Inside(line).OfType<TextBlock>().SingleOrDefault(b => Equals(b.Tag, "task-repeat-mark"));
+        var markedLine = t.Lines.Single(l => TitleOf(l) == "repeating");
+        var mark = MarkOf(markedLine);
+
+        Assert.NotNull(mark);
+        Assert.Equal("\uE8EE", mark!.Text);
+        Assert.StartsWith("Repeats every hour, 09:00-19:00 · next run ", Assert.IsType<string>(mark.ToolTip));
+        Assert.EndsWith(" · sonnet", (string)mark.ToolTip);
+        // In the face's Right slot: a direct child of the line's TaskLineFace, between the title and the chip.
+        var face = Assert.IsType<TaskLineFace>(mark.Parent);
+        var kids = face.Children.Cast<UIElement>().ToList();
+        Assert.True(kids.IndexOf(mark) > kids.FindIndex(k => k is TextBlock { Tag: "task-text" }));
+        Assert.Null(MarkOf(t.Lines.Single(l => TitleOf(l) == "plain")));
+    });
+
     // Waiting on you first, then quadrant I (important and urgent), II (important), III (urgent), IV (neither), each
     // in its own order, a newer task on top until dragged.
     [Fact]

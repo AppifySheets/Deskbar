@@ -171,6 +171,15 @@ public static class TaskRepeats
         ("Every Monday at 09:00", "weekly monday 09:00"),
     ];
 
+    /// <summary>
+    /// The repeat mark's tooltip (task 0b78269e, Task 9): "Repeats every hour, 09:00-19:00 · next run Thu 09:00 · sonnet".
+    /// The next run is left out while none is set. Times are said as a snooze says them (TaskSnooze.WhenText) in local
+    /// time. One place for the tasks panel's mark and the bar's, so the two cannot say different things.
+    /// </summary>
+    public static string MarkTip(string label, DateTimeOffset? next, string model, DateTimeOffset now) =>
+        string.Join(" · ", new[] { $"Repeats {label}", next is { } n ? $"next run {TaskSnooze.WhenText(n.ToLocalTime(), now.ToLocalTime())}" : "", model }
+            .Where(part => part.Length > 0));
+
     const string Forms = "use every <n>m or every <n>h (15 minutes to 24 hours, optionally followed by a window such as 09:00-19:00), daily HH:MM, weekdays HH:MM, or weekly <day> HH:MM";
 
     // One pattern per form, tried in turn (as TaskSnooze.Parse does). Times are H:MM or HH:MM; their range is checked after.

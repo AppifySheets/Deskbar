@@ -2132,6 +2132,62 @@ public class TasksBoardTests
 
     static TaskRepeat DailyRepeat() => new(TaskRepeats.Parse("daily 09:00").Value, TaskRepeat.DefaultModel, @"C:\repos\x");
 
+    // Task 9: the repeat mark, Segoe Fluent's RepeatAll after the snooze moon, with the schedule, the next run and the model
+    // in its tooltip; none on a plain line and none in a Matrix line (the moon's rule).
+    static TextBlock? RepeatMarkOf(object line) =>
+        Inside(line).OfType<TextBlock>().SingleOrDefault(b => Equals(b.Tag, TasksWindow.RepeatMarkTag));
+
+    [Fact]
+    public void A_recurring_line_shows_the_repeat_mark_with_schedule_next_run_and_model() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var id = t.Tasks.AddNote("a", t.Gepha).Value.Id;
+        Assert.True(t.Tasks.SetRepeat(id, DailyRepeat()).IsSuccess);
+        t.Controller.Show();
+        // A repeat sleeps until its next run (TaskBoard.SleepUntilNextRun), so its line is under the Snoozed filter.
+        t.Controller.Filter(TaskFilter.Snoozed);
+
+        var mark = RepeatMarkOf(LineOf(t.Window, id));
+
+        Assert.NotNull(mark);
+        Assert.Equal("", mark!.Text);
+        var tip = Assert.IsType<string>(mark.ToolTip);
+        Assert.StartsWith("Repeats every day at 09:00 · next run ", tip);
+        Assert.EndsWith(" · sonnet", tip);
+        // After the snooze moon, in the same strip as the toggles.
+        var strip = Assert.IsType<StackPanel>(mark.Parent);
+        Assert.Equal("Snooze", AutomationProperties.GetName((Button)strip.Children[^2]));
+        Assert.Same(mark, strip.Children[^1]);
+    });
+
+    [Fact]
+    public void A_plain_line_has_no_repeat_mark() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var id = t.Tasks.AddNote("a", t.Gepha).Value.Id;
+        t.Controller.Show();
+
+        Assert.Null(RepeatMarkOf(LineOf(t.Window, id)));
+    });
+
+    [Fact]
+    public void A_Matrix_line_has_no_repeat_mark() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var id = t.Tasks.AddNote("a", t.Gepha).Value.Id;
+        Assert.True(t.Tasks.SetRepeat(id, DailyRepeat()).IsSuccess);
+        t.Controller.Show();
+        Click(ButtonNamed(t.Window, "Matrix"));
+        // The Matrix's cells hold the task (the Snoozed filter is a List one and empties it), with the moon's rule: no mark.
+        // Wake it so it is on the Matrix; the repeat stays.
+        Assert.True(t.Tasks.RunStarted(id).IsSuccess);
+
+        // Guard against passing for want of a line: the Matrix is on and the task is drawn.
+        Assert.True(t.Window.MatrixShown);
+        Assert.Contains(id, t.Window.Keys);
+        Assert.Null(RepeatMarkOf(t.Window));
+    });
+
     [Fact]
     public void The_line_menu_has_Repeat_with_five_choices_custom_and_no_off_on_a_plain_task() => StaThread.Run(() =>
     {

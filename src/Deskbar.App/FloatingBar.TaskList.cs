@@ -570,6 +570,10 @@ public partial class FloatingBar
             // Whether the line menu's Open Claude can open anything (task 6a57f59b, ClaudeTaskActions.CanOpen). Without
             // the App's answer (the tests) a Claude task's session counts as openable, as before.
             OpensSession = t.IsClaudes && (opensSession?.Invoke(t) ?? true),
+            // The repeat mark's facts (task 0b78269e, Task 9): the schedule in words, when it next runs and its model.
+            RepeatLabel = t.Repeat.Map(r => r.Schedule.Label).GetValueOrDefault(),
+            NextRun = t.NextRun.Map(next => (DateTimeOffset?)next).GetValueOrDefault(),
+            RepeatModel = t.Repeat.Map(r => r.Model).GetValueOrDefault(),
         }).ToArray();
 
     // SUBTASKS UNDER THEIR PARENT (follow-up to the subtasks spec; Petre's screenshot of "↳ test1" four lines above its
@@ -1473,6 +1477,17 @@ public partial class FloatingBar
             new Typeface(taskMoreLabel.FontFamily, taskMoreLabel.FontStyle, taskMoreLabel.FontWeight, taskMoreLabel.FontStretch),
             taskMoreLabel.FontSize, Brushes.White, VisualTreeHelper.GetDpi(taskMoreLabel).PixelsPerDip).Width;
 
+    // The repeat mark for the Right slot (task 0b78269e, Task 9): Segoe Fluent's RepeatAll, U+E8EE, in the dim ink, with the
+    // same tooltip as the tasks panel's (TaskRepeats.MarkTip). Empty for a task that does not repeat.
+    IReadOnlyList<UIElement> RepeatMarkOf(TaskLine line) =>
+        line.RepeatLabel is not { } label ? []
+            : [new TextBlock
+            {
+                Text = "", FontFamily = IconFont, FontSize = 12, Foreground = TaskDimInk, VerticalAlignment = VerticalAlignment.Center,
+                Margin = new Thickness(4, 0, 0, 0), Tag = "task-repeat-mark",
+                ToolTip = TaskRepeats.MarkTip(label, line.NextRun, line.RepeatModel ?? TaskRepeat.DefaultModel, DateTimeOffset.Now),
+            }];
+
     // One task's line: a button the width of the list, so a click anywhere on it goes to the task.
     Button TaskLineButton(TaskLine line)
     {
@@ -1484,8 +1499,11 @@ public partial class FloatingBar
         // toggles laid over the title's end, and the age are all gone from the bar's line: the title's weight and slant
         // already say the flags (Ruling 59, TextOf), the line's right-click menu still sets them (Important, Urgent:
         // FloatingBar.TaskEdit.cs), and the tasks panel has both the toggles and the age. TaskLineFace keeps its right
-        // parts and overlay slots for any later use; the bar hands it none.
-        var face = new TaskLineFace(LeftOf(line).ToList(), TitleOrEditor(line), [], WorkspaceChipButton(line),
+        // parts and overlay slots for any later use; the bar hands it none, with ONE exception: the repeat mark of a
+        // recurring task (task 0b78269e, Task 9; Petre picked it from a mockup). It is a fact about the task, not a
+        // control or a flag, and the title's weight cannot say it. It takes the Right slot: a glyph's width, beside the
+        // title's first row, so the chip and the title keep their rules. A plain task hands the slot nothing, as before.
+        var face = new TaskLineFace(LeftOf(line).ToList(), TitleOrEditor(line), RepeatMarkOf(line), WorkspaceChipButton(line),
             WorkspaceDot(line), null);
         // A closed line in its undo window is dimmed, all but its Undo, which is the one thing on it to press.
         if (line.Closing)
@@ -2630,6 +2648,15 @@ internal sealed record TaskLine(Guid Id, string Title, string Detail, TaskStatus
     public bool OpensSession { get; init; }
 
     public bool Urgent { get; init; }
+
+    /// <summary>The task's repeat in words ("every day at 09:00"), or null: the line's repeat mark (task 0b78269e, Task 9).</summary>
+    public string? RepeatLabel { get; init; }
+
+    /// <summary>When the next run is due, or null: in the repeat mark's tooltip.</summary>
+    public DateTimeOffset? NextRun { get; init; }
+
+    /// <summary>The model the repeat's runs use, or null: in the repeat mark's tooltip.</summary>
+    public string? RepeatModel { get; init; }
 
     /// <summary>
     /// Whether a Done task's change runs in this Deskbar yet (task 8470d176, RunningChanges): Shipping draws the hollow

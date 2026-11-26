@@ -88,6 +88,11 @@ public partial class TasksWindow
     GridLength commentsWidth = new(ButtonColumn);
     GridLength actionWidth = new(0);
 
+    // The flags column: the two toggles and the snooze moon, and a fourth toggle's width while a line on show repeats (task
+    // 0b78269e, Task 9: the repeat mark, RepeatMark, takes a toggle's width). Worked out per draw like the comments column,
+    // so the title keeps its room on every list with no recurring task, which is nearly every one.
+    GridLength flagsWidth = new(FlagsColumn);
+
     // Whether this draw's slim lines lead their strip with a Reevaluate slot (SizeColumns; task 3dd07539).
     bool reevaluateLeads;
     TaskColumnWidths columnWidths = TaskColumnWidths.Default;
@@ -97,6 +102,7 @@ public partial class TasksWindow
     void SizeColumns(TasksView view, IReadOnlyList<TaskRowView> shownRows)
     {
         commentsWidth = new(CommentsColumnFor(shownRows));
+        flagsWidth = new(FlagsColumn + (shownRows.Any(r => r.RepeatLabel is not null) ? ToggleWidth : 0));
         var full = !view.Slim && !view.Matrix;
         // Start Claude, on a task no session has joined, takes the same column as Open Claude (task 59b8f613).
         // Reevaluate beside Open Claude (task 3dd07539): on a full line it makes this column two buttons wide while any
@@ -124,7 +130,7 @@ public partial class TasksWindow
     // the strip takes its buttons back first, all seven from about 940 to 970 DIP (by the comment counts and the action
     // column on show), and then the title grows.
     IReadOnlyList<GridLength> FullColumns() =>
-        [new(22), new(1, GridUnitType.Star), .. columnWidths.InOrder.Select(w => new GridLength(w)), new(FlagsColumn), commentsWidth, actionWidth,
+        [new(22), new(1, GridUnitType.Star), .. columnWidths.InOrder.Select(w => new GridLength(w)), flagsWidth, commentsWidth, actionWidth,
             new(1000, GridUnitType.Star)];
 
     // The title's floor on a full line, and the strip's cap: the two limits FullColumns' two stars are drawn within. Set on
@@ -164,7 +170,7 @@ public partial class TasksWindow
     // A slim line's columns, in ListOrder: no status, no assignee; the squares, the age and the workspace chip; the buttons.
     IReadOnlyList<GridLength> SlimColumns() =>
         [new(22), new(1, GridUnitType.Star), new(0), slimSquaresWidth, new(0), new(SlimAgeColumn), new(columnWidths.Workspace),
-            new(FlagsColumn), commentsWidth, actionWidth, new(ButtonColumn)];
+            flagsWidth, commentsWidth, actionWidth, new(ButtonColumn)];
 
     // Every full line's grid on show, with the header's, so a divider drag can resize them in place. Emptied by each draw.
     readonly List<Grid> fullGrids = [];

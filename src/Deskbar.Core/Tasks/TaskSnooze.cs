@@ -68,13 +68,20 @@ public static class TaskSnooze
     /// How a snoozed task says when it comes back, from <paramref name="now"/>: "until 15:40" today, "until tomorrow
     /// 09:00", "until Mon 09:00" within the week, "until 8 Dec 09:00" further off. Both times local.
     /// </summary>
-    public static string UntilText(DateTimeOffset until, DateTimeOffset now) =>
-        (until.Date - now.Date).Days switch
+    public static string UntilText(DateTimeOffset until, DateTimeOffset now) => $"until {WhenText(until, now)}";
+
+    /// <summary>
+    /// The time part of <see cref="UntilText"/> without its "until": "15:40" today, "tomorrow 09:00", "Mon 09:00" within
+    /// the week, "8 Dec 09:00" further off. Shared with the repeat mark's "next run ..." (task 0b78269e, Task 9), so a
+    /// snooze and a repeat say a time the same way. Both times local.
+    /// </summary>
+    public static string WhenText(DateTimeOffset when, DateTimeOffset now) =>
+        (when.Date - now.Date).Days switch
         {
-            <= 0 => $"until {until.ToString("HH:mm", CultureInfo.InvariantCulture)}",
-            1 => $"until tomorrow {until.ToString("HH:mm", CultureInfo.InvariantCulture)}",
-            < 7 => $"until {until.ToString("ddd HH:mm", CultureInfo.InvariantCulture)}",
-            _ => $"until {until.ToString("d MMM HH:mm", CultureInfo.InvariantCulture)}",
+            <= 0 => when.ToString("HH:mm", CultureInfo.InvariantCulture),
+            1 => $"tomorrow {when.ToString("HH:mm", CultureInfo.InvariantCulture)}",
+            < 7 => when.ToString("ddd HH:mm", CultureInfo.InvariantCulture),
+            _ => when.ToString("d MMM HH:mm", CultureInfo.InvariantCulture),
         };
 
     /// <summary>
