@@ -1783,12 +1783,12 @@ CW3. Narrow the panel with its width grip until a twelve-line comment wraps past
 
 (Task [Deskbar task 0b78269e](https://deskbar.app/task#0b78269e-3365-4401-9d2d-635512282d7a).) A note task whose description says to comment the current time and then call it done, in a folder that is a git repo. Tracing is not needed.
 
-RT1. On the note's "⋯" menu in the tasks panel pick Repeat, then "Every hour": the line leaves the panel's lists, shows under the Snoozed chip with the repeat mark, and the mark's tooltip reads `Repeats every hour · next run <time> · sonnet`.
+RT1. On the note's "⋯" menu in the tasks panel pick Repeat, then "Every hour" (when the task's workspace knows several folders, a list opens: pick the repo): the line leaves the panel's lists, shows under the Snoozed chip with the repeat mark, and the mark's tooltip reads `Repeats every hour · next run <time> · sonnet`.
 RT2. Pick "Wake now": a run starts with no window and no change of focus, and the line shows Claude working.
 RT3. The run comments the time and calls the task done. The line goes back under Snoozed, and the next run is an hour on.
 RT4. About a minute after the run goes idle its session is gone from `claude agents`.
-RT5. Wake again, open the run's window while it works, and wake again once it is idle: the run is skipped while the window is open, and the session is not stopped under you.
-RT6. Post a comment on the task between runs: a fresh run starts and its answer reads the comment.
+RT5. Wake again, open the run's window while it works, and wake again once it is idle: the run is skipped while the window is open, and the session is not stopped under you. The skip shows as `recurring: <id> not started again` in the trace log (with `%APPDATA%\Deskbar\trace.on`), or simply no second session appears in `claude agents`.
+RT6. After RT4 (the last run's session is gone from `claude agents`), post a comment on the task: a fresh run starts and its answer reads the comment. A comment posted before that goes to the last run's session instead.
 RT7. Rename the task's folder, then Wake now: the task asks once, and no further question comes at the next hour.
 RT8. Put the folder back, then run `deskbar.cmd task repeat <id> off` between runs: the task becomes Done, and closing it ends the job. Run `deskbar.cmd task repeat <id> off` on a task that is mid-run: only the schedule goes, the run finishes.
 RT9. Set Custom… to `daily HH:MM` two minutes ahead: it runs at that time without a window.

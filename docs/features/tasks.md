@@ -141,14 +141,14 @@ A task can repeat, for work you want done again at a set time: a morning summary
 
 - Pick **Repeat** on a line's "⋯" menu, in the tasks panel or in the task window. It offers "Every hour", "Every hour, 09:00-19:00", "Every day at 09:00", "Every weekday at 09:00", "Every Monday at 09:00", **Custom…** and, while the task repeats, **Off**. The current schedule is ticked.
 - **Custom…** asks for the same words `task repeat` takes (see [From a script](#from-a-script)), such as `every 30m`, `weekdays 08:30` or `weekly friday 16:00`, and `--model` is allowed there. Times are in this PC's time. An interval can be from 15 minutes to 24 hours, and a window after it, such as `09:00-19:00`, stays within one day.
-- A run uses Sonnet unless you name another model. It runs in the task's folder, the only one Deskbar knows for it, and a worktree counts as its repo.
+- A run uses Sonnet unless you name another model. It runs in the task's folder: the only one Deskbar knows for it, or the one you pick from a list when there are several. A worktree counts as its repo. Changing the schedule later keeps the model and the folder, unless the folder has gone.
 - A task that repeats shows a repeat mark on its line. Hover it to read "Repeats every hour · next run Thu 09:00 · sonnet". Between runs the task waits under the panel's **Snoozed** chip, and **Wake now** starts a run at once.
 - A run is quiet. It opens no window and takes no focus, and the task does not jump to the top. It comments on the task and marks it done, and the task goes back to waiting for the next time. About a minute after a run goes idle Deskbar stops its session, unless you have it open in a window.
 - A run that comes due while the last one is still going is skipped, not queued. There is no catch-up: if the PC was asleep or off at the time, the run is simply missed and the next one comes at its next time.
-- A comment you post between runs starts a fresh run that reads it.
+- A comment you post between runs starts a fresh run that reads it, but only once the last run's session has been stopped, about a minute after it goes idle. Before that, the comment goes to that session, as a comment on any task does.
 - If the folder is gone, or a run cannot start, the task asks you once, and then keeps quiet rather than asking at every time.
-- **Off** between runs ends the job: the task becomes done, and you close it as you would any finished task. **Off** while a run is going only drops the schedule and lets that run finish. Closing a repeating task stops its repeats, and reopening it starts them again from that moment.
-- A Claude session can set a repeat on a task by its id, but it may never turn one off. Only you do that.
+- **Off** between runs, or while the task asks you about its folder or a run that could not start, ends the job: the task becomes done, and you close it as you would any finished task. **Off** while a run is going only drops the schedule and lets that run finish. Closing a repeating task stops its repeats, and reopening it starts them again from that moment.
+- A task's own Claude session may set its task's repeat or turn it off. The manager may set a repeat on any task by its id, but it may not turn one off.
 
 ## Tasks from older versions
 

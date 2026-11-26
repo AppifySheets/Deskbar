@@ -88,7 +88,7 @@ Deskbar gives up on a session when it has been resumed three times in ten minute
 
 A [recurring task](tasks.md#recurring-tasks) starts a fresh Claude session at each time it is due. Deskbar starts it in the background, in the task's folder, on Sonnet unless the repeat names another model, and it opens no window and takes no focus. The session reads the task, does the work, comments and marks the task done. About a minute after it goes idle Deskbar stops it, unless you have it open in a window, so finished runs do not pile up in `claude agents`.
 
-A time that comes while the last run is still going is skipped. After sleep or shutdown nothing is caught up. A comment you post between runs, or **Wake now**, starts a run at once. If the folder is gone or a run cannot start, the task asks you once. A repeat can be set or ended from a script with `deskbar.cmd task repeat`, and a session may set one on its own task but may not turn one off.
+A time that comes while the last run is still going is skipped. After sleep or shutdown nothing is caught up. **Wake now** starts a run at once. A comment you post between runs starts a fresh run too, but only once the last run's session has been stopped, about a minute after it goes idle; until then the comment goes to that session. If the folder is gone or a run cannot start, the task asks you once. A repeat can be set or ended from a script with `deskbar.cmd task repeat`. A task's own session may set its task's repeat or turn it off (`task repeat ... --session <id>`). The manager may set a repeat on any task by its id, but it may not turn one off.
 
 ## Settings
 

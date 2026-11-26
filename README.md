@@ -614,7 +614,8 @@ works, comments and calls it done, and the task goes quiet until the next time. 
 repeat mark; hover it to read the schedule, when the next run is and which model runs it (Sonnet unless you choose
 another). A run never opens a window or takes focus, and a run that comes due while the last one is still going is
 skipped. Nothing catches up after sleep or shutdown. Between runs the task waits under the "Snoozed" chip, and "Wake now"
-starts a run at once. A comment you post between runs starts a fresh run that reads it. See
+starts a run at once. A comment you post between runs starts a fresh run that reads it, once the last run's session has
+been stopped (about a minute after it goes idle); before that, the comment goes to that session. See
 [Recurring tasks](docs/features/tasks.md#recurring-tasks).
 
 The panel's Stats switch, next to List and Matrix, shows how the work is going: how many tasks are open,
