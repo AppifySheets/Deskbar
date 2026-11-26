@@ -49,8 +49,19 @@ public static class ManagerDockLayout
         public sealed record Resize(double WidthDips) : AfterDrag;
     }
 
-    public static AfterDrag Dragged(WindowRect strip, WindowRect frame, double scale) =>
-        Math.Abs(frame.Width - strip.Width) > ResizeSlackPixels && scale > 0
+    //
+    // A RESIZE ONLY WHEN THE INNER EDGE ALONE MOVED (review finding): the top, the bottom and the OUTER edge (the one
+    // against the tasks panel or the bar, on the dock's `edge`) still where the strip has them, within the slack. Without
+    // that, a title-bar drag that ends in a Snap (half the screen), a maximize (the whole work area) or on a screen of
+    // another scale (other pixels for the same DIPs) changes the frame's width too, and was read as a new width and saved:
+    // a half-screen strip reserved for good. Every such drag is a SnapBack.
+    public static AfterDrag Dragged(WindowRect strip, WindowRect frame, double scale, PanelEdge edge)
+    {
+        bool Near(int a, int b) => Math.Abs(a - b) <= ResizeSlackPixels;
+        var outerStayed = edge == PanelEdge.Right ? Near(frame.Right, strip.Right) : Near(frame.Left, strip.Left);
+        var onlyInnerMoved = outerStayed && Near(frame.Top, strip.Top) && Near(frame.Bottom, strip.Bottom);
+        return onlyInnerMoved && !Near(frame.Width, strip.Width) && scale > 0
             ? new AfterDrag.Resize(frame.Width / scale)
             : new AfterDrag.SnapBack();
+    }
 }

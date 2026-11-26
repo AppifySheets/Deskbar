@@ -36,7 +36,7 @@ public class ManagerDockLayoutTests
     {
         var moved = new WindowRect(-3000, 400, -2040, 2524);
 
-        Assert.IsType<ManagerDockLayout.AfterDrag.SnapBack>(ManagerDockLayout.Dragged(Strip, moved, 1.5));
+        Assert.IsType<ManagerDockLayout.AfterDrag.SnapBack>(ManagerDockLayout.Dragged(Strip, moved, 1.5, PanelEdge.Right));
     }
 
     // Its inner edge dragged 150 px further in: 1110 px at 150% is a 740 DIP dock.
@@ -45,7 +45,7 @@ public class ManagerDockLayoutTests
     {
         var wider = new WindowRect(-2190, 322, -1080, 2446);
 
-        var after = Assert.IsType<ManagerDockLayout.AfterDrag.Resize>(ManagerDockLayout.Dragged(Strip, wider, 1.5));
+        var after = Assert.IsType<ManagerDockLayout.AfterDrag.Resize>(ManagerDockLayout.Dragged(Strip, wider, 1.5, PanelEdge.Right));
         Assert.Equal(740, after.WidthDips);
     }
 
@@ -53,5 +53,29 @@ public class ManagerDockLayoutTests
     [Fact]
     public void A_few_pixels_of_width_are_not_a_resize() =>
         Assert.IsType<ManagerDockLayout.AfterDrag.SnapBack>(
-            ManagerDockLayout.Dragged(Strip, Strip with { Left = Strip.Left - ManagerDockLayout.ResizeSlackPixels }, 1.5));
+            ManagerDockLayout.Dragged(Strip, Strip with { Left = Strip.Left - ManagerDockLayout.ResizeSlackPixels }, 1.5, PanelEdge.Right));
+
+    // Review finding: a title-bar drag that ends snapped to the far half, or on another screen, changes the frame's width
+    // too, but its outer edge, top or bottom moved, so it is a snap back, never a width. (A maximize, or a Snap to the half
+    // beside the panel, can leave all three where a resize would; the app tells those apart by the window's own state,
+    // IsZoomed and IsShellArranged, before it asks this rule. See ManagerDock.DragEnded.)
+    [Theory]
+    [InlineData(-3840, 322, -2460, 2446)]   // snapped to the far left half
+    [InlineData(-2040, 400, -1080, 1400)]   // snapped to a quarter beside the panel: top and bottom moved
+    [InlineData(100, 36, 1000, 2160)]       // dropped on the other screen
+    public void A_drag_that_moved_more_than_the_inner_edge_snaps_back(int left, int top, int right, int bottom) =>
+        Assert.IsType<ManagerDockLayout.AfterDrag.SnapBack>(
+            ManagerDockLayout.Dragged(Strip, new WindowRect(left, top, right, bottom), 1.5, PanelEdge.Right));
+
+    // Docked on the left edge, the outer edge is the left one, and the inner (right) edge is the one a resize moves.
+    [Fact]
+    public void On_the_left_edge_the_right_edge_is_the_inner_one()
+    {
+        var strip = new WindowRect(1080, 36, 2040, 2160);
+
+        Assert.IsType<ManagerDockLayout.AfterDrag.Resize>(
+            ManagerDockLayout.Dragged(strip, strip with { Right = 2190 }, 1.5, PanelEdge.Left));
+        Assert.IsType<ManagerDockLayout.AfterDrag.SnapBack>(
+            ManagerDockLayout.Dragged(strip, strip with { Left = 930 }, 1.5, PanelEdge.Left));
+    }
 }
