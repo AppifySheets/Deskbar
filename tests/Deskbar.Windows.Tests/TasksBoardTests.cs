@@ -3438,6 +3438,41 @@ public class TasksBoardTests
         Assert.Null(DescriptionPreviewOf(t.Window, plain));
     });
 
+    // Task e117cb92 (Petre, of a WEB-657 link under a task's title: "link in the description doesn't get clicked; it closes
+    // the issue panel"). The description box takes no hits, so the line finds the link under a press by hand
+    // (TasksWindow.DescriptionLinkAt): a point on the link's text finds it, a point on the plain text beside it finds
+    // nothing (the press stays the line's), and the link found opens the address as a question's link does.
+    [Fact]
+    public void A_press_on_a_link_in_an_open_lines_description_finds_that_link() => StaThread.Run(() =>
+    {
+        var opened = new List<Uri>();
+        using var t = Build(openUri: opened.Add);
+        var id = t.Tasks.AddNote("Old edits rule", t.Gepha).Value.Id;
+        t.Tasks.Describe(id, "Plain words first, then [WEB-657](https://example.com/browse/WEB-657) at the end");
+        t.Controller.Show();
+        t.Controller.ToggleThread(id);
+        t.Window.UpdateLayout();
+
+        var line = LineOf(t.Window, id);
+        var box = Inside(line).OfType<RichTextBox>().Single(b => Equals(b.Tag, "task-description"));
+        var link = Assert.Single(Inside(box.Document).OfType<Hyperlink>());
+        // The middle of a character near `at`: the link's "W", and the "l" of the description's "Plain".
+        static Point Middle(TextPointer at)
+        {
+            var from = at.GetPositionAtOffset(1, LogicalDirection.Forward)!.GetCharacterRect(LogicalDirection.Forward);
+            var to = at.GetPositionAtOffset(2, LogicalDirection.Forward)!.GetCharacterRect(LogicalDirection.Backward);
+            return new Point((from.Left + to.Left) / 2, (from.Top + from.Bottom) / 2);
+        }
+        Func<IInputElement, Point> In(Point inBox) => element => box.TranslatePoint(inBox, (UIElement)element);
+
+        Assert.Same(link, TasksWindow.DescriptionLinkAt(line, In(Middle(link.ContentStart))));
+        Assert.Null(TasksWindow.DescriptionLinkAt(line, In(Middle(box.Document.ContentStart.GetInsertionPosition(LogicalDirection.Forward)))));
+        Assert.Null(TasksWindow.DescriptionLinkAt(line, In(new Point(-5, -5))));
+
+        TasksWindow.DescriptionLinkAt(line, In(Middle(link.ContentStart)))!.RaiseEvent(new RoutedEventArgs(Hyperlink.ClickEvent));
+        Assert.Equal([new Uri("https://example.com/browse/WEB-657")], opened);
+    });
+
     // Petre, 2026-11-23, of a long brief that filled the window: "i want that after i go to details". A closed line
     // shows only the description's first line, plain, cut to one line; opening the line shows the whole of it, and
     // closing it again goes back to the one line.

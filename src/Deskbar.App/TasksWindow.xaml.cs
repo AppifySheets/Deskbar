@@ -1021,6 +1021,25 @@ public partial class TasksWindow : Window
         // (TasksWindow.Drag.cs), armed only, so a press released in place stays this Click.
         line.PreviewMouseLeftButtonDown += (_, e) =>
         {
+            // A PRESS ON A LINK IN THE OPEN LINE'S DESCRIPTION IS THE LINK'S (task e117cb92; Petre, of a WEB-657 link
+            // under a task's title: "link in the description doesn't get clicked; it closes the issue panel"). The
+            // description box takes no hits, so a press anywhere on it is a press on the line (DescriptionBlock says why),
+            // and a press on its link folded the line instead of opening the address. So the line asks first whether the
+            // press is over one of the description's links (DescriptionLinkAt) and, if it is, raises that link's Click,
+            // which opens it as a question's or a comment's link opens (in the task's workspace, LinkOpener). Handled, so
+            // the line neither picks, folds nor arms a drag. A second press of a double-click on a link is swallowed:
+            // the first one already opened it, and a double-click must not also take Petre to the task's workspace.
+            // The repaint guard holds here as on every other click (RepaintGrace, read directly because ClickIgnored also
+            // spends pressClicks): a line that slid under the pointer in the last half second, as the one below a closed
+            // line does, must not open an address Petre never aimed at. A line in its undo window opens nothing either,
+            // as its own Click picks nothing: Undo is the one thing on it to press.
+            if (DescriptionLinkAt(line, e.GetPosition) is { } descriptionLink)
+            {
+                e.Handled = true;
+                if (e.ClickCount == 1 && !row.Closing && ClickClock() - linesChangedAt >= RepaintGrace)
+                    descriptionLink.RaiseEvent(new RoutedEventArgs(Hyperlink.ClickEvent, descriptionLink));
+                return;
+            }
             // RULING 54 (Petre: "clicking a task should open that task; double clicking takes me to the workspace and
             // window"): a double-click anywhere on the line goes there, as the bar's does. Handled, so the line neither
             // clicks again nor arms a drag; its first click already picked and expanded the task (the Click below). A
@@ -1811,7 +1830,9 @@ public partial class TasksWindow : Window
 
     // THE DESCRIPTION UNDER A TITLE (Ruling 58): Petre's markdown, rendered as a comment's is (MarkdownBlocks), dim, a
     // block of its own under the title. A read-only box that takes no hits and no focus, so a click on it falls through to
-    // the line (selecting it) and a link in it is not clickable here; the full text is a click away in Edit.
+    // the line (selecting it): a box that took hits would keep every press for its own text selection, and a click on
+    // the description would stop picking the task. Its links still open on a click (task e117cb92): the line's press
+    // asks DescriptionLinkAt whether the pointer is over one before it does anything else.
     RichTextBox DescriptionBlock(TaskRowView row)
     {
         // The text alone: its pictures are the row under it (TaskImageRow), never a path shown as text.
@@ -1836,6 +1857,62 @@ public partial class TasksWindow : Window
     }
 
     const string DescriptionTag = "task-description";
+
+    // THE DESCRIPTION LINK UNDER THE POINTER (task e117cb92), or none. The description box takes no hits, so WPF's own hit
+    // test never reaches its Hyperlinks; this does the hit test by hand. Every description box inside the line that is
+    // showing, and where the point (pointIn gives it in an element's coordinates, the press's GetPosition in the window)
+    // lies inside both the box and the part of it its HeightCap lets show (an open line cuts a long description at four
+    // lines, and a press below the cut is on whatever is drawn there, not on the hidden text). Then each link in the box's
+    // document is asked whether one of its characters covers the point (Covers). Internal for the tests, which pass a
+    // point of their own: a raised MouseButtonEventArgs reads the real mouse's position.
+    internal static Hyperlink? DescriptionLinkAt(DependencyObject line, Func<IInputElement, Point> pointIn) =>
+        LogicalDescendants(line).OfType<RichTextBox>()
+            .Where(box => Equals(box.Tag, DescriptionTag) && box.IsVisible)
+            .Select(box => (Box: box, At: pointIn(box)))
+            .Where(hit => Shows(hit.Box, hit.At))
+            .SelectMany(hit => LogicalDescendants(hit.Box.Document).OfType<Hyperlink>().Where(link => Covers(link, hit.At)))
+            .FirstOrDefault();
+
+    // The line's content and everything under it, by the logical tree: a description box sits in a HeightCap (a Decorator)
+    // in a StackPanel in the line's frame, and a FlowDocument's blocks and inlines are its logical children, so one walk
+    // reaches both the boxes and their links.
+    static IEnumerable<DependencyObject> LogicalDescendants(DependencyObject node) =>
+        LogicalTreeHelper.GetChildren(node).OfType<DependencyObject>().SelectMany(child => new[] { child }.Concat(LogicalDescendants(child)));
+
+    // Whether a point in the box's coordinates is on the part of the box that is drawn: inside the box, and inside the
+    // HeightCap around it when the open line cut it (Capped puts the box straight in the cap, which clips at its bounds).
+    static bool Shows(RichTextBox box, Point at) =>
+        new Rect(box.RenderSize).Contains(at)
+        && (box.Parent is not HeightCap cap || new Rect(cap.RenderSize).Contains(box.TranslatePoint(at, cap)));
+
+    // Whether one of the link's characters covers the point. A character's box runs from the left edge of the position in
+    // front of it to the right edge of the position after it, a line high; a link that wraps has characters on two lines,
+    // each with its own box, so the gap at the end of its first line is not part of it. GetCharacterRect is in the box's
+    // coordinates, the same ones the point is in (LineEdgeAbove relies on the same).
+    static bool Covers(Hyperlink link, Point at)
+    {
+        var positions = Positions(link).ToList();
+        return positions.Zip(positions.Skip(1), CharacterBox).Any(box => box.Contains(at));
+    }
+
+    // Every insertion position from the link's start to its end, which are the edges of its characters.
+    static IEnumerable<TextPointer> Positions(TextElement element)
+    {
+        for (var at = element.ContentStart; at is not null && at.CompareTo(element.ContentEnd) < 0; at = at.GetNextInsertionPosition(LogicalDirection.Forward))
+            yield return at;
+        yield return element.ContentEnd;
+    }
+
+    // The box of the character between two neighbouring positions. Empty when the two edges are on different lines, which
+    // only a position at a wrap can give; the character is then measured from the other side by its neighbours.
+    static Rect CharacterBox(TextPointer from, TextPointer to)
+    {
+        var left = from.GetCharacterRect(LogicalDirection.Forward);
+        var right = to.GetCharacterRect(LogicalDirection.Backward);
+        return left.IsEmpty || right.IsEmpty || Math.Abs(left.Top - right.Top) > 0.5
+            ? Rect.Empty
+            : new Rect(new Point(Math.Min(left.Left, right.Left), left.Top), new Point(Math.Max(left.Left, right.Left), Math.Max(left.Bottom, right.Bottom)));
+    }
 
     // The line's detail (question or status line), so a test can find it and read how it is cut.
     internal const string DetailTag = "task-detail";
