@@ -104,7 +104,11 @@ public sealed class TaskService(ITaskStore store, Func<DateTimeOffset> now, Func
     public TaskSession NewSession(string id, string folder) => new(id, folder, now(), Maybe<DateTimeOffset>.None);
 
     // The same line again changes nothing, so it saves and pulses nothing (TaskBoard.SetStatusLine, review of PR B, M-3).
-    public Result SetStatusLine(Guid id, string text) => ApplyIfChanged(Board.SetStatusLine(id, text, now()));
+    // It is still heard (statusLinesHeard): a session answering Deskbar's ask with the line it already had ("still waiting
+    // on CI") has answered, and StalledTasks must not hand its task to Petre for saying nothing (task 8710ac09).
+    public Result SetStatusLine(Guid id, string text) =>
+        ApplyIfChanged(Board.SetStatusLine(id, text, now()))
+            .Tap(() => ImmutableInterlocked.Update(ref statusLinesHeard, heard => heard.SetItem(id, now())));
 
     public Result Ask(Guid id, string question) => Apply(Board.Ask(id, question, now()));
 
@@ -385,6 +389,33 @@ public sealed class TaskService(ITaskStore store, Func<DateTimeOffset> now, Func
     // after a restart StalledTasks measures from the task's UpdatedAt instead (see its header).
     ImmutableDictionary<Guid, DateTimeOffset> lastBusy = ImmutableDictionary<Guid, DateTimeOffset>.Empty;
 
+    // ASK BEFORE HANDING BACK (task 8710ac09, StalledTasks' header): when each quiet task's session was asked whether it
+    // waits on Petre, and when a session last set each task's status line (SetStatusLine), changed or not. In memory only:
+    // a restart forgets an ask, and the session is simply asked again after its next 15 quiet minutes.
+    ImmutableDictionary<Guid, DateTimeOffset> nudged = ImmutableDictionary<Guid, DateTimeOffset>.Empty;
+    ImmutableDictionary<Guid, DateTimeOffset> statusLinesHeard = ImmutableDictionary<Guid, DateTimeOffset>.Empty;
+    readonly Subject<Guid> stalledNudges = new();
+
+    /// <summary>
+    /// The quiet tasks whose session is to be asked now whether it waits on Petre (StalledTasks), for the app's
+    /// CommentWaker to deliver on a comment's roads with SessionBriefing.StalledNudge.
+    /// </summary>
+    public IObservable<Guid> StalledNudges => stalledNudges;
+
+    /// <summary>
+    /// The ask could not reach any session of the task (CommentWake found none to wake): nobody can answer, so the task
+    /// comes to Petre now instead of after StalledTasks.Answer. Only a task still Claude's and still asked is moved.
+    /// </summary>
+    public void NudgeUndelivered(Guid id)
+    {
+        if (!nudged.ContainsKey(id)) return;
+        nudged = nudged.Remove(id);
+        var next = Board.HandBack(id, now());
+        if (ReferenceEquals(next, Board)) return;
+        trace?.Invoke($"tasks: handed back {Line(next, id)}, the ask could not reach any of its sessions");
+        Commit(next);
+    }
+
     /// <summary>
     /// Stalled tasks (StalledTasks; spec docs/superpowers/specs/2026-11-23-stalled-claude-tasks-design.md): called on
     /// every poll of Claude Code's session list with the ids of the sessions working now. A Claude task quiet for
@@ -412,12 +443,18 @@ public sealed class TaskService(ITaskStore store, Func<DateTimeOffset> now, Func
             trace?.Invoke($"tasks: set the question of {Line(next, found.TaskId)} aside, its session works on it again after a reply");
             Commit(next);
         });
-        var step = StalledTasks.Step(Board, busy, working, lastBusy, now());
+        var step = StalledTasks.Step(Board, busy, working, lastBusy, now(), nudged, statusLinesHeard);
         lastBusy = step.LastBusy;
-        step.HandedBack.Select(id => $"tasks: handed back {Line(step.Board, id)}, no session worked on it for {StalledTasks.After.TotalMinutes:0} minutes")
+        nudged = step.Nudged;
+        // Only the tasks still watched keep their heard time; the rest would only grow the map.
+        statusLinesHeard = statusLinesHeard.RemoveRange(statusLinesHeard.Keys.Where(id => !step.Board.Tasks.Any(t => t.Id == id && t.IsOpen)).ToArray());
+        step.Nudge.Select(id => $"tasks: asked the session of {Line(step.Board, id)} whether it waits on you, no session worked on it for {StalledTasks.After.TotalMinutes:0} minutes")
+            .Concat(step.HandedBack.Select(id => $"tasks: handed back {Line(step.Board, id)}, its session did not answer the ask in {StalledTasks.Answer.TotalMinutes:0} minutes"))
             .Concat(step.TakenBack.Select(id => $"tasks: taken back {Line(step.Board, id)}, its session works on it again"))
             .ToList().ForEach(line => trace?.Invoke(line));
         CommitIfChanged(step.Board);
+        // Announced after the board is saved, so the waker reads the task as it stands.
+        step.Nudge.ToList().ForEach(stalledNudges.OnNext);
     }
 
     static string Line(TaskBoard board, Guid id) =>

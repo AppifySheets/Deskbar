@@ -710,10 +710,14 @@ tasks after a restart or a crash**, under the tasks box, turns the resuming off 
 (`deskbar.cmd claude-resume off`). Claude Code keeps sessions for 30 days; raise `cleanupPeriodDays` in
 `~/.claude/settings.json` to keep them longer.
 
-The same list says whether each session is working or idle. A Claude task that no session has worked on
-for 15 minutes is handed back to you and shows on the bar with Claude's last status line, so a session that
-stopped with "ready to merge" without asking you is not left out of sight. It goes back to Claude by itself
-once its session works on it again. A task you assign to yourself stays yours.
+The same list says whether each session is working or idle. When no session has worked on a Claude task
+for 15 minutes, Deskbar first asks its session what the task is waiting on. If the next move is yours, the
+session asks you, and the task shows under Waiting on you. If it is waiting on something else, like a CI run,
+a background job or another session, it says so in its status line and the task stays with Claude. Only a
+session that says nothing within 5 minutes, or one Deskbar cannot reach, has its task handed back to you. It
+then shows on the bar with Claude's last status line, so a session that stopped with "ready to merge" without
+asking you is not left out of sight. It goes back to Claude by itself once its session works on it again. A
+task you assign to yourself stays yours.
 
 Double-click a task, on the bar or in the tasks panel, to go to its session. You land on the task's
 workspace, and a background session's Windows Terminal window comes to the front, or opens attached to it

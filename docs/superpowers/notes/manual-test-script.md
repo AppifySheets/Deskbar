@@ -522,10 +522,18 @@ Manage ticked. Use a throwaway folder Claude Code already trusts, not a real rep
     picks up as before.
 89a. Stalled tasks (spec `docs/superpowers/specs/2026-11-23-stalled-claude-tasks-design.md`). Give a VS Code session a
     task, let it set a status line and stop at the prompt without `task ask`. The task is off the bar (Claude's). Leave
-    it 15 minutes: within 15 seconds after that it is on the bar with its status line, assigned to you in the tasks
-    panel, and the trace says `tasks: handed back <id> "<title>"`. Send the session a prompt: once it has been busy
-    for a poll, the task leaves the bar and the trace says `taken back`. Repeat, but assign the task to yourself in the
-    tasks panel before prompting: it stays on the bar while the session works.
+    it 15 minutes: within 15 seconds after that the trace says `tasks: asked the session of <id> "<title>"` and the
+    session takes a turn on a prompt opening "Deskbar: no session has worked on your task". Interrupt that turn (Esc)
+    before it runs any `task` command. Five minutes after the ask the task is on the bar with its status line, assigned
+    to you in the tasks panel, and the trace says `tasks: handed back <id> "<title>", its session did not answer`. Send
+    the session a prompt: once it has been busy for a poll, the task leaves the bar and the trace says `taken back`.
+    Repeat, but assign the task to yourself in the tasks panel before prompting: it stays on the bar while the session
+    works.
+89b. Stalled task, answered (task 8710ac09). As 89a, but let the session answer the ask. If it was waiting on you, the
+    task is under Waiting on you with its question. If it says it waits on something else (start a long `gh run watch`
+    in it first), its status line names that, the task stays off the bar, and 15 quiet minutes later it is asked again,
+    never handed back while it keeps answering. A task whose sessions have no transcript left, so nothing can be
+    resumed: the task comes to you right at the ask, and its thread says no session could be reached.
 
 ## Going to a Claude session, and starting one
 
@@ -1236,7 +1244,7 @@ MG9. (Task 1c9eefdf.) After a new day's manager has started, open the Claude app
 Manager event wakes (docs/superpowers/specs/2026-11-25-manager-event-wakes-design.md):
 
 MW1. Open the manager, close its window, and leave a Claude task's session idle for 15 minutes without `task ask` or
-     `task done`. Within about half an hour of the manager's start, the task's thread has one manager comment and the
+     `task done`, then let it ignore Deskbar's ask (89a) so the task is handed back 5 minutes later. Within about half an hour of the manager's start, the task's thread has one manager comment and the
      session took a turn on it. The Manager button shows no dot (task 6a87df67: a first nudge is not news for you).
 MW2. Let the same session stop again the same way: the next wake lights the orange dot. Open the manager: the dot goes,
      and its last reply names that task in a line, without listing the questions or merges the bar already shows.

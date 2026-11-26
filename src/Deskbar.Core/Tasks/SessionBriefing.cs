@@ -80,6 +80,8 @@ public static class SessionBriefing
         && (text.StartsWith(ManagerCommentOpening, StringComparison.Ordinal)
             || text.StartsWith(UserCommentOpening, StringComparison.Ordinal)
             || text.StartsWith(ReevaluateOpening, StringComparison.Ordinal)
+            // The stalled task's ask (task 8710ac09) is Deskbar's, not the user replying.
+            || text.StartsWith(StalledOpening, StringComparison.Ordinal)
             || text.TrimEnd() == SessionKeeper.ContinueMessage);
 
     // How Claude Code opens the prompts it delivers itself (task b846f5ad). Each one fires UserPromptSubmit like a message
@@ -170,6 +172,25 @@ public static class SessionBriefing
 
     // How much of the question the Reevaluate message quotes: enough to recognise it, short enough not to bury the steps.
     const int QuestionLength = 300;
+
+    const string StalledOpening = "Deskbar: no session has worked on your task ";
+
+    /// <summary>
+    /// What a session reads when its task has been quiet for StalledTasks.After (task 8710ac09, StalledTasks' header):
+    /// say whether it waits on the user, on something else, or is finished. Delivered on a comment's roads (the app's
+    /// CommentWaker), so an idle or ended session gets it too. Any change to the task answers it; a session that says
+    /// nothing within StalledTasks.Answer has its task handed to the user.
+    /// </summary>
+    // WHY THE STATUS LINE COUNTS EVEN UNCHANGED: a session waiting on a long CI run may already have "waiting on CI" as its
+    // line. TaskService.SetStatusLine hears the same line again as an answer, so the session need not invent new words.
+    public static string StalledNudge(TaskItem task) =>
+        $"{StalledOpening}{task.Id.ToString()[..8]} \"{Cut(task.Title)}\" for {StalledTasks.After.TotalMinutes:0} minutes. "
+        + $"Say what it is waiting on, or Deskbar hands it to the user in {StalledTasks.Answer.TotalMinutes:0} minutes as waiting on them.\n"
+        + (task.StatusLine.Length > 0 ? $"Its status line now: \"{task.StatusLine}\"\n" : "")
+        + $"- the next move is the user's (a pull request to merge, something to try, a decision): run {Shim} task ask - --session <your session id>, what they must do on stdin, with the pull request or page as a markdown link to click\n"
+        + $"- you are waiting on something else (a CI run, a background job, another session, a time): run {Shim} task status-line - --session <your session id> with what and until when, even if the line already says it\n"
+        + $"- your pull request is merged or the work is finished: run {Shim} task done --session <your session id>, with what to try in the status line\n"
+        + "Then stop without saying anything more.\n";
 
     /// <summary>
     /// What a session reads when it starts, resumes, clears or compacts: its own task when it has one, otherwise the

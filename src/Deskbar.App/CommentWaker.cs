@@ -58,7 +58,16 @@ sealed class CommentWaker : IDisposable
             // CommentWake's own words name a comment, which a press of Reevaluate is not.
             Unsent = "No session of this task can be resumed, so Claude was not asked to reevaluate it.",
         });
-        subscription = comments.Merge(reevaluations)
+        // A STALLED TASK'S ASK (task 8710ac09) rides them too: a Claude task quiet for 15 minutes (TaskService.StalledNudges)
+        // has its session asked whether it waits on Petre (SessionBriefing.StalledNudge), and only a session that does not
+        // answer has its task handed to him (StalledTasks). When no session can be reached at all, nobody can answer, so
+        // the task is handed to him at once (TaskService.NudgeUndelivered) instead of after the answer's five minutes.
+        var stalled = tasks.StalledNudges.Select(taskId => new Delivery(taskId, "a stalled task's ask", SessionBriefing.StalledNudge)
+        {
+            Unsent = "No session of this task could be reached to ask whether it waits on you, so it came to you.",
+            Undelivered = () => tasks.NudgeUndelivered(taskId),
+        });
+        subscription = comments.Merge(reevaluations).Merge(stalled)
             .Where(_ => enabled())
             .Select(delivery => live.Take(1).SelectMany(listed => Observable.FromAsync(() => Deliver(delivery, listed)))
                 // One delivery that throws must not end the waker for the rest of the run (final review, I5): it is traced,
@@ -75,9 +84,11 @@ sealed class CommentWaker : IDisposable
     // What goes to a task's session: its task, what it is (for the trace) and its words, made from the task as it stands
     // when it is delivered.
     // Unsent, when set, is the thread's line in place of CommentWake's when no session can take it.
+    // Undelivered, when set, runs when no session can take it, before the thread's line.
     sealed record Delivery(Guid TaskId, string What, Func<TaskItem, string> Message)
     {
         public string? Unsent { get; init; }
+        public Action? Undelivered { get; init; }
     }
 
     async Task<System.Reactive.Unit> Deliver(Delivery delivery, IReadOnlyCollection<ClaudeAgent> listed)
@@ -108,6 +119,7 @@ sealed class CommentWaker : IDisposable
                 await Resumed(taskId, session, message);
                 break;
             case WakePlan.Nothing(var why):
+                delivery.Undelivered?.Invoke();
                 tasks.Note(taskId, delivery.Unsent ?? why);
                 break;
         }

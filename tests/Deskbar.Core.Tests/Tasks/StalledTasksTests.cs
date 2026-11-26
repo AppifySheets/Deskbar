@@ -30,10 +30,19 @@ public sealed class StalledTasksTests
 
     static DateTimeOffset At(int minutes) => t0.AddMinutes(minutes);
 
+    // Two polls: the one that asks the quiet task's session (task 8710ac09), and the one StalledTasks.Answer later that
+    // hands it back because nothing was heard. The busy sets are the same for both.
+    static StalledStep Unanswered(TaskBoard board, IReadOnlySet<string> busy, IReadOnlySet<string> working,
+        ImmutableDictionary<Guid, DateTimeOffset> lastBusy, DateTimeOffset at)
+    {
+        var asked = StalledTasks.Step(board, busy, working, lastBusy, at);
+        return StalledTasks.Step(asked.Board, busy, working, asked.LastBusy, at + StalledTasks.Answer, asked.Nudged);
+    }
+
     [Fact]
     public void Quiet_for_15_minutes_hands_the_task_back()
     {
-        var step = StalledTasks.Step(Claudes(TaskBoard.Empty, id1), Nobody, Nobody, NoneBusy, At(15));
+        var step = Unanswered(Claudes(TaskBoard.Empty, id1), Nobody, Nobody, NoneBusy, At(15));
 
         Assert.Equal(Assignee.Me, Get(step.Board, id1).Assignee);
         Assert.True(Get(step.Board, id1).HandedBack.HasValue);
@@ -64,14 +73,14 @@ public sealed class StalledTasksTests
         var tenLater = StalledTasks.Step(busy.Board, Nobody, Nobody, busy.LastBusy, At(70));
         Assert.Equal(Assignee.Claude, Get(tenLater.Board, id1).Assignee);
 
-        var fifteenLater = StalledTasks.Step(tenLater.Board, Nobody, Nobody, tenLater.LastBusy, At(75));
+        var fifteenLater = Unanswered(tenLater.Board, Nobody, Nobody, tenLater.LastBusy, At(75));
         Assert.Equal(Assignee.Me, Get(fifteenLater.Board, id1).Assignee);
     }
 
     [Fact]
     public void After_a_restart_a_task_quiet_for_an_hour_comes_back_on_the_first_poll()
     {
-        var step = StalledTasks.Step(Claudes(TaskBoard.Empty, id1), Nobody, Nobody, NoneBusy, At(60));
+        var step = Unanswered(Claudes(TaskBoard.Empty, id1), Nobody, Nobody, NoneBusy, At(60));
 
         Assert.Equal(Assignee.Me, Get(step.Board, id1).Assignee);
     }
@@ -89,9 +98,9 @@ public sealed class StalledTasksTests
     [Fact]
     public void A_handed_back_task_goes_back_to_Claude_when_its_session_works()
     {
-        var handed = StalledTasks.Step(Claudes(TaskBoard.Empty, id1), Nobody, Nobody, NoneBusy, At(15));
+        var handed = Unanswered(Claudes(TaskBoard.Empty, id1), Nobody, Nobody, NoneBusy, At(15));
 
-        var step = StalledTasks.Step(handed.Board, S1Works, S1Works, handed.LastBusy, At(16));
+        var step = StalledTasks.Step(handed.Board, S1Works, S1Works, handed.LastBusy, At(21));
 
         Assert.Equal(Assignee.Claude, Get(step.Board, id1).Assignee);
         Assert.True(Get(step.Board, id1).HandedBack.HasNoValue);
@@ -133,8 +142,8 @@ public sealed class StalledTasksTests
         Assert.Same(board, restarted.Board);
         Assert.Equal(At(60), restarted.LastBusy[id1]);
 
-        var handed = StalledTasks.Step(board, Nobody, Nobody, NoneBusy, At(60));
-        var resumed = StalledTasks.Step(handed.Board, busy: S1Works, Nobody, handed.LastBusy, At(61));
+        var handed = Unanswered(board, Nobody, Nobody, NoneBusy, At(60));
+        var resumed = StalledTasks.Step(handed.Board, busy: S1Works, Nobody, handed.LastBusy, At(66));
         Assert.Equal(Assignee.Me, Get(resumed.Board, id1).Assignee);
     }
 
@@ -147,11 +156,11 @@ public sealed class StalledTasksTests
             .Create("Next thing", ws, Session("s1"), At(1), id2).Value.Board;
         Assert.False(Get(board, id1).HasLiveSession);
 
-        var step = StalledTasks.Step(board, S1Works, S1Works, NoneBusy, At(30));
+        var step = Unanswered(board, S1Works, S1Works, NoneBusy, At(30));
         Assert.Equal(Assignee.Me, Get(step.Board, id1).Assignee);
         Assert.Equal(Assignee.Claude, Get(step.Board, id2).Assignee);
 
-        var later = StalledTasks.Step(step.Board, S1Works, S1Works, step.LastBusy, At(31));
+        var later = StalledTasks.Step(step.Board, S1Works, S1Works, step.LastBusy, At(36), step.Nudged);
         Assert.Equal(Assignee.Me, Get(later.Board, id1).Assignee);
     }
 
@@ -164,5 +173,90 @@ public sealed class StalledTasksTests
         var step = StalledTasks.Step(closed, Nobody, Nobody, busy.LastBusy, At(3));
 
         Assert.False(step.LastBusy.ContainsKey(id1));
+    }
+
+    // ASK BEFORE HANDING BACK (task 8710ac09). Petre: "notify the session and if the session is still not responding, then
+    // ask the task to wait on me ... otherwise, it's just a session that's waiting for something else, not me necessarily".
+
+    [Fact]
+    public void Quiet_for_15_minutes_asks_the_session_and_keeps_the_task_with_Claude()
+    {
+        var board = Claudes(TaskBoard.Empty, id1);
+
+        var step = StalledTasks.Step(board, Nobody, Nobody, NoneBusy, At(15));
+
+        Assert.Same(board, step.Board);
+        Assert.Equal([id1], step.Nudge);
+        Assert.Equal(At(15), step.Nudged[id1]);
+        Assert.Empty(step.HandedBack);
+    }
+
+    [Fact]
+    public void An_unanswered_ask_hands_the_task_back_only_after_the_answer_time()
+    {
+        var asked = StalledTasks.Step(Claudes(TaskBoard.Empty, id1), Nobody, Nobody, NoneBusy, At(15));
+
+        var early = StalledTasks.Step(asked.Board, Nobody, Nobody, asked.LastBusy, At(19), asked.Nudged);
+        Assert.Equal(Assignee.Claude, Get(early.Board, id1).Assignee);
+        Assert.Empty(early.Nudge);   // asked once, not on every poll
+
+        var late = StalledTasks.Step(early.Board, Nobody, Nobody, early.LastBusy, At(20), early.Nudged);
+        Assert.Equal(Assignee.Me, Get(late.Board, id1).Assignee);
+        Assert.Equal([id1], late.HandedBack);
+        Assert.False(late.Nudged.ContainsKey(id1));
+    }
+
+    [Fact]
+    public void A_status_line_after_the_ask_answers_it_and_restarts_the_clock()
+    {
+        var asked = StalledTasks.Step(Claudes(TaskBoard.Empty, id1), Nobody, Nobody, NoneBusy, At(15));
+        var answered = asked.Board.SetStatusLine(id1, "Waiting on CI run, about 10 minutes", At(16)).Value;
+
+        var step = StalledTasks.Step(answered, Nobody, Nobody, asked.LastBusy, At(25), asked.Nudged);
+        Assert.Equal(Assignee.Claude, Get(step.Board, id1).Assignee);
+        Assert.False(step.Nudged.ContainsKey(id1));
+
+        // Quiet for another 15 minutes after the answer: asked again, not handed back.
+        var again = StalledTasks.Step(step.Board, Nobody, Nobody, step.LastBusy, At(31), step.Nudged);
+        Assert.Equal([id1], again.Nudge);
+        Assert.Equal(Assignee.Claude, Get(again.Board, id1).Assignee);
+    }
+
+    [Fact]
+    public void The_same_status_line_set_again_after_the_ask_answers_it()
+    {
+        var board = Claudes(TaskBoard.Empty, id1);
+        var asked = StalledTasks.Step(board, Nobody, Nobody, NoneBusy, At(15));
+        var heard = ImmutableDictionary<Guid, DateTimeOffset>.Empty.SetItem(id1, At(16));
+
+        var step = StalledTasks.Step(asked.Board, Nobody, Nobody, asked.LastBusy, At(25), asked.Nudged, heard);
+
+        Assert.Equal(Assignee.Claude, Get(step.Board, id1).Assignee);
+        Assert.Empty(step.HandedBack);
+    }
+
+    [Fact]
+    public void Waking_and_stopping_without_a_word_is_no_answer_but_busy_holds_the_hand_back_off()
+    {
+        var asked = StalledTasks.Step(Claudes(TaskBoard.Empty, id1), Nobody, Nobody, NoneBusy, At(15));
+
+        var working = StalledTasks.Step(asked.Board, S1Works, S1Works, asked.LastBusy, At(21), asked.Nudged);
+        Assert.Equal(Assignee.Claude, Get(working.Board, id1).Assignee);
+        Assert.True(working.Nudged.ContainsKey(id1));
+
+        var stopped = StalledTasks.Step(working.Board, Nobody, Nobody, working.LastBusy, At(22), working.Nudged);
+        Assert.Equal(Assignee.Me, Get(stopped.Board, id1).Assignee);
+    }
+
+    [Fact]
+    public void An_ask_or_done_after_the_ask_leaves_the_task_where_the_session_put_it()
+    {
+        var asked = StalledTasks.Step(Claudes(TaskBoard.Empty, id1), Nobody, Nobody, NoneBusy, At(15));
+        var waiting = asked.Board.Ask(id1, "Merge the pull request", At(16)).Value;
+
+        var step = StalledTasks.Step(waiting, Nobody, Nobody, asked.LastBusy, At(30), asked.Nudged);
+
+        Assert.Same(waiting, step.Board);
+        Assert.Empty(step.Nudged);
     }
 }
