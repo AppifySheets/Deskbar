@@ -23,8 +23,19 @@ public sealed partial class RemoteControl
         BookmarkRequest.Remove remove => BookmarkRemove(remove),
         BookmarkRequest.Open open => BookmarkOpen(open),
         BookmarkRequest.OpenAll openAll => BookmarkOpenAll(openAll),
+        BookmarkRequest.Move move => BookmarkMove(move),
         _ => ControlReply.Fail(ControlUsage.LineFor("bookmark")),
     };
+
+    // The twin of dragging a chip to a screen half of a row or onto another workspace's row: the same
+    // WorkspaceManager.MoveBookmark the drop calls, so the refusals (a screen for a link, a duplicate in the target) are
+    // the same. Answers the bookmark as stored, in the workspace it is now in.
+    ControlReply BookmarkMove(BookmarkRequest.Move move) =>
+        WorkspaceNamed(move.Workspace)
+            .Bind(from => BookmarkNamed(from, move.Bookmark)
+                .Bind(b => (move.To is { } to ? WorkspaceNamed(to).Map(w => w) : Result.Success(from))
+                    .Bind(target => manager.MoveBookmark(from.Id, b.Id, target.Id, move.Screen).Map(moved => DescribeBookmark(target, moved)))))
+            .Match(Success, ControlReply.Fail);
 
     // One entry per bookmark, flat, so a caller can filter by `workspace`. `running` comes from the opener: for a program
     // or an app the answer that hides its chip, for a link the answer that draws its chip open (its browser window is
@@ -44,6 +55,8 @@ public sealed partial class RemoteControl
         target = bookmark.Target,
         arguments = bookmark.Arguments,
         workingDirectory = bookmark.WorkingDirectory,
+        // The display number the bookmark remembers (`bookmark move --screen`), null for none.
+        screen = bookmark.Screen,
         running = bookmarks?.IsRunning(bookmark) ?? false,
     };
 

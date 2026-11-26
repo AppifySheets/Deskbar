@@ -192,6 +192,66 @@ public sealed class RemoteControlBookmarkTests
         Assert.True(Parsed(watched.Execute(["bookmark", "list", "Work"]))[0].GetProperty("running").GetBoolean());
     }
 
+    // `bookmark move`, the twin of dragging a chip: to a screen, back to any screen, and to another workspace.
+    [Fact]
+    public void Move_sets_the_screen_forgets_it_and_moves_to_another_workspace()
+    {
+        Parsed(control.Execute(["bookmark", "add", "Work", "--program", @"C:\RustDesk\rustdesk.exe"]));
+
+        Assert.Equal(2, Parsed(control.Execute(["bookmark", "move", "Work", "rustdesk", "--screen", "2"])).GetProperty("screen").GetInt32());
+        Assert.Equal(2, Listed()[0].GetProperty("screen").GetInt32());
+
+        Assert.Equal(JsonValueKind.Null, Parsed(control.Execute(["bookmark", "move", "Work", "rustdesk", "--any-screen"])).GetProperty("screen").ValueKind);
+
+        var moved = Parsed(control.Execute(["bookmark", "move", "Work", "rustdesk", "--to", "Home", "--screen", "1"]));
+        Assert.Equal("Home", moved.GetProperty("workspace").GetString());
+        Assert.Equal(1, moved.GetProperty("screen").GetInt32());
+        Assert.Equal(0, Listed().GetArrayLength());
+        Assert.Equal(1, Listed("Home").GetArrayLength());
+    }
+
+    [Fact]
+    public void Move_refuses_a_screen_for_a_link_and_a_duplicate_in_the_target()
+    {
+        Parsed(control.Execute(["bookmark", "add", "Work", "--url", "https://example.com/", "--name", "Site"]));
+        Parsed(control.Execute(["bookmark", "add", "Home", "--url", "https://example.com/", "--name", "Same"]));
+
+        var screen = control.Execute(["bookmark", "move", "Work", "Site", "--screen", "2"]);
+        var duplicate = control.Execute(["bookmark", "move", "Work", "Site", "--to", "Home"]);
+
+        Assert.NotEqual(ControlReply.Ok, screen.ExitCode);
+        Assert.Contains("browser", screen.Output);
+        Assert.NotEqual(ControlReply.Ok, duplicate.ExitCode);
+        Assert.Contains("already has this bookmark", duplicate.Output);
+        Assert.Equal(1, Listed().GetArrayLength());
+    }
+
+    [Theory]
+    [InlineData("move", "Work", "x")] // nothing asked
+    [InlineData("move", "Work", "x", "--screen", "0")]
+    [InlineData("move", "Work", "x", "--screen", "two")]
+    [InlineData("move", "Work", "x", "--screen", "2", "--any-screen")]
+    [InlineData("move", "Work", "x", "--to")]
+    [InlineData("move", "Work", "x", "--to", "Home", "--to", "Work")]
+    [InlineData("move", "Work", "x", "--any-screen", "--any-screen")]
+    public void Move_with_wrong_options_prints_the_usage(params string[] args)
+    {
+        var parsed = BookmarkArguments.Parse(args);
+
+        Assert.True(parsed.IsFailure);
+        Assert.Contains("bookmark move", parsed.Error);
+    }
+
+    [Fact]
+    public void Move_parses_its_options_in_any_order()
+    {
+        var parsed = (BookmarkRequest.Move)BookmarkArguments.Parse(["move", "Work", "x", "--screen", "3", "--to", "Home"]).Value;
+
+        Assert.Equal("Home", parsed.To);
+        Assert.Equal(ScreenChange.On(3), parsed.Screen);
+        Assert.Equal(ScreenChange.Any, ((BookmarkRequest.Move)BookmarkArguments.Parse(["move", "Work", "x", "--any-screen"]).Value).Screen);
+    }
+
     // Ruling P6: C runtime quoting, as CommandLineToArgvW reads it back.
     [Theory]
     [InlineData(new[] { "a b", "c" }, "\"a b\" c")]

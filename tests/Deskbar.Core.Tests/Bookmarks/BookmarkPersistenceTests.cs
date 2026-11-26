@@ -41,6 +41,29 @@ public sealed class BookmarkPersistenceTests : IDisposable
     }
 
     [Fact]
+    public void A_bookmarks_screen_round_trips_and_an_old_entry_has_none()
+    {
+        var onTwo = new Bookmark(Guid.NewGuid(), "Tool", BookmarkKind.Program, @"C:\t\tool.exe", Screen: 2);
+        var old = Guid.NewGuid();
+        var store = new JsonPersistenceStore(dir);
+        Assert.True(store.Save(AppState.Empty with { Workspaces = [new Workspace(Guid.NewGuid(), "Work", null) { Bookmarks = [onTwo] }] }).IsSuccess);
+
+        Assert.Equal(onTwo, Assert.Single(store.Load().Value.Workspaces[0].Bookmarks));
+
+        // An entry written before bookmarks had a screen, and a link someone gave one by hand.
+        WriteState($$$"""
+            {"Workspaces":[{"Id":"{{{Guid.NewGuid()}}}","Name":"Work","DesktopId":null,"Bookmarks":[
+                {"Id":"{{{old}}}","Name":"Tool","Kind":"Program","Target":"C:\\t\\tool.exe"},
+                {"Id":"{{{Guid.NewGuid()}}}","Name":"Docs","Kind":"Link","Target":"https://example.com","Screen":2}]}],
+             "WorkspaceRules":[],"RenameRules":[],"Inventory":{}}
+            """);
+        var loaded = new JsonPersistenceStore(dir).Load().Value.Workspaces[0].Bookmarks;
+
+        Assert.Equal(2, loaded.Count);
+        Assert.All(loaded, b => Assert.Null(b.Screen));
+    }
+
+    [Fact]
     public void A_file_written_before_bookmarks_loads_with_none()
     {
         WriteState($$$"""{"Workspaces":[{"Id":"{{{Guid.NewGuid()}}}","Name":"Work","DesktopId":null}],"WorkspaceRules":[],"RenameRules":[],"Inventory":{}}""");

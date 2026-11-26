@@ -251,8 +251,8 @@ public static class ControlUsage
         new("Bookmark chip menu", [
             new("bookmark", "list [<workspace>]",
                 "every bookmark as JSON (or one workspace's): workspace, id, name, kind, target, arguments, workingDirectory,\n"
-                + "      running (a running program or app shows no chip; a link runs while the browser window it went\n"
-                + "      into stays open, and its chip is drawn bright)"),
+                + "      screen (the screen it opens on, or null), running (a running program or app shows no chip; a link\n"
+                + "      runs while the browser window it went into stays open, and its chip is drawn bright)"),
             new("bookmark", "add <workspace> --url <url> | --program <path> [--cwd <folder>] [-- <args>] | --app <id> [--name <name>]",
                 "add a bookmark chip to the workspace's row: --url is the twin of the row menu's \"Bookmark link from\n"
                 + "      clipboard\" and of dropping a link on the row; --program and --app are the twins of a drop and of\n"
@@ -261,6 +261,10 @@ public static class ControlUsage
             new("bookmark", "remove <workspace> <name|id>", "Remove"),
             new("bookmark", "open <workspace> <name|id>", "Open: switch to the workspace and start the bookmark"),
             new("bookmark", "open-all <workspace>", "Open all bookmarks: every chip showing, in order, one switch"),
+            new("bookmark", "move <workspace> <name|id> [--to <workspace>] [--screen <n> | --any-screen]",
+                "dragging a chip: --to moves it to another workspace's row (refused when that workspace has the same\n"
+                + "      bookmark), --screen makes a program or app open on screen n and sit in that screen's lane,\n"
+                + "      --any-screen forgets the screen. A link has no screen"),
         ]),
         new("Group menu", [
             new("group-create", "<group name> <first workspace>", "New group…"),

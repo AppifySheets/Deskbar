@@ -55,6 +55,16 @@ public static class BookmarkRunning
         && windows.Any(w => w.ProcessPath is { } path && PackagedPaths.IsPackaged(path)
             && string.Equals(PackagedPaths.FamilyOf(path), family, StringComparison.OrdinalIgnoreCase));
 
+    // Whether a NEW window is the app an App bookmark just started, for putting it on the bookmark's screen
+    // (BookmarkOpener, WorkspaceManager.ExpectAppWindow): the window carries the app's AppUserModelID, or, for a
+    // packaged program whose window carries none (new Teams), its exe sits in the app's package. The same two tests
+    // IsRunning makes, asked of one window. `windowAppId` is the window's id as the shell gives it, or null.
+    public static bool IsAppWindow(string appId, WindowInfo window, string? windowAppId) =>
+        string.Equals(windowAppId, appId, StringComparison.OrdinalIgnoreCase)
+        || (windowAppId is null && PackagedPaths.FamilyOfAppId(appId) is { } family
+            && window.ProcessPath is { } path && PackagedPaths.IsPackaged(path)
+            && string.Equals(PackagedPaths.FamilyOf(path), family, StringComparison.OrdinalIgnoreCase));
+
     static bool ProgramRuns(Bookmark bookmark, IEnumerable<WindowInfo> windows)
     {
         var target = RealExe(bookmark.Target);
