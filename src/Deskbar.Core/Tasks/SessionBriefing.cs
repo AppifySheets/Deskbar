@@ -76,6 +76,46 @@ public static class SessionBriefing
             || text.StartsWith(UserCommentOpening, StringComparison.Ordinal)
             || text.TrimEnd() == SessionKeeper.ContinueMessage);
 
+    // How Claude Code opens the prompts it delivers itself (task b846f5ad). Each one fires UserPromptSubmit like a message
+    // the user typed, with the text below as the hook's `prompt` (measured on 2026-11-26 in this machine's transcripts: a
+    // UserPromptSubmit hook ran right after every one of them):
+    //   * a SUBAGENT'S HAND-BACK, and any other Claude session's message (SendMessage): "Another Claude session sent a
+    //     message:" then an <agent-message> element. A session that delegates a review or a test run while its task waits
+    //     gets one of these minutes later, and Deskbar set the question aside as if the user had replied.
+    //   * a background job's notice: a shell or subagent that finished, a Monitor event, an asyncRewake Stop hook's
+    //     feedback. All open with a <task-notification> element.
+    //   * a notice that another session went idle ("[Cross-session idle notice]"), and other notices the harness marks as
+    //     not the user's ("[MESSAGE FROM NON-USER SOURCE - NOT USER INPUT]", "[SYSTEM NOTIFICATION - NOT USER INPUT]").
+    static readonly IReadOnlyList<string> ClaudeCodeOpenings =
+    [
+        "Another Claude session sent a message:", "<task-notification>", "[Cross-session idle notice]",
+        "[MESSAGE FROM NON-USER SOURCE", "[SYSTEM NOTIFICATION - NOT USER INPUT]",
+    ];
+
+    // System-reminder blocks the harness may put ahead of a prompt. Transcripts store such a block as a message of its own
+    // before a hand-back, but they do not record the hook's stdin, so the check looks past any leading ones rather than
+    // trust that the hook never sees them. A prompt that is nothing but such blocks is the harness's too.
+    static readonly System.Text.RegularExpressions.Regex LeadingReminders = new(
+        @"\A\s*(?:<system-reminder>.*?</system-reminder>\s*)*",
+        System.Text.RegularExpressions.RegexOptions.Singleline | System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+
+    /// <summary>
+    /// Whether a prompt is one Claude Code itself put in the session (task b846f5ad): a subagent's hand-back, another
+    /// session's message, a background job's notice or another harness notice (<see cref="ClaudeCodeOpenings"/>), after
+    /// any leading system-reminder blocks, or nothing but such blocks. None is the user replying.
+    /// </summary>
+    public static bool DeliveredByClaudeCode(string prompt) =>
+        LeadingReminders.Replace(prompt, "", 1) is var text
+        && (text.Trim().Length == 0 && prompt.Trim().Length > 0
+            || ClaudeCodeOpenings.Any(opening => text.StartsWith(opening, StringComparison.Ordinal)));
+
+    /// <summary>
+    /// Whether a prompt can be the user replying (RepliedTasks): neither Deskbar (<see cref="DeliveredByDeskbar"/>) nor
+    /// Claude Code (<see cref="DeliveredByClaudeCode"/>) delivered it. A /loop or scheduled check-in still passes, since
+    /// nothing in its text tells it from the user's own (RepliedTasks' known limitation).
+    /// </summary>
+    public static bool FromTheUser(string prompt) => !DeliveredByDeskbar(prompt) && !DeliveredByClaudeCode(prompt);
+
     /// <summary>
     /// What a session reads when Petre's comment wakes it (CommentWake; its waiting Stop hook or a resume hands it this).
     /// The comment whole, image paths already absolute (TaskService.ExpandImages), so a picture in it can be read at once;

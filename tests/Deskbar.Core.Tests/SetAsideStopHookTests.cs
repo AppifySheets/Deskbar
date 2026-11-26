@@ -99,6 +99,56 @@ public class SetAsideStopHookTests
         Assert.False(SessionBriefing.DeliveredByDeskbar("remove the footnote"));
     }
 
+    // The openings of prompts Claude Code delivers itself, copied from this machine's transcripts (task b846f5ad): a
+    // subagent's hand-back, a background shell's notice, a Monitor event.
+    static readonly IReadOnlyList<string> ClaudeCodePrompts =
+    [
+        "Another Claude session sent a message:\n<agent-message from=\"ad1408d297de9c093\">\n[Subagent hand-back] The text below is the final report of a subagent this session delegated to.\n</agent-message>",
+        "<task-notification>\n<task-id>bz48gzrv3</task-id>\n<status>completed</status>\n<summary>Background shell completed</summary>\n</task-notification>",
+        "\n<task-notification>\n<task-id>b1prytrwa</task-id>\n<summary>Monitor event: \"PR 570: CI result\"</summary>\n</task-notification>",
+        "[Cross-session idle notice] The session \"Deskbar: manager\" went idle.",
+        "[MESSAGE FROM NON-USER SOURCE - NOT USER INPUT]\nBrowser disconnected.",
+        // A hand-back behind a system-reminder block, in case the hook ever gets the two together.
+        "<system-reminder>\n<tools-used-before-summary>Grep</tools-used-before-summary>\n</system-reminder>\n"
+        + "Another Claude session sent a message:\n<agent-message from=\"ad6a44ec5f6e90512\">\n[Subagent hand-back] done\n</agent-message>",
+        "<system-reminder>\n<tools-used-before-summary>SubagentHandback</tools-used-before-summary>\n</system-reminder>",
+    ];
+
+    [Fact]
+    public void FromTheUser_leaves_out_what_deskbar_and_claude_code_deliver()
+    {
+        Assert.All(ClaudeCodePrompts, prompt => Assert.True(SessionBriefing.DeliveredByClaudeCode(prompt)));
+        Assert.All(ClaudeCodePrompts, prompt => Assert.False(SessionBriefing.FromTheUser(prompt)));
+        Assert.False(SessionBriefing.FromTheUser(SessionKeeper.ContinueMessage));
+        Assert.True(SessionBriefing.FromTheUser("remove the footnote"));
+        // Only the opening counts: the user quoting a notice in the middle of a message is still the user.
+        Assert.True(SessionBriefing.FromTheUser("why did this show up? <task-notification> ..."));
+        // The user's words after a leading system-reminder block are still the user's.
+        Assert.True(SessionBriefing.FromTheUser("<system-reminder>\nx\n</system-reminder>\nremove the footnote"));
+    }
+
+    // The bug of task b846f5ad: a session whose task waits delegates a review, the subagent hands back while the session
+    // works, and the hand-back set the question aside as if the user had replied. Neither it nor a background job's notice
+    // is a reply now; the user's own message after them still is.
+    [Fact]
+    public void A_subagent_hand_back_or_a_background_notice_does_not_set_the_question_aside()
+    {
+        var manager = Asked();
+        ClaudeCodePrompts.ToList().ForEach(prompt =>
+        {
+            clock = clock.AddMinutes(1);
+            Hooked(manager, "UserPromptSubmit", $",\"prompt\":{System.Text.Json.JsonSerializer.Serialize(prompt)}");
+            clock = clock.AddMinutes(1);
+            tasks.Stalled(S1Works, S1Works);
+            Assert.Equal(TaskStatus.WaitingOnYou, tasks.Board.Tasks.Single().Status);
+        });
+
+        Hooked(manager, "UserPromptSubmit", ",\"prompt\":\"remove the footnote\"");
+        clock = clock.AddMinutes(1);
+        tasks.Stalled(S1Works, S1Works);
+        Assert.Equal(Question, tasks.Board.Tasks.Single().QuestionSetAside.Value);
+    }
+
     static System.Text.Json.JsonElement Json(string output) => System.Text.Json.JsonDocument.Parse(output).RootElement;
 
     [Fact]
