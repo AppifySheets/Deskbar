@@ -1822,7 +1822,13 @@ public partial class TasksWindow : Window
             Padding = new Thickness(8),
             // 3 DIP above (TileGap), so the thread stands apart from its task's tile as the tiles do from each other. A
             // subtask's thread in place sits under its entry, indented a little inside the parent's frame.
-            Margin = inParent ? new Thickness(12, 0, 0, 8) : new Thickness(43, TileGap, 10, 6),
+            //
+            // THE SAME SIDES AS THE TILES (task dee002f7, Petre: "task details are indented needlessly", on a screenshot of
+            // a narrow panel). The thread used to start 43 DIP in, under the title rather than the tile, and end 10 DIP
+            // short of the right side. On a narrow panel that cost a fifth of the width, and the row of buttons and the
+            // session line ran off the right edge. The frame and its fill already say which task it belongs to, so it now
+            // takes the tile's own inset (TileInset) on both sides and lines up with the tile above it.
+            Margin = inParent ? new Thickness(12, 0, 0, 8) : new Thickness(TileInset, TileGap, TileInset, 6),
             Child = panel,
         };
     }
