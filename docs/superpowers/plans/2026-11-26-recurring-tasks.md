@@ -242,6 +242,8 @@ Folder for the id form: `--folder` (through `Folder(f) ?? f`), else the only `co
 - Produces: `sealed class RecurringRunner(TaskService tasks, Func<bool> enabled, Func<TaskItem, bool> running, Func<string, bool> folderExists, Func<TaskItem, string, Maybe<string>, Action<string>, Result> start, Action<string>? trace = null)` with `void RunDue()` and `Result RunNow(Guid id)` (= `tasks.Wake(id)` then `RunDue()`).
 - Produces: `CommentWaker` constructor gains `Func<Guid, Result>? startRun = null` (last).
 
+A start in flight counts as running. Between `RunStarted` and the new session's `task join` the task is still Backlog with no session listed, so `IsBetweenRuns` is true. Without this, a comment in that window would get `FreshRun` and a second run would start. `RecurringRunner` keeps the ids of starts in flight (an immutable set swapped on the UI thread). An id leaves the set when `claude agents` lists a session of the task, when `failed` fires, or after 5 minutes. Both `running` (for `Plan`) and `RunNow` treat a member as running. Test: `A_comment_while_a_run_is_starting_starts_nothing_more`.
+
 RunDue, nothing while `enabled()` is false: `Start` → `RunStarted`, then `start(task, repeat.Folder, repeat.Model, failed)` where `failed` notes Claude's words and asks `StartFailedQuestion`; `Skip` → `Rescheduled` and a trace line; `FolderGone` → `Rescheduled`, `Note(FolderGoneNote)`, `Ask(FolderGoneQuestion)`; `Schedule` → `Rescheduled`.
 
 - [ ] **Step 1: Write the failing tests:**
