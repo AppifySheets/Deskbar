@@ -304,12 +304,13 @@ public sealed partial class RemoteControl
     //
     // A PROMPT IS REMEMBERED (task 8bd18246, RepliedTasks): a prompt after a task began waiting is Petre replying in the
     // terminal, and once the session then works, Deskbar sets the question aside. It settles nothing here (Ruling 49
-    // stands). A prompt Deskbar itself put there (a delivered comment, the keeper's resume message) is not a reply, so it is
-    // left out (SessionBriefing.DeliveredByDeskbar).
+    // stands). A prompt Deskbar itself put there (a delivered comment, the keeper's resume message) is not a reply, and
+    // neither is one Claude Code put there (a subagent's hand-back, another session's message, a background job's notice,
+    // task b846f5ad), so both are left out (SessionBriefing.FromTheUser). A hook with no prompt field still counts, as before.
     string Prompted(TaskService service, ClaudeHookEvent hook)
     {
         var sessionId = hook.SessionId;
-        if (!hook.Prompt.Map(SessionBriefing.DeliveredByDeskbar).GetValueOrDefault(false)) service.Prompted(sessionId);
+        if (hook.Prompt.Map(SessionBriefing.FromTheUser).GetValueOrDefault(true)) service.Prompted(sessionId);
         var own = service.Board.TaskOf(sessionId);
         return SessionBriefing.Prompt(sessionId, own, own.HasValue ? Maybe<TaskItem>.None : service.Board.ClosedTaskOf(sessionId), service.ExpandImages);
     }

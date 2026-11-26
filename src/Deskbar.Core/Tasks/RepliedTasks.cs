@@ -31,8 +31,10 @@ namespace Deskbar.Core.Tasks;
 // KNOWN LIMITATION (Ruling 33's): a /loop or scheduled check-in arrives as a prompt that cannot be told from Petre's. In a
 // session whose task waits, it sets the question aside while the check-in runs, and the session then asks it again or it
 // is restored. The cost is the question leaving the block for that turn and one line in the thread; a snoozed task is left
-// alone. Prompts Deskbar itself delivers (a comment by resume, the keeper's resume message) are not counted
-// (SessionBriefing.DeliveredByDeskbar).
+// alone. Prompts Deskbar itself delivers (a comment by resume, the keeper's resume message) are not counted, nor are those
+// Claude Code delivers (a subagent's hand-back, another session's message, a background job's notice, an idle notice;
+// task b846f5ad), see
+// SessionBriefing.FromTheUser.
 //
 // THIS IS A PURE FUNCTION over the board, the working set and the prompt times; TaskService keeps the prompt times in
 // memory (a prompt before a Deskbar restart is not seen, so a restart can only make this rule wait for the next reply).
