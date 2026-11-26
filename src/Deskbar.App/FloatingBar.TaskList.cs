@@ -512,10 +512,13 @@ public partial class FloatingBar
     /// <summary>
     /// Every open task as the bar draws it, in the pile's order (TaskBoard.Pile). <paramref name="workspaceName"/> and
     /// <paramref name="colour"/> answer for the workspace chip; <paramref name="sessionWindow"/> finds a Claude task's
-    /// VS Code window from its session's folder. Pure apart from those three, so the rules are read in one place.
+    /// VS Code window from its session's folder. <paramref name="delivery"/> says whether a Done task's change runs here yet
+    /// (TaskService.DeliveryOf; task 8470d176), none meaning the full tick. Pure apart from those, so the rules are read in
+    /// one place.
     /// </summary>
     internal static IReadOnlyList<TaskLine> Lines(TaskBoard board, Func<Guid, Maybe<string>> workspaceName,
-        Func<Guid, Brush?> colour, Func<string, Maybe<nint>> sessionWindow, Func<TaskItem, Maybe<string>>? goalTitle = null) =>
+        Func<Guid, Brush?> colour, Func<string, Maybe<nint>> sessionWindow, Func<TaskItem, Maybe<string>>? goalTitle = null,
+        Func<TaskItem, TaskDelivery>? delivery = null) =>
         // A snoozed task is off the bar until it comes back (task 6da8d7eb, TaskItem.SnoozedUntil); the tasks panel's
         // "Snoozed" filter is where it can be found meanwhile.
         board.Pile().Where(t => !t.IsSnoozed).Select(t => new TaskLine(
@@ -538,6 +541,8 @@ public partial class FloatingBar
             ParentTitle = board.ParentOf(t).Map(p => (string?)FirstLine(p.Title)).GetValueOrDefault(),
             ParentId = board.ParentOf(t).Map(p => (Guid?)p.Id).GetValueOrDefault(),
             SubtaskCount = board.OpenSubtaskCount(t.Id),
+            // Whether a Done task's change runs in this Deskbar yet: the ring, or the disc (task 8470d176).
+            Delivery = delivery?.Invoke(t) ?? TaskDelivery.None,
         }).ToArray();
 
     // SUBTASKS UNDER THEIR PARENT (follow-up to the subtasks spec; Petre's screenshot of "↳ test1" four lines above its
@@ -995,7 +1000,8 @@ public partial class FloatingBar
         // RULING 48: the bar lists a Claude task only while it needs Petre (NeedsYou). The window shows everything.
         // The bar's lines in the pile's order; UnderParents draws subtasks under their parent. WithPendingCloses does it
         // again with the lines in their undo window among them (review of #467, finding 4).
-        var flat = Lines(taskService.Board, WorkspaceName, id => workspaceAccents.GetValueOrDefault(id), SessionWindow, GoalTitle)
+        var flat = Lines(taskService.Board, WorkspaceName, id => workspaceAccents.GetValueOrDefault(id), SessionWindow, GoalTitle,
+                taskService.DeliveryOf)
             .Where(NeedsYou).ToArray();
         // The tasks panel's "Subtasks" checkbox applies here too (task 173ef268; Petre, with a screenshot of the bar's
         // Warehouse parent and its subtasks under it: "same checkbox"). One setting, saved by the panel, so the bar and
@@ -1188,7 +1194,10 @@ public partial class FloatingBar
         $"{line.Important}|{line.Urgent}|{line.StartsGroup}|{line.GoalTitle}|{line.Assignee.Id}|" +
         // Subtasks: the parent's title (the arrow's tooltip), the count, and where the line is drawn. A count can change
         // with no line of the bar changing (a subtask assigned to Claude is not on the bar), so it must be in the shape.
-        $"{line.ParentTitle}|{line.SubtaskCount}|{line.ShownIn}";
+        $"{line.ParentTitle}|{line.SubtaskCount}|{line.ShownIn}|" +
+        // The ring or the disc, and the hover line saying which (task 8470d176): GitHub's answer can change with nothing
+        // else on the line changing.
+        $"{line.Delivery.Stage}|{line.Delivery.Note}";
 
     // "+N more" counts the open tasks out of sight; a closed line in its undo window is not an open task, so it is
     // neither counted nor allowed to hide one from the count.
@@ -1505,9 +1514,11 @@ public partial class FloatingBar
         // AFTER THE SUBTASK ARROW, never before it (task 9e85caee, Petre: "what's up with research being nested further
         // than the other tasks?"): in front of the arrow it pushed a done subtask's "↳" a tick's width to the right of its
         // siblings', which reads as one more level of nesting. The arrow says where the line sits; the tick is the title's.
+        // HOLLOW UNTIL IT RUNS (task 8470d176): a Done task whose change is not in this Deskbar yet gets the ring
+        // (TaskStatusMarks.DoneTick), which fills into the disc once the running build holds it.
         if (line.Status == TaskStatus.Done && !line.Closing)
         {
-            var tick = TaskStatusMarks.DoneTick(Math.Round(Text(9.5)));
+            var tick = TaskStatusMarks.DoneTick(Math.Round(Text(9.5)), line.Delivery.Shipping);
             tick.Margin = new Thickness(0, 0, 4, 0);
             text.Inlines.Add(new InlineUIContainer(tick) { BaselineAlignment = BaselineAlignment.Center });
         }
@@ -1607,6 +1618,9 @@ public partial class FloatingBar
         string.Join("\n", new[]
         {
             $"{TaskViews.StatusName(line.Status)}: {line.Title}",
+            // Where a Done task's change stands against this Deskbar (task 8470d176): "Merged in Deskbar #573, not in
+            // this Deskbar (2.6.23) yet; ..." or "Running in this Deskbar (2.6.23).", nothing when it cannot be told.
+            line.Delivery.Note,
             line.Detail,
             line.Quadrant == Quadrant.IV ? "" : $"{line.Quadrant.Numeral()}: {line.Quadrant.Words()}",
             line.WorkspaceName is { } name ? $"On {name}" : "On no workspace",
@@ -2300,6 +2314,12 @@ internal sealed record TaskLine(Guid Id, string Title, string Detail, TaskStatus
     public bool Important { get; init; }
 
     public bool Urgent { get; init; }
+
+    /// <summary>
+    /// Whether a Done task's change runs in this Deskbar yet (task 8470d176, RunningChanges): Shipping draws the hollow
+    /// ring instead of the disc, and the Note goes in the tooltip. None for anything it cannot tell.
+    /// </summary>
+    public TaskDelivery Delivery { get; init; } = TaskDelivery.None;
 
     public Quadrant Quadrant => QuadrantOf.Flags(Important, Urgent);
 

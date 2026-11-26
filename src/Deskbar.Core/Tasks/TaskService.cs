@@ -156,6 +156,36 @@ public sealed class TaskService(ITaskStore store, Func<DateTimeOffset> now, Func
     /// <summary>The clock this service stamps changes with, for a caller that works out a snooze's end from it.</summary>
     public DateTimeOffset Now => now();
 
+    // WHETHER A DONE TASK'S CHANGE RUNS HERE YET (task 8470d176; the rules are in RunningChanges). What GitHub said about
+    // the recorded pull requests lives here rather than on the board: it is a fact about THIS running build, not about
+    // the task, so it is never saved (a restart into a newer build must ask again) and it never touches tasks.json.
+    // RunningChangeWatch writes it (Arrived); the bar and the tasks panel read it per line (DeliveryOf) when they draw,
+    // and they redraw on Changed, which Arrived pulses only when an answer changed. Worked out on every read rather
+    // than kept per task, so a task that turns Done, or gains a pull request, is right at its next drawing with nothing
+    // to recompute.
+    Maybe<RunningBuild> runningBuild = Maybe<RunningBuild>.None;
+    IReadOnlyDictionary<string, PullRequestArrival> arrivals = ImmutableDictionary<string, PullRequestArrival>.Empty;
+
+    /// <summary>Where a task's change stands against the running build (RunningChanges.Of); None until the watch has spoken.</summary>
+    public TaskDelivery DeliveryOf(TaskItem task) =>
+        runningBuild.Map(build => RunningChanges.Of(task, build, arrivals)).GetValueOrDefault(TaskDelivery.None);
+
+    /// <summary>
+    /// What GitHub said about the recorded pull requests against <paramref name="build"/>, keyed by
+    /// PullRequestLink.Key: the whole set known so far, replacing the last. Pulses Changed only when it differs, so an
+    /// unchanged look redraws nothing.
+    /// </summary>
+    public void Arrived(RunningBuild build, IReadOnlyDictionary<string, PullRequestArrival> facts)
+    {
+        var same = runningBuild.HasValue && runningBuild.Value == build
+            && facts.Count == arrivals.Count
+            && facts.All(f => arrivals.TryGetValue(f.Key, out var known) && known == f.Value);
+        if (same) return;
+        runningBuild = build;
+        arrivals = facts.ToImmutableDictionary();
+        changed.OnNext(Unit.Default);
+    }
+
     /// <summary>Makes a task a subtask of another, or (none) a plain task again (TaskBoard.SetParent).</summary>
     public Result SetParent(Guid id, Maybe<Guid> parent) => ApplyIfChanged(Board.SetParent(id, parent, now()));
 

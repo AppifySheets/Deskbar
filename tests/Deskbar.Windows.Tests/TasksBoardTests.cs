@@ -1708,6 +1708,37 @@ public class TasksBoardTests
         Assert.False(new[] { note, working, asking }.Any(id => HasDoneTick(LineOf(t.Window, id))));
     });
 
+    // Task 8470d176: a Done task whose pull request merged but is not in the running Deskbar has the hollow ring and an
+    // outlined "Merged" chip ("PR open" while it is still open); both fill back to the disc and "Done" once it runs.
+    [Fact]
+    public void A_done_change_not_running_yet_has_the_ring_and_a_merged_chip() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var done = t.Tasks.Create("finished", t.Gepha, Session("s3")).Value.Id;
+        var pr = new PullRequestLink("AppifySheets", "Deskbar", 573);
+        t.Tasks.AddPullRequest(done, pr);
+        t.Tasks.MarkDone(done);
+        var build = new RunningBuild("AppifySheets", "Deskbar", "2.6.23", new string('a', 40));
+        t.Controller.Show();
+        bool HasRing() => Inside(LineOf(t.Window, done)).OfType<FrameworkElement>().Any(e => Equals(e.Tag, TaskStatusMarks.ShippingTickTag));
+
+        t.Tasks.Arrived(build, new Dictionary<string, PullRequestArrival> { [pr.Key] = new(PullRequestState.Open, false) });
+        t.Window.UpdateLayout();
+        Assert.Equal("PR open", StatusWordOf(LineOf(t.Window, done)));
+
+        t.Tasks.Arrived(build, new Dictionary<string, PullRequestArrival> { [pr.Key] = new(PullRequestState.Merged, false) });
+        t.Window.UpdateLayout();
+        Assert.Equal("Merged", StatusWordOf(LineOf(t.Window, done)));
+        Assert.True(HasRing());
+        Assert.False(HasDoneTick(LineOf(t.Window, done)));
+
+        t.Tasks.Arrived(build, new Dictionary<string, PullRequestArrival> { [pr.Key] = new(PullRequestState.Merged, true) });
+        t.Window.UpdateLayout();
+        Assert.Equal("Done", StatusWordOf(LineOf(t.Window, done)));
+        Assert.True(HasDoneTick(LineOf(t.Window, done)));
+        Assert.False(HasRing());
+    });
+
     // Petre's screenshot: the placeholder "Comment as you, in markdow…" was cut off and the box squeezed. A short
     // placeholder, the hint in the tooltip, the box across the thread, and nothing clipped at the minimum width.
     [Fact]

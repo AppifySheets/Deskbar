@@ -33,6 +33,26 @@ public static class GitHubCli
             : Task.FromResult(Result.Failure<PullRequestFacts>("gh.exe is not on the PATH or in %ProgramFiles%\\GitHub CLI"));
 
     /// <summary>
+    /// What GitHub says about one pull request against the running commit (task 8470d176; RunningChanges holds the
+    /// rules): <c>gh pr view &lt;url&gt; --json state,closedAt,mergeCommit</c>, and for a merged one GitHub's compare of
+    /// its merge commit with <paramref name="runningCommit"/> (<c>gh api repos/o/r/compare/&lt;merge&gt;...&lt;running&gt;
+    /// --jq .status</c>). `per_page=1` keeps the compare's list of commits to one; only its status is read. A failure
+    /// when gh cannot be run, either answer is not what was expected, or GitHub does not know the running commit (a
+    /// local build answers 404).
+    /// </summary>
+    public static Task<Result<PullRequestArrival>> Arrival(PullRequestLink link, string runningCommit) =>
+        Find() is { HasValue: true } gh
+            ? new ClaudeCli(gh.Value).Run(["pr", "view", link.Url, "--json", "state,closedAt,mergeCommit"], null, Timeout)
+                .Bind(RunningChanges.ParseMerge)
+                .Bind(pr => pr.State == PullRequestState.Merged
+                    ? new ClaudeCli(gh.Value)
+                        .Run(["api", $"repos/{link.Owner}/{link.Repo}/compare/{pr.MergeCommit.Value}...{runningCommit}?per_page=1", "--jq", ".status"], null, Timeout)
+                        .Bind(RunningChanges.Contains)
+                        .Map(running => new PullRequestArrival(pr.State, running))
+                    : Task.FromResult(Result.Success(new PullRequestArrival(pr.State, false))))
+            : Task.FromResult(Result.Failure<PullRequestArrival>("gh.exe is not on the PATH or in %ProgramFiles%\\GitHub CLI"));
+
+    /// <summary>
     /// The full path of gh.exe: on Deskbar's own PATH, then the user's and the machine's as the registry holds them now,
     /// then the folder GitHub's installer (and winget) puts it in. None when it is in none of them.
     /// </summary>

@@ -99,6 +99,7 @@ public partial class App : Application
     // the pull requests linked in waiting questions through `gh` and takes the task off the bar once they are merged or
     // closed, without waiting for the session's `task answered`. Built beside claudeSessions; disposed with it.
     Core.Tasks.PullRequestWatch? pullRequestWatch;
+    Core.Tasks.RunningChangeWatch? runningChangeWatch;
 
     // Tiling (docs/superpowers/specs/2026-11-08-tiling-design.md): the Tiler decides, the surface does the
     // Win32. Both live for the process, both are null in compatibility mode (there are no desktops to tile),
@@ -1896,6 +1897,16 @@ public partial class App : Application
             new System.Reactive.Concurrency.SynchronizationContextScheduler(new System.Windows.Threading.DispatcherSynchronizationContext(Dispatcher)),
             trace: ClickTrace.On ? ClickTrace.Write : null);
 
+        // A Done task's change shows a hollow ring until this very build holds it (task 8470d176, RunningChanges): the
+        // watch asks GitHub whether the commit this Deskbar was built from contains each recorded pull request's merge.
+        // The repository is this app's own, the one UpdateService reads releases from. A build whose version carries no
+        // commit (none should, but a hand-made one might) gets no watch, and every Done task keeps the full tick.
+        runningChangeWatch = Core.Tasks.RunningBuild.Of("AppifySheets", "Deskbar", UpdateService.RunningVersion)
+            .Map(build => new Core.Tasks.RunningChangeWatch(tasks!, build, Deskbar.Windows.Claude.GitHubCli.Arrival,
+                new System.Reactive.Concurrency.SynchronizationContextScheduler(new System.Windows.Threading.DispatcherSynchronizationContext(Dispatcher)),
+                trace: ClickTrace.On ? ClickTrace.Write : null))
+            .GetValueOrDefault();
+
         commentWaker = new CommentWaker(tasks!, () => manager.State.ClaudeTasksInEffect, claudeSessions.Live, claudeSessions.Resumable, commentInbox,
             claudeSessions.ResumeWith, claudeSessions.StopNow, ClickTrace.On ? ClickTrace.Write : null);
 
@@ -2745,6 +2756,7 @@ public partial class App : Application
             claudeActions?.Dispose();
             commentWaker?.Dispose();
             pullRequestWatch?.Dispose();
+            runningChangeWatch?.Dispose();
             claudeSessions?.Dispose();
             // The tasks panel, before WPF's Shutdown closes its window (which follows this event when nothing cancels
             // it): saved open if it was, so it opens again at the next sign-in, and its strip given back. Without
@@ -3170,6 +3182,7 @@ public partial class App : Application
         claudeActions?.Dispose();
         commentWaker?.Dispose();
         pullRequestWatch?.Dispose();
+        runningChangeWatch?.Dispose();
         claudeSessions?.Dispose();
         monitor?.Dispose();
         hotkeys?.Dispose(); // unregisters RegisterHotKey chords before the process exits

@@ -1270,6 +1270,22 @@ TB2. Open the thread of a note: the row reads **Open in window**, **Start Claude
 TB3. Open the thread of a task with two sessions: each session line that can be opened has its Open again. Narrow
      the panel to its narrowest: the row wraps onto a second line instead of being cut off.
 
+## Done when running
+
+Task 8470d176. A Done task whose pull request is in this repository shows a hollow green ring until the Deskbar you
+are running holds the merge, then the full disc. Needs `gh` signed in, and a build from main (a local build whose
+commit GitHub has never seen keeps every tick full).
+
+DR1. Have a Claude session finish a task with a pull request (`gh pr create`) and mark it done after the merge, before
+     the release that carries it is installed. Within a minute its tick on the bar and in the tasks panel is a hollow
+     green ring, the panel's status chip is an outlined "Merged", and the line's tooltip says "Merged in Deskbar #N,
+     not in this Deskbar (version) yet".
+DR2. Install the release that carries it (the update) and let Deskbar restart: the ring is a full disc again, the
+     chip says "Done", and the tooltip says "Running in this Deskbar (version)".
+DR3. A done note, and a done task without a pull request, keep the full disc throughout.
+DR4. A done task marked done while its pull request is still open: ring, chip "PR open"; merge it and within a minute
+     the chip says "Merged".
+
 ## Results (2026-08-01)
 
 Status: **pending human execution.** An agent cannot observe the desktop, Task View,

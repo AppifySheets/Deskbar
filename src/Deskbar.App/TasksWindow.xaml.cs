@@ -810,7 +810,7 @@ public partial class TasksWindow : Window
         // column so it sits at the same x on every line. Only on a full line: none in a Matrix line (no room there; its
         // Done tick still shows) and none on a slim one (the tick still shows, and the status is named in its tooltip,
         // SlimTip), and none on a line in its undo window (it is closed).
-        Control(At(Part.Status), full && !row.Closing ? TaskStatusMarks.Chip(row.Status) : null);
+        Control(At(Part.Status), full && !row.Closing ? TaskStatusMarks.Chip(row.Status, row.Delivery.Stage) : null);
         // A slim line has the sessions as squares alone, and no assignee or Reopen (Task 8): those are in its tooltip
         // and its "⋯" menu (SlimTip, OpenMenuFor).
         Control(At(Part.Sessions), compactLines ? null : slimLines ? SquaresOf(row) : SessionsOf(row));
@@ -1106,8 +1106,12 @@ public partial class TasksWindow : Window
     static readonly Brush Halo = Frozen(0x66, 0x3B, 0x82, 0xF6);
 
     // What a line's tooltip says: its status and title, or that it was just closed.
+    // A Done task's change not running here yet, or running, adds a line saying so (task 8470d176, TaskDelivery.Note).
     static string LineTip(TaskRowView row) =>
-        row.Closing ? "Closed. Undo brings it back." : $"{StatusWords(row)}: {row.Title}";
+        row.Closing ? "Closed. Undo brings it back." : $"{StatusWords(row)}: {row.Title}{DeliveryLine(row)}";
+
+    // The tooltip's line about where a Done task's change stands against this Deskbar, with its line break, or nothing.
+    static string DeliveryLine(TaskRowView row) => row.Delivery.Note.Length > 0 ? $"\n{row.Delivery.Note}" : "";
 
     // A line's status in words: "Duplicate of <title>" for a closed duplicate (task links), the status's name otherwise.
     static string StatusWords(TaskRowView row) =>
@@ -1125,7 +1129,7 @@ public partial class TasksWindow : Window
     TextBlock SlimTip(TaskRowView row, string head)
     {
         var tip = new TextBlock { Tag = "task-line-tip" };
-        slimTips[row.Id] = (tip, row.SessionCount > SlimSquares ? $"{head}\n{row.Sessions}" : head, StatusWords(row),
+        slimTips[row.Id] = (tip, (row.SessionCount > SlimSquares ? $"{head}\n{row.Sessions}" : head) + (row.Closing ? "" : DeliveryLine(row)), StatusWords(row),
             row.Created, row.Assignee.Name);
         WriteSlimTip(slimTips[row.Id], Now());
         return tip;
@@ -1463,10 +1467,13 @@ public partial class TasksWindow : Window
             // subtask's arrow stood a tick's width right of its siblings' and read as one more level of nesting. On a
             // subtask the tick is an inline right after the breadcrumb run instead ("↳ ✓ title", or "↳ Parent › ✓ title"
             // on a full line), the way the bar draws it, so every sibling's arrow starts at the same x.
+            //
+            // HOLLOW UNTIL IT RUNS (task 8470d176): a Done task whose change is not in this Deskbar yet gets the ring, which
+            // fills into the disc once the running build holds it (row.Delivery, TaskStatusMarks.DoneTick).
             var doneTick = row.Status == TaskStatus.Done && !row.Closing;
             if (doneTick && row.ParentTitle is not null)
             {
-                var tick = TaskStatusMarks.DoneTick(12);
+                var tick = TaskStatusMarks.DoneTick(12, row.Delivery.Shipping);
                 tick.Margin = new Thickness(0, 0, 5, 0);
                 // Inlines[0] is the breadcrumb run (the subtask branch above always adds it first), so the tick is second.
                 title.Inlines.InsertAfter(title.Inlines.FirstInline, new InlineUIContainer(tick) { BaselineAlignment = BaselineAlignment.Center });
@@ -1474,7 +1481,7 @@ public partial class TasksWindow : Window
             }
             else if (doneTick)
             {
-                var tick = TaskStatusMarks.DoneTick(12);
+                var tick = TaskStatusMarks.DoneTick(12, row.Delivery.Shipping);
                 tick.Margin = new Thickness(0, 2, 5, 0);
                 tick.VerticalAlignment = VerticalAlignment.Top;
                 var titleRow = new DockPanel();
