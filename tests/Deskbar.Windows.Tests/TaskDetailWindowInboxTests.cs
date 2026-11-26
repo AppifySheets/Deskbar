@@ -244,6 +244,38 @@ public partial class TaskDetailWindowInboxTests
         Assert.Empty(Inside(window).OfType<Button>().Where(b => AutomationProperties.GetName(b) == "Show more" && b.Visibility == Visibility.Visible).Select(b => $"{b.ToolTip} {b.ActualHeight}"));
     });
 
+    // The owner's ruling (2026-11-27): in the task window's page too, a long comment is drawn whole, with no inner scroll,
+    // no clip and no resize grip; only a monster one is cut at the guard, and "Show all" survives a redraw.
+    [Fact]
+    public void A_long_comment_in_the_window_is_drawn_whole_and_a_monster_one_has_the_guard() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var id = t.Tasks.AddNote("Long brief", Maybe<Guid>.None).Value.Id;
+        Assert.True(t.Tasks.Comment(id, Maybe<string>.None, string.Join("\n\n", Enumerable.Range(1, 14).Select(i => $"Line {i} of a made-up comment"))).IsSuccess);
+        Assert.True(t.Tasks.Comment(id, Maybe<string>.None, string.Join("\n\n", Enumerable.Range(1, 80).Select(i => $"Monster {i} of a made-up comment"))).IsSuccess);
+        var (window, page) = Open(t, id);
+        window.UpdateLayout();
+
+        static string TextOf(RichTextBox b) => new System.Windows.Documents.TextRange(b.Document.ContentStart, b.Document.ContentEnd).Text;
+        var boxes = Inside(window).OfType<RichTextBox>().Where(b => b.IsReadOnly).ToList();
+        var long14 = boxes.First(b => TextOf(b).Contains("Line 14 of"));
+        Assert.Equal(FullBubble.GuardHeight(11.5), long14.MaxHeight);
+        Assert.True(long14.ExtentHeight < long14.MaxHeight);
+        var monster = boxes.First(b => TextOf(b).Contains("Monster 80 of"));
+        Assert.Equal(FullBubble.GuardHeight(11.5), monster.MaxHeight);
+        Assert.DoesNotContain(Inside(window).OfType<FrameworkElement>(), e => AutomationProperties.GetName(e) is "Resize comment" or "Show more" && e.Visibility == Visibility.Visible);
+
+        // Only the monster has a visible "Show all" (the other comment is under the guard, so its button is collapsed).
+        var visible = Inside(window).OfType<Button>().Where(b => AutomationProperties.GetName(b) == FullBubble.ShowAllName && b.Visibility == Visibility.Visible).ToList();
+        Assert.Single(visible);
+        visible[0].RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        Assert.True(double.IsPositiveInfinity(monster.MaxHeight));
+
+        // A comment arriving later redraws the page; the opened one stays open.
+        Assert.True(t.Tasks.Comment(id, Maybe<string>.None, "A later word", wakes: false).IsSuccess);
+        var again = Inside(window).OfType<RichTextBox>().First(b => TextOf(b).Contains("Monster 80 of"));
+        Assert.True(double.IsPositiveInfinity(again.MaxHeight));
+    });
     // The old header's Undo: a close can be undone for its six seconds, from the window's page, which stays up meanwhile.
     [Fact]
     public void A_close_can_be_undone_from_the_page() => StaThread.Run(() =>

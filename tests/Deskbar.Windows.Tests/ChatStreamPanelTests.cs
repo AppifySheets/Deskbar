@@ -395,40 +395,54 @@ public class ChatStreamPanelTests
     static IEnumerable<Inline> Flatten(IEnumerable<Inline> inlines) =>
         inlines.SelectMany(i => i is Span s ? Flatten(s.Inlines).Prepend(i) : [i]);
 
+    // THE OWNER'S RULING (2026-11-27): a message shows in full, at its natural height, with no inner scroll; only one past
+    // about forty lines is cut, with "Show all", which opens it in place and is remembered by the stream's state.
+    static string Paras(int n) => string.Join("\n\n", Enumerable.Range(0, n).Select(i => "Paragraph " + i));
+
     [Fact]
-    public void A_long_message_is_clipped_and_show_more_opens_it_in_place() => StaThread.Run(() =>
+    public void A_long_message_is_whole_with_no_inner_scroll() => StaThread.Run(() =>
+    {
+        var panel = Panel();
+        panel.Apply([Said(Paras(14), 0)]);
+        var box = Inside(panel).OfType<RichTextBox>().Single();
+        panel.Measure(new Size(500, double.PositiveInfinity));
+        panel.Arrange(new Rect(0, 0, 500, panel.DesiredSize.Height));
+        panel.UpdateLayout();
+
+        Assert.Equal(FullBubble.GuardHeight(11.5), box.MaxHeight);
+        Assert.True(box.ExtentHeight < box.MaxHeight);
+        Assert.Equal(box.ExtentHeight, box.ActualHeight, 1);
+        Assert.Equal(Visibility.Collapsed, Inside(panel).OfType<Button>().Single(b => AutomationProperties.GetName(b) == "Show all").Visibility);
+        Assert.DoesNotContain(Inside(panel).OfType<Button>(), b => AutomationProperties.GetName(b) == "Show more");
+    });
+
+    [Fact]
+    public void A_monster_message_is_cut_at_the_guard_and_show_all_opens_it_in_place_for_good() => StaThread.Run(() =>
     {
         var state = new ChatStreamState();
         var panel = Panel(Deps(state));
-        panel.Apply([Said(string.Join("\n\n", Enumerable.Range(0, 12).Select(i => "Paragraph " + i)), 0)]);
+        panel.Apply([Said(Paras(90), 0)]);
         var box = Inside(panel).OfType<RichTextBox>().Single();
-        var more = Inside(panel).OfType<Button>().Single(b => AutomationProperties.GetName(b) == "Show more");
+        var all = Inside(panel).OfType<Button>().Single(b => AutomationProperties.GetName(b) == "Show all");
+        panel.Measure(new Size(500, double.PositiveInfinity));
+        panel.Arrange(new Rect(0, 0, 500, panel.DesiredSize.Height));
+        panel.UpdateLayout();
         var created = panel.Created;
 
-        Assert.Equal(54, box.MaxHeight);
-        Assert.Equal(Visibility.Visible, more.Visibility);
-        Click(more);
+        Assert.Equal(FullBubble.GuardHeight(11.5), box.MaxHeight);
+        Assert.Equal(Visibility.Visible, all.Visibility);
+        Click(all);
 
         Assert.True(double.IsPositiveInfinity(box.MaxHeight));
+        Assert.Equal(Visibility.Collapsed, all.Visibility);
         Assert.Equal(created, panel.Created);
         Assert.Contains("m0", state.OpenMessages);
-        Assert.Equal("Show less", ((TextBlock)more.Content).Text);
 
         // A rebuilt page draws it open again.
         var again = Panel(Deps(state));
-        again.Apply([Said(string.Join("\n\n", Enumerable.Range(0, 12).Select(i => "Paragraph " + i)), 0)]);
+        again.Apply([Said(Paras(90), 0)]);
         Assert.True(double.IsPositiveInfinity(Inside(again).OfType<RichTextBox>().Single().MaxHeight));
     });
-
-    [Fact]
-    public void A_short_message_has_no_show_more() => StaThread.Run(() =>
-    {
-        var panel = Panel();
-        panel.Apply([Said("Short.", 0)]);
-
-        Assert.Equal(Visibility.Collapsed, Inside(panel).OfType<Button>().Single(b => AutomationProperties.GetName(b) == "Show more").Visibility);
-    });
-
     [Fact]
     public void Pictures_show_as_a_count() => StaThread.Run(() =>
     {
