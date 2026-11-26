@@ -2010,8 +2010,8 @@ public partial class TasksWindow : Window
           + $"{settledOpen.Contains(row.Id)}{earlierOpen.Contains(row.Id)}";
 
     // The row of buttons (ThreadActions, task 1c17b7d6: Open in window, Open Claude or "Start Claude on this", Add subtask),
-    // the task's sessions with their Open buttons (Task 9), the subtasks and links, then the comments, each with its
-    // author and time over its markdown, then a box for Petre's next one. RULING 62: the settled comments are folded away
+    // the task's sessions with their Open buttons (Task 9), the subtasks and links, then the comments as a chat (task
+    // 39bc9c4d, ChatThread), then a box for Petre's next one. RULING 62: the settled comments are folded away
     // behind one dim line above the comments, "N settled comments", which unfolds them in place (and reads "Hide N
     // settled comments" while they show). They are kept, so the history stays.
     //
@@ -2079,10 +2079,14 @@ public partial class TasksWindow : Window
         var open = earlierOpen.Contains(row.Id);
         // RULING 63: more than three comments show only the latest three, under a dim "N earlier comments" line that
         // unfolds the rest (settled comments, folded above, do not count toward the three).
-        if (settledCount > 0) panel.Children.Add(SettledFold(row.Id, settledCount, unfolded));
-        if (earlier > 0) panel.Children.Add(EarlierFold(row.Id, earlier, open));
-        // A hairline between comments (task aa42794f, ThreadHairline), 8 DIP each side: CommentOf's bottom margin.
-        ThreadHairline.Separated(shown.Select(comment => CommentOf(comment, row.Id)), 8).ToList().ForEach(comment => panel.Children.Add(comment));
+        // The two folds sit side by side, centred over the conversation, as a chat shows "earlier messages" (task 39bc9c4d).
+        var folds = new WrapPanel { HorizontalAlignment = HorizontalAlignment.Center };
+        if (settledCount > 0) folds.Children.Add(SettledFold(row.Id, settledCount, unfolded));
+        if (earlier > 0) folds.Children.Add(EarlierFold(row.Id, earlier, open));
+        if (folds.Children.Count > 0) panel.Children.Add(folds);
+        // The comments as a chat (task 39bc9c4d, ChatThread): bubbles on two sides, Deskbar's lines as events, a day line
+        // above each day's first comment. It replaced the hairline between comments (task aa42794f).
+        ChatThread.WithDays(shown, (comment, named) => CommentOf(comment, row.Id, named)).ToList().ForEach(comment => panel.Children.Add(comment));
         panel.Children.Add(CommentBox(row.Id));
         authors[row.Id] = shown.Select(c => c.Author).ToArray();
         shownComments[row.Id] = shown.Select(c => c.Id).ToArray();
@@ -2170,8 +2174,7 @@ public partial class TasksWindow : Window
         var words = count == 1 ? "1 settled comment" : $"{count} settled comments";
         var fold = Small(new TextBlock { Text = unfolded ? $"Hide {words}" : words, Foreground = HeaderInk, FontSize = 10.5 },
             "Settled comments", () => ToggleSettled(task), "Settled comments are kept, folded away");
-        fold.Margin = new Thickness(0, 0, 0, 6);
-        return fold;
+        return AsFoldPill(fold);
     }
 
     // How many comments a thread shows before the rest fold behind "N earlier comments" (Ruling 63).
@@ -2187,7 +2190,15 @@ public partial class TasksWindow : Window
                 if (!earlierOpen.Remove(task)) earlierOpen.Add(task);
                 if (latest is not null) Draw(latest);
             }, "Only the latest three comments show");
-        fold.Margin = new Thickness(0, 0, 0, 6);
+        return AsFoldPill(fold);
+    }
+
+    // A fold as a small filled pill, centred over the conversation beside its twin (task 39bc9c4d).
+    static Button AsFoldPill(Button fold)
+    {
+        fold.Background = TileFill;
+        fold.Padding = new Thickness(9, 1, 9, 2);
+        fold.Margin = new Thickness(3, 0, 3, 6);
         return fold;
     }
 
@@ -2331,33 +2342,40 @@ public partial class TasksWindow : Window
 
     // `taskId` is the task the comment is on, the one whose workspace a link in it opens in (LinkOpener): the subtask's
     // own for a subtask's thread drawn inside its parent's.
-    UIElement CommentOf(TaskCommentView comment, Guid taskId)
+    // One comment of a thread, drawn as a chat (task 39bc9c4d, ChatThread): Petre's a bubble on the right, a session's or
+    // the manager's a bubble on the left (named when `named`, see ChatThread.WithDays), Deskbar's own lines a small
+    // centred event. Edit and Settle sit by the time under it and show on hover. While one of his comments is being edited
+    // it is the editor box at the thread's full width instead, under its author and time, as before.
+    UIElement CommentOf(TaskCommentView comment, Guid taskId, bool named = true)
     {
-        var header = new StackPanel { Orientation = Orientation.Horizontal };
-        header.Children.Add(new TextBlock { Tag = "comment-author", Text = comment.Author, FontWeight = FontWeights.Bold, FontSize = 11, Foreground = comment.ByClaude ? ClaudeInk : Ink });
-        header.Children.Add(new TextBlock { Text = $" · {comment.When}", FontSize = 11, Foreground = HeaderInk });
         // RULING 58 ("i should only be able to edit my own comments, not claude's"): his own comments, and only those, have
         // an Edit button beside the time; the board refuses a session's comment too (TaskBoard.EditComment).
         var editing = editingComment == comment.Id && comment.Editable;
-        if (comment.Editable && !editing)
+        if (editing)
         {
-            var edit = Small("Edit", "Edit comment", () => BeginEditComment(comment.Id), "Edit your comment");
-            edit.Margin = new Thickness(8, 0, 0, 0);
-            header.Children.Add(edit);
+            var header = new StackPanel { Orientation = Orientation.Horizontal };
+            header.Children.Add(new TextBlock { Text = comment.Author, FontWeight = FontWeights.Bold, FontSize = 11, Foreground = comment.ByClaude ? ClaudeInk : Ink });
+            header.Children.Add(new TextBlock { Text = $" · {comment.When}", FontSize = 11, Foreground = HeaderInk });
+            return new StackPanel { Margin = new Thickness(0, 0, 0, 8), Children = { header, CommentEditorBox(comment) } };
         }
+        var actions = new List<Button>();
+        if (comment.Editable)
+            actions.Add(Small(new TextBlock { Text = "Edit", Foreground = DimInk, FontSize = 10 }, "Edit comment", () => BeginEditComment(comment.Id), "Edit your comment"));
         // RULING 62: any comment can be settled (a question that has its answer) or brought back, from its own button; the
         // comment stays either way.
-        var settle = Small(comment.Settled ? "Unsettle" : "Settle", comment.Settled ? "Unsettle comment" : "Settle comment",
-            () => Actions?.SettleComment(comment.Id, !comment.Settled), comment.Settled ? "Show it with the thread again" : "Fold this comment away, keeping it");
-        settle.Margin = new Thickness(4, 0, 0, 0);
-        if (!editing) header.Children.Add(settle);
-        if (editing) return new StackPanel { Margin = new Thickness(0, 0, 0, 8), Children = { header, CommentEditorBox(comment) } };
+        actions.Add(Small(new TextBlock { Text = comment.Settled ? "Unsettle" : "Settle", Foreground = DimInk, FontSize = 10 },
+            comment.Settled ? "Unsettle comment" : "Settle comment",
+            () => Actions?.SettleComment(comment.Id, !comment.Settled), comment.Settled ? "Show it with the thread again" : "Fold this comment away, keeping it"));
+        var isEvent = comment.Who == CommentAuthor.Deskbar;
         // Images in tasks: the body renders the comment's text alone; its pictures are a row of their own after it
         // (TaskImageRow), outside the clipped box, so folding to three lines cuts text, never a picture.
         var split = TaskImages.Split(comment.Markdown);
-        var document = MarkdownBlocks.Render(split.Text, LinkOpener(taskId));
-        document.FontSize = 11.5;
-        document.Foreground = Ink;
+        // A one-line Deskbar event carries its time at its end ("Resumed. · 09:08"); a longer one has it on a line below.
+        var timeInBody = isEvent && split.Images.Count == 0 && ChatThread.TimeFitsInline(split.Text);
+        var document = MarkdownBlocks.Render(timeInBody ? $"{split.Text.Trim()} · {comment.Time}" : split.Text, LinkOpener(taskId));
+        document.FontSize = isEvent ? 10.5 : 11.5;
+        document.Foreground = isEvent ? HeaderInk : Ink;
+        if (isEvent) document.TextAlignment = TextAlignment.Center;
         var body = new RichTextBox
         {
             Document = document,
@@ -2387,7 +2405,10 @@ public partial class TasksWindow : Window
         }
         // A comment of pictures alone has no text box to show.
         if (split.Text.Trim().Length == 0) body.Visibility = Visibility.Collapsed;
-        var parts = new StackPanel { Margin = new Thickness(0, 0, 0, 8), Opacity = comment.Settled ? 0.55 : 1, Children = { header, body } };
+        // As wide as its text, so a short comment gets a short bubble (ChatThread.FitWidth); an event is centred.
+        ChatThread.FitWidth(body);
+        body.HorizontalAlignment = isEvent ? HorizontalAlignment.Center : HorizontalAlignment.Left;
+        var parts = new StackPanel { Children = { body } };
         var more = Small(new TextBlock { Text = full ? "Show less" : "Show more", Foreground = HeaderInk, FontSize = 10.5 },
             full ? "Show less" : "Show more", () =>
             {
@@ -2405,8 +2426,11 @@ public partial class TasksWindow : Window
                 var wanted = body.ExtentHeight > ThreeLines + 0.5 ? Visibility.Visible : Visibility.Collapsed;
                 if (more.Visibility != wanted) more.Visibility = wanted;
             };
+        if (isEvent) more.HorizontalAlignment = HorizontalAlignment.Center;
+        var placed = isEvent ? ChatThread.Event(comment, parts, timeInBody, actions) : ChatThread.Message(comment, named, parts, actions);
         // A settled comment, when unfolded, is dim: it is history.
-        return parts;
+        placed.Opacity = comment.Settled ? 0.55 : 1;
+        return placed;
     }
 
     // --- editing one of his comments in place (Ruling 58) -------------------------------------------------------------
@@ -2492,9 +2516,9 @@ public partial class TasksWindow : Window
     //
     // Petre's screenshot: the placeholder "Comment as you, in markdow…" was cut off and the box was squeezed beside its
     // button inside the indented frame. So the box spans the frame's full width with a short placeholder; the hint
-    // (markdown works, which keys do what) is its tooltip and a dim line under it while it has the keyboard; the
-    // "Comment" button sits at the end of that line. Nothing here has a width of its own to clip at the window's
-    // minimum width: the hint trims, the box wraps.
+    // (markdown works, which keys do what) is its tooltip and a dim line under it while it has the keyboard; the send
+    // button sits inside the box's right end (task 39bc9c4d). Nothing here has a width of its own to clip at the
+    // window's minimum width: the hint trims, the box wraps.
     internal const string CommentPlaceholder = "Add a comment…";
     internal const string CommentHint = "Markdown works. Paste or drop images. Enter adds, Shift+Enter starts a new line.";
 
@@ -2555,28 +2579,63 @@ public partial class TasksWindow : Window
         };
         commentBoxes[id] = box;
 
-        var post = Flat(new TextBlock { Text = "Comment", Foreground = Ink, FontSize = 11 }, "Post comment", () => Post(id), new Thickness(10, 1, 10, 1));
+        // THE BOX AS A CHAT'S (task 39bc9c4d): a rounded box with a round send button inside its right end, in place of the
+        // square box with a "Comment" button under it. The button keeps its name, "Post comment", for automation and the
+        // tests. It sits at the bottom, so it stays by the last line as the box grows.
+        var post = Flat(SendArrow(), "Post comment", () => Post(id), new Thickness(0));
+        post.Background = Brushes.Transparent;
+        post.ToolTip = "Post the comment (Enter)";
+        post.VerticalAlignment = VerticalAlignment.Bottom;
         post.Margin = new Thickness(6, 0, 0, 0);
-        DockPanel.SetDock(post, Dock.Right);
+        Grid.SetColumn(post, 1);
+        box.VerticalAlignment = VerticalAlignment.Center;
+        placeholder.VerticalAlignment = VerticalAlignment.Center;
+        var inside = new Grid { Children = { box, placeholder, post } };
+        inside.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        inside.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        hint.Margin = new Thickness(12, 3, 0, 0);
         return new StackPanel
         {
+            Margin = new Thickness(0, 4, 0, 0),
             Children =
             {
                 new Border
                 {
-                    CornerRadius = new CornerRadius(4),
+                    CornerRadius = new CornerRadius(15),
                     Background = Frozen(0xFF, 0x15, 0x16, 0x1A),
                     BorderBrush = ThreadEdge,
                     BorderThickness = new Thickness(1),
-                    Padding = new Thickness(6, 3, 6, 3),
-                    Child = new Grid { Children = { box, placeholder } },
+                    Padding = new Thickness(12, 3, 3, 3),
+                    Child = inside,
                 },
                 // The pictures waiting to go with the comment, each with its x (TasksWindow.Images.cs).
                 PendingRow(id),
-                new DockPanel { Margin = new Thickness(0, 3, 0, 0), Children = { post, hint } },
+                hint,
             },
         };
     }
+
+    // The send button's face: an up arrow on a round blue disc, 22 DIP across.
+    static UIElement SendArrow() => new Border
+    {
+        Width = 22,
+        Height = 22,
+        CornerRadius = new CornerRadius(11),
+        Background = PickedFill,
+        Child = new System.Windows.Shapes.Path
+        {
+            Data = Geometry.Parse("M 5.5,10 L 5.5,1.5 M 2,5 L 5.5,1.5 L 9,5"),
+            Stroke = Brushes.White,
+            StrokeThickness = 1.6,
+            StrokeStartLineCap = PenLineCap.Round,
+            StrokeEndLineCap = PenLineCap.Round,
+            StrokeLineJoin = PenLineJoin.Round,
+            Width = 11,
+            Height = 11.5,
+            HorizontalAlignment = HorizontalAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Center,
+        },
+    };
 
     // A key in a comment box, as one method the tests drive without a real key event.
     KeyOutcome PressInComment(Guid id, Key key, ModifierKeys modifiers)

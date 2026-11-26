@@ -483,46 +483,56 @@ public partial class TaskDetailWindow : Window
             fold.Margin = new Thickness(0, 0, 0, 10);
             ThreadHost.Children.Add(fold);
         }
-        // A hairline between comments (task aa42794f, ThreadHairline), 14 DIP each side: CommentOf's bottom margin.
-        ThreadHairline.Separated(row.Comments.Where(c => settledOpen || !c.Settled).Select(CommentOf), 14).ToList()
+        // The comments as a chat (task 39bc9c4d, ChatThread), as in the panel: bubbles on two sides, Deskbar's lines as
+        // events, a day line above each day's first comment. It replaced the hairline between comments (task aa42794f).
+        ChatThread.WithDays(row.Comments.Where(c => settledOpen || !c.Settled).ToArray(), CommentOf).ToList()
             .ForEach(comment => ThreadHost.Children.Add(comment));
     }
 
-    UIElement CommentOf(TaskCommentView comment)
+    // One comment: a bubble (Petre's on the right, a session's or the manager's on the left) or, for Deskbar's own lines,
+    // a centred event, with Edit and Settle by its time on hover (ChatThread). Being edited, it is the editor at the
+    // thread's full width under its author and time, as before.
+    UIElement CommentOf(TaskCommentView comment, bool named)
     {
-        var header = new StackPanel { Orientation = Orientation.Horizontal };
-        header.Children.Add(new TextBlock { Text = comment.Author, FontWeight = FontWeights.Bold, FontSize = 11.5, Foreground = comment.ByClaude ? ClaudeInk : Ink, VerticalAlignment = VerticalAlignment.Center });
-        header.Children.Add(new TextBlock { Text = $" · {comment.When}", FontSize = 11.5, Foreground = HeaderInk, VerticalAlignment = VerticalAlignment.Center });
-        var editingThis = editingComment == comment.Id;
-        // Only his own comments are edited (Ruling 58); any can be settled or brought back (Ruling 62).
-        if (comment.Editable && !editingThis)
-            header.Children.Add(Spaced(Flat(SmallText("Edit"), "Edit comment", () => BeginEditComment(comment), new Thickness(6, 1, 6, 1), tip: "Edit your comment")));
-        if (!editingThis)
-            header.Children.Add(Spaced(Flat(SmallText(comment.Settled ? "Unsettle" : "Settle"), comment.Settled ? "Unsettle comment" : "Settle comment",
-                () => Actions?.SettleComment(comment.Id, !comment.Settled), new Thickness(6, 1, 6, 1),
-                tip: comment.Settled ? "Show it with the thread again" : "Fold this comment away, keeping it")));
-        var parts = new StackPanel { Tag = CommentTag, Margin = new Thickness(0, 0, 0, 14), Opacity = comment.Settled ? 0.55 : 1 };
-        parts.Children.Add(header);
         var split = TaskImages.Split(comment.Markdown);
-        if (editingThis)
+        if (editingComment == comment.Id)
         {
-            parts.Children.Add(CommentEditor(comment));
-            return parts;
+            var header = new StackPanel { Orientation = Orientation.Horizontal };
+            header.Children.Add(new TextBlock { Text = comment.Author, FontWeight = FontWeights.Bold, FontSize = 11.5, Foreground = comment.ByClaude ? ClaudeInk : Ink, VerticalAlignment = VerticalAlignment.Center });
+            header.Children.Add(new TextBlock { Text = $" · {comment.When}", FontSize = 11.5, Foreground = HeaderInk, VerticalAlignment = VerticalAlignment.Center });
+            return new StackPanel { Tag = CommentTag, Margin = new Thickness(0, 0, 0, 14), Children = { header, CommentEditor(comment) } };
         }
+        // Only his own comments are edited (Ruling 58); any can be settled or brought back (Ruling 62).
+        var actions = new List<Button>();
+        if (comment.Editable)
+            actions.Add(Flat(SmallText("Edit"), "Edit comment", () => BeginEditComment(comment), new Thickness(5, 0, 5, 1), tip: "Edit your comment"));
+        actions.Add(Flat(SmallText(comment.Settled ? "Unsettle" : "Settle"), comment.Settled ? "Unsettle comment" : "Settle comment",
+            () => Actions?.SettleComment(comment.Id, !comment.Settled), new Thickness(5, 0, 5, 1),
+            tip: comment.Settled ? "Show it with the thread again" : "Fold this comment away, keeping it"));
+        actions.ForEach(button => button.Background = Brushes.Transparent);
+        var isEvent = comment.Who == CommentAuthor.Deskbar;
+        // A one-line Deskbar event carries its time at its end ("Resumed. · 09:08"); a longer one has it on a line below.
+        var timeInBody = isEvent && split.Images.Count == 0 && ChatThread.TimeFitsInline(split.Text);
+        var parts = new StackPanel();
         if (split.Text.Trim().Length > 0)
         {
-            var body = Rendered(split.Text, 12.5);
-            body.Margin = new Thickness(0, 3, 0, 0);
+            var body = Rendered(timeInBody ? $"{split.Text.Trim()} · {comment.Time}" : split.Text, isEvent ? 11 : 12.5);
+            if (isEvent)
+            {
+                body.Document.Foreground = HeaderInk;
+                body.Document.TextAlignment = TextAlignment.Center;
+            }
+            // As wide as its text, so a short comment gets a short bubble; an event is centred.
+            ChatThread.FitWidth(body);
+            body.HorizontalAlignment = isEvent ? HorizontalAlignment.Center : HorizontalAlignment.Left;
             parts.Children.Add(body);
         }
         if (TaskImageRow.Of(StateDir, split.Images, OpenImage) is { } pictures) parts.Children.Add(pictures);
-        return parts;
-    }
-
-    static UIElement Spaced(Button button)
-    {
-        button.Margin = new Thickness(8, 0, 0, 0);
-        return button;
+        var placed = isEvent ? ChatThread.Event(comment, parts, timeInBody, actions) : ChatThread.Message(comment, named, parts, actions);
+        placed.Tag = CommentTag;
+        // A settled comment, when unfolded, is dim: it is history.
+        placed.Opacity = comment.Settled ? 0.55 : 1;
+        return placed;
     }
 
     static TextBlock SmallText(string text) => new() { Text = text, Foreground = DimInk, FontSize = 10.5 };
