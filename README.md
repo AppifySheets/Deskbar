@@ -345,7 +345,7 @@ switches once and opens every chip that is showing, so a program already running
 `deskbar.cmd help` lists them.
 
 A link chip shows the site's own icon. For each web-link bookmark Deskbar asks that site, once, for
-`/favicon.ico`, with no cookies or credentials, and keeps the icon under `%APPDATA%\Deskbarookmark-icons`.
+`/favicon.ico`, with no cookies or credentials, and keeps the icon under `%APPDATA%\Deskbar\bookmark-icons`.
 Until it arrives, or if the site has none, the chip shows a coloured tile with the first letter of its name. A
 failed fetch is tried again at the next start. See [the privacy page](https://deskbar.app/privacy).
 
