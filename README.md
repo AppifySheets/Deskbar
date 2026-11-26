@@ -447,8 +447,9 @@ the note's description), and it lands on the workspace you are on (or on
 none, or another one, by the chip under the box). The new note is selected and glows blue for a moment,
 so you can see where it landed; the tasks panel's own add box does the same. To hand the note to Claude
 straight away, press the play button after the flag toggles, or Ctrl+Enter, instead of Enter: the note is
-added and "Start Claude on this" runs on it. Tick a note to close it,
-with six seconds to undo.
+added and "Start Claude on this" runs on it. A line on the bar has no tick box, so a long title
+gets its whole second row; click a line to open its task in the tasks panel, and close it there or
+with Close in the line's right-click menu, with six seconds to undo.
 An important task's title is bold and an urgent one's italic, which sorts the list into Covey's four
 quadrants; set them from a line's right-click menu or the toggles in the tasks panel, and drag a line up
 or down to reorder it. When there are more tasks than fit, the list scrolls with the mouse wheel.

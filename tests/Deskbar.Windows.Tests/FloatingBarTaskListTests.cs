@@ -168,6 +168,18 @@ public class FloatingBarTaskListTests
 
     static void Click(Button button) => button.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
 
+    // Closes a task the way the bar closes one now that its lines carry no tick box (task acd76fbe): the "Close" item of the
+    // line's right-click menu, which calls CloseWithUndo. An open menu holds the list's paint back, so the menu is shut and
+    // the list painted, as the app's own rebuild after the menu's close would. A Claude task still at work opens the stop
+    // menu from this item instead (task 37cd7081); that menu is left to the caller.
+    static void CloseFromMenu(ListBar t, Button line)
+    {
+        var menu = t.Bar.OpenTaskLineMenu(((TaskLine)line.Tag).Id)!;
+        menu.Items.OfType<MenuItem>().Single(i => i.Header is TextBlock { Text: "Close" }).RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+        menu.IsOpen = false;
+        t.Bar.PaintTaskList();
+    }
+
     // A click in the text box, the way the bar sees one: the press arrives first and takes the keyboard.
     static void ClickBox(ListBar t) =>
         t.Box.RaiseEvent(new MouseButtonEventArgs(Mouse.PrimaryDevice, 0, MouseButton.Left) { RoutedEvent = UIElement.PreviewMouseLeftButtonDownEvent });
@@ -302,14 +314,14 @@ public class FloatingBarTaskListTests
     });
 
     [Fact]
-    public void A_note_has_a_tick_box_that_closes_it() => StaThread.Run(() =>
+    public void A_note_closes_from_its_menu() => StaThread.Run(() =>
     {
         using var t = Build();
         var note = t.Tasks.AddNote("Dishwasher tablets", Maybe<Guid>.None).Value;
 
         var line = Assert.Single(t.Lines);
         Assert.False(HasButtonNamed(line, "Close task"));
-        Click(ButtonNamed(line, "Tick off"));
+        CloseFromMenu(t, line);
 
         // Closed in the store at once; the line stays for the undo window and then leaves.
         Assert.Equal(TaskStatus.Closed, t.Tasks.Board.Tasks.Single(x => x.Id == note.Id).Status);
@@ -330,7 +342,7 @@ public class FloatingBarTaskListTests
         var line = t.Lines.Single();
         Assert.Equal(Orange, ((SolidColorBrush)EdgeOf(line).BorderBrush).Color);
 
-        Click(ButtonNamed(line, "Tick off"));
+        CloseFromMenu(t, line);
 
         // Task 37cd7081: its session is still live (it is waiting on Petre), so the tick offers to stop Claude first.
         Assert.Equal(TaskStatus.WaitingOnYou, t.Tasks.Board.Tasks.Single().Status);
@@ -353,7 +365,7 @@ public class FloatingBarTaskListTests
         Assert.False(Closing(again));
         Assert.Equal(Orange, ((SolidColorBrush)EdgeOf(again).BorderBrush).Color);
         Assert.DoesNotContain(Inside(again).OfType<FrameworkElement>(), e => Equals(e.Tag, "task-window-icon"));
-        Assert.True(HasButtonNamed(again, "Tick off"));
+        Assert.False(HasButtonNamed(again, "Tick off"));
     });
 
     // Petre, 2026-11-23: "i can't currently see statuses". A Done task's line carries the green tick in front of its title
@@ -373,7 +385,7 @@ public class FloatingBarTaskListTests
         // The title's text is unchanged: the tick is a picture, not a character.
         Assert.StartsWith("Merged", TextOf(LineFor(done)));
 
-        Click(ButtonNamed(LineFor(done), "Tick off"));
+        CloseFromMenu(t, LineFor(done));
         Assert.False(Ticked(LineFor(done)));
     });
 
@@ -419,7 +431,7 @@ public class FloatingBarTaskListTests
 
         var doneLine = t.Lines.Single(l => ((TaskLine)l.Tag).Id == done.Id);
         Assert.False(HasButtonNamed(doneLine, "Close task"));
-        Click(ButtonNamed(doneLine, "Tick off"));
+        CloseFromMenu(t, doneLine);
 
         Assert.Equal(TaskStatus.Closed, t.Tasks.Board.Tasks.Single(x => x.Id == done.Id).Status);
         Assert.True(Closing(t.Lines.Single(l => ((TaskLine)l.Tag).Id == done.Id)));
@@ -1168,8 +1180,7 @@ public class FloatingBarTaskListTests
         });
         Enumerable.Range(1, 5).ToList().ForEach(i => t.Tasks.AddNote($"Note {i}", t.Gepha));
 
-        // Right after the repaint that drew them: nothing takes the click.
-        Click(ButtonNamed(t.Lines[0], "Tick off"));
+        // Right after the repaint that drew them: nothing takes the click. The line has no tick box any more, and its menu is not click-guarded, so the line and "+N" are tried.
         Click(t.Lines[0]);
         Click(ButtonNamed(t.List, "More tasks"));
         Assert.Equal(5, t.Tasks.Board.Pile().Count);
@@ -1178,15 +1189,14 @@ public class FloatingBarTaskListTests
 
         // Half a second on, a single click works and closes Note 5...
         now = now.AddMilliseconds(600);
-        PressAndClick(ButtonNamed(t.Lines[0], "Tick off"), clickCount: 1);
+        CloseFromMenu(t, t.Lines[0]);
         Assert.Equal(4, t.Tasks.Board.Pile().Count);
 
-        // ...whose line stays where it was with the Undo sign in the tick's place, so the second press of the double click lands
-        // on Undo rather than on Note 4's tick, and is dropped there too: the note stays closed and Note 4 stays open.
+        // ...whose line stays where it was with the Undo sign at its start, so the second press of a double click lands
+        // on Undo and is dropped there too: the note stays closed and Note 4 stays open.
         now = now.AddMilliseconds(600);
         Assert.True(Closing(t.Lines[0]));
         PressAndClick(ButtonNamed(t.Lines[0], "Undo"), clickCount: 2);
-        PressAndClick(ButtonNamed(t.Lines[1], "Tick off"), clickCount: 2);
         PressAndClick(ButtonNamed(t.List, "More tasks"), clickCount: 2);
         Assert.Equal(4, t.Tasks.Board.Pile().Count);
         Assert.Empty(went);
@@ -1208,8 +1218,8 @@ public class FloatingBarTaskListTests
         var done = t.Tasks.Create("Merged", t.Gepha, Session("s1")).Value;
         t.Tasks.MarkDone(done.Id);
 
-        Click(ButtonNamed(t.Lines.Single(l => ((TaskLine)l.Tag).Id == done.Id), "Tick off"));
-        Click(ButtonNamed(t.Lines.Single(l => !Closing(l)), "Tick off"));
+        CloseFromMenu(t, t.Lines.Single(l => ((TaskLine)l.Tag).Id == done.Id));
+        CloseFromMenu(t, t.Lines.Single(l => !Closing(l)));
 
         Assert.All(t.Lines, line => Assert.True(Closing(line)));
         Assert.Empty(t.Tasks.Board.Pile());
@@ -1386,7 +1396,7 @@ public class FloatingBarTaskListTests
         var first = t.Tasks.AddNote("First", Maybe<Guid>.None).Value;
         var second = t.Tasks.AddNote("Second", Maybe<Guid>.None).Value;
 
-        Click(ButtonNamed(t.Lines[0], "Tick off"));
+        CloseFromMenu(t, t.Lines[0]);
 
         Assert.Equal(TaskStatus.Closed, t.Tasks.Board.Tasks.Single(x => x.Id == second.Id).Status);
         Assert.Equal([second.Id, first.Id], t.Lines.Select(l => ((TaskLine)l.Tag).Id));
@@ -1405,14 +1415,14 @@ public class FloatingBarTaskListTests
     {
         using var t = Build();
         var note = t.Tasks.AddNote("Dishwasher tablets", t.Gepha).Value;
-        Click(ButtonNamed(t.Lines[0], "Tick off"));
+        CloseFromMenu(t, t.Lines[0]);
 
         Click(ButtonNamed(t.Lines[0], "Undo"));
 
         Assert.Equal(TaskStatus.Backlog, t.Tasks.Board.Tasks.Single(x => x.Id == note.Id).Status);
         var line = Assert.Single(t.Lines);
         Assert.False(Closing(line));
-        Assert.True(HasButtonNamed(line, "Tick off"));
+        Assert.False(HasButtonNamed(line, "Tick off"));
         Assert.Equal(0, t.Timers.Running);
     });
 
@@ -1422,7 +1432,7 @@ public class FloatingBarTaskListTests
         using var t = Build();
         t.Tasks.AddNote("First", Maybe<Guid>.None);
         t.Tasks.AddNote("Second", Maybe<Guid>.None);
-        Click(ButtonNamed(t.Lines[0], "Tick off"));
+        CloseFromMenu(t, t.Lines[0]);
         Assert.Equal(2, t.Lines.Count);
 
         t.Timers.FireAll();
@@ -1440,8 +1450,8 @@ public class FloatingBarTaskListTests
         Enumerable.Range(1, 4).ToList().ForEach(i => t.Tasks.AddNote($"Note {i}", Maybe<Guid>.None));
         var before = t.Lines.Select(l => ((TaskLine)l.Tag).Id).ToList();
 
-        Click(ButtonNamed(t.Lines[0], "Tick off"));
-        Click(ButtonNamed(t.Lines[1], "Tick off"));
+        CloseFromMenu(t, t.Lines[0]);
+        CloseFromMenu(t, t.Lines[1]);
 
         Assert.Equal(before, t.Lines.Select(l => ((TaskLine)l.Tag).Id));
         Assert.True(Closing(t.Lines[0]) && Closing(t.Lines[1]) && !Closing(t.Lines[2]));
@@ -1461,7 +1471,7 @@ public class FloatingBarTaskListTests
         var done = t.Tasks.Create("Merged", t.Gepha, Session("s1")).Value;
         t.Tasks.MarkDone(done.Id);
 
-        Click(ButtonNamed(t.Lines[0], "Tick off"));
+        CloseFromMenu(t, t.Lines[0]);
         Assert.Equal(TaskStatus.Closed, t.Tasks.Board.Tasks.Single(x => x.Id == done.Id).Status);
         Assert.True(Closing(t.Lines[0]));
         Assert.False(HasButtonNamed(t.Lines[0], "Tick off"));
@@ -1469,7 +1479,7 @@ public class FloatingBarTaskListTests
         Click(ButtonNamed(t.Lines[0], "Undo"));
         Assert.Equal(TaskStatus.Done, t.Tasks.Board.Tasks.Single(x => x.Id == done.Id).Status);
         Assert.False(Closing(Assert.Single(t.Lines)));
-        Assert.True(HasButtonNamed(t.Lines[0], "Tick off"));
+        Assert.False(HasButtonNamed(t.Lines[0], "Tick off"));
     });
 
     // LIVE CHECK, Petre's 320 px screenshot: nothing in the list clips at the narrowest width the bar allows. The box,
@@ -1595,16 +1605,12 @@ public class FloatingBarTaskListTests
             var eight = new FormattedText(name[..8], System.Globalization.CultureInfo.CurrentCulture, FlowDirection.LeftToRight,
                 new Typeface(title.FontFamily, title.FontStyle, title.FontWeight, title.FontStretch), title.FontSize, Brushes.White, 1).Width;
             Assert.True(title.ActualWidth >= eight, $"at {width}: '{name}' has {title.ActualWidth:0.#} DIP, eight characters need {eight:0.#}");
-            // What follows the title on the line: the next element laid out to its right that takes room and shows.
-            var right = title.TransformToAncestor(line).TransformBounds(new Rect(title.RenderSize)).Right;
-            title.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
-            if (title.DesiredSize.Width <= title.ActualWidth + 0.5) return; // a title that fits needs no more room
-            var next = Inside(line).OfType<FrameworkElement>()
-                .Where(e => e != title && e.IsVisible && e.Opacity > 0 && e.ActualWidth > 0 && !e.IsAncestorOf(title) && !title.IsAncestorOf(e))
-                .Select(e => e.TransformToAncestor(line).TransformBounds(new Rect(e.RenderSize)))
-                .Where(b => b.Left >= right - 0.5)
-                .Select(b => b.Left).DefaultIfEmpty(line.ActualWidth).Min();
-            Assert.True(next - right <= 8, $"at {width}: '{name}' ends at {right:0.#}, the next thing starts at {next:0.#}");
+            // The first row of the title ends left of the chip (task acd76fbe: the title block itself now spans the whole line,
+            // the second row running under the chip, so the block's own right edge no longer says anything).
+            var end = Inside(line).OfType<FrameworkElement>().Single(b => (Equals(b.Tag, "task-workspace") || Equals(b.Tag, "task-workspace-dot")) && b.IsVisible);
+            var chipLeft = end.TransformToAncestor(line).TransformBounds(new Rect(end.RenderSize)).Left;
+            var rowRight = FirstRowRight(line, title);
+            Assert.True(rowRight <= chipLeft + 0.5, $"at {width}: '{name}' first row ends at {rowRight:0.#}, the chip starts at {chipLeft:0.#}");
         });
     });
 
@@ -1666,6 +1672,43 @@ public class FloatingBarTaskListTests
     {
         Assert.Contains(".bak", FloatingBar.LoadProblemLine("Could not read tasks.json: bad; kept tasks.json as tasks.json.20261122-090000.bak"));
         Assert.Contains("copy it somewhere safe", FloatingBar.LoadProblemLine("Could not read tasks.json: bad; could not keep C:\\x\\tasks.json aside: locked"));
+    }
+
+    // Where the FIRST ROW of a line's title ends, in the line's coordinates (task acd76fbe). The title block spans the whole line and
+    // a LineBreak ends its first row early, so the row is the runs before the first LineBreak, measured with FormattedText
+    // at the block's font (each run's own weight and slant), plus the width of any inline element (the Done tick), from the
+    // block's left edge and padding.
+    static double FirstRowRight(Button line, TextBlock title)
+    {
+        var row = title.Inlines.TakeWhile(i => i is not LineBreak).ToList();
+        var runs = row.OfType<Run>().ToList();
+        var joined = string.Concat(runs.Select(r => r.Text)).TrimEnd(' ');
+        var objects = row.OfType<InlineUIContainer>().Sum(c =>
+        {
+            c.Child.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+            return c.Child.DesiredSize.Width;
+        });
+        var width = 0.0;
+        if (joined.Length > 0)
+        {
+            var formatted = new FormattedText(joined, System.Globalization.CultureInfo.CurrentUICulture, FlowDirection.LeftToRight,
+                new Typeface(title.FontFamily, title.FontStyle, title.FontWeight, title.FontStretch), title.FontSize, Brushes.White,
+                VisualTreeHelper.GetDpi(title).PixelsPerDip);
+            var at = 0;
+            runs.ForEach(r =>
+            {
+                var span = Math.Min(r.Text.Length, joined.Length - at);
+                if (span > 0)
+                {
+                    formatted.SetFontWeight(r.FontWeight, at, span);
+                    formatted.SetFontStyle(r.FontStyle, at, span);
+                }
+                at += r.Text.Length;
+            });
+            width = formatted.WidthIncludingTrailingWhitespace;
+        }
+        var left = title.TransformToAncestor(line).TransformBounds(new Rect(title.RenderSize)).Left;
+        return left + title.Padding.Left + width + objects;
     }
 
     // Where the bar's content ends: its width less the root's padding (FloatingBar.xaml, Root Padding="4").
@@ -1742,12 +1785,85 @@ public class FloatingBarTaskListTests
     {
         using var t = Build();
         t.Tasks.AddNote("note", t.Gepha);
-        Click(ButtonNamed(t.Lines[0], "Tick off"));
+        CloseFromMenu(t, t.Lines[0]);
 
         var undo = ButtonNamed(t.Lines[0], "Undo");
         Assert.Equal("Undo", undo.ToolTip);
         Assert.Equal("↶", Inside(undo).OfType<TextBlock>().Single(b => Equals(b.Tag, "undo-sign")).Text);
         Assert.DoesNotContain(Inside(undo).OfType<TextBlock>(), b => b.Text == "Undo");
+    });
+
+    // Task acd76fbe (Petre: "remove the checkbox"): no open line starts with a tick box, whatever kind of task it is. The
+    // only button a line carries at its start is Undo, and only while the line is in its six-second undo window after a
+    // close from the line's menu; Undo brings the task back, and the line is again without either button.
+    [Fact]
+    public void An_open_line_has_no_tick_box_and_a_closed_one_starts_with_undo() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var note = t.Tasks.AddNote("a note", t.Gepha).Value;
+        var done = t.Tasks.Create("Merged", t.Gepha, Session("s1")).Value;
+        t.Tasks.MarkDone(done.Id);
+
+        Assert.All(t.Lines, line =>
+        {
+            Assert.False(HasButtonNamed(line, "Tick off"));
+            Assert.False(HasButtonNamed(line, "Undo"));
+        });
+
+        CloseFromMenu(t, t.Lines.Single(l => ((TaskLine)l.Tag).Id == note.Id));
+        var closed = t.Lines.Single(l => ((TaskLine)l.Tag).Id == note.Id);
+        Assert.True(Closing(closed));
+        Assert.True(HasButtonNamed(closed, "Undo"));
+        Assert.False(HasButtonNamed(closed, "Tick off"));
+        // Undo is the first button of the line, ahead of anything else it holds.
+        Assert.Equal("Undo", AutomationProperties.GetName(Inside(closed).OfType<Button>().First(b => b != closed)));
+
+        Click(ButtonNamed(closed, "Undo"));
+        var back = t.Lines.Single(l => ((TaskLine)l.Tag).Id == note.Id);
+        Assert.False(Closing(back));
+        Assert.Equal(TaskStatus.Backlog, t.Tasks.Board.Tasks.Single(x => x.Id == note.Id).Status);
+        Assert.False(HasButtonNamed(back, "Undo"));
+        Assert.False(HasButtonNamed(back, "Tick off"));
+    });
+
+    // Task acd76fbe: a long title on a narrow bar takes the line's FULL width, and its first row ends early with one
+    // LineBreak so that it stays left of the chip while the second row runs on under the chip. The runs joined still read
+    // exactly as the line's text did (the break is not a character), and the first row's measured width fits left of the chip.
+    [Fact]
+    public void A_wrapping_title_breaks_its_first_row_beside_the_chip_and_its_second_runs_under_it() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var gepha = t.Gepha;
+        Assert.True(t.Harness.Manager.RenameWorkspace(gepha, "Deskbar").IsSuccess);
+        t.Tasks.AddNote("Send the invoices for November to every client, with the late fee, and chase the ones from October as well", gepha);
+        t.Bar.ApplyWidth(240);
+        t.Bar.RequestRebuild();
+        t.Bar.UpdateLayout();
+
+        var line = t.Lines.Single();
+        var title = TextBlockOf(line);
+        var chip = Inside(line).OfType<FrameworkElement>().Single(e => (Equals(e.Tag, "task-workspace") || Equals(e.Tag, "task-workspace-dot")) && e.IsVisible);
+        Rect In(FrameworkElement e) => e.TransformToAncestor(line).TransformBounds(new Rect(e.RenderSize));
+
+        Assert.Single(title.Inlines.OfType<LineBreak>());
+        // A note has no detail, so the runs joined are exactly its title.
+        Assert.Equal("Send the invoices for November to every client, with the late fee, and chase the ones from October as well", TextOf(line));
+        Assert.True(FirstRowRight(line, title) <= In(chip).Left + 0.5, $"first row ends at {FirstRowRight(line, title)}, the chip starts at {In(chip).Left}");
+        // (The title keeps its own few DIP of right margin, so it ends a little short of the chip's right edge, never short of the chip's body.)
+        Assert.True(In(title).Right >= In(chip).Right - 5, $"title {In(title)} does not reach under the chip {In(chip)}");
+    });
+
+    // The other half: a title that fits beside the chip is one row and gets no LineBreak.
+    [Fact]
+    public void A_short_title_that_fits_beside_the_chip_has_no_line_break() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        t.Tasks.AddNote("Call the bank", t.Gepha);
+        t.Bar.ApplyWidth(300);
+        t.Bar.RequestRebuild();
+        t.Bar.UpdateLayout();
+
+        Assert.Empty(TextBlockOf(t.Lines.Single()).Inlines.OfType<LineBreak>());
     });
 
     // NO AGE ON THE BAR (reverses Ruling 46; Petre, 2026-11-24, of the bar's "26m": "move the time from here to the proper
@@ -1780,7 +1896,8 @@ public class FloatingBarTaskListTests
         var end = Inside(line).OfType<FrameworkElement>().Single(b => (Equals(b.Tag, "task-workspace") || Equals(b.Tag, "task-workspace-dot")) && b.IsVisible);
         var title = Inside(line).OfType<TextBlock>().Single(b => Equals(b.Tag, "task-text"));
         Rect In(FrameworkElement e) => e.TransformToAncestor(line).TransformBounds(new Rect(e.RenderSize));
-        Assert.True(In(title).Right <= In(end).Left + 6, $"title {In(title)} then chip {In(end)}");
+        // The title block spans the line now; its first row (before the LineBreak) is what must end by the chip.
+        Assert.True(FirstRowRight(line, title) <= In(end).Left + 0.5, $"first row ends at {FirstRowRight(line, title)}, chip {In(end)}");
         Assert.True(title.ActualWidth >= TaskLineFace.TitleShare * line.ActualWidth * 0.5, $"title has {title.ActualWidth} of {line.ActualWidth}");
     });
 
@@ -2114,7 +2231,7 @@ public class FloatingBarTaskListTests
         using var t = Build();
         t.Tasks.AddNote("a note", t.Gepha);
 
-        Click(ButtonNamed(t.Lines[0], "Tick off"));
+        CloseFromMenu(t, t.Lines[0]);
 
         Assert.True(Closing(t.Lines[0]));
         Assert.False(HasButtonNamed(t.Lines[0], "Important"));
@@ -2577,7 +2694,7 @@ public class FloatingBarTaskListTests
         t.Tasks.SetStatus(id, Deskbar.Core.Tasks.TaskStatus.InProgress);
         t.Bar.Selection.Select(id);
 
-        Click(ButtonNamed(t.Lines[0], "Tick off"));
+        CloseFromMenu(t, t.Lines[0]);
         Assert.True(t.Bar.Selection.Current.HasNoValue);
         Click(ButtonNamed(t.Lines[0], "Undo"));
 

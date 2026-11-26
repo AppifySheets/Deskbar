@@ -27,6 +27,13 @@ namespace Deskbar.App;
 // Every part but the title is measured at its own width; the title is measured at the room left, and is arranged at all
 // of it. Each part sits in the line's first row (FirstRow), so a title that wraps to a second line leaves them beside its
 // first line.
+//
+// THE SECOND ROW RUNS THE FULL WIDTH (task acd76fbe, Petre: "utilize the second row fully"). A wrapping TextBlock title
+// is given the whole line from its left edge to the line's right edge, under the chip too, and its first row is ended
+// early by a LineBreak where its words stop fitting the room beside the chip and the Right parts (TitleRows). So the
+// first row stops where the chip starts, as before, and the second row goes on to the end of the line instead of stopping
+// short of the chip. A title that is not a wrapping TextBlock (the inline editor) keeps the old layout: it ends where the
+// chip starts on every row.
 internal sealed class TaskLineFace : Panel
 {
     /// <summary>How much of the line the title keeps before the chip gives way to a dot.</summary>
@@ -42,6 +49,13 @@ internal sealed class TaskLineFace : Panel
     // The width the title was given by the last measure.
     double titleRoom;
 
+    // A wrapping TextBlock title spans the full line (see the header): the text it was built with, so each measure can
+    // place its first row's break afresh, and the break placed last, so a measure that lands on the same one changes no
+    // inline (changing them would measure the title again and again).
+    readonly TextBlock? spanning;
+    readonly IReadOnlyList<System.Windows.Documents.Inline> spanningSource = [];
+    int? placedBreak;
+
     public TaskLineFace(IReadOnlyList<UIElement> left, UIElement title, IReadOnlyList<UIElement> right, UIElement chip, UIElement? dot,
         UIElement? overlay)
     {
@@ -51,6 +65,11 @@ internal sealed class TaskLineFace : Panel
         this.chip = chip;
         this.dot = dot;
         this.overlay = overlay;
+        if (title is TextBlock { TextWrapping: TextWrapping.Wrap } text)
+        {
+            spanning = text;
+            spanningSource = text.Inlines.ToList();
+        }
         // The overlay last, so it is drawn over the title.
         left.Concat([title]).Concat(right).Concat([chip]).Concat(dot is null ? [] : [dot]).Concat(overlay is null ? [] : [overlay]).ToList()
             .ForEach(part => Children.Add(part));
@@ -85,6 +104,7 @@ internal sealed class TaskLineFace : Panel
         if (double.IsInfinity(available.Width))
         {
             ShowsDot = false;
+            PlaceBreak(null);
             title.Measure(free);
             titleRoom = title.DesiredSize.Width;
             overlay?.Measure(free);
@@ -94,9 +114,27 @@ internal sealed class TaskLineFace : Panel
         ShowsDot = dot is not null && dot.DesiredSize.Width < chip.DesiredSize.Width
             && available.Width - fixedWidth - chip.DesiredSize.Width < TitleShare * available.Width;
         titleRoom = Math.Max(0, available.Width - fixedWidth - End.DesiredSize.Width);
-        title.Measure(new Size(titleRoom, available.Height));
         overlay?.Measure(new Size(titleRoom, available.Height));
+        if (spanning is null)
+        {
+            title.Measure(new Size(titleRoom, available.Height));
+            return new Size(available.Width, Math.Max(title.DesiredSize.Height, FirstRow));
+        }
+        // The first row's words fit the room beside the chip (less the title's own margins and one DIP, so a rounding
+        // in the measure cannot push the last word under the chip); the second row has the line to its end.
+        PlaceBreak(TitleRows.BreakAt(spanning, spanningSource, titleRoom - spanning.Margin.Left - spanning.Margin.Right - 1));
+        title.Measure(new Size(Math.Max(0, available.Width - WidthOf(left)), available.Height));
         return new Size(available.Width, Math.Max(title.DesiredSize.Height, FirstRow));
+    }
+
+    // The spanning title's first row ended at `at` (TitleRows.WithBreak), changed only when the break moves.
+    void PlaceBreak(int? at)
+    {
+        if (spanning is null || at == placedBreak) return;
+        placedBreak = at;
+        var inlines = TitleRows.WithBreak(spanningSource, at);
+        spanning.Inlines.Clear();
+        spanning.Inlines.AddRange(inlines);
     }
 
     protected override Size ArrangeOverride(Size final)
@@ -113,7 +151,9 @@ internal sealed class TaskLineFace : Panel
             x += part.DesiredSize.Width;
         });
         var room = Math.Max(0, final.Width - x - WidthOf(right) - End.DesiredSize.Width);
-        title.Arrange(new Rect(x, title.DesiredSize.Height < row ? (row - title.DesiredSize.Height) / 2 : 0, room, Math.Max(title.DesiredSize.Height, 0)));
+        // A spanning title is arranged to the line's end: its first row's break keeps the words clear of the chip.
+        title.Arrange(new Rect(x, title.DesiredSize.Height < row ? (row - title.DesiredSize.Height) / 2 : 0,
+            spanning is null ? room : Math.Max(0, final.Width - x), Math.Max(title.DesiredSize.Height, 0)));
         // The quiet controls over the right end of the title, in its first row.
         overlay?.Arrange(InRow(x + room - Math.Min(room, overlay.DesiredSize.Width), overlay) with { Width = Math.Min(room, overlay.DesiredSize.Width) });
         x += room;
