@@ -212,6 +212,23 @@ public class FloatingBarBookmarksTests
         Assert.Equal(@"C:\beeper.exe", added.Target);
     });
 
+    // Once bookmarked, the same item undoes it. A running program's chip is hidden, so the menu must not keep offering
+    // an add the manager refuses as a duplicate (Petre's first live try with Remote Desktop Manager).
+    [Fact]
+    public void A_bookmarked_windows_menu_offers_to_remove_the_bookmark() => StaThread.Run(() =>
+    {
+        var harness = Harness.Build();
+        using var bar = ShowBar(harness);
+        Button Icon() => Buttons(RowNamed(bar.Rows, "Sparrow")).Single(b => b.Tag is "icon");
+        Click(Item(FloatingBar.MenuOf(Icon())!, "Bookmark in this workspace"));
+
+        var headers = Headers(FloatingBar.MenuOf(Icon())!);
+        Assert.DoesNotContain("Bookmark in this workspace", headers);
+        Click(Item(FloatingBar.MenuOf(Icon())!, "Remove bookmark from Sparrow"));
+
+        Assert.Empty(harness.Manager.State.Workspaces.Single(w => w.Name == "Sparrow").Bookmarks);
+    });
+
     [Fact]
     public void The_window_menu_has_no_bookmark_item_for_an_explorer_window() => StaThread.Run(() =>
     {

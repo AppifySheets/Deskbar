@@ -8220,8 +8220,16 @@ public partial class FloatingBar : Window
             && manager.WorkspaceOf(row.Window.Handle).TryGetValue(out var home)
             && manager.BookmarkFor(row.Window.Handle, AppIdOf(row.Window), bookmarkSources).TryGetValue(out var candidate))
         {
-            var bookmarkItem = new MenuItem { Header = "Bookmark in this workspace", Icon = MenuGlyph("☆") };
-            bookmarkItem.Click += (_, _) => Report(manager.AddBookmark(home.Id, candidate));
+            // Already bookmarked there: the item turns into its undo. A running program's chip is hidden, so without this
+            // the menu offered to add a bookmark the row was not showing, and the add was refused as a duplicate
+            // (Petre, on the first live try with Remote Desktop Manager: "GPH already has this bookmark").
+            var existing = home.Bookmarks.FirstOrDefault(b => BookmarkRules.SameTarget(b, candidate));
+            var bookmarkItem = existing is null
+                ? new MenuItem { Header = "Bookmark in this workspace", Icon = MenuGlyph("☆") }
+                : new MenuItem { Header = $"Remove bookmark from {home.Name}", Icon = MenuGlyph("★") };
+            bookmarkItem.Click += (_, _) => Report(existing is null
+                ? manager.AddBookmark(home.Id, candidate)
+                : manager.RemoveBookmark(home.Id, existing.Id));
             menu.Items.Add(bookmarkItem);
         }
 
