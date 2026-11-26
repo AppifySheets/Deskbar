@@ -312,6 +312,44 @@ public partial class TasksWindow
         };
     }
 
+    // A TASK JUST ADDED FROM THE PANEL (the tester's L1; TasksBoard.ShowAdded calls Glow, then ScrollToSelected). In the
+    // List its line is picked, glows and is scrolled to; in the Inbox it may be in another tab than the one on show, so:
+    //   - no page open: the tab that holds it comes on show, and its line glows (TaskGlow, on the Inbox's selected fill)
+    //     and is brought into view, once it is drawn: a redraw held by a press in flight (MustWait) draws it later, and
+    //     the glow waits for that draw (inboxGlowPending);
+    //   - a page open (a subtask added from the page's thread): the page and the tab stay as they are.
+    // The ScrollToSelected that follows is no explicit "show this task", so it opens no page (inboxJustAdded). A task
+    // added from the bar's box or by a session does not come through here, and changes nothing in the panel's tab.
+    // NOT FOLLOWED: "Add and start Claude" adds the note, and Claude starts on it a moment later, which moves its line
+    // from Notes to Claude. Following it there would need a timer or a hook in the add box; the line stays in Notes.
+    Guid? inboxGlowPending;
+    Guid? inboxJustAdded;
+
+    // Glow's Inbox half: whether the Inbox answered for it.
+    bool InboxGlow(Guid id)
+    {
+        if (latest?.Inbox is not { } inbox) return false;
+        inboxJustAdded = id;
+        if (inboxPage is not null) return true;
+        if (inbox.Tabbed && inbox.TabOf(id) is { HasValue: true } tab) inboxTab = tab.Value;
+        inboxGlowPending = id;
+        RedrawInbox();
+        ApplyInboxGlow();
+        return true;
+    }
+
+    // The pending glow, on its line once the line is drawn (DrawInbox calls this too).
+    void ApplyInboxGlow()
+    {
+        if (inboxGlowPending is not { } id || !inboxLines.TryGetValue(id, out var line)) return;
+        inboxGlowPending = null;
+        line.Line.Background = TaskGlow.Fading(InboxLook.Raised);
+        line.Line.BringIntoView();
+    }
+
+    /// <summary>For the tests: whether an Inbox line glows.</summary>
+    internal bool InboxGlowing(Guid id) => inboxLines.TryGetValue(id, out var line) && TaskGlow.IsGlow(line.Line.Background);
+
     // The selection drawn in place (PaintSelection calls this): the selected line lighter, its square lighter still, its
     // buttons out.
     void PaintInboxSelection() =>
