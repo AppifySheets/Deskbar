@@ -127,6 +127,21 @@ public sealed class SessionBriefingTests
         Assert.Contains("task done with what to try in the status line", SessionBriefing.ParkedNudge);
     }
 
+    // Task 8710ac09: both Stop nudges say they come from Deskbar and are recognised in the prompt a waiter's wake starts,
+    // wrapped or not, so the turn they start is not nudged again and is never taken for the user's reply.
+    [Fact]
+    public void Both_stop_nudges_are_recognised_in_a_prompt()
+    {
+        var wrapped = "<task-notification>\n<summary>Deskbar</summary>\n</task-notification>\nStop hook blocking error from command \"Stop\": ";
+
+        Assert.True(SessionBriefing.IsStopNudge(wrapped + SessionBriefing.ParkedNudge));
+        Assert.True(SessionBriefing.IsStopNudge(SessionBriefing.SetAsideNudge("Merge it")));
+        Assert.True(SessionBriefing.DeliveredByDeskbar(SessionBriefing.ParkedNudge));
+        Assert.False(SessionBriefing.FromTheUser(wrapped + SessionBriefing.SetAsideNudge("Merge it")));
+        Assert.False(SessionBriefing.IsStopNudge("carry on"));
+        Assert.StartsWith("Deskbar", SessionBriefing.ParkedNudge);
+    }
+
     // Task e52e33cb: a session is told to keep mechanical work out of its own conversation, on a cheaper model, and
     // to have the strongest model review the diff before the pull request. No model is named in either line.
     [Fact]

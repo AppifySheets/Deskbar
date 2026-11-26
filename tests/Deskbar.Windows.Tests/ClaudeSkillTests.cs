@@ -494,6 +494,8 @@ public sealed class ClaudeSkillTests : IDisposable
         Assert.NotNull(wait);
         Assert.True(wait!["asyncRewake"]!.GetValue<bool>());
         Assert.Equal(2592000, wait["timeout"]!.GetValue<long>());
+        // Task 8710ac09: the wake shows as one line reading "Deskbar", not "Stop hook feedback".
+        Assert.Equal("Deskbar", wait["rewakeSummary"]!.GetValue<string>());
         Assert.True(File.Exists(Path.Combine(Deskbar, "claude-wait-hook.cmd")));
         Assert.Contains("claude-wait", File.ReadAllText(Path.Combine(Deskbar, "claude-wait-hook.cmd")));
     }

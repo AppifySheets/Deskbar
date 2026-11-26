@@ -613,6 +613,88 @@ public class RemoteControlClaudeHookTests
         Assert.True(Blinks(manager, "Deskbar"));
     }
 
+    // --- the quiet road (task 8710ac09): a session with a live waiter gets its Stop nudge in its inbox, not a block ---
+    //
+    // Claude Code shows every blocking Stop hook as "Stop hook reported a problem" in yellow, and a waiter's wake as one
+    // line (measured 2026-11-26). So where a waiter can take it, the nudge goes into the inbox and the stop goes through.
+
+    string HookedWithInbox(WorkspaceManager manager, string hookEvent, string extra = "") =>
+        new RemoteControl(manager, tasks: tasks, longPath: LongPath, inbox: new CommentInbox(InboxFolder, () => DateTimeOffset.UtcNow))
+            .Execute(["claude-hook", "--entry", "claude-vscode", "--attended", "1", "--from", Repo, "--json", HookOf(hookEvent, "s1", null, extra)])
+            .Output;
+
+    static string PromptField(string prompt) => ",\"prompt\":" + System.Text.Json.JsonSerializer.Serialize(prompt);
+
+    string Inbox(string session = "s1") =>
+        File.Exists(Path.Combine(InboxFolder, session + ".md")) ? File.ReadAllText(Path.Combine(InboxFolder, session + ".md")) : "";
+
+    [Fact]
+    public void Stop_with_a_waiter_puts_the_nudge_in_the_inbox_and_lets_the_stop_through()
+    {
+        try
+        {
+            var manager = WithTask();
+            Waited(manager, "s1");
+
+            Assert.Equal("", HookedWithInbox(manager, "Stop"));
+            Assert.Equal(SessionBriefing.ParkedNudge, Inbox().Trim());
+        }
+        finally { if (Directory.Exists(InboxFolder)) Directory.Delete(InboxFolder, true); }
+    }
+
+    [Fact]
+    public void Stop_without_a_waiter_still_blocks()
+    {
+        try
+        {
+            var output = HookedWithInbox(WithTask(), "Stop");
+
+            Assert.Equal("block", Json(output).GetProperty("decision").GetString());
+            Assert.Equal("", Inbox());
+        }
+        finally { if (Directory.Exists(InboxFolder)) Directory.Delete(InboxFolder, true); }
+    }
+
+    // The loop guard: the waiter's wake is a new turn, whose Stop carries no stop_hook_active. A turn that began with a
+    // nudge is not nudged again; the next turn that did not is.
+    [Fact]
+    public void A_turn_begun_by_a_nudge_is_not_nudged_again()
+    {
+        try
+        {
+            var manager = WithTask();
+            Waited(manager, "s1");
+            var woken = "<task-notification>\n<summary>Deskbar</summary>\n</task-notification>\nStop hook blocking error from command \"Stop\": "
+                + SessionBriefing.ParkedNudge;
+
+            HookedWithInbox(manager, "UserPromptSubmit", PromptField(woken));
+            Assert.Equal("", HookedWithInbox(manager, "Stop"));
+            Assert.Equal("", Inbox());
+
+            HookedWithInbox(manager, "UserPromptSubmit", PromptField("carry on"));
+            Assert.Equal("", HookedWithInbox(manager, "Stop"));
+            Assert.Equal(SessionBriefing.ParkedNudge, Inbox().Trim());
+        }
+        finally { if (Directory.Exists(InboxFolder)) Directory.Delete(InboxFolder, true); }
+    }
+
+    // Review of the branch: a comment that shared the waiter's wake with a nudge is work, so that turn may be nudged.
+    [Fact]
+    public void A_turn_begun_by_a_nudge_and_a_comment_may_be_nudged()
+    {
+        try
+        {
+            var manager = WithTask();
+            Waited(manager, "s1");
+            var both = SessionBriefing.ParkedNudge + "\n\n" + SessionBriefing.Commented(Titled("Tasks board"), "look at this");
+
+            HookedWithInbox(manager, "UserPromptSubmit", PromptField(both));
+            Assert.Equal("", HookedWithInbox(manager, "Stop"));
+            Assert.Equal(SessionBriefing.ParkedNudge, Inbox().Trim());
+        }
+        finally { if (Directory.Exists(InboxFolder)) Directory.Delete(InboxFolder, true); }
+    }
+
     // Ruling 57: the assignee follows the session. `task ask` hands the task to Petre, `task answered` back to Claude, and
     // `task done` to Petre, who closes it.
     [Fact]

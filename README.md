@@ -740,7 +740,10 @@ and always exits 0. When Deskbar is not running, the hook prints nothing and the
 With **Claude Code sessions keep their tasks in the task list** ticked under it (on by default), the Stop hook also
 nudges a session whose turn ends with its task still in progress and nothing of its own running in the
 background: once per reply, it tells the session to run `task ask` if the next move is yours, so the task
-comes to you with a question instead of sitting out of sight. Three more
+comes to you with a question instead of sitting out of sight. Where the session's comment waiter is running,
+the nudge arrives through it and shows in the session as one line, "Deskbar", followed by the session's short
+reply. Otherwise Claude Code holds the stop and shows the nudge in yellow under "Stop hook reported a problem".
+That label is Claude Code's name for any Stop hook that keeps a turn going. Nothing has failed. Three more
 hooks, on SessionStart, UserPromptSubmit and SessionEnd, run `claude-task-hook.cmd`. A starting session
 is told its task, or the open tasks on its workspace it could join and how to create its own; each of
 your messages reminds it of its task in one line. Your message changes no status: the session says when your
