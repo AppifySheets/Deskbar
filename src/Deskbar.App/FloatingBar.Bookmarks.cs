@@ -64,7 +64,9 @@ public partial class FloatingBar
     // Frozen, as every static brush on this bar must be (CLAUDE.md, "Static WPF brushes must be frozen").
     static readonly Brush ChipOutline = Frozen(0x80, 0xFF, 0xFF, 0xFF);
     static readonly Brush ChipLinkDot = Frozen(0xC0, 0xFF, 0xFF, 0xFF);
-    static readonly Brush ChipDivider = Frozen(0x55, 0xFF, 0xFF, 0xFF);
+    // Bright and solid, so it reads as a bar between the windows and the chips. At 0x55 it was lost beside the dashed
+    // outline 2 DIP away: Petre, on the first live try, "vertical bar between them, please".
+    static readonly Brush ChipDivider = Frozen(0xC8, 0xFF, 0xFF, 0xFF);
 
     // Which chips each workspace row shows, worked out from ONE reading of the windows and the open app ids for the
     // whole rebuild (BookmarkOpener.ShowingNow), not one per row. With no opener every bookmark shows.
@@ -104,7 +106,10 @@ public partial class FloatingBar
             });
 
         // The cell: a window icon's footprint (IconCellWidth wide, the icon plus its 2 DIP each side), the divider
-        // standing in its left 1 DIP.
+        // standing at its left edge. The window icon before it ends 2 DIP short of this cell and the chip's face starts
+        // 2 DIP in, so there is a 4 DIP gap; the divider is laid out at the cell's edge and drawn 1 DIP further left
+        // (a render offset, which costs no width the wrap would have to know about), so it stands in the middle of the
+        // gap rather than against the dashed outline, where it read as part of it.
         var cell = new Grid { Width = IconCellWidth, Height = size + 4 };
         cell.Children.Add(face);
         if (divider)
@@ -113,7 +118,8 @@ public partial class FloatingBar
                 Width = 1,
                 Background = ChipDivider,
                 HorizontalAlignment = HorizontalAlignment.Left,
-                Margin = new Thickness(0, 3, 0, 3),
+                Margin = new Thickness(0, 1, 0, 1),
+                RenderTransform = new TranslateTransform(-1, 0),
                 IsHitTestVisible = false,
             });
 
