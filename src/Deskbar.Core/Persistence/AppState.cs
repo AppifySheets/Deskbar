@@ -887,6 +887,12 @@ public sealed record TasksPanelState(bool Open, double Width)
     // The widths the lines are drawn with: the saved ones, or the defaults.
     [JsonIgnore] public Tasks.TaskColumnWidths ColumnWidths => Columns ?? Tasks.TaskColumnWidths.Default;
 
+    // Whether the panel shows the Inbox view (Deskbar task 740a2231: three tabs, Needs you, Claude and Notes, over the
+    // List's own lines) instead of List or Matrix. Opt in: an older file, and every profile that never picked it, keep
+    // the view they had (AppState.TasksMatrix), so a new build changes nobody's panel by itself. Picking Inbox sets it,
+    // picking List or Matrix clears it; Stats is not remembered either way, as before.
+    public bool Inbox { get; init; }
+
     // What an absent AppState.TasksPanel means: closed, at the default width. Callers use this, not their own copy.
     public static readonly TasksPanelState Default = new(false, Tasks.TasksPanelLayout.DefaultWidth);
 }
