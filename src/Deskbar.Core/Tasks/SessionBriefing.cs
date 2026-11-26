@@ -414,7 +414,8 @@ public static class SessionBriefing
         // Subtasks spec: a session splitting its work makes a subtask, which the next session picks up with this one's
         // context (its join reply names this session and its transcript). `task family` is not listed here: the join
         // reply, the start briefing and a subtask's prompt line carry it where it matters.
-        $"  {Shim} task subtask - --session {sessionId}   (split off a piece of your work; whoever takes it up is briefed on yours)",
+        // Task fa056b2f: the subtask starts its own Claude session at once, so the briefing says so and names the opt-out.
+        $"  {Shim} task subtask - --session {sessionId}   (split off a piece of your work; a session starts on it at once, unless --no-start)",
         // Task e52e33cb (design docs/superpowers/specs/2026-11-25-session-model-pick-design.md). A week of Petre's
         // transcripts, measured: the usage is in the long sessions, and about two thirds of it is the conversation
         // read again on every turn. So what a session keeps OUT of its own conversation is what saves his limits:

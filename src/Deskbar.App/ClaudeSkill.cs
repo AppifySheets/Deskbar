@@ -374,7 +374,9 @@ static class ClaudeSkill
           parent, the siblings and their sessions with transcript files: read the end of the parent session's
           transcript before you start, and stay clear of what the siblings are doing. `deskbar.cmd task family
           --session <id>` prints it again later. To split off a piece of your own work for another session, run
-          `deskbar.cmd task subtask - --session <id>` with its title on stdin.
+          `deskbar.cmd task subtask - --session <id>` with its title on stdin: a Claude session starts on it at once,
+          in your repo, briefed on your work (`--model <name>` picks its model). Add `--no-start` only when the user
+          asked for the piece to wait; it then sits in the backlog until a session takes it up.
         - Related and duplicate tasks. Before you start, look through `deskbar.cmd task list` and `task list --closed`
           for the same or related work, and read what their sessions did. Link a related task with `deskbar.cmd task
           relate <task id> --session <id>` (`task unrelate` removes it); the join reply's `linked` and `task family`

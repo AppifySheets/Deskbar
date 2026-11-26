@@ -197,6 +197,158 @@ public class RemoteControlSubtaskTests
         Assert.True(Titled("Split piece").Assignee.IsClaude);
     }
 
+    // --- the subtask's own session starts at once (task fa056b2f) -----------------------------------
+
+    // Every start the pipe asks for: the task, the folder, the model and whether it was the quiet one (StartQuietly).
+    // `refuse` stands in for a start the app refuses (Claude sessions off); `withQuiet: false` is a copy that does not
+    // set StartQuietly.
+    sealed class Starts
+    {
+        public readonly List<(Guid Task, string Folder, Maybe<string> Model, bool Quiet)> Made = [];
+
+        Func<TaskItem, string, Maybe<string>, Result> Recorder(string? refuse, bool quiet) => (task, folder, model) =>
+        {
+            if (refuse is not null) return Result.Failure(refuse);
+            Made.Add((task.Id, folder, model, quiet));
+            return Result.Success();
+        };
+
+        public TaskSessionCommands Commands(string? refuse = null, bool withQuiet = true) =>
+            new(_ => Result.Success(), _ => [], Recorder(refuse, quiet: false), (_, _) => Result.Success())
+            {
+                StartQuietly = withQuiet ? Recorder(refuse, quiet: true) : null,
+            };
+    }
+
+    ControlReply SaidWith(WorkspaceManager manager, TaskSessionCommands commands, string from, params string[] form) =>
+        new RemoteControl(manager, tasks: tasks, taskSessions: commands).Execute(["task", .. form, "--session", "p1", "--from", from]);
+
+    [Fact]
+    public void A_subtask_starts_a_session_on_itself_in_the_callers_repo_not_its_worktree()
+    {
+        var manager = Started();
+        Family(manager);
+        var starts = new Starts();
+
+        var reply = SaidWith(manager, starts.Commands(), Repo + @"\.claude\worktrees\topic", "subtask", "Split piece");
+
+        Assert.Equal(ControlReply.Ok, reply.ExitCode);
+        Assert.True(Json(reply).GetProperty("started").GetBoolean());
+        Assert.False(Json(reply).TryGetProperty("notStarted", out _));
+        var start = Assert.Single(starts.Made);
+        Assert.Equal(Titled("Split piece").Id, start.Task);
+        Assert.Equal(Repo, start.Folder);
+        Assert.Equal(Maybe<string>.None, start.Model);
+        // Nobody clicked for it, so the app is asked for the start that opens no window.
+        Assert.True(start.Quiet);
+    }
+
+    // The folder the calling session was started in (its own task's record) wins over the shell's, which is wherever
+    // the session last cd'd to; a worktree folder still starts at its repo.
+    [Fact]
+    public void The_start_folder_is_the_calling_sessions_recorded_repo_not_its_shell_folder()
+    {
+        var manager = Started();
+        tasks.Create("Parent work", IdOf(manager, "iam.ge"), tasks.NewSession("p1", Repo + @"\.claude\worktrees\topic"));
+        var starts = new Starts();
+
+        SaidWith(manager, starts.Commands(), @"C:\repos\Other\src", "subtask", "Split piece");
+
+        Assert.Equal(Repo, Assert.Single(starts.Made).Folder);
+    }
+
+    [Fact]
+    public void A_copy_without_a_quiet_start_uses_the_plain_one()
+    {
+        var manager = Started();
+        Family(manager);
+        var starts = new Starts();
+
+        SaidWith(manager, starts.Commands(withQuiet: false), Repo, "subtask", "Split piece");
+
+        Assert.False(Assert.Single(starts.Made).Quiet);
+    }
+
+    [Fact]
+    public void A_title_starting_with_dashes_is_taken_as_it_is()
+    {
+        var manager = Started();
+        Family(manager);
+
+        var reply = SaidWith(manager, new Starts().Commands(), Repo, "subtask", "--model flag ignored by X");
+
+        Assert.Equal(ControlReply.Ok, reply.ExitCode);
+        Assert.Equal("--model flag ignored by X", Json(reply).GetProperty("title").GetString());
+    }
+
+    [Fact]
+    public void No_start_leaves_the_subtask_in_the_backlog()
+    {
+        var manager = Started();
+        Family(manager);
+        var starts = new Starts();
+
+        var reply = SaidWith(manager, starts.Commands(), Repo, "subtask", "--no-start", "Later piece");
+
+        Assert.Equal(ControlReply.Ok, reply.ExitCode);
+        Assert.False(Json(reply).GetProperty("started").GetBoolean());
+        Assert.False(Json(reply).TryGetProperty("notStarted", out _));
+        Assert.Empty(starts.Made);
+        Assert.Equal(Deskbar.Core.Tasks.TaskStatus.Backlog, Titled("Later piece").Status);
+    }
+
+    [Fact]
+    public void Model_names_the_started_sessions_model()
+    {
+        var manager = Started();
+        Family(manager);
+        var starts = new Starts();
+
+        SaidWith(manager, starts.Commands(), Repo, "subtask", "Cheap piece", "--model", "haiku");
+
+        Assert.Equal(Maybe.From("haiku"), Assert.Single(starts.Made).Model);
+    }
+
+    [Theory]
+    [InlineData("subtask", "Piece", "--model", "not a model")]
+    [InlineData("subtask", "Piece", "--no-start", "--model", "haiku")]
+    [InlineData("subtask", "Piece", "Another title")]
+    [InlineData("subtask", "Piece", "--soon")]
+    [InlineData("subtask", "--no-start")]
+    public void A_bad_subtask_form_changes_nothing(params string[] form)
+    {
+        var manager = Started();
+        Family(manager);
+        var before = tasks.Board.Tasks.Count;
+        var starts = new Starts();
+
+        Assert.Equal(ControlReply.Failed, SaidWith(manager, starts.Commands(), Repo, form).ExitCode);
+        Assert.Equal(before, tasks.Board.Tasks.Count);
+        Assert.Empty(starts.Made);
+    }
+
+    [Fact]
+    public void A_refused_start_keeps_the_subtask_and_says_why()
+    {
+        var manager = Started();
+        Family(manager);
+
+        var reply = SaidWith(manager, new Starts().Commands(refuse: "Claude sessions are off"), Repo, "subtask", "Split piece");
+
+        Assert.Equal(ControlReply.Ok, reply.ExitCode);
+        Assert.False(Json(reply).GetProperty("started").GetBoolean());
+        Assert.Equal("Claude sessions are off", Json(reply).GetProperty("notStarted").GetString());
+        Assert.True(Titled("Split piece").Assignee.IsClaude);
+    }
+
+    [Fact]
+    public void No_start_before_the_stdin_dash_still_reads_the_title()
+    {
+        var args = ControlArguments.WithTextInput(["task", "subtask", "--no-start", "-", "--session", "p1"], () => "Piece\n");
+
+        Assert.Equal(["task", "subtask", "--no-start", "Piece", "--session", "p1"], args);
+    }
+
     [Fact]
     public void A_subtask_form_without_a_session_is_refused()
     {

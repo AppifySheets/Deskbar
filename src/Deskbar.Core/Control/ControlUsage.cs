@@ -139,9 +139,11 @@ public static class ControlUsage
                 "a backlog note on the caller's workspace, a follow-up for later, linked as related to the session's\n"
                 + "      own task so it says where it came from. In every form that takes text, -\n"
                 + "      reads the text from stdin (a heredoc in Git Bash): free text never goes on the command line"),
-            new("task", "subtask <title>|- --session <session>",
-                "a Claude session splits its work: a backlog subtask of its own task, assigned to Claude so the next\n"
-                + "      session is offered it; when its own task is already a subtask, a sibling under the same parent"),
+            new("task", "subtask <title>|- [--no-start] [--model <model>] --session <session>",
+                "a Claude session splits its work: a subtask of its own task, assigned to Claude, and a background\n"
+                + "      session starts on it at once in the caller's repo, with no window (--model picks its model);\n"
+                + "      --no-start leaves it in the backlog for the next session instead. When its own task is already a\n"
+                + "      subtask, a sibling under the same parent"),
             new("task", "pr <url> --session <session>",
                 "a pull request the session opened, on its own task, so the tasks panel's search finds the task by its\n"
                 + "      number. A `gh pr create` is recorded by itself; this is for one opened another way"),

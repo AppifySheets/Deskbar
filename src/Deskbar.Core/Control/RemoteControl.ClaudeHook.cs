@@ -354,7 +354,9 @@ public sealed partial class RemoteControl
     //   task later <title> --session <sid>      a Backlog note on the caller's workspace, a follow-up for later, related to
     //                                           the session's own task when it has one (task fa1e6a74)
     //   task add <title> [flags] --session <sid> `task add` with its flags, related to the session's own task the same way
-    //   task subtask <title> --session <sid>    a Backlog subtask of the session's own task (a sibling when that is a subtask)
+    //   task subtask <title> [--no-start] [--model <model>] --session <sid>
+    //                                           a subtask of the session's own task (a sibling when that is a subtask), with
+    //                                           a Claude session started on it at once unless --no-start (task fa056b2f)
     //   task family --session <sid>             the family and linked tasks of the session's own task (subtasks spec)
 //   task pr <url> --session <sid>           a pull request the session opened some other way than `gh pr create`, on its
 //                                           own task (task e7aa49b1; the hook records `gh pr create` by itself)
@@ -395,8 +397,9 @@ public sealed partial class RemoteControl
                 .Bind(o => service.Relate(t.Id, o.Id)).Map(() => t))),
             ["unrelate", var other] => Changed(Own().Bind(t => service.Board.Find(other)
                 .Bind(o => service.Unrelate(t.Id, o.Id)).Map(() => t))),
-            // A session splits its work: a subtask of its own task, or a sibling when its task is already a subtask.
-            ["subtask", var title] => Changed(service.AddSubtask(session, title)),
+            // A session splits its work: a subtask of its own task, or a sibling when its task is already a subtask, and
+            // a Claude session starts on it at once unless --no-start says not to (SessionSubtask, task fa056b2f).
+            ["subtask", .. var rest] => SessionSubtask(service, session, folder, rest),
             ["new", var title] => Changed(service.Create(title, Here(), service.NewSession(session, folder ?? ""))),
             ["status-line", var text] => Changed(Own().Bind(t => service.SetStatusLine(t.Id, text).Map(() => t))),
             ["ask", var question] => Changed(Own().Bind(t => service.Ask(t.Id, question).Map(() => t))
@@ -428,6 +431,89 @@ public sealed partial class RemoteControl
             ["deployed", var note] => Changed(Own().Bind(t => service.MarkDeployed(t.Id, note).Map(() => t))),
             _ => ControlReply.Fail($"Wrong arguments for a session's task form.\n{TaskUsage()}"),
         };
+    }
+
+    // A SESSION'S SUBTASK STARTS ITS OWN SESSION (task fa056b2f, Petre: "when agents are creating tasks for claude, start
+    // them immediately unless asked not to explicitly"). `task subtask` is the one form that makes a task FOR Claude
+    // (TaskBoard.AddSubtask assigns it to Claude; `later` and `add` make the user's notes). It used to sit in the
+    // Backlog until a session on the workspace was offered it, or the user clicked "Start Claude on this", so a split
+    // piece of work waited on someone noticing it. Now the subtask is made, and then a background session starts on it
+    // through the same path as `task start` and the menu's "Start Claude on this" (TaskSessionCommands.Start: the
+    // `claude --bg` whose first message joins the task, so the new session reads its family and this session's work).
+    //
+    //   --no-start      the old behaviour: the subtask waits in the Backlog. The explicit "not now" the task asks for.
+    //   --model <name>  the new session's model (ClaudeStart.Model), so a session can hand a mechanical piece to a cheaper
+    //                   one; without it the start uses `claude-model`, as every start does. Refused with --no-start,
+    //                   since nothing would use it.
+    //
+    // The folder is the REPO of the folder the calling session was started in (ClaudeStart.RepoOf), as its own task
+    // records it (the SessionStart hook's folder), else of the shell folder the command came from: the piece is split
+    // off the work in that repo. The recorded folder comes first because the shell's is wherever the session last
+    // `cd`'d to (a subfolder, another repo). A worktree folder is left out because worktrees are deleted after their
+    // merge (ClaudeStart.Folders says the same). With neither, the likeliest of the subtask's own candidates
+    // (ClaudeStart.Folders leads with the parent's repo).
+    //
+    // QUIET (TaskSessionCommands.StartQuietly): nobody clicked for this start, so the app opens no window on the new
+    // session and shows no message; it runs in the background and shows in the tasks panel's Claude block, where Open
+    // Claude attaches to it.
+    //
+    // Parsing, the model's name and the subtask itself come first: a refusal there changes nothing. A start that cannot
+    // happen (Claude sessions off, no folder, no session commands in this copy) does NOT undo the subtask, which is still
+    // real work split off; the reply says it was not started and why, so the session can tell the user or run
+    // `task start` itself. A failure after the start is under way (an untrusted folder) lands in the subtask's thread.
+    //
+    // The reply is the subtask as every task form answers it (Describe), plus `started` (true or false) and, when false
+    // for a reason other than --no-start, `notStarted` with that reason.
+    ControlReply SessionSubtask(TaskService service, string session, string? folder, string[] words) =>
+        SubtaskWords.Parse(words)
+            .Ensure(w => w.Start || w.Model is null, "--model names the started session's model; with --no-start no session starts")
+            .Bind(w => (w.Model is { } given ? ClaudeStart.Model(given).Map(Maybe.From) : Result.Success(Maybe<string>.None))
+                .Bind(model => service.AddSubtask(session, w.Title!)
+                    .Map(made => (Task: made, Started: w.Start ? StartSubtask(service, made, session, folder, model) : Maybe<Result>.None))))
+            .Match(made => SubtaskReply(service.Board.Tasks.First(t => t.Id == made.Task.Id), made.Started), ControlReply.Fail);
+
+    // The start itself (see above): None when --no-start asked for none, else whether it got under way.
+    Maybe<Result> StartSubtask(TaskService service, TaskItem subtask, string session, string? folder, Maybe<string> model) =>
+        taskSessions is not { } commands
+            ? Result.Failure("Claude sessions are not available in this copy of Deskbar")
+            : (CallerFolder(service, session, folder) is { } here ? ClaudeStart.RepoOf(here) : commands.Folders(subtask).FirstOrDefault()) is { } where
+                ? (commands.StartQuietly ?? commands.Start)(service.Board.Tasks.First(t => t.Id == subtask.Id), where, model)
+                : Result.Failure($"No folder is known for it; run task start {subtask.Id} --folder <path>");
+
+    // The folder the calling session was started in, as its own task records it, else the shell folder (see above).
+    static string? CallerFolder(TaskService service, string session, string? shell) =>
+        service.Board.TaskOf(session)
+            .Bind(own => own.Sessions.TryFirst(s => s.Id == session && s.Folder != ""))
+            .Map(s => (string?)s.Folder)
+            .GetValueOrDefault(shell);
+
+    // Describe's JSON with `started` and, for a start that was wanted and refused, `notStarted` (see above).
+    ControlReply SubtaskReply(TaskItem subtask, Maybe<Result> started)
+    {
+        var reply = System.Text.Json.JsonSerializer.SerializeToNode(Describe(subtask), Json)!.AsObject();
+        reply["started"] = started.Map(r => r.IsSuccess).GetValueOrDefault(false);
+        started.Where(r => r.IsFailure).Tap(r => reply["notStarted"] = r.Error);
+        return Success(reply);
+    }
+
+    // The words of `task subtask` after the verb (--session is already off): the title and, in any order, --no-start and
+    // --model <name>. The first other word is the title, even one starting with "--" (free text from stdin is taken as
+    // it is); a second one, or a missing title, is refused with the form's usage line.
+    sealed record SubtaskWords(string? Title, bool Start, string? Model)
+    {
+        public static Result<SubtaskWords> Parse(string[] words) => Parse(words, new SubtaskWords(null, true, null));
+
+        static Result<SubtaskWords> Parse(string[] words, SubtaskWords so) => words switch
+        {
+            [] => so.Title is null ? Result.Failure<SubtaskWords>($"A subtask needs a title.\n{Usage}") : Result.Success(so),
+            ["--no-start", .. var rest] => Parse(rest, so with { Start = false }),
+            ["--model", var model, .. var rest] => Parse(rest, so with { Model = model }),
+            [var title, .. var rest] when so.Title is null =>
+                Parse(rest, so with { Title = title }),
+            [var other, ..] => Result.Failure<SubtaskWords>($"task subtask does not take '{other}'.\n{Usage}"),
+        };
+
+        const string Usage = "task subtask <title>|- [--no-start] [--model <model>] --session <session>";
     }
 
     // The workspace a session's `task new` and `task later` go on (task f905b1a7: "tasks added to the deskbar by claude
