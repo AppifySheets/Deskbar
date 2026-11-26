@@ -169,14 +169,13 @@ public partial class FloatingBar
         }));
     }
 
-    // What a drop does (drag to nest, see TaskDropTarget's header): on a line's middle the task becomes its subtask; a
-    // subtask drawn under its parent and dropped anywhere else leaves it, a plain task again (it would otherwise be drawn
-    // straight back under its parent, so the drop could only rewrite its flags); everything else is placed as before.
+    // What a drop does (drag to nest, see TaskDropTarget's header): on a line's middle the task becomes its subtask;
+    // dropped anywhere else it is a plain task, then placed. A subtask is freed whether it was drawn under its parent or
+    // on a line of its own (task 7378433e: one whose parent is off the bar could only be moved under another task), and
+    // clearing the parent of a task that has none changes nothing. A failed freeing places nothing.
     static Result Dropped(TaskService service, TaskDragState drag, TaskDropPreview drop) =>
         drop.Into is { } parent ? service.SetParent(drag.Id, parent)
-        : drag.Line.Tag is TaskLine { ShownIn: not null }
-            ? service.SetParent(drag.Id, Maybe<Guid>.None).Bind(() => service.Place(drag.Id, drop.Quadrant, drop.Place))
-        : service.Place(drag.Id, drop.Quadrant, drop.Place);
+        : service.SetParent(drag.Id, Maybe<Guid>.None).Bind(() => service.Place(drag.Id, drop.Quadrant, drop.Place));
 
     /// <summary>Lost capture, a button that came up unseen: nothing is dropped, and what waited is served.</summary>
     internal void CancelTaskDrag(string why)
@@ -223,7 +222,7 @@ public partial class FloatingBar
         if (TaskDropTarget.InOwnBlock(drawn, dragged, inList)) return null;
         var task = taskService.Board.Tasks.FirstOrDefault(t => t.Id == dragged);
         return TaskDropTarget.At(TaskDropTarget.Anchors(drawn), [], task?.Quadrant ?? Quadrant.IV, inList,
-                task is null ? TaskDropTarget.Part.None : TaskDropTarget.PartOf(task.Status)) is { } drop
+                task is null ? TaskDropTarget.Part.None : TaskDropTarget.PartOf(task.Status), self: dragged) is { } drop
             ? new TaskDropPreview(drop.Quadrant, drop.Place, drop.LineY) { Into = drop.Into, IntoBounds = drop.IntoBounds }
             : null;
     }

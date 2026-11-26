@@ -2300,6 +2300,34 @@ public class FloatingBarTaskListTests
         Assert.Equal(["n1", "n2"], t.Lines.Skip(1).Select(TitleOf).OrderBy(x => x));
     });
 
+    // Task 7378433e (Petre: "subtasks can only be moved into other tasks as subtasks; i should be able to move them as
+    // non-subtasks"). A subtask whose parent is Claude's is on the bar without its parent, on a line of its own, so it
+    // was never drawn under it and a drop beside a line only reordered it. Freed like any subtask now; over the middle of
+    // its own line nothing happens, so a drag that comes back frees nothing.
+    [Fact]
+    public void A_subtask_whose_parent_is_off_the_bar_dragged_beside_a_line_is_freed() => StaThread.Run(() =>
+    {
+        using var t = DragBar(2);
+        var parent = t.Tasks.AddNote("Claude's parent", t.Gepha).Value.Id;
+        t.Tasks.Assign(parent, Assignee.Claude);
+        var child = t.Tasks.AddNote("child", t.Gepha, parent: parent).Value.Id;
+        Settle(t);
+        Assert.DoesNotContain(parent, t.Lines.Select(l => ((TaskLine)l.Tag).Id));
+        Button Line(Guid id) => t.Lines.Single(l => ((TaskLine)l.Tag).Id == id);
+        Assert.Null(((TaskLine)Line(child).Tag).ShownIn);
+
+        // Back onto its own line's middle: still a subtask.
+        Drag(t, Line(child), In(t, Line(child), 0.5));
+        Assert.Equal(Maybe.From(parent), t.Tasks.Board.Tasks.Single(x => x.Id == child).ParentId);
+
+        // Beside n1: a plain task, placed after it.
+        Settle(t);
+        var n1 = t.Tasks.Board.Tasks.Single(x => x.Title == "n1").Id;
+        Drag(t, Line(child), In(t, Line(n1), 0.9));
+        Assert.True(t.Tasks.Board.Tasks.Single(x => x.Id == child).ParentId.HasNoValue);
+        Assert.Equal(["n2", "n1", "child"], t.Tasks.Board.Pile().Where(x => x.Id != parent).Select(x => x.Title));
+    });
+
     // Done lines sit in the pinned block under the questions (task eefb986a) and are dragged among themselves too (task
     // f41d7857): never above a question, and to the foot of the done lines when let go below them.
     [Fact]

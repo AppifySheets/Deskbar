@@ -29,6 +29,18 @@ namespace Deskbar.App;
 // above its part, before the part's first line; anywhere below it, after the part's last line. Such a drop is said in
 // `pinnedTo`, the dragged task's own quadrant, which TaskBoard.Place reads as a place in its part. The window's Matrix
 // adds the other cells as areas, so a pinned task dropped on one takes that cell's flags.
+//
+// A SUBTASK DROPPED BESIDE A LINE BECOMES A PLAIN TASK, wherever it was drawn (task 7378433e, Petre: "subtasks can only
+// be moved into other tasks as subtasks; i should be able to move them as non-subtasks"). Freeing used to be kept for a
+// subtask drawn under its parent, so a subtask on a line of its own (its parent snoozed, Claude's and off the bar, or the
+// subtask waiting on Petre under a plain parent) could only be put under another task: a drop beside a line reordered it
+// and left its parent as it was. The callers now free every dragged task that is not dropped Into a line (clearing a
+// parent it does not have changes nothing; the window's Matrix, which has no nesting, still only moves a line). What keeps
+// a short drag from freeing it by accident is the block it was dragged from: the parent's block for a nested subtask
+// (InOwnBlock), and for any other line its own line, where the drop is none (`self`). The whole line, not only its middle:
+// the drag starts 4 px from the press, so with a bar line's 5 DIP edge band a press just below the middle started the
+// drag already in "after itself" (review of this branch). A pinned subtask alone in its part is still freed by a drop
+// anywhere off its own line: InPart says that as a place beside itself.
 internal static class TaskDropTarget
 {
     /// <summary>
@@ -106,14 +118,19 @@ internal static class TaskDropTarget
     /// <summary>
     /// The drop for a pointer at <paramref name="at"/>, or none when no line or area can answer. <paramref name="dragged"/>
     /// is the part of the pinned block the dragged task is in, so a pinned one moves within its part (see the header).
+    /// <paramref name="self"/> is the dragged task: over its own line the drop is none, so a drag that comes back to
+    /// where it started frees no subtask (task 7378433e, see the header).
     /// </summary>
-    internal static Drop? At(IReadOnlyList<Placed> lines, IReadOnlyList<Area> areas, Quadrant pinnedTo, Point at, Part dragged = Part.None)
+    internal static Drop? At(IReadOnlyList<Placed> lines, IReadOnlyList<Area> areas, Quadrant pinnedTo, Point at, Part dragged = Part.None,
+        Guid? self = null)
     {
         if (areas.FirstOrDefault(a => a.Bounds.Contains(at)) is { } area)
             return new Drop(area.Quadrant, TaskPlace.Top, area.Bounds.Top);
         if (lines.Count == 0) return null;
 
         var nearest = lines.OrderBy(p => Distance(p.Bounds, at.Y)).First();
+        // Over its own line: it stays as it is (the dragged line never takes itself as a child, so no Into is lost).
+        if (nearest.Id == self && Distance(nearest.Bounds, at.Y) == 0) return null;
         // Into before anything else, so a pinned line takes a child like any other line.
         if (nearest.TakesChild && InMiddle(nearest.Bounds, at.Y))
             return new Drop(nearest.Quadrant, TaskPlace.Top, nearest.Bounds.Top) { Into = nearest.Id, IntoBounds = nearest.Bounds };

@@ -6022,6 +6022,63 @@ public class TasksBoardTests
         Assert.True(t.Tasks.Board.Tasks.Single(x => x.Id == child).ParentId.HasNoValue);
     });
 
+    // Task 7378433e (Petre: "subtasks can only be moved into other tasks as subtasks; i should be able to move them as
+    // non-subtasks"). A subtask waiting on Petre under a plain parent keeps its line in the pinned block, not under its
+    // parent, so it was never "nested" and a drop beside a line left its parent. It is freed like any subtask now; over
+    // the middle of its own line nothing happens.
+    [Fact]
+    public void In_the_panel_a_subtask_on_a_line_of_its_own_dragged_beside_a_line_is_freed() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var other = t.Tasks.AddNote("other", t.Gepha).Value.Id;
+        var parent = t.Tasks.AddNote("parent", t.Gepha).Value.Id;
+        var child = t.Tasks.Create("child", t.Gepha, Session("s1")).Value.Id;
+        Assert.True(t.Tasks.SetParent(child, parent).IsSuccess);
+        t.Tasks.Ask(child, "Ship it?");
+        t.Window.DragMouse = ArrangeMouse.Held;
+        t.Controller.Show();
+        t.Window.UpdateLayout();
+
+        // Back onto its own line's middle: no drop, still a subtask.
+        var own = InLine(t, child, 0.5);
+        t.Window.DragPress(child, own);
+        t.Window.DragMove(new Point(own.X, own.Y + 8));
+        t.Window.DragMove(own);
+        Assert.Null(t.Window.DropLineY);
+        t.Window.DragRelease();
+        t.Window.Dispatcher.Invoke(() => { }, System.Windows.Threading.DispatcherPriority.Background);
+        Assert.Equal(Maybe.From(parent), t.Tasks.Board.Tasks.Single(x => x.Id == child).ParentId);
+
+        // Beside another line: a plain task, still waiting on Petre.
+        t.Window.UpdateLayout();
+        WindowDrag(t, child, InLine(t, other, 0.9));
+
+        var freed = t.Tasks.Board.Tasks.Single(x => x.Id == child);
+        Assert.True(freed.ParentId.HasNoValue);
+        Assert.Equal(Deskbar.Core.Tasks.TaskStatus.WaitingOnYou, freed.Status);
+    });
+
+    // The Matrix offers no nesting, so a drag of a subtask's line between its cells only changes its quadrant and keeps
+    // its parent (review of the task 7378433e branch): freeing there would leave no drag that moves a subtask.
+    [Fact]
+    public void In_the_matrix_a_subtask_line_dragged_to_another_cell_keeps_its_parent() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var other = t.Tasks.AddNote("Book the venue", t.Gepha, Quadrant.I).Value.Id;
+        var parent = t.Tasks.AddNote("Ship the release", t.Gepha).Value.Id;
+        var child = t.Tasks.AddNote("Write the notes", t.Gepha, Quadrant.IV, parent).Value.Id;
+        t.Window.DragMouse = ArrangeMouse.Held;
+        t.Controller.Show();
+        Click(ButtonNamed(t.Window, "Matrix"));
+        t.Window.UpdateLayout();
+
+        WindowDragTo(t, child, InMatrixLine(t, other, 0.9));
+
+        var moved = t.Tasks.Board.Tasks.Single(x => x.Id == child);
+        Assert.Equal(Quadrant.I, moved.Quadrant);
+        Assert.Equal(Maybe.From(parent), moved.ParentId);
+    });
+
     [Fact]
     public void Add_subtask_on_a_subtask_adds_a_sibling_in_the_window() => StaThread.Run(() =>
     {

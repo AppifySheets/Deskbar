@@ -744,6 +744,12 @@ S17. A subtask's way to its parent (task 54b39c4c). Give a note three subtasks. 
     subtask's line: **Open parent** shows the parent in the tasks panel. Open a subtask in its own window: the side
     column has a Parent section above Subtasks, and its button opens the parent's window; Details no longer lists
     "Subtask of".
+S18. A subtask on a line of its own moves out as a plain task (task 7378433e). Give a task assigned to Claude a
+    subtask assigned to you, with the Subtasks box ticked: on the bar the subtask has a line of its own with the arrow,
+    and no parent above it. Drag it down and back onto its own line: no drop line, and it is still a
+    subtask. Drag it between two other lines: it is a plain task there, without the arrow. In the tasks panel, ask a
+    question on a subtask of a plain note so it sits in Waiting on you, and drag it between two lines: it stays in
+    Waiting on you and is a plain task.
 
 ## Goals
 

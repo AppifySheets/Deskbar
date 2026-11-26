@@ -154,6 +154,8 @@ public partial class TasksWindow
     {
         if (drag is not { } current) return;
         var drop = dropShown;
+        // Read now, at the release: the view is the one the drop was aimed in, whatever the queue runs after it.
+        var free = !matrixShown || current.Entry is not null;
         EndDrag();
         if (!current.Started) return;
         dropQueued = true;
@@ -161,7 +163,7 @@ public partial class TasksWindow
         {
             try
             {
-                if (drop is not null) Dropped(current.Id, drop, fromThread: current.Entry is not null);
+                if (drop is not null) Dropped(current.Id, drop, free);
             }
             finally
             {
@@ -172,9 +174,14 @@ public partial class TasksWindow
     }
 
     // What a drop does (drag to nest, TaskDropTarget's header), as on the bar: on a line's middle the task becomes its
-    // subtask; a nested subtask dropped anywhere else is freed first, then placed; everything else is placed as before.
-    // A subtask dragged by its entry in its parent's thread (`fromThread`, task f64d06ae) is freed the same way.
-    void Dropped(Guid id, TaskDropTarget.Drop drop, bool fromThread = false)
+    // subtask; dropped anywhere else it is freed first, then placed. Every subtask is freed so: one drawn under its parent,
+    // one dragged by its entry in its parent's thread (task f64d06ae), and one on a line of its own, whose parent is not
+    // listed beside it (task 7378433e: it could only be moved under another task). Clearing the parent of a task that has
+    // none changes nothing. In the Matrix (`free` false) a line's drag is only a move, as before: the Matrix offers no
+    // nesting, so a drag between its cells means "change its quadrant", and freeing there would leave no drag that moves
+    // a subtask and keeps it one (review of this branch). A thread entry's drag frees in the Matrix too (task f64d06ae):
+    // pulling it out of the thread is what it is for.
+    void Dropped(Guid id, TaskDropTarget.Drop drop, bool free)
     {
         if (drop.Into is { } parent)
         {
@@ -183,8 +190,7 @@ public partial class TasksWindow
         }
         // Freed first; a freeing that failed places nothing (it would only rewrite the flags of a task drawn back under
         // its parent; review of the drag-to-nest branch, minor 3).
-        if ((fromThread || (dragLines.TryGetValue(id, out var line) && line.Nested))
-            && Actions?.SetParent?.Invoke(id, CSharpFunctionalExtensions.Maybe<Guid>.None) != true) return;
+        if (free && Actions?.SetParent?.Invoke(id, CSharpFunctionalExtensions.Maybe<Guid>.None) == false) return;
         Actions?.Place(id, drop.Quadrant, drop.Place);
     }
 
@@ -240,7 +246,7 @@ public partial class TasksWindow
             // An entry's subtask may also have a line nested under the parent; its drag did not start there, so that
             // line's block is not asked. A drop back onto its own parent's middle changes nothing either.
             if (entry.Entry is null && TaskDropTarget.InOwnBlock(drawn, dragged, at)) return null;
-            return TaskDropTarget.At(TaskDropTarget.Anchors(drawn), [], own, at, mine.Part) is { } drop
+            return TaskDropTarget.At(TaskDropTarget.Anchors(drawn), [], own, at, mine.Part, self: dragged) is { } drop
                 && !(entry.Entry is not null && drop.Into == entry.Parent) ? drop : null;
         }
         if (cells.Count == 0) return null;
@@ -256,7 +262,7 @@ public partial class TasksWindow
         // as a whole.
         var areas = (mine.Waiting ? quadrant != own : lines.All(l => l.Waiting)) ? new[] { new TaskDropTarget.Area(quadrant, box) } : [];
         // A drop on the cell's waiting lines goes to the top of the cell's own quadrant.
-        return TaskDropTarget.At(lines, areas, quadrant, at, mine.Part);
+        return TaskDropTarget.At(lines, areas, quadrant, at, mine.Part, self: dragged);
     }
 
     // The lines that can be aimed at, with their boxes in the drag's coordinates.
