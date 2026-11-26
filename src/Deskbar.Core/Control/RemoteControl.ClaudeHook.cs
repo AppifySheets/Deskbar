@@ -443,7 +443,9 @@ public sealed partial class RemoteControl
                 taskSessions?.FolderExists ?? (_ => true)),
             ["new", var title] => Changed(service.Create(title, Here(), service.NewSession(session, folder ?? ""))),
             ["status-line", var text] => Changed(Own().Bind(t => service.SetStatusLine(t.Id, text).Map(() => t))),
-            ["ask", var question] => Changed(Own().Bind(t => service.Ask(t.Id, question, session).Map(() => t))
+            // The text may end in a `--options` line and the options, one per line (AnswerOptions): split here, checked before
+            // the task is looked up, so a bad list refuses the whole ask and stores nothing.
+            ["ask", var text] => Changed(AnswerOptions.Split(text).Bind(asked => Own().Bind(t => service.Ask(t.Id, asked.Question, session, asked.Options).Map(() => t)))
                 .Tap(_ => Attention(folder))),
             ["done"] => Changed(Own().Bind(t => service.MarkDone(t.Id).Map(() => t))),
             // Ruling 49: the session says its question is settled (the user's reply answered it, or the session settled it

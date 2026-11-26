@@ -1565,4 +1565,74 @@ public class RemoteControlClaudeHookTests
     [Fact]
     public void Claude_wait_reads_stdin_like_a_hook() =>
         Assert.Equal(["claude-wait", "--json", "{}"], ControlArguments.WithInput(["claude-wait"], () => "{}"));
+
+    // --- the answer options of `task ask` (AnswerOptions) -----------------------------------------------------------
+    //
+    // The options are more lines of the ask's stdin text, after a line `--options`: free text never goes on cmd's command
+    // line, so no `--option <text>` word exists. The client sends the whole text as the ask's one word.
+
+    [Fact]
+    public void An_ask_with_options_stores_them_and_writes_the_question_alone_into_the_thread()
+    {
+        var manager = Started();
+        Editor(manager, 0x10, "TaskSpaces", "Deskbar");
+        Said(manager, "s1", Repo, "new", "Tasks board");
+
+        var reply = Said(manager, "s1", Repo, "ask", "Merge [PR 512](https://example.com/pull/512)?\n--options\nMerge it\nNot yet");
+
+        Assert.Equal(ControlReply.Ok, reply.ExitCode);
+        var task = Titled("Tasks board");
+        Assert.Equal(TaskStatus.WaitingOnYou, task.Status);
+        Assert.Equal("Merge [PR 512](https://example.com/pull/512)?", task.Question.Value);
+        Assert.Equal(["Merge it", "Not yet"], task.QuestionOptions);
+        Assert.Equal("Merge [PR 512](https://example.com/pull/512)?", Assert.Single(task.Comments).Markdown);
+    }
+
+    [Fact]
+    public void An_ask_with_a_bad_option_is_refused_with_the_limit_and_stores_nothing()
+    {
+        var manager = Started();
+        Editor(manager, 0x10, "TaskSpaces", "Deskbar");
+        Said(manager, "s1", Repo, "new", "Tasks board");
+
+        var refused = Said(manager, "s1", Repo, "ask", "Merge?\n--options\na\nb\nc\nd\ne");
+
+        Assert.Equal(ControlReply.Failed, refused.ExitCode);
+        Assert.Contains("at most 4 options", refused.Output);
+        Assert.Contains("40 characters", refused.Output);
+        var task = Titled("Tasks board");
+        Assert.Equal(TaskStatus.InProgress, task.Status);
+        Assert.True(task.Question.HasNoValue);
+        Assert.Empty(task.QuestionOptions);
+        Assert.Empty(task.Comments);
+    }
+
+    [Fact]
+    public void An_ask_with_a_marker_and_no_options_is_refused_too()
+    {
+        var manager = Started();
+        Editor(manager, 0x10, "TaskSpaces", "Deskbar");
+        Said(manager, "s1", Repo, "new", "Tasks board");
+
+        Assert.Equal(ControlReply.Failed, Said(manager, "s1", Repo, "ask", "Merge?\n--options").ExitCode);
+
+        Assert.True(Titled("Tasks board").Question.HasNoValue);
+    }
+
+    [Fact]
+    public void An_ask_without_a_marker_is_as_it_was_and_answered_clears_the_options()
+    {
+        var manager = Started();
+        Editor(manager, 0x10, "TaskSpaces", "Deskbar");
+        Said(manager, "s1", Repo, "new", "Tasks board");
+        Said(manager, "s1", Repo, "ask", "Merge?\n--options\nMerge it\nNot yet");
+        Assert.Equal(2, Titled("Tasks board").QuestionOptions.Count);
+
+        Said(manager, "s1", Repo, "answered");
+        Said(manager, "s1", Repo, "ask", "Delete the branch?");
+
+        var task = Titled("Tasks board");
+        Assert.Equal("Delete the branch?", task.Question.Value);
+        Assert.Empty(task.QuestionOptions);
+    }
 }

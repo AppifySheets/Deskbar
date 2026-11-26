@@ -59,6 +59,14 @@ namespace Deskbar.Core.Tasks;
 // hand edit never fails the file or invents a schedule; an unreadable `nextRun` reads as none. Still version 2; an older
 // build drops them on its next save, which costs the schedule and never a task.
 //
+// THE ANSWER OPTIONS (the inbox's answer buttons). `questionOptions` is an optional array of strings of version 2 as well,
+// the answers a session offered with the open question; missing, null or of the wrong type reads as none, and none is not
+// written, so a file without any is unchanged. WHY A FILE WITH THEM STILL LOADS IN A BUILD THAT DOES NOT KNOW THEM: the
+// reader's JsonSerializerOptions are the Web defaults, which do not disallow unmapped members, so a property no DTO field
+// names is skipped whole and never fails the parse (the same way every optional field above reached older builds; a
+// test, "A_file_with_an_unknown_field_still_loads", holds the options to that). That older build ignores the list and
+// drops it at its next save, which costs the buttons of the one open question, never a task.
+//
 // The model uses Maybe, which serialises badly, so the file is written from private DTO records: a Maybe becomes a
 // nullable field (null means none). Every time is converted to UTC before writing AND after reading, so the file
 // means the same on a machine in another time zone, a hand-edited time in local time is still the same instant,
@@ -168,7 +176,14 @@ public sealed class JsonTaskStore(string baseDirectory, Action<string>? trace = 
         [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull), JsonConverter(typeof(TolerantRepeatConverter))]
         RepeatDto? Repeat = null,
         [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull), JsonConverter(typeof(TolerantTimeConverter))]
-        DateTimeOffset? NextRun = null);
+        DateTimeOffset? NextRun = null,
+        // TaskItem.QuestionOptions (the inbox's answer buttons): the answers offered with the open question, as strings. Left
+        // out of the file while empty, so a task without any is written as before. Read tolerantly like PullRequests: anything
+        // but an array reads as none and a non-string entry is skipped (FromDto then keeps them only with a question). Still
+        // version 2: an older build's reader skips a property it does not know (the options never fail the load; see the
+        // header), and drops it on its next save, which costs the buttons of one open question and never a task.
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull), JsonConverter(typeof(TolerantStringListConverter))]
+        IReadOnlyList<string>? QuestionOptions = null);
 
     // TaskItem.Repeat as stored: the schedule's canonical text (RepeatSchedule.Text), the model and the folder. Every part
     // is nullable because the reader fills what it finds and FromDto decides whether that is a repeat.
@@ -285,7 +300,8 @@ public sealed class JsonTaskStore(string baseDirectory, Action<string>? trace = 
             t.Deployed.Count > 0 ? t.Deployed.Select(d => new DeployedDto(d.Key, d.At.ToUniversalTime(), d.Note)).ToArray() : null,
             // The schedule is stored as its canonical text, which TaskRepeats.Parse reads back to the same schedule.
             t.Repeat.HasValue ? new RepeatDto(t.Repeat.Value.Schedule.Text, t.Repeat.Value.Model, t.Repeat.Value.Folder) : null,
-            t.NextRun.HasValue ? t.NextRun.Value.ToUniversalTime() : null);
+            t.NextRun.HasValue ? t.NextRun.Value.ToUniversalTime() : null,
+            t.QuestionOptions.Count > 0 ? t.QuestionOptions : null);
 
     static TaskItem FromDto(TaskDto d) =>
         new(d.Id, d.Title ?? "",
@@ -328,6 +344,12 @@ public sealed class JsonTaskStore(string baseDirectory, Action<string>? trace = 
                 .DistinctBy(p => p.Key).ToArray(),
             Repeat = RepeatOf(d.Repeat),
             NextRun = d.NextRun is { } due ? due.ToUniversalTime() : Maybe<DateTimeOffset>.None,
+            // The options only mean something beside a question, and only when they obey the limits (AnswerOptions.Check): a
+            // hand-edited list that does not reads as none, as a list with no question does, rather than as buttons the
+            // rules would never have let an ask store.
+            QuestionOptions = !string.IsNullOrWhiteSpace(d.Question) && AnswerOptions.Check(d.QuestionOptions) is { IsSuccess: true } options
+                ? options.Value
+                : [],
         };
 
     // A stored repeat as a TaskRepeat, or none (task 0b78269e). It needs a schedule that parses (so a minute-level hand edit
