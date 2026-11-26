@@ -291,15 +291,64 @@ public sealed class TaskServiceTests
         Assert.Equal(Assignee.Claude, s.Board.Tasks.Single().Assignee);
         Assert.Equal(saves, store.Saves);
 
+        var asked = new List<Guid>();
+        using var _ = s.StalledNudges.Subscribe(asked.Add);
         clock = clock.AddMinutes(5);
-        s.Stalled(nobody, nobody);              // 15 minutes: handed back, saved, traced
+        s.Stalled(nobody, nobody);              // 15 minutes: the session is asked first (task 8710ac09), nothing saved
+        Assert.Equal(Assignee.Claude, s.Board.Tasks.Single().Assignee);
+        Assert.Equal([task.Id], asked);
+        Assert.Equal(saves, store.Saves);
+        Assert.Contains(traced, line => line.Contains("asked the session") && line.Contains(task.Id.ToString()[..8]));
+
+        clock = clock.AddMinutes(5);
+        s.Stalled(nobody, nobody);              // no answer in 5 minutes: handed back, saved, traced
         Assert.Equal(Assignee.Me, s.Board.Tasks.Single().Assignee);
         Assert.Equal(saves + 1, store.Saves);
+        Assert.Single(asked);
         Assert.Contains(traced, line => line.Contains("handed back") && line.Contains(task.Id.ToString()[..8]));
 
         s.Stalled(busy, busy);                // the session works again: taken back
         Assert.Equal(Assignee.Claude, s.Board.Tasks.Single().Assignee);
         Assert.Contains(traced, line => line.Contains("taken back"));
+    }
+
+    // Task 8710ac09: the session answers the ask with the status line it already had ("still waiting on CI"). The board
+    // does not change, but the answer is heard, so the task stays with Claude.
+    [Fact]
+    public void Stalled_hears_the_same_status_line_set_again_as_an_answer()
+    {
+        var s = new TaskService(store, () => clock);
+        var task = s.Create("Tasks redesign", ws, Session("s1", clock)).Value;
+        s.SetStatusLine(task.Id, "Waiting on CI");
+        var nobody = new HashSet<string>();
+
+        clock = clock.AddMinutes(15);
+        s.Stalled(nobody, nobody);              // asked
+        clock = clock.AddMinutes(1);
+        s.SetStatusLine(task.Id, "Waiting on CI");
+        clock = clock.AddMinutes(5);
+        s.Stalled(nobody, nobody);              // answered: still Claude's
+
+        Assert.Equal(Assignee.Claude, s.Board.Tasks.Single().Assignee);
+    }
+
+    // Task 8710ac09: no session could be reached to ask, so nobody can answer, and the task comes to Petre at once.
+    [Fact]
+    public void An_undelivered_ask_hands_the_task_back_at_once()
+    {
+        var s = new TaskService(store, () => clock);
+        var task = s.Create("Tasks redesign", ws, Session("s1", clock)).Value;
+        var nobody = new HashSet<string>();
+
+        s.NudgeUndelivered(task.Id);            // never asked: nothing happens
+        Assert.Equal(Assignee.Claude, s.Board.Tasks.Single().Assignee);
+
+        clock = clock.AddMinutes(15);
+        s.Stalled(nobody, nobody);
+        s.NudgeUndelivered(task.Id);
+
+        Assert.Equal(Assignee.Me, s.Board.Tasks.Single().Assignee);
+        Assert.True(s.Board.Tasks.Single().HandedBack.HasValue);
     }
 
     // Images in tasks (docs/superpowers/specs/2026-11-24-task-images-design.md): deleting a task deletes its image folder,

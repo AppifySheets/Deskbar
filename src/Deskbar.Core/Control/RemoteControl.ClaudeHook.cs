@@ -198,8 +198,10 @@ public sealed partial class RemoteControl
     //   * the session has no background work or scheduled wake-up of its own (it is waiting on that, not on Petre);
     //   * the session's task is open, In progress and Claude's (an ask or done already moved it, and a task Petre took
     //     is his).
-    // The cost: one short extra turn on most replies of a session with a task, shown as "Stop hook feedback". StalledTasks
-    // still hands back whatever this misses, after 15 quiet minutes.
+    // The cost: one short extra turn on most replies of a session with a task. Claude Code shows it in yellow as "Stop hook
+    // reported a problem" (seen 2026-11-26, task 8710ac09); it is this nudge, not a failure, and Petre chose to keep it. What
+    // this misses, StalledTasks catches after 15 quiet minutes: it asks the session again, and hands the task back to
+    // Petre only if the session does not answer.
     bool Parked(ClaudeHookEvent hook) =>
         tasks is { } service
         && manager.State.ClaudeTasksInEffect

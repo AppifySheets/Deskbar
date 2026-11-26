@@ -99,6 +99,8 @@ public class SetAsideStopHookTests
         // The Reevaluate button's request (task 3dd07539) is Deskbar's, not Petre replying: read as his reply it would set
         // aside the very question the session is asked to check.
         Assert.True(SessionBriefing.DeliveredByDeskbar(SessionBriefing.Reevaluate(task)));
+        // A stalled task's ask (task 8710ac09) is Deskbar's too.
+        Assert.True(SessionBriefing.DeliveredByDeskbar(SessionBriefing.StalledNudge(task)));
         Assert.False(SessionBriefing.DeliveredByDeskbar("remove the footnote"));
     }
 
