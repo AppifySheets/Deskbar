@@ -24,8 +24,8 @@ namespace Deskbar.App;
 // Left in the menu only: Status and Close (the tick), Snooze (the moon), Duplicate of, Goal and Open parent.
 //
 // Each action keeps its slot on every line, an empty slot where it does not apply (a closed task cannot be edited), so a
-// button sits at the same x on every line, as every other column does. A full line (710 DIP and wider) has the room for
-// all seven, a fixed column beside the others at the right end, which the title gives up.
+// button sits at the same x on every line, as every other column does. A full line has the room for all seven from about
+// 940 DIP; narrower, its strip gives up buttons before the title goes under its readable floor (task 39d58e5b, FullColumns).
 //
 // The buttons are quiet like the comments and "⋯" (half strength until the line is hovered or picked, Quieten) and click
 // like them (Small: the click guard, and the click kept from the line). A button whose action is a menu (Assign to, Move

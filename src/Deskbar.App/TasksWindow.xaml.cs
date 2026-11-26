@@ -60,7 +60,7 @@ namespace Deskbar.App;
 //   Idle part        the Claude working block's idle tasks (TaskGroupKind.ClaudeIdle, task 10b49554) come after its
 //                    working ones under a dashed divider captioned "idle" (IdleDivider), their lines at IdleOpacity; a
 //                    ClaudeIdle group with no working one above it has an ordinary "CLAUDE IDLE" caption instead.
-//   The width        (tasks panel plan, Task 8; spec "Lines at panel width" and "The Matrix") below 710 DIP the lines are
+//   The width        (tasks panel plan, Task 8; spec "Lines at panel width" and "The Matrix") below 850 DIP the lines are
 //                    slim (the view's Slim: squares for sessions, no status chip, assignee, age or Reopen; "Lines at panel width"
 //                    below Line), and the List / Matrix switch shows only from 780 (MatrixAllowed, PaintViewSwitch in
 //                    TasksWindow.Matrix.cs). Both come with the view, made again at the grip's drag end, never during it.
@@ -1076,11 +1076,14 @@ public partial class TasksWindow : Window
     // workspace chip (88), comments (40), action (52) and "…" (24). Now the five text columns start at about 300 DIP in
     // all and Petre resizes them from the header, and the buttons sit together at the right end, as narrow as their
     // glyphs. The age stays left-aligned in its own column so its x never follows the text length. The full line is
-    // still drawn only from 710 DIP (TasksPanelLayout.SlimBelow; narrower, the slim line below), a threshold set when the
-    // fixed columns were wider, so the title now keeps more than the 100 DIP it was built to guarantee there.
+    // drawn only from 850 DIP (TasksPanelLayout.SlimBelow; narrower, the slim line below). It was drawn from 710, the
+    // width at which its columns merely fitted beside a 100 DIP title, until Petre's "wider bar renders worse than
+    // narrow" (task 39d58e5b): the title then wrapped into five lines where the slim line read it in one. From 850 the
+    // title never has less than TasksPanelLayout.FullTitleReadable, 320 DIP: the menu buttons at the line's end give way
+    // first (FullColumns), and a window test measures it.
 
     // LINES AT PANEL WIDTH (spec docs/superpowers/specs/2026-11-23-tasks-panel-design.md, "Lines at panel width"; Petre's
-    // pick, "slim line when narrow"; plan 2026-11-23-tasks-panel, Task 8). Below TasksPanelLayout.SlimBelow (710 DIP; the
+    // pick, "slim line when narrow"; plan 2026-11-23-tasks-panel, Task 8). Below TasksPanelLayout.SlimBelow (850 DIP; the
     // view's Slim) a line is slim: tick, title (a Done task's green tick still in front of it), the sessions as squares
     // alone (no words), the age (since 2026-11-24, when it left the bar), the workspace chip, then the buttons: the
     // toggles and the snooze moon, the comment count, Open Claude and "⋯". The status chip and the assignee move into the

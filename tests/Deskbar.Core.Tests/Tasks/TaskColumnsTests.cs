@@ -15,7 +15,7 @@ public class TaskColumnsTests
     [InlineData(0, 70)]
     public void Dragging_a_columns_left_divider_left_widens_it(double moved, double expected)
     {
-        var dragged = TaskColumnWidths.Dragged(Start, TaskColumn.Sessions, moved, titleAtStart: 300);
+        var dragged = TaskColumnWidths.Dragged(Start, TaskColumn.Sessions, moved, room: 300);
 
         Assert.Equal(expected, dragged.Sessions);
         Assert.Equal(Start with { Sessions = expected }, dragged);
@@ -24,20 +24,21 @@ public class TaskColumnsTests
     // A column never goes under MinWidth, however far right its divider is dragged.
     [Fact]
     public void A_column_is_never_narrower_than_the_minimum() =>
-        Assert.Equal(TaskColumnWidths.MinWidth, TaskColumnWidths.Dragged(Start, TaskColumn.Workspace, 500, titleAtStart: 300).Workspace);
+        Assert.Equal(TaskColumnWidths.MinWidth, TaskColumnWidths.Dragged(Start, TaskColumn.Workspace, 500, room: 300).Workspace);
 
-    // Widening stops where the title would go under MinTitle: a 300 DIP title lets a column grow by 220.
+    // Widening stops at the room the line can give (the title over its floor, the menu strip over "⋯"): 300 of it lets a
+    // column grow by 300.
     [Fact]
     public void A_column_grows_only_as_far_as_the_title_can_give() =>
-        Assert.Equal(Start.Status + 300 - TaskColumnWidths.MinTitle,
-            TaskColumnWidths.Dragged(Start, TaskColumn.Status, -1000, titleAtStart: 300).Status);
+        Assert.Equal(Start.Status + 300,
+            TaskColumnWidths.Dragged(Start, TaskColumn.Status, -1000, room: 300).Status);
 
-    // A title already under MinTitle gives nothing, but the column can still be narrowed to give it room back.
+    // A line with no room to give lets nothing grow, but a column can still be narrowed to give the title room back.
     [Fact]
     public void A_squeezed_title_still_lets_a_column_shrink()
     {
-        Assert.Equal(Start.Age, TaskColumnWidths.Dragged(Start, TaskColumn.Age, -40, titleAtStart: 50).Age);
-        Assert.Equal(Start.Age - 10, TaskColumnWidths.Dragged(Start, TaskColumn.Age, 10, titleAtStart: 50).Age);
+        Assert.Equal(Start.Age, TaskColumnWidths.Dragged(Start, TaskColumn.Age, -40, room: 0).Age);
+        Assert.Equal(Start.Age - 10, TaskColumnWidths.Dragged(Start, TaskColumn.Age, 10, room: 0).Age);
     }
 
     // The widths read and set by column, in the order they stand.

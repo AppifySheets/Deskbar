@@ -100,22 +100,51 @@ public partial class TasksWindow
     // A full line's columns, in ListOrder: the tick, the title (the star, which wraps), the five text columns, the buttons.
     // The last holds the menu's actions as icon buttons and "⋯" after them (task 59b8f613, TasksWindow.LineButtons.cs). It
     // is a star too, with a weight that gives it all the room first, but capped at what the seven and "⋯" need, and the
-    // title keeps FullTitleFloor before it gets any (ConstrainFullColumns). So a wide full line has all seven, and at the
-    // narrowest full line (710 DIP, with the scroll bar) the strip gives up its last buttons rather than the title its
-    // floor: measured 95 DIP of title there with a fixed 176 DIP column, against the 100 it is promised.
+    // title keeps FullTitleFloor before it gets any (ConstrainFullColumns).
+    //
+    // THE TITLE OUTRANKS THE MENU BUTTONS (task 39d58e5b, Petre's pick of option B). The floor was 112 DIP, so at the
+    // narrowest full line (then 710 DIP) the strip kept its buttons and the title got about 100 DIP: four or five lines a
+    // title, while a slim line one DIP narrower read it in one ("wider bar renders worse than narrow"). The floor is now
+    // the readable width, so on a narrow full line the strip gives up its buttons, down to "⋯" alone, before the title
+    // goes under it, and the full line starts only where the title and "⋯" both fit (TasksPanelLayout.SlimBelow). Wider,
+    // the strip takes its buttons back first, all seven from about 940 to 970 DIP (by the comment counts and the action
+    // column on show), and then the title grows.
     IReadOnlyList<GridLength> FullColumns() =>
         [new(22), new(1, GridUnitType.Star), .. columnWidths.InOrder.Select(w => new GridLength(w)), new(FlagsColumn), commentsWidth, actionWidth,
             new(1000, GridUnitType.Star)];
 
     // The title's floor on a full line, and the strip's cap: the two limits FullColumns' two stars are drawn within. Set on
-    // every full line's grid and on the header's, so the header's columns stay over the lines'. 100 DIP for the title's
-    // text, plus the 10 DIP of margin its block has inside the column (TextOf: 2 left, 8 right), plus 2 to spare.
-    const double FullTitleFloor = 112;
+    // every full line's grid and on the header's, so the header's columns stay over the lines'. The readable width for
+    // the title's text (TasksPanelLayout.FullTitleReadable, 320 DIP, task 39d58e5b; it was 100), plus the 10 DIP of
+    // margin its block has inside the column (TextOf: 2 left, 8 right), plus 2 to spare.
+    const double FullTitleFloor = TasksPanelLayout.FullTitleReadable + 12;
 
+    //
+    // THE FLOOR GIVES WAY TO "⋯" (task 39d58e5b review). A hard 332 DIP floor pushed the line's right end off it whenever
+    // the fixed columns left less than 332 + 22: with the scroll bar, a closed task's Reopen and two-digit comment counts
+    // on show at 850 DIP; on a subtask's full line inside its parent's thread, 18 DIP narrower than the header; and with
+    // text columns saved wide by a drag before the floor rose. WPF keeps a star column's MinWidth even when the grid has
+    // no room for it, so the columns after it ran past the line's edge and "⋯" was clipped. So each grid works out its own
+    // floor from its own width (FitTitleFloor): FullTitleFloor where the room allows, less where it does not, never so
+    // much that "⋯" leaves the line. It is worked out again when the grid's width changes and when a divider drag or a
+    // reset changes the text columns (ApplyColumns). The header's grid hooks its size once in BuildColumnHeader.
     void ConstrainFullColumns(Grid grid)
     {
-        grid.ColumnDefinitions[At(Part.Title)].MinWidth = FullTitleFloor;
         grid.ColumnDefinitions[At(Part.More)].MaxWidth = ButtonColumn * (LineButtonSlots + 1);
+        FitTitleFloor(grid);
+        if (!ReferenceEquals(grid, ColumnHeader)) grid.SizeChanged += (_, _) => FitTitleFloor(grid);
+    }
+
+    // The title's floor for one full-line grid: what its width leaves after the fixed columns and one button for "⋯",
+    // capped at FullTitleFloor. Before the grid is laid out (width 0) the floor is FullTitleFloor; the first layout's
+    // SizeChanged sets the real one.
+    void FitTitleFloor(Grid grid)
+    {
+        var fixedColumns = grid.ColumnDefinitions.Where(c => c.Width.IsAbsolute).Sum(c => c.Width.Value);
+        var room = grid.ActualWidth - fixedColumns - ButtonColumn;
+        // By ListOrder, not At: a SizeChanged can arrive on a line grid after a later draw switched to the Matrix.
+        grid.ColumnDefinitions[ListOrder.ToList().IndexOf(Part.Title)].MinWidth =
+            grid.ActualWidth > 0 ? Math.Clamp(room, 0, FullTitleFloor) : FullTitleFloor;
     }
 
     // A slim line's columns, in ListOrder: no status, no assignee; the squares, the age and the workspace chip; the buttons.
@@ -126,9 +155,17 @@ public partial class TasksWindow
     // Every full line's grid on show, with the header's, so a divider drag can resize them in place. Emptied by each draw.
     readonly List<Grid> fullGrids = [];
 
-    // A divider drag under way: which column, the pointer's x over the header at the press, the widths then and the
-    // title's width then (TaskColumnWidths.Dragged caps the growth with it). Null while none is.
-    (TaskColumn Column, double X, TaskColumnWidths Widths, double Title)? columnDrag;
+    // A divider drag under way: which column, the pointer's x over the header at the press, the widths then and the room
+    // the line could give up then (TaskColumnWidths.Dragged caps the growth with it, RoomToGive). Null while none is.
+    (TaskColumn Column, double X, TaskColumnWidths Widths, double Room)? columnDrag;
+
+    // What a column may grow by, read off the header (whose columns are the lines'): the title's width over its floor
+    // plus the menu strip's over "⋯" alone. Both stars give it up as the column grows (the strip first, its weight being
+    // the larger), so the drag stops where the title is at its floor and "⋯" still on the line. Before task 39d58e5b it
+    // was the title's width less 80 DIP, which let a drag squeeze the title to 80.
+    double RoomToGive() =>
+        Math.Max(0, ColumnHeader.ColumnDefinitions[At(Part.Title)].ActualWidth - FullTitleFloor)
+        + Math.Max(0, ColumnHeader.ColumnDefinitions[At(Part.More)].ActualWidth - ButtonColumn);
 
     // The left inset of a line's grid from the list's edge, and its right one, so the header's columns sit exactly over
     // the lines': the tile's inset (TileInset), the selection frame's 2 DIP and Claude's 3 DIP edge on the left, then the
@@ -162,6 +199,8 @@ public partial class TasksWindow
         });
         Enum.GetValues<TaskColumn>().ToList().ForEach(column => ColumnHeader.Children.Add(Divider(column)));
         fullGrids.Add(ColumnHeader);
+        // The header's title floor follows its width, as each full line's does (ConstrainFullColumns, FitTitleFloor).
+        ColumnHeader.SizeChanged += (_, _) => FitTitleFloor(ColumnHeader);
         // The lines narrow by the scroll bar's width while it shows; the header, outside the scroller, follows.
         Scroller.ScrollChanged += (_, _) => FollowScrollBar();
         Scroller.SizeChanged += (_, _) => FollowScrollBar();
@@ -191,11 +230,11 @@ public partial class TasksWindow
         Grid.SetColumn(divider, ColumnIndexOf(column));
         Panel.SetZIndex(divider, 1);
         divider.DragStarted += (_, _) =>
-            columnDrag = (column, Mouse.GetPosition(ColumnHeader).X, columnWidths, ColumnHeader.ColumnDefinitions[At(Part.Title)].ActualWidth);
+            columnDrag = (column, Mouse.GetPosition(ColumnHeader).X, columnWidths, RoomToGive());
         divider.DragDelta += (_, _) =>
         {
             if (columnDrag is { } drag)
-                ApplyColumns(TaskColumnWidths.Dragged(drag.Widths, drag.Column, Mouse.GetPosition(ColumnHeader).X - drag.X, drag.Title));
+                ApplyColumns(TaskColumnWidths.Dragged(drag.Widths, drag.Column, Mouse.GetPosition(ColumnHeader).X - drag.X, drag.Room));
         };
         divider.DragCompleted += (_, e) => EndColumnDrag(e.Canceled);
         divider.MouseDoubleClick += (_, e) =>
@@ -231,6 +270,8 @@ public partial class TasksWindow
         columnWidths = widths;
         fullGrids.ForEach(grid => Enum.GetValues<TaskColumn>().ToList()
             .ForEach(column => grid.ColumnDefinitions[ColumnIndexOf(column)].Width = new GridLength(widths[column])));
+        // New text column widths change what the title may keep beside them (FitTitleFloor).
+        fullGrids.ForEach(FitTitleFloor);
     }
 
     // The header's columns for this draw, the full line's, and whether it shows: only over full lines in the List, and

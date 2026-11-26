@@ -78,9 +78,10 @@ public class TasksBoardTests
 
     static readonly DateTime ClickStart = new(2026, 11, 22, 9, 0, 0, DateTimeKind.Utc);
 
-    // The panel's saved width in most tests: past TasksPanelLayout.MatrixFrom (780), so the full line and the List / Matrix
-    // switch both show (Task 8). It was the floating window's 720 DIP until the switch was gated on 780.
-    const double Wide = 800;
+    // The panel's saved width in most tests: past TasksPanelLayout.SlimBelow (850) and MatrixFrom (780), so the full line
+    // and the List / Matrix switch both show (Task 8). It was the floating window's 720 DIP until the switch was gated on
+    // 780, then 800 until the full line moved up to 850 (task 39d58e5b), which 800 is under.
+    const double Wide = 1000;
 
     // Each read of the task clock is a minute later, so tasks are raised in the order the test makes them. Each read of
     // the click clock is a second later, so a click is never "right after a repaint" unless a test hands in a clock of
@@ -112,7 +113,7 @@ public class TasksBoardTests
         };
 #pragma warning restore WPF0001
         // A panel wide enough for everything (Wide, below): the full line and the Matrix switch both need it. The slim line
-        // below 710 DIP and the switch's 780 are Task 8's, with their own tests passing a `width`.
+        // below 850 DIP and the switch's 780 are Task 8's, with their own tests passing a `width`.
         Assert.True(harness.Manager.SaveTasksPanel(new Deskbar.Core.Persistence.TasksPanelState(false, width)).IsSuccess);
         var panel = new TasksPanelRig(window).Docked(edge, screenDips);
         var controller = new TasksBoard(window, panel.Panel, tasks, harness.Manager, goTo ?? (t =>
@@ -1762,27 +1763,32 @@ public class TasksBoardTests
         Assert.Equal(offset, t.Window.ScrollOffset, 1);
     });
 
-    // Review I-3: at the narrowest width the full line is drawn at (TasksPanelLayout.SlimBelow, 710 DIP, the floating
-    // window's old minimum; narrower, Task 8 draws the slim line), with enough lines for the scroll bar, every column
-    // stays inside the list's viewport and the title keeps a usable width.
+    // Review I-3: at the narrowest width the full line is drawn at (TasksPanelLayout.SlimBelow; narrower, Task 8 draws the
+    // slim line), with enough lines for the scroll bar, every column stays inside the list's viewport and the title keeps
+    // a READABLE width, TasksPanelLayout.FullTitleReadable (task 39d58e5b: at the old 710 it kept 100 DIP, which wrapped
+    // every title into five lines beside a slim line one DIP narrower that read it in one). A Claude task with a two-digit
+    // comment count is on show, so the action column (Open Claude) and the widest usual comments column are drawn too:
+    // the menu strip gives up its buttons to keep the title readable, and "⋯" still ends inside the line.
     [Fact]
     public void At_the_full_lines_narrowest_width_the_columns_stay_inside_the_viewport() => StaThread.Run(() =>
     {
         using var t = Build();
         Enumerable.Range(1, 40).ToList().ForEach(i => t.Tasks.AddNote($"a note with a fairly long title, number {i}", t.Gepha));
+        var claude = t.Tasks.Create("a Claude task with a fairly long title and many comments", t.Gepha, Session("s1")).Value.Id;
+        Enumerable.Range(1, 12).ToList().ForEach(i => t.Tasks.Comment(claude, "s1", $"comment {i}"));
         t.Controller.Show();
         t.Window.Width = TasksPanelLayout.SlimBelow;
         t.Window.UpdateLayout();
 
         var scroller = Inside(t.Window).OfType<ScrollViewer>().First(s => s.Content is StackPanel);
         Assert.True(scroller.ComputedVerticalScrollBarVisibility == Visibility.Visible, "the scroll bar shows");
-        t.Window.Keys.Take(5).Select(id => LineOf(t.Window, id)).ToList().ForEach(line =>
+        t.Window.Keys.Take(5).Append(claude).Distinct().Select(id => LineOf(t.Window, id)).ToList().ForEach(line =>
         {
             var more = ButtonNamed(line, "More");
             var bounds = more.TransformToAncestor(scroller).TransformBounds(new Rect(more.RenderSize));
             Assert.True(bounds.Right <= scroller.ViewportWidth + 0.5, $"More ends at {bounds.Right} in a viewport {scroller.ViewportWidth} wide");
             var title = Inside(line).OfType<TextBlock>().First(b => Equals(b.Tag, "task-title"));
-            Assert.True(title.ActualWidth >= 100, $"the title has {title.ActualWidth} DIP");
+            Assert.True(title.ActualWidth >= TasksPanelLayout.FullTitleReadable, $"the title has {title.ActualWidth} DIP");
         });
     });
 
@@ -4677,11 +4683,11 @@ public class TasksBoardTests
     static IReadOnlyList<string> MenuWords(ContextMenu menu) =>
         menu.Items.OfType<MenuItem>().Select(i => i.Header is TextBlock text ? text.Text : $"{i.Header}").ToArray();
 
-    // Below 710 DIP a line is slim: no session words, no assignee and no Reopen button on it; its sessions are squares
+    // Below SlimBelow (850 DIP) a line is slim: no session words, no assignee and no Reopen button on it; its sessions are squares
     // only, and the assignee moves into its tooltip with the age. The age itself stays on the slim line since it left the
     // bar (Petre, 2026-11-24: "move the time from here to the proper tasks window"), whole, never trimmed.
     [Fact]
-    public void A_panel_narrower_than_710_draws_slim_lines() => StaThread.Run(() =>
+    public void A_panel_narrower_than_SlimBelow_draws_slim_lines() => StaThread.Run(() =>
     {
         using var t = Build(width: TasksPanelLayout.SlimBelow - 1);
         var id = t.Tasks.Create("work", t.Gepha, Session("s1")).Value.Id;
@@ -4830,10 +4836,10 @@ public class TasksBoardTests
         Assert.All(OffToggles(full, fullId), toggle => Assert.Equal(0, toggle.Opacity));
     });
 
-    // From 710 DIP the line is today's, and the switch between the two happens when the grip's drag ends (ResizePanel),
+    // From SlimBelow (850 DIP) the line is today's, and the switch between the two happens when the grip's drag ends (ResizePanel),
     // redrawing every line once.
     [Fact]
-    public void A_panel_710_or_wider_draws_todays_lines() => StaThread.Run(() =>
+    public void A_panel_SlimBelow_or_wider_draws_todays_lines() => StaThread.Run(() =>
     {
         using var t = Build(width: TasksPanelLayout.SlimBelow);
         var id = t.Tasks.Create("work", t.Gepha, Session("s1")).Value.Id;
@@ -4934,12 +4940,13 @@ public class TasksBoardTests
     });
 
     // TASK 8 REVIEW, IMPORTANT 1: the lines and the switch follow the width the panel DOCKS at (TasksPanel.DockedWidth),
-    // which is the saved width clamped to half the screen it docks on, not the saved width itself. A saved 700 on a
-    // screen whose half is 546 DIP is a 546 DIP panel, and its lines are slim.
+    // which is the saved width clamped to half the screen it docks on, not the saved width itself. A saved 1000 on a
+    // screen whose half is 546 DIP is a 546 DIP panel, and its lines are slim. (1000 is past SlimBelow, so only the
+    // clamp can make it slim.)
     [Fact]
-    public void A_panel_clamped_below_710_by_its_screen_draws_slim_lines() => StaThread.Run(() =>
+    public void A_panel_clamped_below_SlimBelow_by_its_screen_draws_slim_lines() => StaThread.Run(() =>
     {
-        using var t = Build(width: 700, screenDips: 1092);
+        using var t = Build(width: 1000, screenDips: 1092);
         var id = t.Tasks.Create("work", t.Gepha, Session("s1")).Value.Id;
         t.Controller.Show();
 
@@ -4947,7 +4954,7 @@ public class TasksBoardTests
         Assert.DoesNotContain(Inside(line).OfType<TextBlock>(), b => b.Text == "1 session");
         Assert.Equal(["session-live"], SquaresOf(line));
         // The saved width is the user's and stays whole, for a wider screen later.
-        Assert.Equal(700, t.Harness.Manager.State.TasksPanel!.Width);
+        Assert.Equal(1000, t.Harness.Manager.State.TasksPanel!.Width);
     });
 
     // A saved 800 on a screen whose half is 640 DIP: a 640 DIP panel, too narrow for the Matrix, so the switch hides and
@@ -4970,9 +4977,9 @@ public class TasksBoardTests
     [Fact]
     public void A_redock_on_a_wider_screen_brings_the_full_lines_back() => StaThread.Run(() =>
     {
-        // 750: above the full line's floor (TasksPanelLayout.SlimBelow, 710 since the snooze moon) and over half the
+        // 1000: above the full line's floor (TasksPanelLayout.SlimBelow, 850 since task 39d58e5b) and over half the
         // 1092 DIP screen, so it docks slim there and full on the wider screen.
-        using var t = Build(width: 750, screenDips: 1092);
+        using var t = Build(width: 1000, screenDips: 1092);
         var id = t.Tasks.Create("work", t.Gepha, Session("s1")).Value.Id;
         t.Controller.Show();
         Assert.DoesNotContain(Inside(LineOf(t.Window, id)).OfType<TextBlock>(), b => b.Text == "1 session");
@@ -6423,7 +6430,7 @@ public class TasksBoardTests
         t.Window.Actions!.ResizePanel(TasksPanelLayout.SlimBelow - 1);
         Assert.False(t.Window.ColumnHeaderShown);
 
-        t.Window.Actions!.ResizePanel(TasksPanelLayout.MatrixFrom);
+        t.Window.Actions!.ResizePanel(TasksPanelLayout.SlimBelow); // past MatrixFrom too: full lines and the switch
         Assert.True(t.Window.ColumnHeaderShown);
         Assert.True(t.Harness.Manager.SetTasksMatrix(true).IsSuccess);
         t.Controller.Refresh();

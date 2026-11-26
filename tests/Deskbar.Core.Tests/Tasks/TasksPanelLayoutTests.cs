@@ -14,13 +14,14 @@ public class TasksPanelLayoutTests
     public void The_width_is_kept_between_the_minimum_and_half_the_screen(double width, double screen, double expected) =>
         Assert.Equal(expected, TasksPanelLayout.Clamp(width, screen));
 
-    // 710: the full line's floor since the snooze moon (18 DIP) joined the toggles; 692 after the status chip column
-    // (72 DIP), 620 before that.
+    // 850: where the full line's readable title and "⋯" both fit (task 39d58e5b). It was 710, where the full line merely
+    // fitted and its title had 100 DIP; 710 to 849 are slim now, the width of Petre's "wider renders worse" screenshot.
     [Theory]
     [InlineData(620, true)]
-    [InlineData(709.9, true)]
-    [InlineData(710, false)]
-    public void Lines_are_slim_below_710(double w, bool slim) =>
+    [InlineData(710, true)]
+    [InlineData(849.9, true)]
+    [InlineData(850, false)]
+    public void Lines_are_slim_below_850(double w, bool slim) =>
         Assert.Equal(slim, TasksPanelLayout.Slim(w));
 
     [Theory]
