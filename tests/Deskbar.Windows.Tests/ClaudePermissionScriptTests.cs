@@ -265,20 +265,34 @@ public sealed class ClaudePermissionScriptTests : IDisposable
         Assert.Equal(PermissionAnswer.AllowLine, Finished(process).Stdout.TrimEnd('\r', '\n'));
     }
 
+    // A STUB THAT PLANTS ITS FILES DURING THE CALL. A script whose reply is no code ends at once, and in a few hundred ms
+    // removes its slot, so a test that waited to see the slot and only then wrote the answer lost the race whenever the
+    // script was quicker than the test's 50 ms look (the full runs of 2026-11-26, "the script made no slot" after about
+    // 140 ms, with the script already gone). Here the stub shim itself, while the script waits on the call, copies the
+    // prepared files into the slot: they are there before the script could read anything, every time, and a marker file
+    // proves the slot existed and was planted.
+    static string PlantingStub(string files) =>
+        $"@for /d %%d in (\"%~dp0{PermissionDesk.FolderName}\\req-*\") do @({files} & echo planted> \"%~dp0planted.txt\")\r\n" +
+        "@type \"%~dp0code.txt\"\r\n";
+
+    static string Planted(string script) => Path.Combine(Path.GetDirectoryName(script)!, "planted.txt");
+
+    static void Prepare(string script, string name, string text) =>
+        File.WriteAllText(Path.Combine(Path.GetDirectoryName(script)!, name), text, new UTF8Encoding(false));
+
     // A reply.txt planted in the slot (where the first script parked the code) is never read: Deskbar answered nothing,
-    // so the script has no code and ends at once, printing nothing, whatever the planted file and the answer say.
+    // so the script has no code and ends at once, printing nothing, whatever the planted reply and answer say.
     [Fact]
     public void A_planted_reply_file_is_ignored()
     {
-        var stub = $"@for /d %%d in (\"%~dp0{PermissionDesk.FolderName}\\req-*\") do @echo {Code}> \"%%d\\reply.txt\"\r\n";
-        var script = Prepared(null, stub: stub);
+        var script = Prepared(null, stub: PlantingStub(
+            "copy /y \"%~dp0reply.src\" \"%%d\\reply.txt\" >nul & copy /y \"%~dp0answer.src\" \"%%d\\answer.txt\" >nul"));
+        Prepare(script, "reply.src", Code + "\r\n");
+        Prepare(script, "answer.src", $"{Code} allow\n");
         using var process = Started(script);
-        var slot = Slot(script, process);
-        try { Answer(slot, $"{Code} allow\n"); }
-        catch (IOException) { }
-        catch (UnauthorizedAccessException) { }
 
         var (exitCode, stdout) = Finished(process);
+        Assert.True(File.Exists(Planted(script)));
         Assert.Equal(0, exitCode);
         Assert.Equal("", stdout.Trim());
     }
@@ -298,18 +312,28 @@ public sealed class ClaudePermissionScriptTests : IDisposable
     [InlineData("0123456789abcdef0123456789abcd!e")]
     public void A_reply_meant_to_break_cmd_prints_nothing(string reply)
     {
-        var script = Prepared(reply);
+        var script = Prepared(reply, stub: PlantingStub("copy /y \"%~dp0answer.src\" \"%%d\\answer.txt\" >nul"));
+        Prepare(script, "answer.src", $"{reply} allow\n");
         using var process = Started(script);
-        var slot = Slot(script, process);
-        try { Answer(slot, $"{reply} allow\n"); }
-        catch (IOException) { }
-        catch (UnauthorizedAccessException) { }
 
         var (exitCode, stdout) = Finished(process);
+        Assert.True(File.Exists(Planted(script)));
         Assert.Equal(0, exitCode);
         Assert.Equal("", stdout.Trim());
     }
 
+    // The control for the two above: the same planting stub with the right code does print the allow line, so a planted
+    // answer is read when it should be, and "prints nothing" above is the script refusing, not the answer missing.
+    [Fact]
+    public void The_planting_stub_with_the_right_code_answers()
+    {
+        var script = Prepared(Code, stub: PlantingStub("copy /y \"%~dp0answer.src\" \"%%d\\answer.txt\" >nul"));
+        Prepare(script, "answer.src", $"{Code} allow\n");
+        using var process = Started(script);
+
+        Assert.Equal(PermissionAnswer.AllowLine, Finished(process).Stdout.TrimEnd('\r', '\n'));
+        Assert.True(File.Exists(Planted(script)));
+    }
     // The hook's JSON on stdin still reaches the call when its output is read straight into a variable: this stub
     // answers its code only when stdin holds a PermissionRequest.
     [Fact]
