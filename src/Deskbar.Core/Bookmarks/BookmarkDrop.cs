@@ -30,4 +30,15 @@ public interface IBookmarkSources
 
     // The text of a small file (a .url), or null when it cannot be read.
     string? ReadText(string path);
+
+    // PACKAGED PROGRAMS whose windows carry no AppUserModelID (new Teams is one: its window has none, its process
+    // has "MSTeams_8wekyb3d8bbwe!MSTeams"). Both default to "no answer" so a source that cannot ask, such as a test
+    // fake, leaves such a program without a bookmark rather than with a wrong one.
+    //
+    // The AppUserModelID of a running packaged process, or null.
+    string? AppIdOfProcess(int processId) => null;
+
+    // The AppUserModelID of the one app an installed package family lists in the Start menu, or null when the
+    // family is not installed or lists more than one app (then nothing says which was meant).
+    string? AppIdOfPackage(string family) => null;
 }

@@ -25,7 +25,7 @@ public static class BookmarkRunning
             ? Path.Combine(Path.GetDirectoryName(path) ?? "", real)
             : path;
 
-    // Link: never (a page is not a process). App: only by AppUserModelID, because a PWA shares msedge.exe's
+    // Link: never (a page is not a process). App: by AppUserModelID, or by a window of its package (PackageRuns), because a PWA shares msedge.exe's
     // process and command line with plain browser windows, so nothing else about a window can tell it apart
     // (probe notes, step 1). Program: by exe path, or for a Chromium browser by profile plus app id, so a
     // PWA-style Program bookmark is not hidden by a plain browser window. A tray-only program has no window
@@ -33,10 +33,27 @@ public static class BookmarkRunning
     public static bool IsRunning(Bookmark bookmark, IEnumerable<WindowInfo> windows, IReadOnlySet<string> openAppIds) =>
         bookmark.Kind switch
         {
-            BookmarkKind.App => openAppIds.Any(id => string.Equals(id, bookmark.Target, StringComparison.OrdinalIgnoreCase)),
+            BookmarkKind.App => openAppIds.Any(id => string.Equals(id, bookmark.Target, StringComparison.OrdinalIgnoreCase))
+                || PackageRuns(bookmark.Target, windows, openAppIds),
             BookmarkKind.Program => ProgramRuns(bookmark, windows),
             _ => false,
         };
+
+    // A packaged program whose WINDOW carries no AppUserModelID (new Teams, Deskbar task e7fb8e04) is still open when
+    // a window's exe sits in its package's folder: "...\WindowsApps\MSTeams_<version>_x64__8wekyb3d8bbwe\ms-teams.exe"
+    // belongs to the app "MSTeams_8wekyb3d8bbwe!MSTeams". A framed app's window runs as ApplicationFrameHost, outside
+    // WindowsApps, and a PWA's as the browser, so neither is taken for a package by this. Teams closed to the tray has
+    // no window, so its chip shows, and a click brings it back.
+    //
+    // Only a FALLBACK for a package whose windows say nothing. A package can hold several apps (the Store's Python
+    // has Python, IDLE and pip; the old Store Office had Word and Excel), and their windows usually carry their own
+    // ids: when any open window carries an id of this family, the ids decide (the exact match above), so an open
+    // Excel does not hide the Word chip.
+    static bool PackageRuns(string appId, IEnumerable<WindowInfo> windows, IReadOnlySet<string> openAppIds) =>
+        PackagedPaths.FamilyOfAppId(appId) is { } family
+        && !openAppIds.Any(id => string.Equals(PackagedPaths.FamilyOfAppId(id), family, StringComparison.OrdinalIgnoreCase))
+        && windows.Any(w => w.ProcessPath is { } path && PackagedPaths.IsPackaged(path)
+            && string.Equals(PackagedPaths.FamilyOf(path), family, StringComparison.OrdinalIgnoreCase));
 
     static bool ProgramRuns(Bookmark bookmark, IEnumerable<WindowInfo> windows)
     {
