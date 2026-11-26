@@ -16,7 +16,9 @@ public sealed class BookmarkConverter : JsonConverter<Bookmark>
 {
     // The entry's shape on disk. A type of its own, so (de)serializing it does not come back to this converter.
     // Screen is last and optional, so a file written before bookmarks remembered a screen loads with none.
-    sealed record Entry(Guid Id, string Name, BookmarkKind Kind, string Target, string? Arguments = null, string? WorkingDirectory = null, int? Screen = null);
+    // Color likewise (the bookmark colour, added after the screen).
+    sealed record Entry(Guid Id, string Name, BookmarkKind Kind, string Target, string? Arguments = null, string? WorkingDirectory = null,
+        int? Screen = null, string? Color = null);
 
     // Whether a parsed bookmark is usable: exactly what the manager would have accepted, so a hand-edited file cannot
     // hold what the menu refuses. A Name or Link target that only needs trimming is accepted as it stands.
@@ -28,7 +30,7 @@ public sealed class BookmarkConverter : JsonConverter<Bookmark>
         try
         {
             return entry.RootElement.Deserialize<Entry>(options) is { } e
-                   && new Bookmark(e.Id, e.Name, e.Kind, e.Target, e.Arguments, e.WorkingDirectory, e.Screen) is var bookmark
+                   && new Bookmark(e.Id, e.Name, e.Kind, e.Target, e.Arguments, e.WorkingDirectory, e.Screen, e.Color) is var bookmark
                    && Acceptable(bookmark)
                 // A link that a hand edit gave a screen loads without one, as BookmarkRules.Check would store it.
                 ? bookmark.Kind == BookmarkKind.Link ? bookmark with { Screen = null } : bookmark
@@ -42,5 +44,5 @@ public sealed class BookmarkConverter : JsonConverter<Bookmark>
     }
 
     public override void Write(Utf8JsonWriter writer, Bookmark value, JsonSerializerOptions options) =>
-        JsonSerializer.Serialize(writer, new Entry(value.Id, value.Name, value.Kind, value.Target, value.Arguments, value.WorkingDirectory, value.Screen), options);
+        JsonSerializer.Serialize(writer, new Entry(value.Id, value.Name, value.Kind, value.Target, value.Arguments, value.WorkingDirectory, value.Screen, value.Color), options);
 }

@@ -18,6 +18,7 @@ public static class BookmarkRules
             .Ensure(b => b.Target is not null, "A bookmark needs a target.")
             // Screens are numbered from 1, as Windows numbers them and the readout says them.
             .Ensure(b => b.Screen is null or > 0, "A screen is numbered from 1.")
+            .Ensure(b => b.Color is null || IsColour(b.Color), b => $"'{b.Color}' is not a colour; a bookmark's colour is #RRGGBB.")
             .Bind(b => b.Kind switch
             {
                 // A link's screen is cleared, not refused: the browser window it opens in is not Deskbar's to move, so a
@@ -48,6 +49,11 @@ public static class BookmarkRules
                                     && string.Equals((a.Arguments ?? "").Trim(), (b.Arguments ?? "").Trim(), StringComparison.Ordinal),
             _ => string.Equals(a.Target, b.Target, StringComparison.OrdinalIgnoreCase),
         };
+
+    // "#RRGGBB" and nothing else: no palette name, no Transparent sentinel. The menu and the pipe turn a palette name
+    // into its hex before it gets here.
+    public static bool IsColour(string colour) =>
+        colour.Length == 7 && colour[0] == '#' && colour.Skip(1).All(Uri.IsHexDigit);
 
     // Absolute http or https only: a file: or javascript: link or a custom scheme would run something other than a page.
     static Result<string> CheckLink(string target) =>

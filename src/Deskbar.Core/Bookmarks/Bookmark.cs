@@ -20,6 +20,10 @@ public enum BookmarkKind
 // readout says ("→ put on screen 2"). Null means no screen: the chip sits in the row's first lane and an open puts the
 // window wherever it opens. Only a Program or an App has one; a link goes into a browser window Deskbar does not
 // move, so BookmarkRules.Check clears it on a link. Optional and last, so an old state.json loads with none.
+//
+// Color (Petre: "i want to be able to change color of the bookmark") is "#RRGGBB", the form Workspace.Color takes, or
+// null for none. It never changes the PICTURE (his correction: "not change the icon"): the chip draws its outline in it
+// and a thin bar under the icon, and the letter tile, favicon or app icon stay as they are.
 public sealed record Bookmark(
     Guid Id,
     string Name,
@@ -27,7 +31,8 @@ public sealed record Bookmark(
     string Target,
     string? Arguments = null,
     string? WorkingDirectory = null,
-    int? Screen = null);
+    int? Screen = null,
+    string? Color = null);
 
 // What a move asks of a bookmark's screen: leave it (Keep, the default), forget it (Any) or set it (On). A struct
 // rather than an int? because "leave it" and "forget it" are two different requests that a null cannot tell apart.

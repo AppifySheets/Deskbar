@@ -24,8 +24,15 @@ public sealed partial class RemoteControl
         BookmarkRequest.Open open => BookmarkOpen(open),
         BookmarkRequest.OpenAll openAll => BookmarkOpenAll(openAll),
         BookmarkRequest.Move move => BookmarkMove(move),
+        BookmarkRequest.Colour colour => BookmarkColour(colour),
         _ => ControlReply.Fail(ControlUsage.LineFor("bookmark")),
     };
+
+    // The chip menu's Colour, through the same manager call.
+    ControlReply BookmarkColour(BookmarkRequest.Colour colour) =>
+        WorkspaceNamed(colour.Workspace)
+            .Bind(w => BookmarkNamed(w, colour.Bookmark).Bind(b => manager.SetBookmarkColor(w.Id, b.Id, colour.Value)).Map(b => DescribeBookmark(w, b)))
+            .Match(Success, ControlReply.Fail);
 
     // The twin of dragging a chip to a screen half of a row or onto another workspace's row: the same
     // WorkspaceManager.MoveBookmark the drop calls, so the refusals (a screen for a link, a duplicate in the target) are
@@ -57,6 +64,8 @@ public sealed partial class RemoteControl
         workingDirectory = bookmark.WorkingDirectory,
         // The display number the bookmark remembers (`bookmark move --screen`), null for none.
         screen = bookmark.Screen,
+        // "#RRGGBB" from the chip menu's Colour or `bookmark color`, null for none.
+        color = bookmark.Color,
         running = bookmarks?.IsRunning(bookmark) ?? false,
     };
 
