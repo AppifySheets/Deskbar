@@ -96,62 +96,6 @@ public static class ClaudeTranscript
     public static Maybe<TurnError> LastTurnError(IEnumerable<string> jsonLines) =>
         LastEntry(jsonLines) is { Error: { } error } ? error : Maybe<TurnError>.None;
 
-    // THE MODEL THE LAST REPLY CAME FROM (the Inbox page's picker, for a session whose model Deskbar did not set and whose
-    // hooks did not name one). Every assistant entry carries message.model ("claude-haiku-5-5"; measured 2026-11-25,
-    // docs/superpowers/specs/2026-11-25-session-model-pick-design.md), and after a switch to another model the later
-    // entries name the new one (measured 2026-11-26 on a session resumed with --model sonnet). The field is
-    // Claude Code's own and undocumented, so the picker shows it as "last reply from", never as a setting. An API error's
-    // entry names a made-up "<synthetic>" model (see LastTurnError) and a subagent's sidechain entries name the
-    // subagent's, so both are passed over.
-    public static Maybe<string> LastModel(IEnumerable<string> jsonLines) =>
-        jsonLines.Select(ModelOf).LastOrDefault(model => model is not null) is { } found ? found : Maybe<string>.None;
-
-    // WHETHER A SWITCH'S COPY HAS ANSWERED (SettingsSwitch.Next, the JOINED phase): an assistant entry from a real reply
-    // (as LastModel counts one) written after the copy joined its task. A copy's transcript starts with the whole old
-    // conversation, written before the copy was listed and so before it joined; only its own turns come after. An API
-    // error's entry (a model the account cannot use, a usage limit) and a subagent's are not a reply, and an entry with no
-    // timestamp says nothing.
-    public static bool RepliedSince(IEnumerable<string> jsonLines, DateTimeOffset since) =>
-        jsonLines.Any(line => ReplyAt(line) is { } at && at > since);
-
-    static DateTimeOffset? ReplyAt(string line)
-    {
-        if (string.IsNullOrWhiteSpace(line)) return null;
-        try
-        {
-            using var document = JsonDocument.Parse(line);
-            var root = document.RootElement;
-            return ModelIn(root) is not null && TimestampOf(root) is { HasValue: true } at ? at.Value : null;
-        }
-        catch (JsonException)
-        {
-            return null;
-        }
-    }
-
-    static string? ModelOf(string line)
-    {
-        if (string.IsNullOrWhiteSpace(line)) return null;
-        try
-        {
-            using var document = JsonDocument.Parse(line);
-            return ModelIn(document.RootElement);
-        }
-        catch (JsonException)
-        {
-            return null;
-        }
-    }
-
-    static string? ModelIn(JsonElement root) =>
-        root.ValueKind == JsonValueKind.Object
-        && root.TryGetProperty("type", out var type) && type.ValueKind == JsonValueKind.String && type.GetString() == "assistant"
-        && !IsTrue(root, "isSidechain") && !IsTrue(root, "isApiErrorMessage")
-        && At(root, "message", "model") is { ValueKind: JsonValueKind.String } model
-        && model.GetString() is { Length: > 0 } name && name != "<synthetic>"
-            ? name
-            : null;
-
     static Turn? LastEntry(IEnumerable<string> jsonLines) =>
         jsonLines
             .Select(Entry)
