@@ -29,6 +29,8 @@ public sealed class DeferredWrites : IDisposable
     // True while the writer thread is between taking a batch and finishing it. Flush waits for this AND an empty queue.
     bool busy;
     bool disposed;
+    // Set by the writer thread, under the lock, as it returns: after Dispose, with nothing left to write.
+    bool exited;
 
     public DeferredWrites(Action<string, string> write, Action<string>? trace = null)
     {
@@ -44,9 +46,12 @@ public sealed class DeferredWrites : IDisposable
     {
         lock (gate)
         {
-            // After Dispose there is no thread to hand it to, so the write happens here, on the caller: late saves
-            // during shutdown must still reach the disk.
-            if (disposed)
+            // Once the writer thread has gone (Dispose, and the queue drained) there is no thread to hand it to, so the
+            // write happens here, on the caller: late saves during shutdown must still reach the disk. While the thread
+            // is still alive (a Dispose whose Flush timed out on a stuck disk) the text queues as usual instead: a
+            // write here would race the thread's own on the same .tmp file, and the thread could then land an older
+            // queued text over this newer one.
+            if (exited)
             {
                 WriteOne(path, content);
                 return;
@@ -73,14 +78,21 @@ public sealed class DeferredWrites : IDisposable
         }
     }
 
-    // Flushes, then stops the thread. A Write after this writes synchronously (see Write).
+    // Flushes, then stops the thread and waits (bounded) for it to go. A Write after that writes synchronously; one
+    // that arrives while the thread is still busy with a stuck disk queues behind it (see Write).
     public void Dispose()
     {
         Flush(TimeSpan.FromSeconds(10));
+        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(2);
         lock (gate)
         {
             disposed = true;
             Monitor.PulseAll(gate);
+            while (!exited)
+            {
+                var left = deadline - DateTime.UtcNow;
+                if (left <= TimeSpan.Zero || !Monitor.Wait(gate, left)) return;
+            }
         }
     }
 
@@ -92,7 +104,12 @@ public sealed class DeferredWrites : IDisposable
             lock (gate)
             {
                 while (waiting.Count == 0 && !disposed) Monitor.Wait(gate);
-                if (waiting.Count == 0) return; // disposed and drained
+                if (waiting.Count == 0)
+                {
+                    exited = true; // disposed and drained: Write writes on its caller from now on
+                    Monitor.PulseAll(gate);
+                    return;
+                }
                 batch = [.. waiting];
                 waiting.Clear();
                 busy = true;
