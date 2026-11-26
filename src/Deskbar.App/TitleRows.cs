@@ -41,15 +41,23 @@ internal static class TitleRows
         var pieces = source.Select(PieceOf).OfType<Piece>().ToList();
         var whole = string.Concat(pieces.Select(p => p.Text));
         double Width(int length) => WidthOf(text, pieces, length);
-        if (whole.Length == 0 || Width(whole.Length) <= room) return null;
+        // ONLY THE TEXT BEFORE THE FIRST LINE BREAK COUNTS (review of task acd76fbe): a question or status line can hold
+        // line breaks, and the TextBlock already ends a row at each. When the text up to the first one fits beside the
+        // chip, the TextBlock ends the first row there by itself and no break is placed; otherwise the break falls
+        // inside that first line. Measuring past it would put the break in the question's second line instead.
+        var firstLine = whole.IndexOfAny(['\n', '\r']) is var newline and >= 0 ? newline : whole.Length;
+        if (firstLine == 0 || Width(firstLine) <= room) return null;
         // Word breaks: just after each space, as TextBlock wraps. The longest prefix that fits wins.
-        var words = Enumerable.Range(1, Math.Max(0, whole.Length - 1)).Where(i => whole[i - 1] == ' ' && whole[i] != ' ').ToList();
+        var words = Enumerable.Range(1, Math.Max(0, firstLine - 1)).Where(i => whole[i - 1] == ' ' && whole[i] != ' ').ToList();
         var fits = LastFitting(words, i => Width(i) <= room);
         if (fits > 0) return fits;
         // The first word alone is wider than the room: break inside it, at the last character that fits (at least one
-        // character, so the first row is never empty while there is any room at all).
-        var chars = LastFitting(Enumerable.Range(1, Math.Max(0, (words.Count > 0 ? words[0] : whole.Length) - 1)).ToList(), i => Width(i) <= room);
-        return Math.Max(chars, room > 0 ? 1 : 0);
+        // character, so the first row is never empty while there is any room at all), never between the two halves of a
+        // surrogate pair (an emoji).
+        var inWord = Enumerable.Range(1, Math.Max(0, (words.Count > 0 ? words[0] : firstLine) - 1))
+            .Where(i => !char.IsLowSurrogate(whole[i])).ToList();
+        var chars = LastFitting(inWord, i => Width(i) <= room);
+        return Math.Max(chars, room > 0 && inWord.Count > 0 ? inWord[0] : 0);
     }
 
     // The last of the ascending offsets that fits, or 0 when none does. A binary search: a longer prefix is never
@@ -85,7 +93,8 @@ internal static class TitleRows
             var length = LengthOf(inline);
             var from = start;
             start += length;
-            if (offset == from) return new Inline[] { new LineBreak(), inline };
+            // An empty run takes no break: the inline after it, at the same offset, does (one break, not two).
+            if (offset == from && length > 0) return new Inline[] { new LineBreak(), inline };
             if (inline is Run run && offset > from && offset < from + length)
                 return new Inline[] { CopyOf(run, run.Text[..(offset - from)]), new LineBreak(), CopyOf(run, run.Text[(offset - from)..]) };
             return new[] { inline };
@@ -104,7 +113,7 @@ internal static class TitleRows
     static int LengthOf(Inline inline) => inline switch
     {
         Run run => run.Text.Length,
-        InlineUIContainer => 1,
+        InlineUIContainer { Child: not null } => 1, // as PieceOf: an empty container is no character
         _ => 0,
     };
 
