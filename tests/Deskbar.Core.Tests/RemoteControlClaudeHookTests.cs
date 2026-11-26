@@ -221,6 +221,40 @@ public class RemoteControlClaudeHookTests
         Assert.Equal("task add (33 characters) --workspace none", ControlArguments.ForTrace(["task", "add", title, "--workspace", "none"]));
     }
 
+    // Task a5e77647: --important and --urgent take no value, so the `-` after one is the title's place, not the flag's
+    // value. It used to be skipped like --session's value: stdin was never read and the note was titled "-". The
+    // trace had the same blind spot and wrote the title after such a flag in full.
+    [Fact]
+    public void A_dash_after_a_valueless_flag_reads_stdin()
+    {
+        const string title = "Buy \"the good\" soap & tablets > 2";
+
+        Assert.Equal(["task", "add", "--important", title, "--from", Repo],
+            ControlArguments.WithInput(["task", "add", "--important", "-", "--from", Repo], () => title + "\n"));
+        Assert.Equal(["task", "add", "--urgent", "--important", title],
+            ControlArguments.WithInput(["task", "add", "--urgent", "--important", "-"], () => title));
+        Assert.Equal(["task", "add", "--workspace", "-", "--urgent", title],
+            ControlArguments.WithInput(["task", "add", "--workspace", "-", "--urgent", "-"], () => title));
+        Assert.Equal("task add --important (6 characters) --from C:\\x",
+            ControlArguments.ForTrace(["task", "add", "--important", "secret", "--from", @"C:\x"]));
+        Assert.Equal("task add --urgent (6 characters) --workspace none",
+            ControlArguments.ForTrace(["task", "add", "--urgent", "secret", "--workspace", "none"]));
+    }
+
+    // The same note made end to end: the title from stdin, the flag set.
+    [Fact]
+    public void Task_add_important_takes_its_title_from_stdin()
+    {
+        var manager = Started();
+        Editor(manager, 0x10, "TaskSpaces", "Deskbar");
+        const string title = "Call \"them\" back & confirm";
+
+        var reply = Ran(manager, [.. ControlArguments.WithInput(["task", "add", "--important", "-", "--from", Repo], () => title + "\n")]);
+
+        Assert.Equal(ControlReply.Ok, reply.ExitCode);
+        Assert.True(Titled(title).Important);
+    }
+
     // Review of PR B, I-1: free text never rides cmd's command line. Each text-taking form takes `-` for its text and the
     // client puts its stdin there, the heredoc's last line break dropped; a `-` that is an option's value is not text.
     [Theory]
