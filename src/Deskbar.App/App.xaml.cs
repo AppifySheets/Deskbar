@@ -2218,7 +2218,8 @@ public partial class App : Application
                 // and a window's "Bookmark this" ask, and the chips' pictures. ONE favicon fetcher for the app's life (it
                 // owns an HttpClient), and the icons it brings kept under %APPDATA%\Deskbar\bookmark-icons (NewStateDir,
                 // so DESKBAR_APPDATA is honoured). BookmarkIcons is made here, on the UI thread, whose dispatcher it posts to.
-                // The icons BEFORE the opener: setting the opener redraws the rows, and that redraw should already have them.
+                // Neither redraws the rows when set: TimeToday's init, further down this initializer, makes the one redraw
+                // that first draws the chips with the opener (hiding running programs) and these icons. Keep them above it.
                 BookmarkIcons = new BookmarkIcons(
                     new Windows.Shell.FaviconStore(Path.Combine(AppPaths.NewStateDir, "bookmark-icons")),
                     new Windows.Shell.FaviconFetcher()),

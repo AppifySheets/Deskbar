@@ -79,6 +79,9 @@ public class FloatingBarBookmarksTests
             Top = -32000,
             BookmarkOpener = new BookmarkOpener(harness.Manager, (started ?? new Started()).Starts, () => new HashSet<string>()),
             ClipboardText = clipboard ?? (() => null),
+            // As in App.xaml.cs: setting the opener does not redraw, TimeToday's init (after it) does, and that redraw
+            // is the first one drawn with the opener (so a running program's chip is hidden).
+            TimeToday = _ => TimeSpan.Zero,
         };
         bar.Show();
         return new BarUnderTest(bar);
@@ -378,4 +381,176 @@ public sealed class BookmarkIconsTests : IDisposable
         Assert.IsType<DrawingImage>(icons.For(Portainer, () => { }));
         Assert.Empty(posted);
     });
+
+    // --- I2 of the Task 8 review: the decode is bounded --------------------------------------------------------------
+
+    // A real PNG of the given size, uniform, so it compresses to almost nothing however large it is.
+    static byte[] Png(int size)
+    {
+        var bitmap = BitmapSource.Create(size, size, 96, 96, PixelFormats.Pbgra32, null, new byte[size * size * 4], size * 4);
+        var encoder = new PngBitmapEncoder();
+        encoder.Frames.Add(BitmapFrame.Create(bitmap));
+        using var stream = new MemoryStream();
+        encoder.Save(stream);
+        return stream.ToArray();
+    }
+
+    // A small real PNG whose header is rewritten to claim `width` x `height` (CRC fixed), with the original tiny image
+    // data: the "256 KB that expands to gigabytes" case, without the test having to make gigabytes.
+    static byte[] PngClaiming(int width, int height)
+    {
+        var bytes = Png(1);
+        // Signature (8), IHDR length (4), "IHDR" (4), then width and height, big-endian.
+        System.Buffers.Binary.BinaryPrimitives.WriteInt32BigEndian(bytes.AsSpan(16), width);
+        System.Buffers.Binary.BinaryPrimitives.WriteInt32BigEndian(bytes.AsSpan(20), height);
+        System.Buffers.Binary.BinaryPrimitives.WriteUInt32BigEndian(bytes.AsSpan(29), Crc32(bytes.AsSpan(12, 17)));
+        return bytes;
+    }
+
+    // The PNG chunk CRC (CRC-32, polynomial 0xEDB88320), bit by bit: short and only ever run on 17 bytes.
+    static uint Crc32(ReadOnlySpan<byte> data)
+    {
+        var crc = 0xFFFFFFFFu;
+        foreach (var b in data)
+        {
+            crc ^= b;
+            for (var bit = 0; bit < 8; bit++) crc = (crc & 1) != 0 ? (crc >> 1) ^ 0xEDB88320u : crc >> 1;
+        }
+        return ~crc;
+    }
+
+    [Fact]
+    public void A_favicon_larger_than_256_px_is_refused_and_not_saved() => StaThread.Run(() =>
+    {
+        var server = new FakeServer(Png(300), "image/png");
+        var icons = Icons(server);
+        var arrived = 0;
+
+        var first = icons.For(Portainer, () => arrived++);
+        Assert.True(posted.TryTake(out var work, TimeSpan.FromSeconds(10)));
+        work!();
+
+        Assert.False(Stored);
+        Assert.Equal(0, arrived);
+        Assert.Same(first, icons.For(Portainer, () => arrived++));
+    });
+
+    [Fact]
+    public void A_header_claiming_a_huge_image_is_refused_before_any_pixel_is_decoded() => StaThread.Run(() =>
+    {
+        Assert.Equal(Maybe<ImageSource>.None, BookmarkIcons.Decode(PngClaiming(60000, 60000)));
+        // The rewrite itself is sound: the same bytes claiming 1 x 1 still decode.
+        Assert.True(BookmarkIcons.Decode(PngClaiming(1, 1)).HasValue);
+    });
+
+    [Fact]
+    public void A_favicon_of_256_px_or_less_decodes_to_its_own_size() => StaThread.Run(() =>
+    {
+        var image = (BitmapSource)BookmarkIcons.Decode(Png(256)).Value;
+
+        Assert.Equal(256, image.PixelWidth);
+        Assert.True(image.IsFrozen);
+    });
+
+    // --- I1 of the Task 8 review: an app's icon is asked off the UI thread, and a miss waits ----------------------------
+
+    static readonly Bookmark Calc = new(Guid.NewGuid(), "Calc", BookmarkKind.App, "Calc!App");
+    static PinImage Opaque => new(2, 2, Enumerable.Repeat((byte)0xFF, 16).ToArray());
+    static PinImage Blank => new(2, 2, new byte[16]);
+
+    [Fact]
+    public void An_app_icon_is_asked_off_the_ui_thread_and_redraws_when_it_arrives() => StaThread.Run(() =>
+    {
+        var uiThread = Environment.CurrentManagedThreadId;
+        var askedOn = 0;
+        var asks = 0;
+        var arrived = 0;
+        var icons = new BookmarkIcons(toUi: posted.Add, appImage: _ =>
+        {
+            askedOn = Environment.CurrentManagedThreadId;
+            Interlocked.Increment(ref asks);
+            return Opaque;
+        });
+
+        Assert.IsType<DrawingImage>(icons.For(Calc, () => arrived++));
+        // Asked once, however many rebuilds come before the answer.
+        Assert.IsType<DrawingImage>(icons.For(Calc, () => arrived++));
+        Assert.True(posted.TryTake(out var work, TimeSpan.FromSeconds(10)));
+        work!();
+
+        Assert.NotEqual(uiThread, askedOn);
+        Assert.Equal(1, asks);
+        Assert.Equal(1, arrived);
+        Assert.IsAssignableFrom<BitmapSource>(icons.For(Calc, () => arrived++));
+        Assert.False(posted.TryTake(out _, TimeSpan.FromMilliseconds(200)));
+    });
+
+    [Fact]
+    public void A_blank_app_icon_is_a_miss_asked_again_only_after_a_minute() => StaThread.Run(() =>
+    {
+        var clock = new DateTime(2026, 11, 26, 12, 0, 0, DateTimeKind.Utc);
+        var asks = 0;
+        var arrived = 0;
+        var icons = new BookmarkIcons(toUi: posted.Add, now: () => clock,
+            appImage: _ => Interlocked.Increment(ref asks) == 1 ? Blank : Opaque);
+
+        icons.For(Calc, () => arrived++);
+        Assert.True(posted.TryTake(out var first, TimeSpan.FromSeconds(10)));
+        first!();
+        Assert.Equal(0, arrived);
+        Assert.IsType<DrawingImage>(icons.For(Calc, () => arrived++));
+
+        // Within the minute: no second ask.
+        clock += TimeSpan.FromSeconds(59);
+        Assert.IsType<DrawingImage>(icons.For(Calc, () => arrived++));
+        Assert.False(posted.TryTake(out _, TimeSpan.FromMilliseconds(200)));
+        Assert.Equal(1, asks);
+
+        // After it: asked again, and this time it answers.
+        clock += TimeSpan.FromSeconds(2);
+        icons.For(Calc, () => arrived++);
+        Assert.True(posted.TryTake(out var second, TimeSpan.FromSeconds(10)));
+        second!();
+        Assert.Equal(2, asks);
+        Assert.Equal(1, arrived);
+        Assert.IsAssignableFrom<BitmapSource>(icons.For(Calc, () => arrived++));
+    });
+
+    [Fact]
+    public void An_app_icon_lookup_that_throws_is_a_miss() => StaThread.Run(() =>
+    {
+        var arrived = 0;
+        var icons = new BookmarkIcons(toUi: posted.Add, appImage: _ => throw new System.Runtime.InteropServices.COMException("no such app"));
+
+        icons.For(Calc, () => arrived++);
+        Assert.True(posted.TryTake(out var work, TimeSpan.FromSeconds(10)));
+        work!();
+
+        Assert.Equal(0, arrived);
+        Assert.IsType<DrawingImage>(icons.For(Calc, () => arrived++));
+    });
+}
+
+// Which app ids, read for windows after a rebuild, redraw the rows (FloatingBar.HidesAnAppChip): only an id no window
+// carried before, that is some App bookmark's target.
+public sealed class HidesAnAppChipTests
+{
+    static readonly Workspace WithCalc = new Workspace(Guid.NewGuid(), "Tools", Guid.NewGuid())
+    {
+        Bookmarks = [new Bookmark(Guid.NewGuid(), "Calc", BookmarkKind.App, "Calc!App")],
+    };
+
+    static IReadOnlySet<string> Known(params string[] ids) => new HashSet<string>(ids, StringComparer.OrdinalIgnoreCase);
+
+    [Fact]
+    public void A_new_id_of_an_app_bookmark_redraws() =>
+        Assert.True(FloatingBar.HidesAnAppChip(["calc!app"], Known(), [WithCalc]));
+
+    [Fact]
+    public void An_id_already_open_does_not() =>
+        Assert.False(FloatingBar.HidesAnAppChip(["Calc!App"], Known("Calc!App"), [WithCalc]));
+
+    [Fact]
+    public void An_id_no_bookmark_names_does_not() =>
+        Assert.False(FloatingBar.HidesAnAppChip(["Other!App", null], Known(), [WithCalc]));
 }

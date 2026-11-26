@@ -387,6 +387,8 @@ public partial class FloatingBar
         IReadOnlyDictionary<WindowHandle, string> names)
     {
         asked.ToList().ForEach(h => appIdsAsked.Remove(h));
+        // The ids some window already carried before this batch, for the bookmark redraw at the end.
+        var knownBefore = OpenAppIds;
         var recheckAt = DateTime.UtcNow + NoAppIdRecheck;
         answers.Where(a => a.Id is null).ToList().ForEach(a => noAppIdUntil[a.Handle] = recheckAt);
         answers.Where(a => a.Id is not null).ToList().ForEach(a =>
@@ -399,12 +401,20 @@ public partial class FloatingBar
                 ClickTrace.Write($"pins: app id of {a.Handle.Value:X}/{names.GetValueOrDefault(a.Handle) ?? "?"} took {a.Ms}ms -> {a.Id ?? "none"}"));
         if (answers.Any(a => a.Id is not null) && lastPinOverview is { } overview) PaintPins(overview);
         // An app's bookmark chip hides while a window carries its app id (BookmarkRunning), and the ids arrive here,
-        // after the rebuild that asked for them. So a new id redraws the rows, but only when some workspace has an App
-        // bookmark to hide: the rows are not otherwise affected by ids. Rebuild has its own re-entrancy guard, and only
-        // windows with no id yet are asked again, so this cannot loop.
-        if (answers.Any(a => a.Id is not null)
-            && manager.State.Workspaces.Any(w => w.Bookmarks.Any(b => b.Kind == Core.Bookmarks.BookmarkKind.App)))
+        // after the rebuild that asked for them. So the rows are redrawn, but only when an id is NEW (no window carried
+        // it before this batch) and is some App bookmark's target: that is the only case in which a chip changes. Rebuild
+        // has its own re-entrancy guard, and only windows with no id yet are asked again, so this cannot loop.
+        if (HidesAnAppChip(answers.Select(a => a.Id), knownBefore, manager.State.Workspaces))
             Rebuild();
+    }
+
+    // Whether ids just read for windows newly hide an App bookmark's chip: an id no window carried before, equal (as
+    // BookmarkRunning compares, ignoring case) to the target of an App bookmark in some workspace. Pure, for the tests.
+    internal static bool HidesAnAppChip(IEnumerable<string?> answered, IReadOnlySet<string> knownBefore, IEnumerable<Workspace> workspaces)
+    {
+        var fresh = answered.OfType<string>().Where(id => !knownBefore.Contains(id)).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        return fresh.Count > 0
+               && workspaces.Any(w => w.Bookmarks.Any(b => b.Kind == Core.Bookmarks.BookmarkKind.App && fresh.Contains(b.Target)));
     }
 
     // Which windows to ask the shell about: no ID known, not already being asked, and not told "none" within
