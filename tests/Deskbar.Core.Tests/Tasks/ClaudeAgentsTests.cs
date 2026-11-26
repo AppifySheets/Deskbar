@@ -36,6 +36,25 @@ public class ClaudeAgentsTests
 
         Assert.True(agent.Background);
         Assert.False(agent.Busy);
+        Assert.Equal("done", agent.State.Value);
+        Assert.True(agent.TurnOver);
+    }
+
+    // Task 607af1db, measured 2026-11-26: a session whose turn ended with a Bash of its own still running in the
+    // background is listed busy, with state "done", until the job ends. Its turn is over; one busy and working is not,
+    // and neither is a busy row with no state, which says nothing about its turn.
+    [Theory]
+    [InlineData("""{"status":"busy","state":"done"}""", true)]
+    [InlineData("""{"status":"busy","state":"blocked"}""", true)]
+    [InlineData("""{"status":"busy","state":"working"}""", false)]
+    [InlineData("""{"status":"busy"}""", false)]
+    [InlineData("""{"status":"idle","state":"blocked"}""", true)]
+    [InlineData("""{"status":"waiting","state":"blocked"}""", true)]
+    public void A_turn_is_over_unless_the_row_is_busy_and_not_done_or_blocked(string fields, bool turnOver)
+    {
+        var json = "[" + fields.Replace("{", """{"id":"abcd1234","cwd":"E:\\x","kind":"background","sessionId":"abcd1234-1",""") + "]";
+
+        Assert.Equal(turnOver, Assert.Single(ClaudeAgents.Parse(json).Value).TurnOver);
     }
 
     // startedAt (milliseconds since 1970, as measured) tells the newest of several sessions in the manager's folder

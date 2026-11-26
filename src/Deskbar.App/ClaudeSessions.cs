@@ -71,7 +71,8 @@ namespace Deskbar.App;
 //
 //   5. STOPPING FINISHED SESSIONS (task 87f899ad; SessionKeeper.Stops has the rule and its reasons). On every good read,
 //      a Done or Closed task's background session that has been idle for SessionKeeper.StopAfter, for a Done task only
-//      with no window of Deskbar's attached to it, is sent `claude stop <short id>`, which keeps its conversation
+//      with no window of Deskbar's attached to it, and for a Closed task idle or busy only on a background job of its
+//      own (task 607af1db, ClaudeAgent.TurnOver), is sent `claude stop <short id>`, which keeps its conversation
 //      (measured) and closes a Closed task's attached window with it (task 8556944b, measured). The task's
 //      thread says so. A stop is sent once; while the session is still listed it is not sent again for StopRetry, so a
 //      stop that fails is traced and retried now and then, never every poll. Going to the task resumes it (job 4).
@@ -188,6 +189,9 @@ public sealed class ClaudeSessions : IDisposable
     // Job 5: since when each listed session has been idle in every good read; one seen busy, or gone from the list, is
     // dropped, so its minute starts again. And when a stop was sent to each session the list still shows.
     ImmutableDictionary<string, DateTimeOffset> idleSince = ImmutableDictionary<string, DateTimeOffset>.Empty;
+    // The same for a turn being over (ClaudeAgent.TurnOver: idle, or busy only on a background job of its own), the
+    // clock a Closed task's session is stopped by (task 607af1db, SessionKeeper.Stops).
+    ImmutableDictionary<string, DateTimeOffset> turnOverSince = ImmutableDictionary<string, DateTimeOffset>.Empty;
     ImmutableDictionary<string, DateTimeOffset> stopSent = ImmutableDictionary<string, DateTimeOffset>.Empty;
 
     // RULING 20: why the list cannot be read, in one line, for Manage to show under the resume box; none after a good
@@ -521,8 +525,13 @@ public sealed class ClaudeSessions : IDisposable
         // Job 5: finished tasks' idle sessions are stopped. Asked after the keeper's steps, on the same board and list.
         idleSince = listed.Where(agent => !agent.Busy).Select(agent => agent.SessionId).Distinct()
             .ToImmutableDictionary(id => id, id => idleSince.TryGetValue(id, out var since) ? since : now);
+        turnOverSince = listed.Where(agent => agent.TurnOver).Select(agent => agent.SessionId).Distinct()
+            .ToImmutableDictionary(id => id, id => turnOverSince.TryGetValue(id, out var since) ? since : now);
         stopSent = stopSent.Where(pair => listedIds.Contains(pair.Key)).ToImmutableDictionary();
-        SessionKeeper.Stops(tasks.Board, keeperView, id => idleSince.TryGetValue(id, out var since) ? since : now, windowOpen, now)
+        SessionKeeper.Stops(tasks.Board, keeperView,
+                id => idleSince.TryGetValue(id, out var since) ? since : now,
+                id => turnOverSince.TryGetValue(id, out var since) ? since : now,
+                windowOpen, now)
             // Not while it is being resumed (a click on the Done task), and not again while a stop sent is on its way.
             .Where(stop => !Queued(stop.Agent.SessionId) && !AnsweredWithinGrace(stop.Agent.SessionId))
             .Where(stop => !stopSent.TryGetValue(stop.Agent.SessionId, out var sent) || now - sent >= StopRetry)

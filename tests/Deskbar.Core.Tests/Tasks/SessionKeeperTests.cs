@@ -288,14 +288,22 @@ public class SessionKeeperTests
     }
     // --- Stops: finished tasks' idle background sessions (task 87f899ad) ------------------------------------------
 
-    static ClaudeAgent Background(string sessionId, bool busy = false) =>
-        new(sessionId, Maybe<string>.None, @"E:\repos\X", true, busy, "");
+    // A background row as the list gives it: busy and working during a turn, idle and done after one, unless the test
+    // names the state (busy and done is a turn ended with a background job of its own still running).
+    static ClaudeAgent Background(string sessionId, bool busy = false, string? state = null) =>
+        new(sessionId, Maybe<string>.None, @"E:\repos\X", true, busy, "")
+        {
+            State = state ?? (busy ? "working" : "done")
+        };
 
-    // Idle since two minutes ago unless the test says otherwise, so StopAfter (one minute) has passed.
+    // Idle, and its turn over, since two minutes ago unless the test says otherwise, so StopAfter (one minute) has
+    // passed. A test that passes idleSince alone moves both clocks: an idle session's turn is over too.
     static IReadOnlyList<KeeperStep.Stop> Stops(
         IEnumerable<TaskItem> tasks, IReadOnlyCollection<ClaudeAgent> live,
-        Func<string, DateTimeOffset>? idleSince = null, Func<TaskItem, bool>? windowOpen = null) =>
-        SessionKeeper.Stops(new TaskBoard(tasks.ToList()), live, idleSince ?? (_ => Now.AddMinutes(-2)), windowOpen ?? (_ => false), Now);
+        Func<string, DateTimeOffset>? idleSince = null, Func<TaskItem, bool>? windowOpen = null,
+        Func<string, DateTimeOffset>? turnOverSince = null) =>
+        SessionKeeper.Stops(new TaskBoard(tasks.ToList()), live, idleSince ?? (_ => Now.AddMinutes(-2)),
+            turnOverSince ?? idleSince ?? (_ => Now.AddMinutes(-2)), windowOpen ?? (_ => false), Now);
 
     [Theory]
     [InlineData(TaskStatus.Done)]
@@ -359,6 +367,48 @@ public class SessionKeeperTests
         Assert.Empty(Stops([task], [Background("s1", busy: true)], windowOpen: _ => true));
         Assert.Empty(Stops([task], [Background("s1")], _ => Now - SessionKeeper.StopAfter + TimeSpan.FromSeconds(1), windowOpen: _ => true));
     }
+
+    // Task 607af1db. A session that ended its turn with a background job still running (a Monitor, a Bash left in the
+    // background) is listed busy until the job ends, with state "done" or "blocked" (measured). A Closed task's
+    // session is stopped anyway, once its turn has been over for StopAfter; the job goes with it.
+    [Theory]
+    [InlineData("done")]
+    [InlineData("blocked")]
+    public void A_closed_tasks_session_busy_only_on_its_own_background_job_is_stopped(string state)
+    {
+        var task = Task(TaskStatus.Closed, 5, Session("s1"));
+
+        // Never idle (busy in every read), its turn over for two minutes.
+        var stop = Assert.Single(Stops([task], [Background("s1", busy: true, state: state)], _ => Now, turnOverSince: _ => Now.AddMinutes(-2)));
+        Assert.Equal(task.Id, stop.TaskId);
+    }
+
+    [Fact]
+    public void A_closed_tasks_session_busy_on_a_background_job_waits_StopAfter_from_the_end_of_its_turn()
+    {
+        var task = Task(TaskStatus.Closed, 5, Session("s1"));
+        var agent = Background("s1", busy: true, state: "done");
+
+        Assert.Empty(Stops([task], [agent], _ => Now, turnOverSince: _ => Now - SessionKeeper.StopAfter + TimeSpan.FromSeconds(1)));
+        Assert.Single(Stops([task], [agent], _ => Now, turnOverSince: _ => Now - SessionKeeper.StopAfter));
+    }
+
+    // A turn in flight still finishes first: busy and working is never stopped, whatever the clocks say.
+    [Fact]
+    public void A_closed_tasks_session_in_a_turn_is_not_stopped() =>
+        Assert.Empty(Stops([Task(TaskStatus.Closed, 5, Session("s1"))], [Background("s1", busy: true, state: "working")]));
+
+    // A busy row with no state says nothing about its turn, so it counts as working.
+    [Fact]
+    public void A_closed_tasks_busy_session_with_no_state_is_not_stopped() =>
+        Assert.Empty(Stops([Task(TaskStatus.Closed, 5, Session("s1"))],
+            [new ClaudeAgent("s1", Maybe<string>.None, @"E:\repos\X", true, true, "")]));
+
+    // A Done task is not Petre's "finished with this": its job may be the last of its work, so it waits for idle.
+    [Fact]
+    public void A_done_tasks_session_busy_on_a_background_job_is_not_stopped() =>
+        Assert.Empty(Stops([Task(TaskStatus.Done, 5, Session("s1"))], [Background("s1", busy: true, state: "done")],
+            turnOverSince: _ => Now.AddMinutes(-2)));
 
     [Fact]
     public void A_session_an_open_task_also_holds_is_not_stopped()
