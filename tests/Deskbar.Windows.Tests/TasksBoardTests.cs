@@ -97,7 +97,7 @@ public class TasksBoardTests
         string edge = "right", double width = Wide, Func<TaskItem, int>? workingOf = null, double? screenDips = null,
         string? stateDir = null, Action<string>? openImage = null, Func<Result>? openManager = null, Action<Uri>? openUri = null,
         Func<TaskItem, Action<string>, ContextMenu?>? pickFolder = null, Func<Guid, Result>? runNow = null,
-        Func<string, Maybe<string>>? askRepeat = null)
+        Func<string, Maybe<string>>? askRepeat = null, Func<string, bool>? folderExists = null)
     {
         var harness = Harness.Build();
         var minutes = 0;
@@ -134,6 +134,8 @@ public class TasksBoardTests
             OpenManager = openManager,
             // A link's final open (task 26f15d70), recorded or dropped: a run never starts a browser.
             OpenUri = openUri ?? (_ => { }),
+            // Whether a repeat's folder still exists (task 0b78269e, final review, item 4); the disk's answer by default.
+            FolderExists = folderExists ?? Directory.Exists,
         };
         if (askRepeat is not null) window.AskRepeat = askRepeat;
         return new Board { Harness = harness, Window = window, Controller = controller, Panel = panel, Tasks = tasks, Timers = timers, WentTo = went };
@@ -2150,7 +2152,7 @@ public class TasksBoardTests
         var mark = RepeatMarkOf(LineOf(t.Window, id));
 
         Assert.NotNull(mark);
-        Assert.Equal("", mark!.Text);
+        Assert.Equal("\uE8EE", mark!.Text);
         var tip = Assert.IsType<string>(mark.ToolTip);
         Assert.StartsWith("Repeats every day at 09:00 · next run ", tip);
         Assert.EndsWith(" · sonnet", tip);
@@ -2245,6 +2247,54 @@ public class TasksBoardTests
         // The repo, not the worktree it was picked from.
         Assert.Equal(@"C:\repos\x", task.Repeat.Value.Folder);
         Assert.True(task.NextRun.HasValue);
+    });
+
+    // Changing the schedule of a task that already repeats keeps its model and its folder (final review, item 4): before,
+    // the menu went back to the default model and the folder pick every time, so picking "Every hour" on a haiku repeat
+    // made it sonnet. The pick is not even asked while the repeat's folder exists.
+    [Fact]
+    public void Picking_a_new_schedule_keeps_the_current_model_and_folder() => StaThread.Run(() =>
+    {
+        var picked = 0;
+        const string kept = @"C:\repos\kept";
+        using var t = Build(folderExists: folder => folder == kept, pickFolder: (_, chosen) =>
+        {
+            picked++;
+            chosen(@"C:\repos\other");
+            return null;
+        });
+        var id = t.Tasks.AddNote("a", t.Gepha).Value.Id;
+        Assert.True(t.Tasks.SetRepeat(id, new TaskRepeat(TaskRepeats.Parse("daily 09:00").Value, "haiku", kept)).IsSuccess);
+
+        Assert.True(t.Controller.Repeat(id, "every 1h").IsSuccess);
+
+        var repeat = t.Tasks.Board.Tasks.Single(x => x.Id == id).Repeat.Value;
+        Assert.Equal("every 1h", repeat.Schedule.Text);
+        Assert.Equal("haiku", repeat.Model);
+        Assert.Equal(kept, repeat.Folder);
+        Assert.Equal(0, picked);
+    });
+
+    // Once the repeat's folder is gone the pick answers, as for a first repeat; the model is still kept.
+    [Fact]
+    public void Picking_a_new_schedule_after_the_folder_went_asks_for_one() => StaThread.Run(() =>
+    {
+        var picked = 0;
+        using var t = Build(folderExists: _ => false, pickFolder: (_, chosen) =>
+        {
+            picked++;
+            chosen(@"C:\repos\other");
+            return null;
+        });
+        var id = t.Tasks.AddNote("a", t.Gepha).Value.Id;
+        Assert.True(t.Tasks.SetRepeat(id, new TaskRepeat(TaskRepeats.Parse("daily 09:00").Value, "haiku", @"C:\repos\gone")).IsSuccess);
+
+        Assert.True(t.Controller.Repeat(id, "every 1h").IsSuccess);
+
+        var repeat = t.Tasks.Board.Tasks.Single(x => x.Id == id).Repeat.Value;
+        Assert.Equal("haiku", repeat.Model);
+        Assert.Equal(@"C:\repos\other", repeat.Folder);
+        Assert.Equal(1, picked);
     });
 
     [Fact]

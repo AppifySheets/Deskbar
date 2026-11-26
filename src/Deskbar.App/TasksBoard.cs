@@ -177,6 +177,12 @@ public sealed class TasksBoard : IDisposable
     internal Func<TaskDetailWindow> NewTaskWindow { get; init; } = () => new TaskDetailWindow();
 
     /// <summary>
+    /// Whether a folder exists (task 0b78269e, final review, item 4): SetRepeat keeps a repeat's folder only while it does.
+    /// The disk's answer in the app; the tests hand their own, since their folders are made-up paths.
+    /// </summary>
+    internal Func<string, bool> FolderExists { get; init; } = System.IO.Directory.Exists;
+
+    /// <summary>
     /// Brings a task window to Petre by its handle: the App moves it onto the desktop in front when it is on another one,
     /// then raises and activates it through an activator (a `deskbar.cmd task open` typed in a terminal carries no right
     /// to the foreground). None (the tests): the window activates itself where it is.
@@ -1099,7 +1105,8 @@ public sealed class TasksBoard : IDisposable
     /// <summary>
     /// The "Repeat" submenu's one entry point (task 0b78269e): <paramref name="words"/> are what `task repeat &lt;id&gt;`
     /// takes, a schedule text, Custom…'s line (with `--model`, `--folder`) or "off". Parsed by the same parser as the
-    /// control pipe (TaskRepeats.ParseRequest). A repeat names its folder with `--folder`, else the Start Claude folder
+    /// control pipe (TaskRepeats.ParseRequest). A repeat names its folder with `--folder`, else a task that already
+    /// repeats keeps its folder while it exists, else the Start Claude folder
     /// pick answers (one known folder at once, otherwise its list opens and the repeat is set when one is chosen); the
     /// repo is stored, not a worktree (ClaudeStart.RepoOf). A refusal shows on the problem line.
     /// </summary>
@@ -1108,12 +1115,18 @@ public sealed class TasksBoard : IDisposable
             .Bind(task => TaskRepeats.ParseRequest(words.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
                 .Bind(request => request is RepeatRequest.Set set ? SetRepeat(task, set) : tasks.ClearRepeat(id))), id);
 
+    // CHANGING A REPEAT KEEPS WHAT WAS NOT SAID (task 0b78269e, final review, item 4), the same rule as the control pipe's
+    // ApplyRepeat in Core. On a task that already repeats, words without --model keep the current repeat's model, and
+    // words without --folder keep its folder while that folder exists (FolderExists), so picking "Every hour" on a haiku
+    // repeat stays haiku and asks for no folder. Only a first repeat, or a folder that has gone, falls back to
+    // TaskRepeat.DefaultModel and the folder pick.
     Result SetRepeat(TaskItem task, RepeatRequest.Set set)
     {
+        var model = set.Model.Or(() => task.Repeat.Map(r => r.Model)).GetValueOrDefault(TaskRepeat.DefaultModel);
         // Applies without reporting: Repeat reports once, whichever way the folder arrived (review fix, task 0b78269e).
         Result Apply(string folder) =>
-            tasks.SetRepeat(task.Id, new TaskRepeat(set.Schedule, set.Model.GetValueOrDefault(TaskRepeat.DefaultModel), ClaudeStart.RepoOf(folder)));
-        if (set.Folder.TryGetValue(out var named)) return Apply(named);
+            tasks.SetRepeat(task.Id, new TaskRepeat(set.Schedule, model, ClaudeStart.RepoOf(folder)));
+        if (set.Folder.Or(() => task.Repeat.Map(r => r.Folder).Where(FolderExists)).TryGetValue(out var named)) return Apply(named);
         if (pickFolder is null) return Result.Failure("No folder is known for this task; give --folder <path>");
         // The pick answers at once with one known folder (its result goes back to Repeat, which reports it once), or opens
         // a list and answers later, from a click; that late answer has no caller to report for it, so it reports itself.

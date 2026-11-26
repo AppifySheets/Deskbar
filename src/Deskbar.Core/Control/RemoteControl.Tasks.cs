@@ -307,7 +307,8 @@ public sealed partial class RemoteControl
     {
         ["close", _] or ["close", _, "--stop-claude"] or ["delete", _] => true,
         ["status", _, var status] => status.Trim().ToLowerInvariant() is "done" or "closed",
-        // `repeat <id> off` ends a task that is between runs as Done (TaskService.ClearRepeat), so it finishes one. The
+        // `repeat <id> off` ends a task that is between runs, or waiting on one of the repeat's own questions, as Done
+        // (TaskService.ClearRepeat), so it finishes one. The
         // manager cannot tell whether a task is between runs, so it is refused for every task (recurring tasks, 0b78269e).
         ["repeat", _, var off] => off.Trim().Equals("off", StringComparison.OrdinalIgnoreCase),
         _ => false,
@@ -626,12 +627,20 @@ public sealed partial class RemoteControl
             .Match(id => Success(Describe(service.Board.Tasks.First(t => t.Id == id))), ControlReply.Fail);
 
     // The one service call of `task repeat`, after everything else is known to be fine (see TaskRepeatReply).
+    //
+    // CHANGING A REPEAT KEEPS WHAT WAS NOT SAID (task 0b78269e, final review, item 4). When the task already repeats, a
+    // call without --model keeps the current repeat's model, and one without --folder keeps the current repeat's folder
+    // while that folder exists. Only a first repeat, or a folder that has gone (what FolderGoneQuestion asks about), falls
+    // back to TaskRepeat.DefaultModel and `defaultFolder`. Before, every change of schedule silently reset both. The
+    // menu's Repeat (TasksBoard.SetRepeat in the App) follows the same rule.
     Result ApplyRepeat(TaskService service, TaskItem task, RepeatRequest request, Func<TaskItem, Result<string>> defaultFolder, Func<string, bool> folderExists) =>
         request is RepeatRequest.Set set
-            ? set.Folder.Match(f => Result.Success(Folder(f) ?? f), () => defaultFolder(task))
+            ? set.Folder.Match(f => Result.Success(Folder(f) ?? f),
+                    () => task.Repeat.Map(r => r.Folder).Where(folderExists).Match(Result.Success, () => defaultFolder(task)))
                 .Map(ClaudeStart.RepoOf)
                 .Ensure(folderExists, "That folder does not exist; pass --folder <path> with a folder that does")
-                .Bind(folder => service.SetRepeat(task.Id, new TaskRepeat(set.Schedule, set.Model.GetValueOrDefault(TaskRepeat.DefaultModel), folder)))
+                .Bind(folder => service.SetRepeat(task.Id, new TaskRepeat(set.Schedule,
+                    set.Model.Or(() => task.Repeat.Map(r => r.Model)).GetValueOrDefault(TaskRepeat.DefaultModel), folder)))
             : service.ClearRepeat(task.Id);
 
     /// <summary>Why `task open` refuses in a copy of Deskbar with no task windows (no openTaskWindow handed in).</summary>

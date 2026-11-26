@@ -1526,6 +1526,47 @@ public class RemoteControlTaskTests
         AssertRefusedAndUnchanged(reply, before);
     }
 
+    // Changing only the schedule of a task that already repeats keeps its model and its folder (final review, item 4):
+    // before, every change went back to TaskRepeat.DefaultModel and the task's candidate folder, so `task repeat <id>
+    // daily 10:00` silently undid a --model haiku or a --folder given earlier. The candidates here would say otherwise.
+    [Fact]
+    public void Repeat_again_keeps_the_current_model_and_folder()
+    {
+        var manager = Started();
+        var id = Prefix(Added(manager));
+        const string other = @"C:\repos\Other";
+        RepeatRun(manager, [], _ => true, "task", "repeat", id, "daily", "09:00", "--model", "haiku", "--folder", other);
+
+        var reply = RepeatRun(manager, [RepoDir], _ => true, "task", "repeat", id, "daily", "10:00");
+
+        Assert.Equal(ControlReply.Ok, reply.ExitCode);
+        var repeat = Json(reply).GetProperty("repeat");
+        Assert.Equal("daily 10:00", repeat.GetProperty("schedule").GetString());
+        Assert.Equal("haiku", repeat.GetProperty("model").GetString());
+        Assert.Equal(other, repeat.GetProperty("folder").GetString());
+    }
+
+    // The current folder is kept only while it exists: once it is gone the candidates answer, as for a first repeat (a
+    // gone folder is what FolderGoneQuestion asks about, and setting the repeat again is its answer). The model, which
+    // nothing can make vanish, is still kept. A --model or --folder given wins over both.
+    [Fact]
+    public void Repeat_again_replaces_a_gone_folder_and_takes_what_is_given()
+    {
+        var manager = Started();
+        var id = Prefix(Added(manager));
+        const string gone = @"C:\repos\Gone";
+        RepeatRun(manager, [], _ => true, "task", "repeat", id, "daily", "09:00", "--model", "haiku", "--folder", gone);
+
+        var fallback = RepeatRun(manager, [RepoDir], folder => folder != gone, "task", "repeat", id, "daily", "10:00");
+        Assert.Equal(ControlReply.Ok, fallback.ExitCode);
+        Assert.Equal(RepoDir, Json(fallback).GetProperty("repeat").GetProperty("folder").GetString());
+        Assert.Equal("haiku", Json(fallback).GetProperty("repeat").GetProperty("model").GetString());
+
+        var given = RepeatRun(manager, [], _ => true, "task", "repeat", id, "daily", "11:00", "--model", "opus", "--folder", @"C:\repos\Third");
+        Assert.Equal("opus", Json(given).GetProperty("repeat").GetProperty("model").GetString());
+        Assert.Equal(@"C:\repos\Third", Json(given).GetProperty("repeat").GetProperty("folder").GetString());
+    }
+
     [Fact]
     public void Repeat_off_ends_it()
     {
