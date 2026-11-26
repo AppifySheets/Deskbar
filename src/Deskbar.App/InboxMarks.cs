@@ -76,6 +76,22 @@ internal static class InboxMarks
         ["refresh"] = [S("M13.5 8a5.5 5.5 0 1 1-1.7-4"), S("M12.4 1.7v2.7H9.6")],
         ["stats"] = [S("M3 13.5V8.5M8 13.5V3M13 13.5V6.5")],
         ["inbox"] = [S("M1.75 9.5h3.5l1 2h3.5l1-2h3.5"), S("M3.5 3h9l1.75 6.5v3a1.25 1.25 0 0 1-1.25 1.25H3A1.25 1.25 0 0 1 1.75 12.5v-3z")],
+        // The step kinds of a session's steps (ChatSteps, TasksWindow.Transcript.cs), and the marks a step row wears. Drawn on
+        // the same grid and with the same strokes as the mockup's table above; the mockup has no step icons of its own, so
+        // these are new: a page of text (read), a pencil (edit), a pencil on a line (write), a globe (web), three nodes joined
+        // (a subagent), a circle with a cross (a failed step: a shape, never a colour alone), a tick (a finished one), and
+        // the two chevrons of a fold. "file" is read and "pencil" is edit; "terminal", "search", "list" and "spark" are the
+        // mockup's own, used for a command, a search, a plan and anything else.
+        ["file"] = [S("M4.25 1.75h5.5l3 3v9.5h-8.5z"), S("M9.75 1.75v3h3")],
+        ["pencil"] = [S("M10.5 2.25l3.25 3.25-7.75 7.75H2.75V10z"), S("M9 3.75l3.25 3.25")],
+        ["write"] = [S("M10.5 1.75l2.75 2.75-6.5 6.5H4V8.25z"), S("M2.5 14h11")],
+        ["globe"] = [Ring(8, 8, 6.25), S("M1.75 8h12.5"), S("M8 1.75c2 1.9 2.6 4 2.6 6.25S10 12.35 8 14.25c-2-1.9-2.6-4-2.6-6.25S6 3.65 8 1.75z")],
+        ["agent"] = [Ring(8, 3.5, 1.75), Ring(3.5, 12.5, 1.75), Ring(12.5, 12.5, 1.75), S("M8 5.25v2.5M8 7.75H3.5v3M8 7.75h4.5v3")],
+        ["fail"] = [Ring(8, 8, 6.25), S("M5.8 5.8l4.4 4.4M10.2 5.8l-4.4 4.4")],
+        ["tick"] = [S("M3.5 8.5l3 3 6-6.5")],
+        ["chevR"] = [S("M6 3.5L10.5 8 6 12.5")],
+        ["chevD"] = [S("M3.5 6L8 10.5 12.5 6")],
+        ["image"] = [Box(2, 3, 12, 10, 2), Disc(5.5, 6.5, 1), S("M2.5 12l3.5-3.5 2.5 2.5 2-2 3 3")],
     };
 
     /// <summary>
@@ -172,6 +188,10 @@ internal static class InboxMarks
 
     /// <summary>The Tag of a turning mark's drawing, for the tests.</summary>
     internal const string TurningTag = "inbox-turning";
+
+    /// <summary>For the tests: the outline of a named icon, to tell two icons' shapes apart.</summary>
+    internal static string ShapeOfIcon(string name) =>
+        string.Join("|", Icons[name].Select(p => $"{p.Ink}:{p.Shape.GetFlattenedPathGeometry()}"));
 
     /// <summary>For the tests: the outline of a mark's icon as path data, to tell two marks' shapes apart.</summary>
     internal static string ShapeOf(InboxMark mark) =>
