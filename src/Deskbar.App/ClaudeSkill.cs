@@ -69,15 +69,22 @@ static class ClaudeSkill
     // older Deskbar refuses, so the script then exits 0 and nothing happens.
     internal const string WaitHookScriptName = "claude-wait-hook.cmd";
 
+    // The permission hook's script (Allow / Deny from a task's page; PermissionScript), on PermissionRequest while the
+    // setting is on (AppState.ClaudePermissions). Its own name for the task script's reason: an older Deskbar neither
+    // claims its entry nor rewrites it, refuses the verb it calls, and the script then prints nothing (the terminal asks).
+    internal const string PermissionHookScriptName = "claude-permission-hook.cmd";
+
     // `on` is "Teach Claude Code about Deskbar" (AppState.ClaudeSkill); `tasks` is whether sessions keep their tasks
     // (AppState.ClaudeTasks), which adds three hook entries and only counts while `on` does (ClaudeHooks).
     // `waiter` is whether this machine's Claude Code honours asyncRewake (ClaudeVersion.SupportsAsyncRewake): the comment
     // waiter's Stop entry is written only then, since a build without it would hold its sessions after every turn.
-    public static void Sync(bool on, bool tasks, bool waiter) =>
-        Sync(on, tasks, Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), AppPaths.NewStateDir, waiter);
+    // `permissions` is AppState.ClaudePermissions AND a Claude Code known to run PermissionRequest hooks as measured
+    // (ClaudeVersion.SupportsPermissionHook): the permission entry, which only counts while `tasks` does.
+    public static void Sync(bool on, bool tasks, bool waiter, bool permissions = false) =>
+        Sync(on, tasks, Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), AppPaths.NewStateDir, waiter, permissions);
 
     // `home` and `deskbarFolder` (where deskbar.cmd lives) are parameters so a test can point them at scratch folders.
-    internal static void Sync(bool on, bool tasks, string home, string deskbarFolder, bool waiter = true)
+    internal static void Sync(bool on, bool tasks, string home, string deskbarFolder, bool waiter = true, bool permissions = false)
     {
         try
         {
@@ -87,14 +94,14 @@ static class ClaudeSkill
             var folder = Path.Combine(claude, "skills", "deskbar");
             var file = Path.Combine(folder, "SKILL.md");
             var scripts = new HookScripts(Path.Combine(deskbarFolder, HookScriptName), Path.Combine(deskbarFolder, TaskHookScriptName),
-                Path.Combine(deskbarFolder, WaitHookScriptName));
+                Path.Combine(deskbarFolder, WaitHookScriptName), Path.Combine(deskbarFolder, PermissionHookScriptName));
             var settings = Path.Combine(claude, "settings.json");
             if (on)
             {
                 // The hooks first: the skill tells a session whether they ask for the user, so it must know.
                 // An entry written by an older Deskbar (`cmd.exe /c ...`) still names the script, so Sync sees it as
                 // Deskbar's own, finds its command differs, and replaces it with this one.
-                var hooksInstalled = InstallHooks(scripts, settings, tasks, ClaudeHooks.ImagesRule(deskbarFolder), waiter);
+                var hooksInstalled = InstallHooks(scripts, settings, tasks, ClaudeHooks.ImagesRule(deskbarFolder), waiter, permissions);
                 Write(folder, file, hooksInstalled, tasks);
             }
             else
@@ -106,6 +113,7 @@ static class ClaudeSkill
                 {
                     RemoveTaskScript(scripts.Task);
                     RemoveTaskScript(scripts.Wait);
+                    RemoveTaskScript(scripts.Permission);
                 }
             }
         }
@@ -123,18 +131,21 @@ static class ClaudeSkill
     // stop the skill from being written, so it is traced and counts as "not installed".
     // The task script is there exactly while its entries are: written before they are added, taken away once they
     // are removed (and not while a file Sync left alone may still hold them), so no entry points at a missing file.
-    static bool InstallHooks(HookScripts scripts, string settings, bool tasks, string imagesRule, bool waiter)
+    static bool InstallHooks(HookScripts scripts, string settings, bool tasks, string imagesRule, bool waiter, bool permissions)
     {
         try
         {
             WriteHookScript(scripts.Ask);
             if (tasks) WriteHookScript(scripts.Task);
             if (tasks && waiter) WriteScript(scripts.Wait, WaitScript());
+            if (tasks && permissions) WriteScript(scripts.Permission, PermissionScript());
             // Without the waiter (an older Claude Code) its entry is not wanted, so Sync takes out one written before.
+            // The same for the permission entry while its setting is off.
             var installed = ClaudeHooks.Sync(true, tasks, settings, HookCommand(scripts.Ask), HookCommand(scripts.Task), imagesRule,
-                waiter ? HookCommand(scripts.Wait) : null);
+                waiter ? HookCommand(scripts.Wait) : null, permissions ? HookCommand(scripts.Permission) : null);
             if (!tasks && installed) RemoveTaskScript(scripts.Task);
             if (!(tasks && waiter) && installed) RemoveTaskScript(scripts.Wait);
+            if (!(tasks && permissions) && installed) RemoveTaskScript(scripts.Permission);
             return installed;
         }
         catch (Exception e) when (IsSettingsOrDiskProblem(e))
@@ -145,8 +156,8 @@ static class ClaudeSkill
     }
 
     // Where the scripts live: claude-hook.cmd for the ask events, claude-task-hook.cmd for the task events, and
-    // claude-wait-hook.cmd for the comment waiter on Stop.
-    sealed record HookScripts(string Ask, string Task, string Wait);
+    // claude-wait-hook.cmd for the comment waiter on Stop, claude-permission-hook.cmd for PermissionRequest.
+    sealed record HookScripts(string Ask, string Task, string Wait, string Permission);
 
     // Takes the task script away with its entries, but only a file Deskbar wrote (it says so on its first line), the
     // rule the skill's own removal keeps: a file of that name someone else put there is theirs.
@@ -247,6 +258,85 @@ static class ClaudeSkill
         "@if exist \"%inbox%\" (move /y \"%inbox%\" \"%inbox%.%mine%\" >nul 2>&1 && (type \"%inbox%.%mine%\" 1>&2 & del \"%inbox%.%mine%\" >nul 2>&1 & exit /b 2))",
         "@ping -n 3 127.0.0.1 >nul",
         "@goto wait",
+        "");
+    }
+
+    // THE PERMISSION HOOK (Allow / Deny from a task's page; Core's PermissionDesk and PermissionAnswer say the rest).
+    // Claude Code runs it on PermissionRequest, the hook's JSON on stdin, while its own terminal dialog is already drawn
+    // (probe Q1, 2026-11-26), so the terminal stays a parallel way to answer the whole time. What it does:
+    //
+    //   1. Makes its SLOT, claude-permission\req-<n>-<n> beside the shim, with `mkdir` (atomic), retried with new numbers
+    //      when another hook has that name (the waiter's I1: %RANDOM% is seeded by the second).
+    //   2. Calls Deskbar ONCE, `deskbar.cmd claude-permission --slot <name>` with stdin passed through, and reads the code
+    //      from the reply with `for /f`. No code (Deskbar not running, or the question stays in the terminal) ends it at
+    //      once, printing nothing. The reply file goes straight after: the code lives on in this process only.
+    //   3. Every second: a slot that is gone (Deskbar dropped the question: the session moved on, the setting went off,
+    //      Deskbar exited or restarted) ends it, printing nothing. An answer file is read ONCE and the slot removed; then
+    //      it prints a fixed line only for exactly one line "<its code> allow|deny|edits", the rule of
+    //      PermissionAnswer.LineFor, and nothing for anything else. Its own deadline, `seconds` ticks of a second or
+    //      more, ends it printing nothing.
+    //
+    // NOTHING READ FROM A FILE IS EVER PARSED BY cmd: the answer's line is set from a FOR variable (substituted after the
+    // line is parsed) with delayed expansion off, and compared with !line! under delayed expansion (expanded after the IF
+    // is parsed), so quotes, & or | in a planted file are text, never a command or a second comparison. The lines it
+    // prints are literals of this script. Every path but those three ends in `exit /b 0` with nothing on stdout: Claude
+    // Code then keeps its own dialog (and never sees exit 2, which is not a decision on this event anyway).
+    //
+    // A late answer is harmless by construction: when the user answered in the terminal first, Claude Code has its
+    // decision and the hook's later line has nothing left to decide ("whichever decides first applies", the hooks
+    // reference), and Deskbar drops the question on the session's next event or poll, which ends this script.
+    // Pure ASCII and no absolute path, for the reason WriteHookScript gives.
+    internal static string PermissionScript(int? seconds = null)
+    {
+        var call = $"call \"%~dp0{ControlCommandLine.ShimName}\" {Core.Control.ControlArguments.ClaudePermissionVerb} --entry \"%CLAUDE_CODE_ENTRYPOINT%\" --attended \"%CLAUDE_CODE_SESSION_ATTENDED%\" --job \"%CLAUDE_JOB_DIR%\" --slot \"%name%\"";
+        return string.Join("\r\n",
+        "@rem Written by Deskbar for Claude Code's PermissionRequest hook: puts the question on the session's task page and prints the answer clicked there. Do not edit.",
+        "@setlocal EnableExtensions DisableDelayedExpansion",
+        $"@set \"box=%~dp0{Core.Tasks.PermissionDesk.FolderName}\"",
+        "@if not exist \"%box%\" mkdir \"%box%\" >nul 2>&1",
+        "@set /a tries=0",
+        ":pick",
+        "@set /a tries+=1",
+        "@if %tries% gtr 50 exit /b 0",
+        "@set \"name=req-%RANDOM%-%RANDOM%\"",
+        "@set \"slot=%box%\\%name%\"",
+        "@mkdir \"%slot%\" >nul 2>&1 || goto pick",
+        $"@if defined CLAUDE_PROJECT_DIR ({call} --from \"%CLAUDE_PROJECT_DIR%\" > \"%slot%\\{Core.Tasks.PermissionDesk.ReplyFile}\" 2>nul) else ({call} > \"%slot%\\{Core.Tasks.PermissionDesk.ReplyFile}\" 2>nul)",
+        "@set \"code=\"",
+        $"@for /f \"usebackq tokens=1\" %%a in (\"%slot%\\{Core.Tasks.PermissionDesk.ReplyFile}\") do @set \"code=%%a\"",
+        $"@del \"%slot%\\{Core.Tasks.PermissionDesk.ReplyFile}\" >nul 2>&1",
+        "@if not defined code goto done",
+        $"@set /a left={seconds ?? Core.Tasks.PermissionDesk.ScriptSeconds}",
+        ":wait",
+        "@if not exist \"%slot%\" exit /b 0",
+        $"@if exist \"%slot%\\{Core.Tasks.PermissionDesk.AnswerFile}\" goto answer",
+        "@set /a left-=1",
+        "@if %left% leq 0 goto done",
+        "@ping -n 2 127.0.0.1 >nul",
+        "@goto wait",
+        ":answer",
+        "@set \"line=\"",
+        "@set /a lines=0",
+        $"@for /f \"usebackq delims=\" %%a in (\"%slot%\\{Core.Tasks.PermissionDesk.AnswerFile}\") do @(set \"line=%%a\" & set /a lines+=1 >nul)",
+        "@rd /s /q \"%slot%\" >nul 2>&1",
+        "@if not \"%lines%\"==\"1\" exit /b 0",
+        "@setlocal EnableDelayedExpansion",
+        "@if \"!line!\"==\"!code! allow\" goto allow",
+        "@if \"!line!\"==\"!code! deny\" goto deny",
+        "@if \"!line!\"==\"!code! edits\" goto edits",
+        "@exit /b 0",
+        ":allow",
+        $"@echo {Core.Tasks.PermissionAnswer.AllowLine}",
+        "@exit /b 0",
+        ":deny",
+        $"@echo {Core.Tasks.PermissionAnswer.DenyLine}",
+        "@exit /b 0",
+        ":edits",
+        $"@echo {Core.Tasks.PermissionAnswer.AllowEditsLine}",
+        "@exit /b 0",
+        ":done",
+        "@rd /s /q \"%slot%\" >nul 2>&1",
+        "@exit /b 0",
         "");
     }
 

@@ -189,7 +189,10 @@ public sealed class PermissionDeskTests : IDisposable
         desk.Register(Slot("req-1-1"), Request("s1"));
         desk.Register(Slot("req-2-2"), Request("s2"));
 
-        Assert.True(desk.Keep(session => session == "s2"));
+        clock += TimeSpan.FromSeconds(30);
+        // A read taken before the questions arrived says nothing about them.
+        Assert.False(desk.Keep(session => session == "s2", seenBefore: clock - TimeSpan.FromMinutes(1)));
+        Assert.True(desk.Keep(session => session == "s2", seenBefore: clock));
         Assert.Equal("s2", desk.All.Single().Request.SessionId);
     }
 
