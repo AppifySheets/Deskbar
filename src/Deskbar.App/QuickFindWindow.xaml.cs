@@ -71,6 +71,18 @@ public partial class QuickFindWindow : Window
     // How many times the rows were rebuilt, for the test that a refresh with nothing new rebuilds nothing.
     internal int Rebuilds { get; private set; }
 
+    // Run before Up, Down and Enter act, so they act on the rows for what is in the box: QuickFind searches after the
+    // keys are taken (task 684210af), and a key pressed in between would otherwise move along, or take, the rows for
+    // the text as it was a moment ago. Set by QuickFind.
+    internal Action Settling { get; set; } = () => { };
+
+    // What the count beside the box says while the rows still belong to older text or a catalogue is being built:
+    // Petre asked to be told it is "thinking or waiting" rather than wonder whether his keys arrived. Present puts
+    // the count back.
+    public const string SearchingText = "searching...";
+
+    public void ShowSearching() => Count.Text = SearchingText;
+
     protected override void OnClosing(System.ComponentModel.CancelEventArgs e)
     {
         if (!closingForGood)
@@ -106,6 +118,11 @@ public partial class QuickFindWindow : Window
         if (!IsOpen) return;
         IsOpen = false;
         Hide();
+        // The rows go with the box. QuickFind now shows the box before it searches (task 684210af), so rows kept from
+        // last time would sit there, clickable, until the new search ran.
+        Rows.Children.Clear();
+        rowsByKey.Clear();
+        (Keys, Headers, Highlighted, drawn, Count.Text) = ([], [], null, "", "");
         dismissed.OnNext(Unit.Default);
     }
 
@@ -144,6 +161,7 @@ public partial class QuickFindWindow : Window
     // Keyboard handling, as one method so the tests can drive it without a real key event.
     public bool Press(Key key)
     {
+        if (key is Key.Enter or Key.Down or Key.Up) Settling();
         switch (key)
         {
             case Key.Escape:

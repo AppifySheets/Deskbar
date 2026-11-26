@@ -1626,3 +1626,14 @@ BT3. Every screen's strip shows its own screen's wallpaper, blurred, under the v
 BT4. Change the wallpaper: within a second or two the strips and the bar show the new one. Move Manage's blur slider:
      both follow it.
 BT5. Untick see-through in Manage: the strips and the bar's top go flat at once; tick it again and the frost returns.
+
+## Quick find keeps up with typing
+
+(Task 684210af.) Several Claude sessions running, so the app's UI thread is busy, and tracing on.
+
+QT1. Press `Win+Alt+Space` and type `teams` straight away, quickly: every letter shows in the box as it is typed, the
+     count beside the box reads `searching...` while the results trail the text, and the results for `teams` follow.
+QT2. Type a word and press Enter at once, before the results move: Enter takes the top row for what is in the box.
+QT3. Leave the box open with text in it for a few seconds, then type: no letter waits about a second before showing.
+QT4. A search that took 100 ms or more writes a `quick find:` line to the trace naming the catalogue, ranking and draw
+     times and how long it waited after the key.
