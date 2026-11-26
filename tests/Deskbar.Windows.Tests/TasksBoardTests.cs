@@ -4332,7 +4332,7 @@ public class TasksBoardTests
         WrapPanel ActionsRow() => Inside(t.Window).OfType<WrapPanel>().Single(p => TasksWindow.ThreadActionsTag.Equals(p.Tag));
         IEnumerable<string?> Words(WrapPanel row) => row.Children.OfType<Button>().Select(AutomationProperties.GetName);
         var row = ActionsRow();
-        Assert.Equal(["Open in window", "Open Claude", "Add subtask"], Words(row));
+        Assert.Equal(["Open in window", "Open Claude", TasksWindow.ReevaluateText, "Add subtask"], Words(row));
         Assert.Same(row, ((StackPanel)row.Parent).Children[0]);
         var line = Inside(t.Window).OfType<DockPanel>().Single(d => "session-line".Equals(d.Tag));
         Assert.False(HasButtonNamed(line, "Open session s1"));
@@ -4381,13 +4381,11 @@ public class TasksBoardTests
         var more = ButtonNamed(line, "More");
         var moreLeft = more.TranslatePoint(new Point(0, 0), strip).X;
         var moreRight = more.TranslatePoint(new Point(more.ActualWidth, 0), line).X;
-        Console.WriteLine($"MEASURED {width}: {shown} of 8 shown in {strip.ActualWidth:0.##} DIP, More at {moreLeft:0.##}, ends at {moreRight:0.##} of {line.ActualWidth:0.##}");
-        // Measured: 8 at 800 (the eighth, Reevaluate, an empty slot on this task in progress), 6 at 460, 1 at 360 (this
-        // line has a comment count, which takes a little of the room).
+        Console.WriteLine($"MEASURED {width}: {shown} of 7 shown in {strip.ActualWidth:0.##} DIP, More at {moreLeft:0.##}, ends at {moreRight:0.##} of {line.ActualWidth:0.##}");
+        // Measured: 7 at 800, 6 at 460, 1 at 360 (this line has a comment count, which takes a little of the room).
         Assert.True(shown >= (width >= Wide ? 7 : width >= TasksPanelLayout.DefaultWidth ? 5 : 1), $"{width}: only {shown} shown");
         Assert.Equal(shown * 22, moreLeft, 0.5);
-        // A full line shows all seven, and "⋯" right after Delete: Reevaluate's slot, a gap on a task in progress, is not
-        // left blank before it (task 3dd07539's review).
+        // A full line shows all seven, and "⋯" right after Delete.
         if (width >= Wide) Assert.Equal(7, shown);
         Assert.True(moreRight <= line.ActualWidth + 0.5, $"\"⋯\" ends at {moreRight:0.##}, past the line's {line.ActualWidth:0.##}");
         // Edit is first; a button left off sits past the strip's edge, clipped.
@@ -4461,15 +4459,17 @@ public class TasksBoardTests
         var row = Inside(t.Window).OfType<WrapPanel>().Single(p => TasksWindow.ThreadActionsTag.Equals(p.Tag));
         var visible = row.Children.OfType<Button>().Where(b => b.Visibility == Visibility.Visible).Select(AutomationProperties.GetName).ToList();
         Console.WriteLine($"MEASURED {width}: line shows {t.Window.LineButtonsShown(id)}, row keeps [{string.Join(", ", visible)}], row {row.Visibility}");
+        // Reevaluate (task 3dd07539) has no twin on the line, so it stays in the row at every width, and the row with it.
+        Assert.Equal(Visibility.Visible, row.Visibility);
         if (width >= Wide)
-            Assert.Equal(Visibility.Collapsed, row.Visibility);
+            Assert.Equal([TasksWindow.ReevaluateText], visible);
         else
         {
             // Exactly the row's buttons whose slot the line does not show: Open in window is slot 1, Add subtask slot 2.
             var shown = t.Window.LineButtonsShown(id)!.Value;
             Assert.True(shown < 3, $"the narrowest line shows {shown}, so the row would have nothing left to check");
-            Assert.Equal(Visibility.Visible, row.Visibility);
-            Assert.Equal(new[] { "Open in window", "Add subtask" }.Where((_, i) => shown <= i + 1).ToList(), visible);
+            Assert.Equal(new[] { shown <= 1 ? "Open in window" : null, TasksWindow.ReevaluateText, shown <= 2 ? "Add subtask" : null }
+                .OfType<string>().ToList(), visible);
         }
     });
 
@@ -4500,24 +4500,24 @@ public class TasksBoardTests
             changed.OnNext(System.Reactive.Unit.Default);
         }
 
-        Assert.Equal(["Open in window", "Open Claude", "Add subtask"], Words());
+        Assert.Equal(["Open in window", "Open Claude", TasksWindow.ReevaluateText, "Add subtask"], Words());
         Becomes(SessionState.Idle);
-        Assert.Equal(["Open in window", "Open Claude", "Add subtask"], Words());
+        Assert.Equal(["Open in window", "Open Claude", TasksWindow.ReevaluateText, "Add subtask"], Words());
         // Ended: Open Claude resumes it, so no second button beside it (the screenshot's case).
         Becomes(SessionState.Ended);
-        Assert.Equal(["Open in window", "Open Claude", "Add subtask"], Words());
+        Assert.Equal(["Open in window", "Open Claude", TasksWindow.ReevaluateText, "Add subtask"], Words());
         // Expired: nothing left to open, so the start button stands in Open Claude's place.
         Becomes(SessionState.Expired);
         Assert.Equal(["Open in window", "Start Claude on this", "Add subtask"], Words());
     });
 
-    // Task 3dd07539: Reevaluate. A Claude task waiting on Petre has the button in its line's last slot (a full line shows
-    // it) and in its open thread's row only while the line does not show it; a click asks the session (Reevaluations) and
-    // writes Deskbar's line. A Claude task in progress has no button but its menu has the item; a note has neither.
+    // Task 3dd07539 (Petre, on Reevaluate in the "⋯" menu: "move it as a button at the top"): an open Claude task's thread
+    // has Reevaluate in its row of buttons at the top, waiting on him or in progress, at every width, and the line and
+    // the "⋯" menu have none. A click asks the session (Reevaluations) and writes Deskbar's line. A note has no button.
     [Theory]
     [InlineData(Wide)]
     [InlineData(TasksPanelLayout.DefaultWidth)]
-    public void Reevaluate_on_a_waiting_Claude_task(double width) => StaThread.Run(() =>
+    public void Reevaluate_is_a_button_at_the_top_of_a_Claude_task(double width) => StaThread.Run(() =>
     {
         using var t = Build(width: width, startClaude: _ => { }, openSession: (_, _) => Result.Success());
         var waiting = t.Tasks.Create("Usage limit", t.Gepha, Session("s1")).Value.Id;
@@ -4527,25 +4527,32 @@ public class TasksBoardTests
         var heard = new List<Guid>();
         using var _ = t.Tasks.Reevaluations.Subscribe(heard.Add);
         t.Controller.Show();
+        WrapPanel Row() => Inside(t.Window).OfType<WrapPanel>().Single(p => TasksWindow.ThreadActionsTag.Equals(p.Tag));
+        Button? RowButton() => Row().Children.OfType<Button>()
+            .SingleOrDefault(b => AutomationProperties.GetName(b) == TasksWindow.ReevaluateText && b.Visibility == Visibility.Visible);
+
+        new[] { waiting, working }.ToList().ForEach(id =>
+        {
+            t.Controller.ToggleThread(id);
+            t.Window.UpdateLayout();
+            Assert.Equal(Visibility.Visible, Row().Visibility);
+            Assert.NotNull(RowButton());
+            Assert.False(HasButton(LineOf(t.Window, id), TasksWindow.ReevaluateText));
+            var menu = t.Window.OpenMenuFor(id);
+            Assert.DoesNotContain(TasksWindow.ReevaluateText, MenuWords(menu));
+            menu.IsOpen = false;
+            t.Controller.ToggleThread(id);
+        });
+        t.Controller.ToggleThread(note);
+        t.Window.UpdateLayout();
+        Assert.Null(RowButton());
+        t.Controller.ToggleThread(note);
+
         t.Controller.ToggleThread(waiting);
         t.Window.UpdateLayout();
-
-        var onLine = t.Window.LineButtonsShown(waiting) > 7;
-        Console.WriteLine($"MEASURED {width}: line shows {t.Window.LineButtonsShown(waiting)} of 8");
-        Assert.Equal(width >= Wide, onLine);
-        var row = Inside(t.Window).OfType<WrapPanel>().Single(p => TasksWindow.ThreadActionsTag.Equals(p.Tag));
-        var inRow = row.Children.OfType<Button>().Any(b => AutomationProperties.GetName(b) == TasksWindow.ReevaluateText && b.Visibility == Visibility.Visible);
-        Assert.NotEqual(onLine, inRow);
-        Assert.False(HasButton(LineOf(t.Window, working), TasksWindow.ReevaluateText));
-        Assert.False(HasButton(LineOf(t.Window, note), TasksWindow.ReevaluateText));
-
-        Click(row.Children.OfType<Button>().Concat(Inside(LineOf(t.Window, waiting)).OfType<Button>())
-            .First(b => AutomationProperties.GetName(b) == TasksWindow.ReevaluateText && b.IsVisible));
+        Click(RowButton()!);
         Assert.Equal([waiting], heard);
         Assert.Equal(TaskService.ReevaluateNote, t.Tasks.Board.Tasks.Single(x => x.Id == waiting).Comments.Last().Markdown);
-
-        Assert.Contains(TasksWindow.ReevaluateText, MenuWords(t.Window.OpenMenuFor(working)));
-        Assert.DoesNotContain(TasksWindow.ReevaluateText, MenuWords(t.Window.OpenMenuFor(note)));
     });
 
     static bool HasButton(object scope, string name) => Inside(scope).OfType<Button>().Any(b => AutomationProperties.GetName(b) == name);

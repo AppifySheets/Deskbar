@@ -737,9 +737,9 @@ each but the expired ones with Open. `deskbar.cmd task go|start|open-session` do
 When a Claude task looks stale, say it still asks you to merge a pull request you merged an hour ago, press
 Reevaluate. The task's session wakes up (an idle or ended one too, the way a comment reaches it), checks where the
 task really stands with gh and git, and puts right what is out of date: it settles a question that is already
-answered, marks finished work done and rewrites an old status line. The button sits on the line of every Claude
-task waiting on you (its last button, on a wide panel) and in its open thread, and "Reevaluate" is on the menu of
-every Claude task. `deskbar.cmd task reevaluate <id>` does the same from a script.
+answered, marks finished work done and rewrites an old status line. The button sits in the row of buttons at the
+top of an open Claude task, next to Open Claude, and "Reevaluate" is on the bar's right-click menu of a Claude task.
+`deskbar.cmd task reevaluate <id>` does the same from a script.
 Every session Deskbar starts on a task names its model, so it does not follow whatever model your Claude Code
 settings hold that day: Opus until you choose another with `deskbar.cmd claude-model <name>` (an alias such as
 `sonnet` or `fable`, or a model's full name; without a name it says what is set), and
