@@ -88,8 +88,9 @@ public partial class FloatingBar
     // Frozen, as every static brush on this bar must be (CLAUDE.md, "Static WPF brushes must be frozen").
     static readonly Brush ChipOutline = Frozen(0x80, 0xFF, 0xFF, 0xFF);
     static readonly Brush ChipLinkDot = Frozen(0xC0, 0xFF, 0xFF, 0xFF);
-    // Light enough that a black favicon reads as lit on the dark row, not so light that a white one vanishes into it.
-    static readonly Brush ChipOpenBacking = Frozen(0x90, 0xFF, 0xFF, 0xFF);
+    // A faint lift, enough that a black favicon reads as lit on the dark row. At 0x90 it was a white tile, and Petre:
+    // "white background of github looks bad".
+    static readonly Brush ChipOpenBacking = Frozen(0x38, 0xFF, 0xFF, 0xFF);
     // Bright and solid, so it reads as a bar between the windows and the chips. At 0x55 it was lost beside the dashed
     // outline 2 DIP away: Petre, on the first live try, "vertical bar between them, please".
     static readonly Brush ChipDivider = Frozen(0xC8, 0xFF, 0xFF, 0xFF);
