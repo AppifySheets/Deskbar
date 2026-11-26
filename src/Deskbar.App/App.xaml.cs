@@ -1772,6 +1772,7 @@ public partial class App : Application
                 Link: url => ProgramStarter.Start(new ProgramLaunch(url, [], null))),
             () => floatingBar?.OpenAppIds ?? new HashSet<string>(),
             LinkWindowSource.For(monitor, desktops, Dispatcher, ClickTrace.On ? ClickTrace.Write : null));
+        HealPackagedBookmarks(manager);
 
         // The remote control: other processes (an agent setting up a worktree, a script) asking this
         // instance to list, create and move. Opened once the manager has loaded state and seen the
@@ -3177,6 +3178,34 @@ public partial class App : Application
     {
         floatingBar!.ShowBar();
         PinFloatingBar(barHandle);
+    }
+
+    // Turns a packaged program's old Program bookmark (exe in one version's WindowsApps folder, plus whatever command
+    // line its window was started with) into the App bookmark the window's menu makes now (Deskbar task e7fb8e04:
+    // the Teams chip replayed "msteams:system-initiated" and Teams stayed in the tray). The families are collected
+    // here, looked up through the package manager on a pool thread, and the answers applied back on this thread,
+    // which owns the manager. A start with no such bookmark does nothing at all; a lookup that fails leaves the
+    // bookmark as it was, to be tried again at the next start. Inside the Store package the lookup may need the
+    // packageQuery capability, which the package does not declare; there it fails into "no answer" and heals nothing,
+    // which is harmless (the window's menu still makes App bookmarks).
+    void HealPackagedBookmarks(WorkspaceManager manager)
+    {
+        var families = manager.State.Workspaces.SelectMany(w => w.Bookmarks)
+            .Select(Core.Bookmarks.BookmarkCandidates.PackageToHeal).OfType<string>()
+            .Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        if (families.Count == 0) return;
+        var sources = new Windows.Shell.ShellBookmarkSources();
+        Task.Run(() => families.ToDictionary(f => f, sources.AppIdOfPackage, StringComparer.OrdinalIgnoreCase))
+            .ContinueWith(done =>
+            {
+                if (!done.IsCompletedSuccessfully) return;
+                var ids = done.Result;
+                Dispatcher.BeginInvoke(() =>
+                {
+                    ClickTrace.Write($"bookmarks: healing packaged programs {string.Join(", ", ids.Select(p => $"{p.Key} -> {p.Value ?? "none"}"))}");
+                    manager.HealBookmarks(b => Core.Bookmarks.BookmarkCandidates.Healed(b, f => ids.GetValueOrDefault(f)));
+                });
+            }, TaskScheduler.Default);
     }
 
     // The user gesture: the button on the bar, "Minimize bar" on either of the bar's own menus, or

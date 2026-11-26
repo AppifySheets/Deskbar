@@ -188,21 +188,12 @@ public static class LaunchCatalog
     static string ProgramOf(StartMenuApp app) =>
         app.TargetPath ?? (app.ParsingName.Split('!') is [var family, ..] ? family : app.ParsingName);
 
-    static bool IsPackaged(string path) => path.Contains(@"\WindowsApps\", StringComparison.OrdinalIgnoreCase);
+    static bool IsPackaged(string path) => PackagedPaths.IsPackaged(path);
 
     static bool IsFrameHost(string path) => Path.GetFileName(path).Equals("ApplicationFrameHost.exe", StringComparison.OrdinalIgnoreCase);
 
-    // "...\WindowsApps\Microsoft.Windows.Photos_2025.11010.4001.0_x64__8wekyb3d8bbwe\Photos.exe" becomes
-    // "Microsoft.Windows.Photos_8wekyb3d8bbwe": the package name (before the first '_') and the publisher id
-    // (after "__"), which is what an AppUserModelID starts with.
-    static string? Family(string path)
-    {
-        var folder = path.Split('\\').SkipWhile(p => !p.Equals("WindowsApps", StringComparison.OrdinalIgnoreCase)).Skip(1).FirstOrDefault();
-        if (folder is null) return null;
-        var nameEnd = folder.IndexOf('_');
-        var publisher = folder.LastIndexOf("__", StringComparison.Ordinal);
-        return nameEnd < 0 || publisher < 0 ? null : $"{folder[..nameEnd]}_{folder[(publisher + 2)..]}";
-    }
+    // A packaged program's family name, which is what an AppUserModelID starts with (PackagedPaths).
+    static string? Family(string path) => PackagedPaths.FamilyOf(path);
 
     // Arguments split the way Windows programs split them for the common cases: on spaces, with double quotes
     // grouping. Enough to find a path argument; nothing here is replayed except a path that exists.

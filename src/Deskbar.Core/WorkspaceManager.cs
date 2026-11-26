@@ -1868,6 +1868,30 @@ public sealed class WorkspaceManager(
         BookmarkInList(workspaceId, bookmarkId)
             .Tap(_ => ReplaceBookmarks(workspaceId, list => list.Where(b => b.Id != bookmarkId).ToList()));
 
+    // Rewrites every bookmark `heal` changes, in every workspace, in ONE persist, and only when something changed, so
+    // a start with nothing to heal writes nothing. Used once at start to turn a packaged program's old Program bookmark
+    // into an App one (BookmarkCandidates.Healed, Deskbar task e7fb8e04). Ids and order are kept.
+    //
+    // Healing can make two bookmarks of one workspace open the same thing: two Teams Program bookmarks that differed
+    // only in their arguments (one saved from the autostarted Teams, one from a Teams started by hand) both become
+    // the App "MSTeams_8wekyb3d8bbwe!MSTeams". AddBookmark refuses such a pair, so the first in row order is kept and
+    // the later one dropped, as if it had never been added.
+    public void HealBookmarks(Func<Bookmark, Bookmark> heal)
+    {
+        var healed = State.Workspaces.Select(w => w with
+        {
+            Bookmarks = w.Bookmarks.Select(heal)
+                .Aggregate(new List<Bookmark>(), (kept, b) =>
+                {
+                    if (!kept.Exists(k => BookmarkRules.SameTarget(k, b))) kept.Add(b);
+                    return kept;
+                })
+                .ToValueList(),
+        }).ToList();
+        if (healed.Zip(State.Workspaces).Any(p => !p.First.Bookmarks.SequenceEqual(p.Second.Bookmarks)))
+            Persist(State with { Workspaces = healed });
+    }
+
     // Empty when the workspace or the bookmark is gone, so a caller holding a stale id just finds nothing.
     public Maybe<Bookmark> BookmarkOf(Guid workspaceId, Guid bookmarkId) =>
         BookmarkInList(workspaceId, bookmarkId).Match(b => Maybe.From(b), _ => Maybe<Bookmark>.None);

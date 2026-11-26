@@ -61,6 +61,54 @@ public sealed class ShellBookmarkSources : IBookmarkSources
 
     public string? NameOfApp(string appId) => new ShellTaskbarPins().NameOfApp(appId);
 
+    // A packaged process's AppUserModelID, from the process itself (GetApplicationUserModelId). Measured on Petre's
+    // machine for new Teams (Deskbar task e7fb8e04): its window has no id, its process answers
+    // "MSTeams_8wekyb3d8bbwe!MSTeams". PROCESS_QUERY_LIMITED_INFORMATION is enough and is granted for the user's own
+    // processes. An unpackaged process answers APPMODEL_ERROR_NO_APPLICATION, which is null here like any failure.
+    public string? AppIdOfProcess(int processId)
+    {
+        var process = OpenProcess(ProcessQueryLimitedInformation, false, (uint)processId);
+        if (process == 0) return null;
+        try
+        {
+            var length = 256u;
+            var id = new StringBuilder((int)length);
+            return GetApplicationUserModelId(process, ref length, id) == 0 && id.ToString() is { Length: > 0 } text ? text : null;
+        }
+        finally
+        {
+            CloseHandle(process);
+        }
+    }
+
+    // The one Start menu app of an installed package family, through the package manager for the current user (no
+    // admin needed for one's own packages). A family that lists several apps answers null: nothing says which of
+    // them a bookmark on one exe meant. Read off the UI thread by the caller; it can take a moment.
+    public string? AppIdOfPackage(string family)
+    {
+        try
+        {
+            var package = new global::Windows.Management.Deployment.PackageManager().FindPackagesForUser("", family).FirstOrDefault();
+            var entries = package?.GetAppListEntries();
+            return entries is { Count: 1 } && entries[0].AppUserModelId is { Length: > 0 } id ? id : null;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    const uint ProcessQueryLimitedInformation = 0x1000;
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    static extern nint OpenProcess(uint access, bool inheritHandle, uint pid);
+
+    [DllImport("kernel32.dll")]
+    static extern bool CloseHandle(nint handle);
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode)]
+    static extern int GetApplicationUserModelId(nint process, ref uint length, StringBuilder id);
+
     // At most 64 KB. Read as bytes and decoded by a StreamReader so a byte-order mark is honoured.
     public string? ReadText(string path)
     {
