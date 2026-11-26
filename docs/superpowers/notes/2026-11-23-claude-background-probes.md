@@ -60,6 +60,10 @@ Task 607af1db. A probe `claude --bg` session (`258ba9da`) started `sleep 240` wi
   still showing `done`;
 - at 05:35:00, that turn over: `idle`, `done`.
 
+A second probe (`21652d63`) did the same with `sleep 90` but ended its turn by asking a question in plain text. It read
+`busy`, `working` during the turn (05:39:40), `busy`, `blocked` from the end of the turn until the sleep finished
+(05:39:44), `busy`, `working` for the notification's turn (05:41:13), and `idle`, `blocked` after it (05:41:15).
+
 So `status` alone cannot tell a turn in flight from a session that only waits on a job of its own; `state` can.
 `ClaudeAgent.TurnOver` reads it, and a Closed task's session is stopped by it (`SessionKeeper.Stops`).
 
