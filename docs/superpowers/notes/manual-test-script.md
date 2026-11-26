@@ -1612,3 +1612,17 @@ DT2. Restart Deskbar with several Done tasks that have pull requests: they show 
      its own within a second or two of the next, rather than all at once at the end.
 DT3. With gh signed out (`gh auth logout`, then log back in afterwards), restart: those Done tasks keep the full tick, as
      before this change, since Deskbar cannot ask.
+
+## The bar's top and the strips are frosted
+
+(Task d52ca36e.) See-through on in Manage, a picture wallpaper laid Fill, the window list on the screens.
+
+BT1. Docked bar: the top (Start, search, pinned apps) shows the blurred wallpaper under the same veil as the idle rows,
+     with no seam between the top and the first row. The footer stays flat.
+BT2. Undock the bar and drag it: the top frosts with the rows and slides with them; the bar's rounded top corners stay
+     clean, and docked again its top corners are square with no sliver of sharp picture in them.
+BT3. Every screen's strip shows its own screen's wallpaper, blurred, under the veil; tabs, the name tag and the active
+     tab's fill read as before. With tracing on, each strip writes one `strip frost:` line.
+BT4. Change the wallpaper: within a second or two the strips and the bar show the new one. Move Manage's blur slider:
+     both follow it.
+BT5. Untick see-through in Manage: the strips and the bar's top go flat at once; tick it again and the frost returns.

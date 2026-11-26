@@ -11,6 +11,8 @@ The current workspace's windows, with their titles, sit in a thin strip along th
 
 Each screen's strip holds that screen's windows of the workspace you are in, and maximized windows stop below it. The active window's title is white and the rest are dimmer. Pinned windows carry a pin glyph.
 
+The strip stands on its screen's wallpaper, blurred, like the bar's rows. It turns flat with the see-through setting in Manage off, and over a solid-colour or tiled wallpaper.
+
 A full-screen window, such as a maximized Remote Desktop session, a video or a browser in F11, covers the whole screen, strip included. The strip goes behind it while it is in front and comes back when you switch to another window on that screen or the full-screen window closes.
 
 The strip is one of three places the window list can go. The **Window list** submenu, on any row's menu and on the bar's background menu, picks the place:

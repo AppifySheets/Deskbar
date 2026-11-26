@@ -39,10 +39,12 @@
          outside this Border stay clear; nothing inside the Border is see-through any more. Do not add an
          opacity setting to bring it back: that reopens the same legibility problem. -->
     <!-- Transparent, and what the bar stands on is the three layers below (FloatingBar.Surface.cs): the top (Start,
-         search, pinned apps) and the footer (stats, tray, clock) flat and opaque, and the band behind the workspace
+         search, pinned apps) and the footer (stats, tray, clock) were flat and opaque, and the band behind the workspace
          rows see-through at 85% (Petre, 2026-11-22: "too black", then, shown it over his wallpaper, "let's take that
-         instead, 85%"). The decision above still holds where it mattered: rows used lately stand on the fade's
-         opaque plate, and only idle rows let 15% of the desktop through. Transparent rather than null, so a press on
+         instead, 85%"). Since Deskbar task d52ca36e the top wears the band's paint too, frost and all (Petre, of the
+         flat top: "i want to make this like the rest of the bar"); only the footer stays flat. The decision above
+         still holds where it mattered: rows used lately stand on the fade's opaque plate, and only idle rows and the
+         top's icons stand on the see-through band. Transparent rather than null, so a press on
          the bar's bare background still hits the bar. -->
     <Border x:Name="Root" CornerRadius="8" Background="Transparent" Padding="4">
         <!-- No "Hide floating bar" menu any more. Petre: "show floating bar doesn't make

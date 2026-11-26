@@ -39,10 +39,12 @@ public sealed class ScreenStrip : Window
     // breathing room and the 2 DIP underline. Turned into the screen's pixels at the screen's own scale, so 36 px at 150%.
     public const double HeightDip = 24;
 
-    // The bar's own flat surface (BarSurface.Solid), so a strip reads as part of Deskbar; flat because the see-through band
-    // belongs to the workspace rows alone (FloatingBar.Surface.cs) and a strip is the taskbar's kind of thing. And the tag's grey
-    // for an unnamed desktop, which has no workspace colour. Frozen, as every static brush must be (CLAUDE.md, traps):
-    // an unfrozen one takes the affinity of the first thread that touches it and throws on the next. BarSurface's are.
+    // The bar's own flat surface (BarSurface.Solid), so a strip reads as part of Deskbar. Flat only while there is no
+    // frost: since Deskbar task d52ca36e (Petre, of the bar's top: "i want to make this like the rest of the bar; and the
+    // top bar too") a strip stands on its screen's wallpaper, frosted, under the band's veil, like the bar (ShowFrost).
+    // And the tag's grey for an unnamed desktop, which has no workspace colour. Frozen, as every static brush must be
+    // (CLAUDE.md, traps): an unfrozen one takes the affinity of the first thread that touches it and throws on the next.
+    // BarSurface's are.
     static readonly Brush StripBackground = BarSurface.Solid;
     static readonly Brush NeutralTag = Frozen(Color.FromArgb(0xFF, 0x3A, 0x3F, 0x49));
 
@@ -62,6 +64,35 @@ public sealed class ScreenStrip : Window
     internal Border NameTag { get; }
 
     readonly TextBlock nameText;
+
+    // The window's content, which carries the strip's top layer: the flat base without frost, the band's veil over one.
+    // Never transparent, so the free space right of the last tab stays hit-testable (see the constructor).
+    readonly Border root;
+
+    // THE STRIP'S FROST (Deskbar task d52ca36e). A strip is an app bar along its screen's top edge, so, like the docked
+    // bar, the only thing ever behind it is the wallpaper: the bar cuts that strip of the picture, frosts it
+    // (FloatingBar.StripFrost.cs) and hands it here. The frost is the WINDOW's background and the veil (BarSurface.FrostVeil,
+    // the rows band's half) is the root's, so the strip reads exactly as the bar's rows do. The window is not layered, so a
+    // see-through background would show black: there is no 85% fallback here, only the frost or the flat base.
+    //
+    // What the frost on show was made from, so the bar's twice-a-second check can tell nothing changed (MakeFrost compares
+    // it). Null while the strip is flat.
+    internal FloatingBar.FrostSource? FrostSource { get; private set; }
+
+    // The last reason this strip went without frost, so the trace says it once and not on every check.
+    internal string? FrostFallback { get; set; }
+
+    // What the last frost that failed was cut from (FloatingBar.StripFrost.cs), so a check where nothing changed skips
+    // decoding the picture again. Null after a frost, after the setting went off, and when Windows named no picture.
+    internal FloatingBar.FrostSource? FrostFailedFor { get; set; }
+
+    // Puts a frost on the strip (its source and its brush, frozen), or takes it off (nulls).
+    internal void ShowFrost(FloatingBar.FrostSource? source, Brush? frost)
+    {
+        FrostSource = frost is null ? null : source;
+        Background = frost ?? StripBackground;
+        root.Background = frost is null ? StripBackground : BarSurface.FrostVeil;
+    }
 
     // How the strip docks: the shell's app bar in the app, a recording fake in the tests, so no test ever reserves a
     // strip of a real screen (that moves every maximized window on it). Arguments and answer as AppBar.Dock's.
@@ -193,7 +224,7 @@ public sealed class ScreenStrip : Window
 
         // The root carries the background, so the free space to the right of the last tab is hit-testable and a
         // right-click there reaches OnRightButtonUp.
-        var root = new Border { Background = StripBackground, Child = Row };
+        root = new Border { Background = StripBackground, Child = Row };
         // MouseUp, not MouseRightButtonUp: the button-specific events are DIRECT events, raised on each element as the
         // bubbling MouseUp passes it, so the bubbling one is the event that really travels from a tag or a tab up here.
         root.MouseUp += OnRightButtonUp;

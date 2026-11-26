@@ -23,7 +23,7 @@ The Settings tab has three sections, and each change applies at once.
 
 The Deskbar on this PC section has the boxes **Start Deskbar with Windows**, **Check GitHub for new versions** and **Teach Claude Code about Deskbar**. The GitHub copy's autostart records the path of the exe you ran it from, so pick a permanent home for the exe before you tick it. The Microsoft Store copy starts through a startup task instead, and its update box checks the Store rather than GitHub.
 
-The section for the bar has **Dock the bar to the edge of its screen**, the see-through band behind the workspace rows (on unless you untick it; it shows your wallpaper blurred, docked or floating, and keeps 85% of the bar's colour where there is no single picture to show), what the bottom strip shows, and the sliders:
+The section for the bar has **Dock the bar to the edge of its screen**, the see-through band behind the workspace rows and the bar's top (on unless you untick it; it shows your wallpaper blurred, docked or floating, and keeps 85% of the bar's colour where there is no single picture to show; the strips along the top of each screen show their screen's wallpaper blurred too, and turn flat with it off), what the bottom strip shows, and the sliders:
 
 - how faint the bar goes once the pointer is elsewhere;
 - how long it waits before dimming, and how long the dimming takes;

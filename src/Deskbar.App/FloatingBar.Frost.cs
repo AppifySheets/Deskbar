@@ -32,9 +32,9 @@ namespace Deskbar.App;
 //   3. That part is cut, shrunk to half and frosted (Frost.Apply: blurred by Manage's slider, 8 screen pixels unless
 //      moved, colour lifted by 1.6), then eased out of the untouched picture across the side facing the desktop
 //      (Frost.Ease), and painted on FrostSurface, which covers the whole bar.
-//   4. The top and the footer stay opaque over it (TopSurface, FootSurface), recent rows keep their opaque plate,
-//      and the rows band lays BarSurface.FrostVeilFrom (half the bar's colour, easing in from the inner edge the
-//      same way) over the frost, so the captions read.
+//   4. The footer stays opaque over it (FootSurface), recent rows keep their opaque plate, and the rows band and the
+//      top (Start, search, pinned apps; TopSurface, since Deskbar task d52ca36e) lay BarSurface.FrostVeilFrom (half
+//      the bar's colour, easing in from the inner edge the same way) over the frost, so the captions read.
 //
 // The first frost blurred by about 28 screen pixels with a hard inner edge. Petre, on his laptop: "it's too blurry",
 // "make it a setting?", "ease into it" (the edge), "make edges less pronounced". Hence the slider (FrostBlur) and
@@ -125,6 +125,10 @@ public partial class FloatingBar
 
     async Task RefreshFrost()
     {
+        // The screen strips' frost rides on the same check (FloatingBar.StripFrost.cs), started before any of the bar's
+        // own reasons to stop below: a strip's frost does not depend on where the bar is docked, or whether it is shown.
+        _ = RefreshStripFrost();
+
         var generation = ++frostGeneration;
         var hwnd = new WindowInteropHelper(this).Handle;
 
@@ -196,9 +200,9 @@ public partial class FloatingBar
         WallpaperCrop.Rect bar, WallpaperCrop.Rect screen, double blur, bool fromLeft, double ease, bool floating, FrostSource? previous)
     {
         if (DesktopWallpaper.On(screen) is not { HasValue: true } found)
-            return Result.Failure<FrostImage?>("Windows reports no picture file for the bar's screen");
+            return Result.Failure<FrostImage?>("Windows reports no picture file for this screen");
         var wallpaper = found.Value;
-        var source = new FrostSource(wallpaper.Path, File.GetLastWriteTimeUtc(wallpaper.Path), wallpaper.Fit, bar, screen, blur, fromLeft, ease, floating);
+        var source = SourceFor(wallpaper, bar, screen, blur, fromLeft, ease, floating);
         if (source == previous) return Result.Success<FrostImage?>(null);
 
         try
@@ -216,6 +220,17 @@ public partial class FloatingBar
             return Result.Failure<FrostImage?>($"the picture would not load ({e.GetType().Name}: {e.Message})");
         }
     }
+
+    // What a frost of `bar` would be made from now, or nothing when Windows names no picture. MakeFrost's own key, also
+    // read on its own by the strips (FloatingBar.StripFrost.cs), which remember the key of a frost that failed and skip
+    // the picture's decode until something in it changes. Runs on a pool thread (a COM call and a file stat).
+    internal static Maybe<FrostSource> SourceFor(
+        WallpaperCrop.Rect bar, WallpaperCrop.Rect screen, double blur, bool fromLeft, double ease, bool floating) =>
+        DesktopWallpaper.On(screen).Map(wallpaper => SourceFor(wallpaper, bar, screen, blur, fromLeft, ease, floating));
+
+    static FrostSource SourceFor(
+        ScreenWallpaper wallpaper, WallpaperCrop.Rect bar, WallpaperCrop.Rect screen, double blur, bool fromLeft, double ease, bool floating) =>
+        new(wallpaper.Path, File.GetLastWriteTimeUtc(wallpaper.Path), wallpaper.Fit, bar, screen, blur, fromLeft, ease, floating);
 
     static FrostImage? Frosted(BitmapSource picture, WallpaperCrop.Area area, WallpaperCrop.Rect bar, FrostSource source)
     {

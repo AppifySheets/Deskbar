@@ -3,8 +3,9 @@ using System.Windows.Media;
 namespace Deskbar.App;
 
 // THE BAR'S SURFACE: the backgrounds every piece of the bar's family stands on, so they cannot drift apart. Solid, the
-// flat base, is the floating bar's top and footer, the detached stats window, the due card and the screen strips.
-// SeeThrough lies only behind the bar's workspace rows (FloatingBar.Surface.cs), and only while the setting is on
+// flat base, is the floating bar's footer, the detached stats window and the due card, and the bar's top and the screen strips
+// wherever there is no frost (task d52ca36e).
+// SeeThrough lies only behind the bar's workspace rows and its top (FloatingBar.Surface.cs), and only while the setting is on
 // (AppState.SeeThrough).
 //
 // The history. The bar was a flat, fully opaque #141518, and docked at full screen height most of it is empty: Petre,
