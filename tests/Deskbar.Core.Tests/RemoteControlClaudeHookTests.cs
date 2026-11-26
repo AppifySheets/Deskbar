@@ -1339,6 +1339,41 @@ public class RemoteControlClaudeHookTests
         Assert.False(session.Replaced);
     }
 
+    // A SWITCH'S COPY (SettingsSwitch): Claude Code starts it with source "fork" under a new id (measured 2026-11-26). Its
+    // own SessionStart joins it to the task whose switch waits for it, so it is briefed on that task, not offered a
+    // choice; the task keeps its status and the original is replaced by it. A fork elsewhere, or with no switch issued,
+    // joins nothing.
+    [Fact]
+    public void A_switch_s_copy_joins_its_task_from_its_own_session_start()
+    {
+        var manager = Started();
+        Editor(manager, 0x10, "TaskSpaces", "Deskbar");
+        Said(manager, "s1", Repo, "new", "Tasks board");
+        Said(manager, "s1", Repo, "ask", "OK to merge?");
+        var id = Titled("Tasks board").Id;
+        var to = new SessionSettings("sonnet", "low", Maybe<string>.None);
+        Assert.True(tasks.SwitchStarted(id, new PendingSwitch("s1", to, DateTimeOffset.UtcNow)).IsSuccess);
+
+        // Not issued yet: no copy is awaited.
+        Hooked(manager, "SessionStart", session: "c0", source: "fork");
+        Assert.True(tasks.SwitchIssued(id, to).IsSuccess);
+        Hooked(manager, "SessionStart", session: "c1", source: "fork", from: @"C:\repos\Other");
+        var briefing = Hooked(manager, "SessionStart", session: "c2", source: "fork", from: "C:/repos/TaskSpaces/");
+
+        var task = Titled("Tasks board");
+        Assert.DoesNotContain(tasks.Board.Tasks.SelectMany(t => t.Sessions), s => s.Id is "c0" or "c1");
+        Assert.Equal(to, task.Sessions.Single(s => s.Id == "c2").LaunchedWith);
+        Assert.Equal("c2", task.Sessions.Single(s => s.Id == "s1").ReplacedBy.Value);
+        Assert.Equal("c2", task.Switching.Value.CopyId.Value);
+        Assert.Equal(TaskStatus.WaitingOnYou, task.Status);
+        Assert.Contains("Tasks board", briefing);
+        Assert.Contains(task.Comments, c => c.ByDeskbar && c.Markdown.StartsWith("Now on Sonnet · Low.", StringComparison.Ordinal));
+
+        // The original still runs until the copy answers; a SessionStart of its own (a compact) does not put it back.
+        Hooked(manager, "SessionStart", session: "s1", source: "compact");
+        Assert.True(Titled("Tasks board").Sessions.Single(s => s.Id == "s1").Replaced);
+    }
+
     // Ruling 17: SessionStart and UserPromptSubmit from a session a person is at record it as attended, which is what
     // ClaudeSessions adopts; a headless one (`claude -p`, listed by `claude agents` as interactive) never is.
     [Fact]

@@ -116,9 +116,9 @@ public sealed class JsonTaskStore(string baseDirectory, Action<string>? trace = 
     // A session's model, effort and permission mode (SessionSettings), each null when not set.
     sealed record SettingsDto(string? Model, string? Effort, string? Mode);
 
-    // A switch under way (TaskItem.Switching): the session it copies, the settings it switches to, when it began, and
-    // the copy's short id once known.
-    sealed record SwitchDto(string From, SettingsDto To, DateTimeOffset At, string? Copy);
+    // A switch under way (TaskItem.Switching, PendingSwitch): the session it copies, the settings it switches to, when it
+    // was picked, when the copy's resume went out, the copy's short id once printed, and its full id once joined.
+    sealed record SwitchDto(string From, SettingsDto To, DateTimeOffset At, DateTimeOffset? Issued, string? Copy, string? CopyId);
 
     // Asks: TaskComment.Asks (task 968c2216), the question an ask wrote into the thread. Left out of the file unless set,
     // so every other comment is written as before and an older build simply drops it (the comment stays, as a plain one).
@@ -330,7 +330,9 @@ public sealed class JsonTaskStore(string baseDirectory, Action<string>? trace = 
             t.Wanted.HasValue ? SettingsOf(t.Wanted.Value) : null,
             t.Switching.HasValue
                 ? new SwitchDto(t.Switching.Value.FromSession, SettingsOf(t.Switching.Value.To), t.Switching.Value.At.ToUniversalTime(),
-                    t.Switching.Value.CopyShortId.HasValue ? t.Switching.Value.CopyShortId.Value : null)
+                    t.Switching.Value.Issued.HasValue ? t.Switching.Value.Issued.Value.ToUniversalTime() : null,
+                    t.Switching.Value.CopyShortId.HasValue ? t.Switching.Value.CopyShortId.Value : null,
+                    t.Switching.Value.CopyId.HasValue ? t.Switching.Value.CopyId.Value : null)
                 : null);
 
     static SettingsDto SettingsOf(SessionSettings s) =>
@@ -391,7 +393,13 @@ public sealed class JsonTaskStore(string baseDirectory, Action<string>? trace = 
             // A switch whose session is gone from the task (a hand edit) names nothing to finish, so it reads as none.
             Switching = d.Switching is { } switching && (d.Sessions ?? []).Any(s => s.Id == switching.From)
                 ? new PendingSwitch(switching.From, SettingsFrom(switching.To), switching.At.ToUniversalTime())
-                    { CopyShortId = string.IsNullOrWhiteSpace(switching.Copy) ? Maybe<string>.None : switching.Copy }
+                {
+                    Issued = switching.Issued is { } issued ? issued.ToUniversalTime() : Maybe<DateTimeOffset>.None,
+                    CopyShortId = string.IsNullOrWhiteSpace(switching.Copy) ? Maybe<string>.None : switching.Copy,
+                    // A joined copy the task no longer holds (a hand edit) names nothing to confirm or revert.
+                    CopyId = !string.IsNullOrWhiteSpace(switching.CopyId) && (d.Sessions ?? []).Any(s => s.Id == switching.CopyId)
+                        ? switching.CopyId : Maybe<string>.None,
+                }
                 : Maybe<PendingSwitch>.None,
         };
 
@@ -631,8 +639,9 @@ public sealed class JsonTaskStore(string baseDirectory, Action<string>? trace = 
             : null;
 
     // A switch under way (`switching`): an object with a string `from`, a settings object `to` and a date-time string
-    // `at`, and maybe a string `copy`; anything short of that reads as no switch, since half a record names nothing a
-    // restarted Deskbar could finish.
+    // `at`, and maybe a date-time string `issued` and strings `copy` and `copyId` (an odd-typed one of those reads as not
+    // set); anything short of the first three reads as no switch, since half a record names nothing a restarted Deskbar
+    // could finish.
     sealed class TolerantSwitchConverter : JsonConverter<SwitchDto?>
     {
         public override SwitchDto? Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
@@ -645,10 +654,17 @@ public sealed class JsonTaskStore(string baseDirectory, Action<string>? trace = 
                 && to.Value.ValueKind != JsonValueKind.Undefined && SettingsIn(to.Value) is { } settings
                 && TextIn(root, "at") is { } at
                 && DateTimeOffset.TryParse(at, System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.RoundtripKind, out var when)
-                    ? new SwitchDto(from, settings, when, TextIn(root, "copy"))
+                    ? new SwitchDto(from, settings, when, TimeIn(root, "issued"), TextIn(root, "copy"), TextIn(root, "copyId"))
                     : null;
         }
 
+        static DateTimeOffset? TimeIn(JsonElement root, string name) =>
+            TextIn(root, name) is { } text
+            && DateTimeOffset.TryParse(text, System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.RoundtripKind, out var at)
+                ? at
+                : null;
+
+        public override void Write(Utf8JsonWriter writer, SwitchDto? value, JsonSerializerOptions options)
         {
             if (value is null)
             {
@@ -660,7 +676,9 @@ public sealed class JsonTaskStore(string baseDirectory, Action<string>? trace = 
             writer.WritePropertyName("to");
             WriteSettings(writer, value.To);
             writer.WriteString("at", value.At);
+            if (value.Issued is { } issued) writer.WriteString("issued", issued);
             if (value.Copy is { } copy) writer.WriteString("copy", copy);
+            if (value.CopyId is { } copyId) writer.WriteString("copyId", copyId);
             writer.WriteEndObject();
         }
     }
