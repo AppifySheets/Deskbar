@@ -503,7 +503,8 @@ last left one, at the size you gave it. A script opens one with `deskbar.cmd tas
 
 Tasks can be linked. "Duplicate of…" on a task's menu in the tasks panel closes it as a duplicate of another task
 you pick by typing part of its title, and the closed list says "Duplicate of" that task; "Related to…" links two
-tasks, and both threads list the link. A Claude session looks for the same or related work before it starts, reads
+tasks, and both threads list the link. A note a Claude session leaves for later is linked to the session's task
+the same way, so you can tell what it follows up. A Claude session looks for the same or related work before it starts, reads
 what the linked tasks' sessions did, and closes its own task as a duplicate when the work is already done elsewhere.
 
 A task you cannot do anything about yet can be snoozed. In the tasks panel, the moon beside a line's two toggles

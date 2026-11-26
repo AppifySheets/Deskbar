@@ -12,7 +12,7 @@ namespace Deskbar.Core.Control;
 //   task list [--closed]
 //   task overview                     (one line per open task, for the manager session: TaskOverview)
 //   task show <id>                    (one task as `list` prints it, thread text included)
-//   task add <title>|- [--workspace <name>|none] [--important] [--urgent]
+//   task add <title>|- [--workspace <name>|none] [--important] [--urgent] [--parent <id>] [--session <sid>]
 //   task close <id> [--stop-claude]
 //   task reopen <id>
 //   task status <id> <backlog|in-progress|waiting|done>
@@ -489,7 +489,10 @@ public sealed partial class RemoteControl
         [var extra, ..] => o with { Bad = $"Unexpected '{extra}': a title with spaces needs quotes" },
     };
 
-    ControlReply TaskAdd(TaskService service, string[] args, string? from)
+    // `session`: set when a session typed `task add ... --session <sid>` (SessionTask). The note is then linked as related
+    // to that session's own task, as `task later` is (TaskBoard.AddNoteFrom, task fa1e6a74), and with no --workspace it
+    // may go on that task's workspace (SessionWorkspace's own-task tier). Without it, `add` is the script form, no link.
+    ControlReply TaskAdd(TaskService service, string[] args, string? from, string? session = null)
     {
         var o = ParseAddFrom(args, new TaskAddOptions(null, null, null));
         // Parse and look everything up first, so a refusal happens before the service is touched.
@@ -503,19 +506,23 @@ public sealed partial class RemoteControl
         // spec, after the builder check): a subtask belongs with its parent. `--workspace none` still means none (final
         // review, finding 4), so the parent's workspace is looked up here rather than defaulted by the board.
         var parent = o.Parent is { } p ? service.Board.Find(p).Map(Maybe.From) : Result.Success(Maybe<TaskItem>.None);
+        var quadrant = QuadrantOf.Flags(o.Important, o.Urgent);
         return parent
-            .Bind(up => (up.HasValue && o.Workspace is null ? Result.Success(up.Value.WorkspaceId) : ResolveWorkspace(service, o.Workspace, from))
-                .Bind(workspace => service.AddNote(o.Title!, workspace, QuadrantOf.Flags(o.Important, o.Urgent), up.Map(t => t.Id))))
+            .Bind(up => (up.HasValue && o.Workspace is null ? Result.Success(up.Value.WorkspaceId) : ResolveWorkspace(service, o.Workspace, from, session))
+                .Bind(workspace => session is null
+                    ? service.AddNote(o.Title!, workspace, quadrant, up.Map(t => t.Id))
+                    : service.AddNoteFrom(session, o.Title!, workspace, quadrant, up.Map(t => t.Id))))
             .Match(task => Success(Describe(task)), ControlReply.Fail);
     }
 
     // `none` is a free task, a name is looked up like every other command's, and no name asks the caller (only
     // `add` has a caller to ask; `move` always names its workspace). The caller is asked the way a session's own forms
-    // ask (SessionWorkspace): its VS Code window, else where the latest task in its repo went (task f905b1a7). `add`
-    // carries no session, so there is no own task to ask. Refused only when neither answers.
-    Result<Maybe<Guid>> ResolveWorkspace(TaskService service, string? workspace, string? from) =>
+    // ask (SessionWorkspace): its VS Code window, else where the latest task in its repo went (task f905b1a7). The script
+    // form of `add` carries no session, so there is no own task to ask; `add --session` does (task fa1e6a74). Refused
+    // only when none answers.
+    Result<Maybe<Guid>> ResolveWorkspace(TaskService service, string? workspace, string? from, string? session = null) =>
         workspace is null
-            ? SessionWorkspace(service, Folder(from), Maybe<string>.None).ToResult(NoWorkspaceForTask).Map(Maybe.From)
+            ? SessionWorkspace(service, Folder(from), Maybe.From(session)).ToResult(NoWorkspaceForTask).Map(Maybe.From)
             : workspace.Trim().Equals("none", StringComparison.OrdinalIgnoreCase) ? Maybe<Guid>.None
             : WorkspaceNamed(workspace).Map(w => Maybe.From(w.Id));
 

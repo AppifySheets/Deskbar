@@ -348,7 +348,9 @@ public sealed partial class RemoteControl
     //   task done --session <sid>               the session's clear finish; only the user closes
     //   task comment <markdown> --session <sid> a comment on the session's own task, signed by the session
     //   task comment-settle <id> --session <sid> settle one of the session's own comments (folds away; answered settles them since its ask)
-    //   task later <title> --session <sid>      a Backlog note on the caller's workspace, a follow-up for later
+    //   task later <title> --session <sid>      a Backlog note on the caller's workspace, a follow-up for later, related to
+    //                                           the session's own task when it has one (task fa1e6a74)
+    //   task add <title> [flags] --session <sid> `task add` with its flags, related to the session's own task the same way
     //   task subtask <title> --session <sid>    a Backlog subtask of the session's own task (a sibling when that is a subtask)
     //   task family --session <sid>             the family and linked tasks of the session's own task (subtasks spec)
 //   task pr <url> --session <sid>           a pull request the session opened some other way than `gh pr create`, on its
@@ -357,7 +359,7 @@ public sealed partial class RemoteControl
     //   task relate <id> --session <sid>        links the session's own task to <id> as related
     //   task unrelate <id> --session <sid>      removes that link
     //
-    // Everything but join, new and later acts on the session's OWN task (TaskBoard.TaskOf), which is the spec's rule that
+    // Everything but join, new, later and add acts on the session's OWN task (TaskBoard.TaskOf), which is the spec's rule that
     // a session only settles tasks it is working on: there is no id to point at someone else's. A session with no open
     // task is refused, and nothing changes. `--session` is the hook's session_id, which the briefing hands the session.
     ControlReply SessionTask(TaskService service, string[] args, string session, string? from)
@@ -404,7 +406,11 @@ public sealed partial class RemoteControl
             // refuses another session's or Petre's.
             ["comment-settle", var comment] => Changed(service.Board.FindComment(comment)
                 .Bind(c => service.SettleComment(c.Id, true, session).Map(() => service.Board.Tasks.First(t => t.Comments.Any(x => x.Id == c.Id))))),
-            ["later", var title] => Changed(service.AddNote(title, Here())),
+            // The follow-up is linked as related to the session's own task, when it has one (task fa1e6a74), so the note
+            // says where it came from and the task lists what it left behind.
+            ["later", var title] => Changed(service.AddNoteFrom(session, title, Here())),
+            // `task add` with --session: the script form with its flags, linked the same way as `later` (TaskAdd).
+            ["add", .. var more] => TaskAdd(service, more, from, session),
             // A pull request by its URL (task e7aa49b1). Anything that is not one GitHub pull request link is refused
             // before the task is touched.
             ["pr", var url] => AskedPullRequests.In(url) is [var link]

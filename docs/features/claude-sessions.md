@@ -184,7 +184,7 @@ From PowerShell, pipe the text in:
 'OK to merge?' | & $ts task ask - --session <id>          # waits on you, and the workspace blinks
 & $ts task answered --session <id>                        # the question is settled: back to in progress, the blink stops
 & $ts task done --session <id>
-'Rename the guard' | & $ts task later - --session <id>    # a note on the session's workspace
+'Rename the guard' | & $ts task later - --session <id>    # a note on the session's workspace, related to its task
 'Split the docs' | & $ts task subtask - --session <id>    # a subtask of the session's own task
 & $ts task family --session <id>                          # its task's parent, siblings and their sessions
 ```

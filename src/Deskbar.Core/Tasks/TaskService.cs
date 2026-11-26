@@ -78,6 +78,13 @@ public sealed class TaskService(ITaskStore store, Func<DateTimeOffset> now, Func
             .Map(r => r.Task);
     }
 
+    /// <summary>
+    /// A note a session adds (`task later`, `task add --session`), related to the session's own task when it has one
+    /// (TaskBoard.AddNoteFrom, task fa1e6a74).
+    /// </summary>
+    public Result<TaskItem> AddNoteFrom(string sessionId, string title, Maybe<Guid> workspace, Quadrant quadrant = Quadrant.IV, Maybe<Guid> parent = default) =>
+        Board.AddNoteFrom(sessionId, title, workspace, now(), makeId(), quadrant, parent).Tap(r => Commit(r.Board)).Map(r => r.Task);
+
     /// <summary>A session splits its work (`task subtask`, TaskBoard.AddSubtask).</summary>
     public Result<TaskItem> AddSubtask(string sessionId, string title) =>
         Board.AddSubtask(sessionId, title, now(), makeId()).Tap(r => Commit(r.Board)).Map(r => r.Task);

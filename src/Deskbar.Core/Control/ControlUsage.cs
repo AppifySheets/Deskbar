@@ -72,8 +72,9 @@ public static class ControlUsage
             new("task", "overview", "one line per open task, for a quick look: id, status, flags, workspace, title, status line,\n"
                 + "      question and whether a Claude is working, idle or done; subtasks indented, snoozed ones counted"),
             new("task", "show <id>", "one task in full, its thread included (the JSON of list, for one task)"),
-            new("task", "add <title>|- [--workspace <name>|none] [--important] [--urgent] [--parent <id>]",
-                "add a note to the backlog; without --workspace it goes on the workspace of the VS Code window\n"
+            new("task", "add <title>|- [--workspace <name>|none] [--important] [--urgent] [--parent <id>] [--session <session>]",
+                "add a note to the backlog (with --session, linked as related to that session's own task);\n"
+                + "      without --workspace it goes on the workspace of the VS Code window\n"
                 + "      whose folder holds the caller's own folder, else on the workspace of the\n"
                 + "      latest task worked on in that folder's repo; - reads the title from stdin;\n"
                 + "      --important and --urgent set its flags, and it goes to the top of the quadrant they give"),
@@ -131,7 +132,8 @@ public static class ControlUsage
             new("task", "done --session <session>", "a session marks its own task done; only you close it"),
             new("task", "comment <markdown>|- --session <session>", "a comment on the session's own task, signed by the session"),
             new("task", "later <title>|- --session <session>",
-                "a backlog note on the caller's workspace, a follow-up for later. In every form that takes text, -\n"
+                "a backlog note on the caller's workspace, a follow-up for later, linked as related to the session's\n"
+                + "      own task so it says where it came from. In every form that takes text, -\n"
                 + "      reads the text from stdin (a heredoc in Git Bash): free text never goes on the command line"),
             new("task", "subtask <title>|- --session <session>",
                 "a Claude session splits its work: a backlog subtask of its own task, assigned to Claude so the next\n"
