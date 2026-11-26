@@ -75,6 +75,10 @@ public partial class TasksWindow
     // Open Claude is a small button like the others (OpenClaudeButton).
     const double OpenClaudeColumn = ButtonColumn;
 
+    // The Claude buttons' width: Open Claude alone, or Open Claude and Reevaluate side by side while a line on show has both.
+    double ClaudeColumnFor(IEnumerable<TaskRowView> rows) =>
+        rows.Any(ReevaluatesOnLine) ? 2 * OpenClaudeColumn : OpenClaudeColumn;
+
     static double CommentsColumnFor(IEnumerable<TaskRowView> rows) =>
         rows.Select(r => r.CommentCount > 0 ? ButtonColumn + 3 + 7 * $"{r.CommentCount}".Length : ButtonColumn).DefaultIfEmpty(ButtonColumn).Max();
 
@@ -91,8 +95,9 @@ public partial class TasksWindow
         commentsWidth = new(CommentsColumnFor(shownRows));
         var full = !view.Slim && !view.Matrix;
         // Start Claude, on a task no session has joined, takes the same column as Open Claude (task 59b8f613).
-        actionWidth = new(full && shownRows.Any(r => r.Status == TaskStatus.Closed && !r.Closing) ? ReopenColumn
-            : shownRows.Any(r => OpensClaude(r) || StartsClaude(r)) ? OpenClaudeColumn
+        // Reevaluate beside Open Claude (task 3dd07539) makes the column two buttons wide while any line on show has it.
+        actionWidth = new(full && shownRows.Any(r => r.Status == TaskStatus.Closed && !r.Closing) ? Math.Max(ReopenColumn, ClaudeColumnFor(shownRows))
+            : shownRows.Any(r => OpensClaude(r) || StartsClaude(r)) ? ClaudeColumnFor(shownRows)
             : 0);
         if (columnDrag is null) columnWidths = view.Columns;
     }

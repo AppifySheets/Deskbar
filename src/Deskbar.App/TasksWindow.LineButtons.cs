@@ -44,20 +44,34 @@ public partial class TasksWindow
     const int AddSubtaskSlot = 2;
     const int LineButtonSlots = 7;
 
-    // REEVALUATE IS A BUTTON AT THE TOP OF THE TASK (task 3dd07539; Petre, on a screenshot of it in the "⋯" menu: "move
-    // it as a button at the top"). It sits in the open thread's row of buttons (ThreadActions) on every open Claude task,
-    // always shown, and is neither a slot of the line's strip nor an item of the panel's "⋯" menu. The bar's menu keeps it,
-    // since a bar line has no thread to open.
-    /// <summary>The words of the thread row's button and the bar menu's item (TaskService.Reevaluate).</summary>
+    // REEVALUATE IS AN ICON ON THE LINE, RIGHT AFTER THE CLAUDE ICON (task 3dd07539). Petre first said, of the "⋯" menu's
+    // item, "move it as a button at the top"; put in the open thread's row of buttons, it stood alone on a row of its own
+    // (the line's strip already covers that row's other buttons), and he picked "a refresh icon right after the orange
+    // Claude icon, on every Claude task". So it shares the action column with Open Claude on every line that has Open
+    // Claude (ReevaluateButton, the column twice as wide while one is on show). The thread's row keeps a copy only where
+    // the line cannot show it: a Matrix line (no action column) and a line being edited (FollowLine). The panel's "⋯" menu
+    // has no item; the bar's menu keeps one, since a bar line has neither.
+    /// <summary>The words of the line's icon, the thread row's button and the bar menu's item (TaskService.Reevaluate).</summary>
     internal const string ReevaluateText = "Reevaluate";
 
     internal const string ReevaluateTip =
-        "Ask Claude to check where this task really stands and fix it: settle a question already answered, mark finished work done, rewrite an old status line";
+        "Reevaluate: ask Claude to check where this task really stands and fix it: settle a question already answered, mark finished work done, rewrite an old status line";
 
-    // Whether an open thread's row offers Reevaluate: an open task a Claude session has worked on (nobody to ask without one;
-    // a closed task is history, Reopen comes first).
+    // Whether Reevaluate is offered: an open task a Claude session has worked on (nobody to ask without one; a closed task
+    // is history, Reopen comes first). The line and the row add their own condition: beside Open Claude, where there is a
+    // session to reach.
     bool Reevaluates(TaskRowView row) =>
         row.Claudes && row.Status != TaskStatus.Closed && !row.Closing && Actions?.Reevaluate is not null;
+
+    // Whether a line's action column carries Reevaluate after Open Claude (and so is two buttons wide).
+    bool ReevaluatesOnLine(TaskRowView row) => OpensClaude(row) && Reevaluates(row);
+
+    // The line's Reevaluate icon: Segoe's "Refresh", U+E72C, in both icon fonts, quiet like the line's other buttons.
+    Button? ReevaluateButton(TaskRowView row) =>
+        ReevaluatesOnLine(row)
+            ? Small(new TextBlock { Text = "", FontFamily = IconFont, FontSize = 12, Foreground = Ink, VerticalAlignment = VerticalAlignment.Center },
+                ReevaluateText, () => Actions?.Reevaluate?.Invoke(row.Id), ReevaluateTip)
+            : null;
 
     /// <summary>The words of the menu item and the line's button, which open the assignee's choices.</summary>
     internal const string AssignToText = "Assign to";
@@ -236,6 +250,8 @@ public partial class TasksWindow
             ThreadAddSubtaskText => fitted > AddSubtaskSlot && strip.Children[AddSubtaskSlot] is Button,
             OpenClaudeText => !editing,
             StartClaudeText => !editing && StartsClaude(row),
+            // The line has Reevaluate beside Open Claude (ReevaluateButton), so the row leaves it out, as it does Open Claude.
+            ReevaluateText => !editing,
             _ => false,
         };
         strip.Fitted.Subscribe(fitted =>
