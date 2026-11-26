@@ -5152,6 +5152,74 @@ public class TasksBoardTests
         finally { Directory.Delete(root, true); }
     });
 
+    // Task e5d85e5e: a comment's picture is a small thumbnail (at most 64 DIP tall and 160 wide), however big the
+    // picture, so a screenshot no longer fills the width of its chat bubble.
+    [Fact]
+    public void A_comments_picture_is_a_small_thumbnail() => StaThread.Run(() =>
+    {
+        var root = ScratchRoot();
+        try
+        {
+            using var t = Build(stateDir: root);
+            var id = t.Tasks.AddNote("Bar looks wrong", t.Gepha).Value.Id;
+            var big = TaskImageFiles.Save(root, id, [TaskImageFiles.FromBitmap(Picture(1200, 800)).Value], Start).Value.Single();
+            t.Tasks.Comment(id, Maybe<string>.None, TaskImages.Join("Look", [big]));
+            t.Controller.Show();
+            t.Controller.ToggleThread(id);
+
+            var image = Inside(PictureOf(t.Window)!).OfType<System.Windows.Controls.Image>().Single();
+            Assert.Equal(64, TaskImageRow.MaxHeight);
+            Assert.Equal(TaskImageRow.MaxHeight, image.MaxHeight);
+            Assert.Equal(TaskImageRow.MaxWidth, image.MaxWidth);
+            image.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+            Assert.True(image.DesiredSize.Height <= TaskImageRow.MaxHeight && image.DesiredSize.Width <= TaskImageRow.MaxWidth,
+                $"thumbnail measured {image.DesiredSize}");
+        }
+        finally { Directory.Delete(root, true); }
+    });
+
+    // Task e5d85e5e: the click enlarges the picture in Deskbar's own lightbox, drawn from the picture's own pixels and
+    // maximized over a screen; a picture that cannot be read builds no lightbox (Show then falls back to the viewer).
+    [Fact]
+    public void The_lightbox_shows_the_picture_and_refuses_a_missing_one() => StaThread.Run(() =>
+    {
+        var root = ScratchRoot();
+        try
+        {
+            var relative = TaskImageFiles.Save(root, Guid.NewGuid(), [TaskImageFiles.FromBitmap(Picture(300, 200)).Value], Start).Value.Single();
+            var path = TaskImages.Resolve(relative, root).Value;
+
+            var window = PictureViewer.Build(path);
+            Assert.NotNull(window);
+            // Created Normal and maximized only once its handle exists and has been moved to the cursor's screen: a
+            // window created Maximized would keep WS_MAXIMIZE through the move and show at the moved-to size.
+            Assert.Equal(WindowState.Normal, window!.WindowState);
+            new System.Windows.Interop.WindowInteropHelper(window).EnsureHandle();
+            Assert.Equal(WindowState.Maximized, window.WindowState);
+            Assert.False(window.ShowInTaskbar);
+            var image = Inside(window).OfType<System.Windows.Controls.Image>().Single(i => Equals(i.Tag, PictureViewer.ImageTag));
+            var source = Assert.IsAssignableFrom<System.Windows.Media.Imaging.BitmapSource>(image.Source);
+            Assert.Equal((300, 200), (source.PixelWidth, source.PixelHeight));
+            window.Close();
+
+            Assert.Null(PictureViewer.Build(Path.Combine(root, "gone.png")));
+        }
+        finally { Directory.Delete(root, true); }
+    });
+
+    // Task e5d85e5e: while the lightbox is open it holds the topmost climbers back like an open menu, and its release
+    // (called from Closed) lets go once, however often it is called.
+    [Fact]
+    public void A_held_lightbox_counts_as_an_open_menu_until_released() => StaThread.Run(() =>
+    {
+        Assert.False(OwnMenus.AnyOpen);
+        var release = OwnMenus.Hold();
+        Assert.True(OwnMenus.AnyOpen);
+        release();
+        release();
+        Assert.False(OwnMenus.AnyOpen);
+    });
+
     // Task b2ff3fb7: a subtask opened in place, inside its parent's thread, has no line of its own, and the line is what
     // draws a task's description. Its thread shows the description's text and its pictures instead, so a screenshot
     // pasted into a task is still there after the task is moved under another.

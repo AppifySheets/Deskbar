@@ -39,6 +39,22 @@ internal static class OwnMenus
 
     public static bool AnyOpen => open > 0;
 
+    // A PICTURE ENLARGED OVER THE SCREEN COUNTS AS A MENU (PictureViewer, task e5d85e5e). Without it the bar, the panel
+    // and the strips climb over the lightbox within a second of it opening. It qualifies under the rule above: it closes
+    // as soon as it loses activation, and PictureViewer releases the hold in Closed, which every way of closing raises,
+    // so the count cannot stick. Hold returns the release; calling it twice releases once.
+    public static Action Hold()
+    {
+        open++;
+        var released = false;
+        return () =>
+        {
+            if (released) return;
+            released = true;
+            open = Math.Max(0, open - 1);
+        };
+    }
+
     // A MENU OPENED AT THE POINTER STILL NEEDS A PLACEMENT TARGET, FOR ITS SCREEN'S SCALING (task 4b6cc9a9).
     //
     // Petre, 2026-11-25, two screenshots from a friend's PC with two screens: a task line's menu on the bar with text
