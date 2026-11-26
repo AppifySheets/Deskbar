@@ -950,12 +950,15 @@ public partial class TasksWindow : Window
         // 59b8f613, TasksWindow.LineButtons.cs). A Matrix line has no room: "⋯" alone, as before.
         var lineActions = compactLines ? null : LineButtons(row, more);
         Control(At(Part.More), (UIElement?)lineActions ?? more);
-        if (row.Closing)
+        // A CLOSED SUBTASK IN ITS PARENT'S THREAD fades the same way (task a78ce57a, ClosedInThread): the line keeps its
+        // tick column, which shows the ticked box (TickOf), and everything else goes to 0.45.
+        var faded = row.Closing || ClosedInThread(row);
+        if (faded)
             grid.Children.OfType<UIElement>().Where(part => Grid.GetColumn(part) != At(Part.Tick)).ToList().ForEach(part => part.Opacity = 0.45);
         // The comments and "…" buttons are quiet until the pointer is on their line, like the bar's quiet controls, and so
         // are the menu's actions beside "⋯". A line in its undo window keeps its own dimming (above): its quiet buttons are
         // not brightened by a hover or a selection (review minor).
-        var quiet = row.Closing ? Array.Empty<UIElement>()
+        var quiet = faded ? Array.Empty<UIElement>()
             : new UIElement?[] { comments, more, openClaude, reevaluate }.OfType<UIElement>().Concat(flags?.Children.OfType<UIElement>() ?? [])
                 .Concat(lineActions?.Children.OfType<Button>().Where(button => !ReferenceEquals(button, more)) ?? []).ToArray();
         Quieten(quiet, loud: false);
@@ -1533,17 +1536,27 @@ public partial class TasksWindow : Window
     UIElement LeftOf(TaskRowView row, string? title = null) =>
         // A parent with open subtasks is refused by the board (task 842e1ba4); the tip says so before the click, and the
         // click's refusal shows on the problem line (TasksBoard.Close reports it).
-        TickOf(row.Id, row.Status, row.Closing, TaskViews.TickTip(row.Claudes, row.SubtaskCount, row.ClaudeWorking), title);
+        TickOf(row.Id, row.Status, row.Closing, TaskViews.TickTip(row.Claudes, row.SubtaskCount, row.ClaudeWorking), title, inThread: row.Nested);
+
+    // A CLOSED SUBTASK MUST LOOK CLOSED IN ITS PARENT'S THREAD (task a78ce57a: "i can't really tell the
+    // subtask is closed"). Inside a thread a closed subtask lost only its tick box and read almost like an open sibling.
+    // It now has what a line in its undo window has (the title struck through, the rest of the line at 0.45), except
+    // that its tick column shows a ticked box where the undo window shows Undo. Only a subtask drawn in a thread
+    // (row.Nested): a top-level closed line, as under the Closed filter where every line is closed, stays as it was.
+    // A line still in its undo window is not this: it has its Undo sign and its own look (row.Closing).
+    static bool ClosedInThread(TaskRowView row) => row.Nested && row.Status == TaskStatus.Closed && !row.Closing;
 
     // The tick box itself, or Undo while the task is in its undo window, or nothing once it is closed: a line's (LeftOf)
     // and a subtask entry's in its parent's thread (SubtaskEntry, task 0eb943d8: "how do i close subtasks?").
     // `title`, on a subtask entry's tick, tells it from its parent line's for screen readers and the tests.
-    UIElement TickOf(Guid id, TaskStatus status, bool closing, string tip, string? title = null) =>
+    // `inThread`: the tick is a subtask's inside its parent's thread, where a closed one shows the ticked box
+    // (ClosedBox, task a78ce57a) instead of nothing.
+    UIElement TickOf(Guid id, TaskStatus status, bool closing, string tip, string? title = null, bool inThread = false) =>
         closing
             // A sign, not a word (Petre: "undo sign instead of text"), the bar's own (FloatingBar.UndoSign).
             ? Small(FloatingBar.UndoSign(12, Ink), title is null ? "Undo" : $"Undo closing {title}", () => Actions?.Undo(id), "Undo", DoubleClickIgnored)
             : status == TaskStatus.Closed
-                    ? new TextBlock()
+                    ? inThread ? ClosedBox(title) : new TextBlock()
                     : Small(new Border
                     {
                         Width = 11,
@@ -1552,6 +1565,36 @@ public partial class TasksWindow : Window
                         BorderThickness = new Thickness(1),
                         CornerRadius = new CornerRadius(3),
                     }, title is null ? "Close" : $"Close {title}", () => Actions?.Close(id), tip);
+
+    // THE TICKED BOX of a closed subtask in its parent's thread (task a78ce57a): the open tick box's own size, edge and
+    // corners (TickOf) with a check mark drawn inside, so the shape alone says "closed" (no colour
+    // is the signal). Not a button: reopening stays in the line's menu. It says "Closed" to the pointer and, by name, to
+    // the tests. The transparent fill makes its whole square hit-testable, so the tooltip shows over the inside as well.
+    static UIElement ClosedBox(string? title)
+    {
+        var box = new Border
+        {
+            Width = 11,
+            Height = 11,
+            BorderBrush = TickEdge,
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(3),
+            Background = Brushes.Transparent,
+            ToolTip = "Closed",
+            // The Border's inside is 9 by 9 DIP: the check runs from the left, down to the foot, and up to the right.
+            Child = new System.Windows.Shapes.Polyline
+            {
+                Points = [new Point(1.5, 4.5), new Point(3.5, 6.5), new Point(7.5, 2)],
+                Stroke = Ink,
+                StrokeThickness = 1.4,
+                StrokeLineJoin = PenLineJoin.Round,
+                StrokeStartLineCap = PenLineCap.Round,
+                StrokeEndLineCap = PenLineCap.Round,
+            },
+        };
+        AutomationProperties.SetName(box, title is null ? "Closed" : $"Closed {title}");
+        return box;
+    }
 
     // The title (on a line being renamed, the box that renames it), and apart from it what goes under it: the description,
     // its pictures and the detail (the question or the status line). Line puts the two in rows of their own, so what is
@@ -1593,7 +1636,9 @@ public partial class TasksWindow : Window
                 FontSize = 12,
                 Foreground = row.Claudes ? ClaudeInk : Ink,
                 TextWrapping = TextWrapping.Wrap,
-                TextDecorations = row.Closing ? TextDecorations.Strikethrough : null,
+                // Struck through in the undo window and, since task a78ce57a, on a closed subtask in its parent's thread. A
+                // decoration on the TextBlock covers the runs the subtask branch below puts in it (breadcrumb, title, count).
+                TextDecorations = row.Closing || ClosedInThread(row) ? TextDecorations.Strikethrough : null,
             };
             // SUBTASKS (Petre's pick A): the parent's name in front of a subtask's title on a full line, "↳" alone on a slim
             // one, and a parent's open subtasks' count after its title, both in the caption grey so the title stays the
@@ -2233,11 +2278,12 @@ public partial class TasksWindow : Window
         // ITS TICK IN FRONT (task 0eb943d8, Petre: "how do i close subtasks?"): a subtask folded into its parent's thread
         // has no line, so no tick and no menu, and opened in place it still had none. The entry now starts with the same
         // tick a line has (TickOf): it closes the subtask with Undo in its place for the undo window, by the board's own
-        // rules (a working Claude offers to stop first). Nothing once it is closed, as on a line.
+        // rules (a working Claude offers to stop first). Once it is closed, the ticked box (task a78ce57a, ClosedBox), in the
+        // same slot, so it still starts at the same x as its open siblings' and a closed one reads as closed.
         // The tick sits in a slot of fixed width, so a closed subtask's entry (no tick) starts at the same x as its open
         // siblings'. A DockPanel, not a horizontal StackPanel: the entry fills what is left, so its text still trims
         // with "…" at the thread's edge rather than being clipped mid-word (review).
-        var slot = new Border { Width = 22, VerticalAlignment = VerticalAlignment.Center, Child = TickOf(sub.Id, sub.Status, sub.Closing, sub.TickTip, sub.Title) };
+        var slot = new Border { Width = 22, VerticalAlignment = VerticalAlignment.Center, Child = TickOf(sub.Id, sub.Status, sub.Closing, sub.TickTip, sub.Title, inThread: true) };
         DockPanel.SetDock(slot, Dock.Left);
         return new DockPanel
         {
