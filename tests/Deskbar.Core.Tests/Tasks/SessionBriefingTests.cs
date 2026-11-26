@@ -104,9 +104,11 @@ public sealed class SessionBriefingTests
         var text = SessionBriefing.Start(Start(), Task("Tasks board"), []);
 
         Assert.Contains("Merge [PR 512](https://github.com/owner/repo/pull/512): CI is green", text);
-        Assert.Contains("when the next move is the user's (a pull request to merge, something to try live before it merges, a decision)", text);
+        Assert.Contains("when the next move is the user's (a pull request to merge, something to try live before it merges, a deploy, a decision)", text);
         Assert.Contains("not while a pull request of yours waits to be merged", text);
-        Assert.Contains($"task answered --session {Sid}, then task done", text);
+        // Task 59d0aac1: the ask's follow-up stops at answered; what comes after the merge is the one ordered rule.
+        Assert.Contains($"Once they have done it, run deskbar.cmd task answered --session {Sid})", text);
+        Assert.DoesNotContain("then task done)", text);
         Assert.DoesNotContain("PR 512 is ready", text);
         Assert.DoesNotContain("(a PR to merge", text);
     }
@@ -120,11 +122,40 @@ public sealed class SessionBriefingTests
     {
         var text = SessionBriefing.Start(Start(), Task("Tasks board"), []);
 
-        Assert.Contains("Once your pull request is merged, the task is done: do not ask the user to test it.", text);
-        Assert.Contains("put what to try in the status line", text);
-        Assert.Contains("the user closes the task once they have tried it and it works", text);
-        Assert.Contains("If your pull request is merged, the task is done", SessionBriefing.ParkedNudge);
+        Assert.Contains("Do not ask the user to test it: put what to try in the status line", text);
+        Assert.Contains("they close the task once it works", text);
         Assert.Contains("task done with what to try in the status line", SessionBriefing.ParkedNudge);
+    }
+
+    // Task 59d0aac1 (from task b63e86cf: an iam.ge session marked its task done at the release, before anything showed
+    // the change running). "Once your pull request is merged, the task is done" and a later "Another app's change: ...
+    // before task done" each read as complete. One ordered rule replaces both, done never comes before deployed, a
+    // deploy a person makes is an ask with a check on a schedule, and every place that said "merged, so done" (the
+    // briefing, both Stop nudges, the stalled nudge, Reevaluate) now waits for the deploy too.
+    [Fact]
+    public void Done_comes_after_one_ordered_merge_release_deploy()
+    {
+        var text = SessionBriefing.Start(Start(), Task("Tasks board"), []);
+
+        Assert.Contains("After the merge, finish in this order: released (if the repository has a release step), deployed, done.", text);
+        Assert.Contains("Never mark done before deployed.", text);
+        Assert.Contains("\"nothing to deploy\" for a change nothing runs", text);
+        Assert.Contains("When a person deploys, or only they can see the evidence, ask (\"Redeploy X\"), check on a schedule, and once it shows: task answered, task deployed, task done.", text);
+        Assert.Contains("In Deskbar's own repository done follows the release.", text);
+        // A task with no pull request (research, an answer) still has a rule for done; a merged change waits for the order.
+        Assert.Contains("(when the work is finished and nothing waits on the user, so not while a pull request of yours waits to be merged; for a merged change, after the order above;", text);
+        Assert.Contains("the code that needs judgement for yourself", text);
+        // The two old rules, each of which read as complete, are gone.
+        Assert.DoesNotContain("the task is done", text);
+        Assert.DoesNotContain("Another app's change", text);
+        Assert.DoesNotContain("the task is done", SessionBriefing.ParkedNudge);
+        Assert.Contains("finish in order: released, deployed", SessionBriefing.ParkedNudge);
+        Assert.Contains("finished and deployed", SessionBriefing.SetAsideNudge("Merge it"));
+        Assert.Contains("the work is finished and deployed (or has nothing to deploy)", SessionBriefing.StalledNudge(Task("Tasks board")));
+        Assert.Contains("not reported deployed", SessionBriefing.Reevaluate(Task("Tasks board")));
+        Assert.Contains("if the work is finished and deployed", SessionBriefing.Regenerate(Task("Tasks board")));
+        // A deploy a person makes is the user's next move, an ask, in the stalled nudge as in the briefing.
+        Assert.Contains("(a pull request to merge, something to try, a deploy, a decision): run", SessionBriefing.StalledNudge(Task("Tasks board")));
     }
 
     // Task 8710ac09: both Stop nudges say they come from Deskbar and are recognised in the prompt a waiter's wake starts,
@@ -164,11 +195,13 @@ public sealed class SessionBriefingTests
         var text = SessionBriefing.Start(Start(), Task("Tasks board"), []);
 
         Assert.Contains("While your pull request is open, keep it on top of its base without being asked", text);
-        Assert.Contains("as soon as the base moves or the pull request conflicts, rebase it onto the latest base", text);
+        Assert.Contains("watch the base until it is merged or closed, and as soon as the base moves or it conflicts, rebase it onto the latest base", text);
+        // Task 59d0aac1: a repository whose CLAUDE.md runs no CI or rebases only before the merge wins over this rule.
+        Assert.Contains("Where the repository's CLAUDE.md says otherwise (no CI, rebasing only before the merge), it wins.", text);
         Assert.Contains("push it straight away with --force-with-lease", text);
         // Task c121bab5: the tests are CI's job after the push, and a base move mid-run means rebasing again at once.
         Assert.Contains("a test run never does: let CI run the tests on what you pushed", text);
-        Assert.Contains("if the base moves again while CI runs, rebase and push again at once", text);
+        Assert.Contains("If the base moves again while CI runs, rebase and push again at once", text);
     }
 
     // Task 08cdb052 ("when asking for action, prs should have links, or artifacts; make that clickable"): an ask copied
@@ -179,7 +212,7 @@ public sealed class SessionBriefingTests
     {
         var text = SessionBriefing.Start(Start(), Task("Tasks board"), []);
 
-        Assert.Contains("as a markdown link [text](https://...), which the tasks panel makes clickable", text);
+        Assert.Contains("as a markdown link [text](https://...) (a file too: [text](file:///", text);
         Assert.DoesNotContain("Merge PR 512:", text);
         Assert.Contains("markdown link", SessionBriefing.ParkedNudge);
     }
@@ -288,7 +321,9 @@ public sealed class SessionBriefingTests
         Assert.Contains("under about 60 characters", text);
         Assert.Contains("Comments are rare", text);
         Assert.Contains("no progress logs, measurements, spike notes or findings", text);
-        Assert.Contains("say exactly what the user must do in the first words", text);
+        // Task 59d0aac1: the "first words" rule lives on the ask line alone, where the lean line used to repeat it.
+        Assert.Contains("what they must do in the first words", text);
+        Assert.Contains("what they must do is task ask", text);
         Assert.DoesNotContain("detail worth keeping", text);
         Assert.True(text.Length < 10_000, $"{text.Length} characters");
     }

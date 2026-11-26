@@ -224,7 +224,7 @@ public static class ManagerSession
         "On a Deskbar wake:",
         $"- Each handed-back task not marked AGAIN: one comment ({shim} task comment <id> -) to wake its session.",
         "  If its status line says the next move is the user's, tell it to run task ask with that move.",
-        "  Otherwise tell it to finish with task done, or carry on with the work.",
+        "  Otherwise tell it to finish (a merged change once it is deployed) with task done, or carry on with the work.",
         "- A task marked AGAIN gets no comment: its session stopped twice, so name it to the user in one line.",
         "- Run the overview only if the wake does not tell you enough.",
         // Task 6a87df67: the user, on the manager listing every merge and question after each wake: "manager doesn't have

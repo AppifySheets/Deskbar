@@ -295,8 +295,10 @@ static class ClaudeSkill
     // the SessionStart briefing names (SessionBriefing). Only while sessions keep tasks AND the hooks are installed: the
     // hooks are what hand a session its id (`--session`), and without them it could not run one of these commands.
     // A pull request ready to merge is a `task ask`, not a comment and done (task 06c2538b; the reasoning is above
-    // SessionBriefing.Commands, which says the same in fewer words). Once it is merged the task is done, with what to try
-    // in its status line, never a second ask to test it (task b326761d; reasoning in SessionBriefing.Commands too). The
+    // SessionBriefing.Commands, which says the same in fewer words). Once it is merged, released and deployed the task is
+    // done, with what to try in its status line, never a second ask to test it (task b326761d). Merged, released,
+    // deployed and done are ONE ordered bullet (task 59d0aac1): as two bullets, "a merged pull request means the task is
+    // done" read as complete and the deploy as a footnote, and an iam.ge session marked its task done at the release. The
     // ask names what to open as a link the tasks panel can click (task 08cdb052; reasoning above SessionBriefing.Commands).
     // A change to another app is reported once it runs there, `task deployed` (task 8470d176, phase 2; reasoning above
     // SessionBriefing.Commands and in RunningChanges' header).
@@ -328,7 +330,7 @@ static class ClaudeSkill
         - Keep the status line current: `deskbar.cmd task status-line - --session <id>`, one short line on stdin
           ("waiting for CI on #398"), changed when what you are doing changes.
         - Ask through the task. When the next move is the user's (a pull request to merge, something to try live
-          before it merges, a decision), run `deskbar.cmd task ask - --session <id>` with what they must do in the first words on stdin
+          before it merges, a deploy only they can make, a decision), run `deskbar.cmd task ask - --session <id>` with what they must do in the first words on stdin
           ("Merge [PR 512](https://github.com/owner/repo/pull/512): CI is green"): the task waits on the user, moves to
           the top of their list, and your workspace blinks. Give whatever they must open (the pull request, a published
           page or artifact, a release) as a markdown link `[text](https://...)` or a bare address: the tasks panel
@@ -350,11 +352,19 @@ static class ClaudeSkill
           repo's notes or the session itself. When the user must act or decide, say exactly what the user must do in
           the first words, through `task ask`, never a comment: a comment does not move the task to the top.
         - Mark it done with `deskbar.cmd task done --session <id>` when the work is finished and nothing waits on the
-          user: not while a pull request of yours waits to be merged. Once the user has merged it, run
-          `deskbar.cmd task answered --session <id>`, then `task done`. A merged pull request means the task is done:
-          do not ask the user to test it. Put what to try in the status line ("merged; try dragging a row onto a
-          group") and mark it done; the user closes the task once they have tried it and it works. Never close or
-          delete a task: only the user closes one. A message from the user leaves a done task done; when it gives you more work on it,
+          user: not while a pull request of yours waits to be merged. A change that merges finishes in one order:
+          merged, released, deployed, done. Once the user has merged it, run `deskbar.cmd task answered --session
+          <id>` and carry on down the order. Released: if the repository has a release step (a release workflow, an
+          image build), wait for it. Deployed: the running app's own evidence (its logs, health page or deploy output)
+          shows the version carrying the change; report it with `deskbar.cmd task deployed - --session <id>`, the
+          evidence on stdin ("2026.11.25.39-3749d21 in the portal logs"). A change nothing runs (docs, a skill, a
+          library with no host) reports "nothing to deploy: library" instead. In Deskbar's own repository Deskbar
+          checks the running build itself, so done follows the release there. When a person makes the deploy (presses
+          redeploy, say), or only they can see the evidence, ask with `task ask` ("Redeploy the portal"), check on a
+          schedule, and once the evidence shows the new version run `task answered`, `task deployed`, then `task
+          done`. Never mark done before deployed: done claims the change runs, and `task done` stops your idle
+          session. Do not ask the user to test it; put what to try in the status line ("deployed; try dragging a row
+          onto a group") and the user closes the task once they have tried it and it works. Never close or delete a task: only the user closes one. A message from the user leaves a done task done; when it gives you more work on it,
           run `deskbar.cmd task join <task id> --session <id>` to put it back in progress. A follow-up for later is
           `deskbar.cmd task later - --session <id>`, its title on stdin, a note on your workspace
           linked to your task as related, so it says where it came from.
@@ -363,13 +373,9 @@ static class ClaudeSkill
           `deskbar.cmd task link <task id>` prints it as markdown, [Deskbar task 1a2b3c4d](https://deskbar.app/task#...);
           in a page, use an <a> to the same address. Clicked, it opens the task in Deskbar, so the user can get from
           the pull request or the mockup back to the task.
-        - Report the deploy. For a change to an app deployed somewhere other than Deskbar itself, a done task's tick
-          stays a hollow ring until the deploy is reported: after the merge, check that the deployed app runs the
-          version carrying it (its logs, health page or deploy output) and run `deskbar.cmd task deployed - --session
-          <id>` with that evidence on stdin ("2026.11.25.39-3749d21 in the portal logs"). A change with nothing to
-          deploy (a library, docs, a script) reports that instead ("nothing to deploy: library"). Deskbar checks its own
-          repository by itself. `task done` stops your idle session, so when the deploy follows within your session,
-          report it first; otherwise say in the status line that checking the deploy is the user's step.
+        - Your repository's own rules win. The pull request rules in Deskbar's start briefing (keep it rebased on its base, let CI
+          run the tests) are a default: where the repository's CLAUDE.md says otherwise (no CI on pull requests,
+          rebasing only right before the merge), follow the CLAUDE.md.
         - Subtasks. A task can have subtasks, one level deep. When you join one, the join reply's `family` names the
           parent, the siblings and their sessions with transcript files: read the end of the parent session's
           transcript before you start, and stay clear of what the siblings are doing. `deskbar.cmd task family
