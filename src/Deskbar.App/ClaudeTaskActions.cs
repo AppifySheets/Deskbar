@@ -112,6 +112,12 @@ public sealed class ClaudeTaskActions : IDisposable
     // The latest list ClaudeSessions could read, none before the first.
     Maybe<IReadOnlyCollection<ClaudeAgent>> latest = Maybe<IReadOnlyCollection<ClaudeAgent>>.None;
 
+    // Which listed sessions are working (task 10b49554), stepped with every list ClaudeSessions reads, at the scheduler's
+    // clock, with the prompt times the hooks reported (a prompt waives the resume grace). No list arrives while the
+    // feature is off, and the record starts over after such a gap (ClaudeActivity.StaleAfter). WorkingCount and
+    // SessionsOf read it only while Latest has a list. Written and read on the UI thread (`live` is observed there).
+    ClaudeActivity activity = ClaudeActivity.None;
+
     // Sessions whose window was launched, and when (see AttachPending).
     ImmutableDictionary<string, DateTimeOffset> attaching = ImmutableDictionary<string, DateTimeOffset>.Empty;
 
@@ -128,6 +134,7 @@ public sealed class ClaudeTaskActions : IDisposable
         liveSubscription = live.Subscribe(list =>
         {
             latest = Maybe.From(list);
+            activity = activity.Next(list, scheduler.Now, tasks.TurnsStarted);
             changed.OnNext(Unit.Default);
         });
     }
@@ -491,14 +498,26 @@ public sealed class ClaudeTaskActions : IDisposable
 
     // --- the thread -------------------------------------------------------------------------------------------------
 
-    /// <summary>The task's sessions as its thread lists them (TaskViews.SessionList).</summary>
-    public IReadOnlyList<SessionView> SessionsOf(TaskItem task) => TaskViews.SessionList(task, Latest, seams.TranscriptExists);
+    /// <summary>
+    /// The task's sessions as its thread lists them (TaskViews.SessionList), working or idle by the same rule as the
+    /// panel's halos and its working part (ClaudeActivity, task 10b49554), so the thread never contradicts the line.
+    /// </summary>
+    public IReadOnlyList<SessionView> SessionsOf(TaskItem task) =>
+        TaskViews.SessionList(task, Latest, seams.TranscriptExists, Latest.HasValue ? activity.Working : null);
 
     /// <summary>
-    /// How many of the task's live sessions the latest list shows busy (TaskViews.WorkingCount), for the tasks panel's
-    /// session halos (tasks panel plan, Task 8). 0 before the first list and while the feature is off (Latest).
+    /// How many of the task's live sessions are working (ClaudeActivity, task 10b49554: busy with the turn in flight, held
+    /// through one quiet list), for the tasks panel's session halos (tasks panel plan, Task 8) and for which part of the
+    /// Claude working block its line sits in. 0 before the first list and while the feature is off (Latest).
     /// </summary>
-    public int WorkingCount(TaskItem task) => TaskViews.WorkingCount(task, Latest);
+    public int WorkingCount(TaskItem task) => Latest.HasValue ? activity.WorkingCount(task) : 0;
+
+    /// <summary>
+    /// Whether there is a list to tell working from idle by (task 10b49554): none before the first read, while the feature
+    /// is off, or while `claude` cannot be read. The tasks panel then keeps the Claude working block whole rather than
+    /// showing every task idle, since nothing says they are.
+    /// </summary>
+    public bool KnowsActivity => Latest.HasValue;
 
     // --- helpers ----------------------------------------------------------------------------------------------------
 

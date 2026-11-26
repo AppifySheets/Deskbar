@@ -379,4 +379,45 @@ public class TaskViewsTests
         var cell = TaskViews.Matrix(board, TaskFilter.Open, TaskWorkspaceFilter.All).Single(c => c.Quadrant == Quadrant.IV);
         Assert.Equal(["asking", "working", "older", "note"], cell.Tasks.Select(t => t.Title));
     }
+
+    // --- working, then idle (task 10b49554, option B of the mockup) ------------------------------------------------
+
+    // Each group as Shown does, with a busy test splitting the Claude working block.
+    IReadOnlyList<string> ShownBusy(TaskFilter filter, Func<TaskItem, bool> busy) =>
+        TaskViews.Grouped(board, filter, TaskWorkspaceFilter.All, busy: busy)
+            .Select(g => $"{g.Kind}: {string.Join(", ", g.Tasks.Select(t => t.Title))}").ToList();
+
+    // With a busy test, the block's tasks a session is working on come first, then the idle ones in their own group, each
+    // in quadrant order; a group with nothing in it is left out, as every group is.
+    [Fact]
+    public void A_busy_test_splits_the_Claude_block_into_working_then_idle()
+    {
+        var note = Note("note", Free);
+        var idle = Claudes("idle", ws, "s1");
+        var urgentIdle = Claudes("urgent idle", ws, "s2");
+        var working = Claudes("working", ws, "s3");
+        Change(b => b.SetFlag(urgentIdle, TaskFlag.Urgent, true, clock));
+        bool Busy(TaskItem t) => t.Id == working;
+
+        Assert.Equal(["ClaudeWorking: working", "ClaudeIdle: urgent idle, idle", "IV: note"], ShownBusy(TaskFilter.Open, Busy));
+        // Quadrant order inside each part: the urgent one (III) before the plain ones (IV, the newest on top).
+        Assert.Equal(["ClaudeIdle: urgent idle, working, idle"], ShownBusy(TaskFilter.InProgress, _ => false));
+        Assert.Equal(["ClaudeWorking: urgent idle, working, idle"], ShownBusy(TaskFilter.InProgress, _ => true));
+        Assert.Equal("Claude idle", TaskViews.GroupName(TaskGroupKind.ClaudeIdle));
+        Assert.True(TaskViews.QuadrantOf(TaskGroupKind.ClaudeIdle).HasNoValue);
+        // Without a test, the block is one group, as before.
+        Assert.Equal(["ClaudeWorking: urgent idle, working, idle", "IV: note"], Shown(TaskFilter.Open, TaskWorkspaceFilter.All));
+    }
+
+    // A subtask in either part stays in its own part unless its parent is in the same one: under a parent across the
+    // divider it would sit on the wrong side of it.
+    [Fact]
+    public void A_subtask_of_the_Claude_block_nests_only_in_its_own_part()
+    {
+        Assert.True(TaskViews.NestsUnder(TaskGroupKind.ClaudeIdle, TaskGroupKind.ClaudeIdle));
+        Assert.False(TaskViews.NestsUnder(TaskGroupKind.ClaudeIdle, TaskGroupKind.ClaudeWorking));
+        Assert.False(TaskViews.NestsUnder(TaskGroupKind.ClaudeWorking, TaskGroupKind.ClaudeIdle));
+        Assert.False(TaskViews.NestsUnder(TaskGroupKind.ClaudeIdle, TaskGroupKind.IV));
+        Assert.True(TaskViews.NestsUnder(TaskGroupKind.IV, TaskGroupKind.ClaudeIdle));
+    }
 }

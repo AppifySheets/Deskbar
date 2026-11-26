@@ -15,6 +15,13 @@ namespace Deskbar.Core.Tasks;
 // the pinned ones first, then working, then the rest. Live, not busy: `claude agents --json` says busy only while a turn
 // runs, so a busy test would move a line in and out of the block every time Claude paused for a tool or a background wait.
 //
+// WORKING, THEN IDLE, INSIDE THAT BLOCK (task 10b49554, 2026-11-26, Petre picked option B of the mockup: "separate claude
+// sessions that are actively working from the ones that are idle"). Live still decides who is in the block; whether a
+// live session is mid-turn decides where in it. Given a `busy` test (the tasks panel passes ClaudeActivity's, which holds
+// a session working through one quiet poll so a line does not flicker), the block is drawn as two groups: ClaudeWorking,
+// the tasks with a session working, then ClaudeIdle under a divider, the rest, each in quadrant then manual order. Without
+// a test (the search by id's Everywhere, older callers) every live task is in ClaudeWorking, as before.
+//
 // A status filter keeps the groups: "In progress" shows the quadrants with only their tasks in progress, in the
 // same order, so a line sits in the same group whatever the filter. The pinned block holds the Done tasks under the
 // questions (task eefb986a, TaskStatusPinning), so "Waiting on you" is that block's questions and "Done" its Done
@@ -92,7 +99,8 @@ public sealed record TaskAssigneeFilter(Maybe<AssigneeKind> Kind)
 /// Snoozed filter's one group).
 /// </summary>
 // ClaudeWorking is appended last so no earlier value moves; the order the groups are drawn in is Grouped's, not the enum's.
-public enum TaskGroupKind { WaitingOnYou, I, II, III, IV, Closed, Snoozed, ClaudeWorking }
+// ClaudeIdle (task 10b49554) is the idle part of that block, drawn right after ClaudeWorking under a divider.
+public enum TaskGroupKind { WaitingOnYou, I, II, III, IV, Closed, Snoozed, ClaudeWorking, ClaudeIdle }
 
 /// <summary>One group of the window: which group, and its tasks in the order they are drawn.</summary>
 public sealed record TaskGroup(TaskGroupKind Kind, IReadOnlyList<TaskItem> Tasks);
@@ -125,23 +133,26 @@ public static class TaskViews
     /// The groups the window draws for a filter, empty groups left out (see the header): Waiting on you in its order
     /// (TaskBoard.Pinned), each quadrant in its manual order, the closed tasks the latest closed first.
     /// </summary>
-    public static IReadOnlyList<TaskGroup> Grouped(TaskBoard board, TaskFilter filter, TaskWorkspaceFilter workspaceFilter, TaskAssigneeFilter? who = null) =>
-        Grouped(board, filter, new Admit(workspaceFilter, who ?? TaskAssigneeFilter.All));
+    /// <param name="busy">
+    /// Whether a session of the task is working right now (task 10b49554): the Claude working block's tasks it says no to
+    /// are drawn in ClaudeIdle after it. None: every task of the block is in ClaudeWorking.
+    /// </param>
+    public static IReadOnlyList<TaskGroup> Grouped(TaskBoard board, TaskFilter filter, TaskWorkspaceFilter workspaceFilter, TaskAssigneeFilter? who = null,
+        Func<TaskItem, bool>? busy = null) =>
+        Grouped(board, filter, new Admit(workspaceFilter, who ?? TaskAssigneeFilter.All), busy);
 
-    static IReadOnlyList<TaskGroup> Grouped(TaskBoard board, TaskFilter filter, Admit where) =>
+    static IReadOnlyList<TaskGroup> Grouped(TaskBoard board, TaskFilter filter, Admit where, Func<TaskItem, bool>? busy = null) =>
         (filter switch
         {
             TaskFilter.Closed => [new TaskGroup(TaskGroupKind.Closed,
                 board.Tasks.Where(t => t.Status == TaskStatus.Closed && where.Admits(t)).OrderByDescending(t => t.UpdatedAt).ToArray())],
             TaskFilter.Snoozed => [new TaskGroup(TaskGroupKind.Snoozed,
                 board.Tasks.Where(t => t.IsOpen && t.IsSnoozed && where.Admits(t)).OrderBy(t => t.SnoozedUntil.Value).ThenBy(t => t.Id).ToArray())],
-            // Waiting on you (questions, then Done), then Claude working (task 93fa0b9b), then the quadrants without the
-            // tasks Claude is at work on. A status filter narrows all three alike; Claude working never holds a question or
-            // a Done task, so under those two filters it is empty and left out.
-            TaskFilter.Open => QuadrantGroups(board, where, _ => true).Prepend(Working(board, where, _ => true)).Prepend(Waiting(board, where, _ => true)),
-            _ => QuadrantGroups(board, where, t => StatusesOf(filter).Contains(t.Status))
-                .Prepend(Working(board, where, t => StatusesOf(filter).Contains(t.Status)))
-                .Prepend(Waiting(board, where, t => StatusesOf(filter).Contains(t.Status))),
+            // Waiting on you (questions, then Done), then Claude working (task 93fa0b9b) with its idle part (task 10b49554),
+            // then the quadrants without the tasks Claude is at work on. A status filter narrows them all alike; Claude
+            // working never holds a question or a Done task, so under those two filters it is empty and left out.
+            TaskFilter.Open => Pinned(board, where, _ => true, busy),
+            _ => Pinned(board, where, t => StatusesOf(filter).Contains(t.Status), busy),
         })
         .Where(g => g.Tasks.Count > 0)
         .ToArray();
@@ -164,6 +175,8 @@ public static class TaskViews
     /// List; the closed tasks have no quadrant order, so under "Closed" every cell is empty, and a snoozed task is out of
     /// view, so under "Snoozed" too (the List shows them) and under every other filter it is left out.
     /// </summary>
+    // Not split into working and idle (task 10b49554): a compact Matrix line shows no sessions, so a line moving between
+    // the two would jump inside its cell with nothing on screen to say why.
     public static IReadOnlyList<TaskCell> Matrix(TaskBoard board, TaskFilter filter, TaskWorkspaceFilter workspaceFilter, TaskAssigneeFilter? who = null) =>
         Matrix(board, filter, new Admit(workspaceFilter, who ?? TaskAssigneeFilter.All));
 
@@ -195,6 +208,7 @@ public static class TaskViews
                 TaskGroupKind.WaitingOnYou => StatusName(TaskStatus.WaitingOnYou),
                 TaskGroupKind.Snoozed => "Snoozed",
                 TaskGroupKind.ClaudeWorking => "Claude working",
+                TaskGroupKind.ClaudeIdle => "Claude idle",
                 _ => StatusName(TaskStatus.Closed),
             });
 
@@ -211,9 +225,22 @@ public static class TaskViews
 
     // The pinned Claude working block: each quadrant's tasks Claude is at work on, I to IV, each quadrant in its manual
     // order (TaskBoard.Group), so the block keeps Petre's priorities.
-    static TaskGroup Working(TaskBoard board, Admit where, Func<TaskItem, bool> shows) =>
-        new(TaskGroupKind.ClaudeWorking, Quadrants.SelectMany(q => board.Group(q.Quadrant))
-            .Where(t => AtWork(t) && where.Admits(t) && !t.IsSnoozed && shows(t)).ToArray());
+    // With a busy test (task 10b49554) it is two groups: ClaudeWorking holds the tasks it says yes to, ClaudeIdle the rest,
+    // each still in that order.
+    static IEnumerable<TaskGroup> Working(TaskBoard board, Admit where, Func<TaskItem, bool> shows, Func<TaskItem, bool>? busy)
+    {
+        var atWork = Quadrants.SelectMany(q => board.Group(q.Quadrant))
+            .Where(t => AtWork(t) && where.Admits(t) && !t.IsSnoozed && shows(t)).ToArray();
+        return busy is null
+            ? [new TaskGroup(TaskGroupKind.ClaudeWorking, atWork)]
+            : [new TaskGroup(TaskGroupKind.ClaudeWorking, atWork.Where(busy).ToArray()),
+                new TaskGroup(TaskGroupKind.ClaudeIdle, atWork.Where(t => !busy(t)).ToArray())];
+    }
+
+    // The open view's groups in their order: Waiting on you, the Claude working block (one group, or its working and idle
+    // parts), then the quadrants without the tasks Claude is at work on.
+    static IEnumerable<TaskGroup> Pinned(TaskBoard board, Admit where, Func<TaskItem, bool> shows, Func<TaskItem, bool>? busy) =>
+        new[] { Waiting(board, where, shows) }.Concat(Working(board, where, shows, busy)).Concat(QuadrantGroups(board, where, shows));
 
     // A quadrant's group leaves out the tasks Claude is at work on: they are in the Claude working block above.
     static IEnumerable<TaskGroup> QuadrantGroups(TaskBoard board, Admit where, Func<TaskItem, bool> shows) =>
@@ -274,13 +301,16 @@ public static class TaskViews
     // No list (None) is "cannot tell" (Global Constraints): the feature is off, or `claude` could not be read. The hooks'
     // word stands then, as everywhere else: a session they call live is Idle, since nothing says it is working, and one
     // they ended is Ended or Expired by its transcript. Nothing is ever shown ended BECAUSE the list was unreadable.
+    //
+    // `working` (task 10b49554) is ClaudeActivity's set: a listed session is Working when it is in it, so the thread says
+    // what the line's halo and its part of the Claude working block say. Without it, the row's Busy decides, as before.
     public static IReadOnlyList<SessionView> SessionList(TaskItem task, Maybe<IReadOnlyCollection<ClaudeAgent>> listed,
-        Func<TaskSession, bool> transcriptExists) =>
+        Func<TaskSession, bool> transcriptExists, IReadOnlySet<string>? working = null) =>
         task.Sessions
             .OrderByDescending(s => s.Joined)
             .Select(s => new SessionView(s.Id, s.Joined, listed.Match(
                 list => list.FirstOrDefault(a => a.SessionId == s.Id) is { } agent
-                    ? agent.Busy ? SessionState.Working : SessionState.Idle
+                    ? (working?.Contains(s.Id) ?? agent.Busy) ? SessionState.Working : SessionState.Idle
                     : Gone(s, transcriptExists),
                 () => s.IsLive ? SessionState.Idle : Gone(s, transcriptExists))))
             .ToList();
@@ -332,11 +362,13 @@ public static class TaskViews
     /// exceptions. A pinned subtask stays in the pinned block unless its parent is there too: the block is what makes a
     /// question (or finished work) findable, and drawn under a plain parent it would sink below the quadrants' lines. And
     /// nothing moves out of or into the Closed group, which is history. The Claude working block (task 93fa0b9b) keeps
-    /// its subtasks the same way: one Claude is at work on stays in the block unless its parent is in the block too.
+    /// its subtasks the same way: one Claude is at work on stays in the block unless its parent is in the block too, and in
+    /// the same part of it, working or idle (task 10b49554): under a parent in the other part it would sit on the wrong
+    /// side of the divider.
     /// </summary>
     public static bool NestsUnder(TaskGroupKind own, TaskGroupKind parent) =>
         own != TaskGroupKind.Closed && parent != TaskGroupKind.Closed
-        && (own is not (TaskGroupKind.WaitingOnYou or TaskGroupKind.ClaudeWorking) || parent == own);
+        && (own is not (TaskGroupKind.WaitingOnYou or TaskGroupKind.ClaudeWorking or TaskGroupKind.ClaudeIdle) || parent == own);
 
     // --- subtasks folded into their parent (task 173ef268, the tasks panel's "Subtasks" checkbox) ----------------------
     //

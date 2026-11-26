@@ -843,8 +843,21 @@ public sealed record TasksPanelState(bool Open, double Width)
     public bool HideSubtasks { get; init; }
 
     // Whether the "Claude working" chip is on (task 93fa0b9b, 2026-11-25, Petre: "just like with current workspace"):
-    // kept across opens and restarts for the same reason. An init property, so an older file loads as false.
+    // kept across opens and restarts for the same reason. An init property, so an older file loads as false. Only READ
+    // since the three-way switch replaced the chip (task 10b49554): a file written before it, with the chip on, opens on
+    // the switch's "Claude" part (ClaudeSwitch). A save writes ClaudeFilter and turns this off.
     public bool ClaudeWorking { get; init; }
+
+    // The three-way Claude switch (task 10b49554, Petre's option B): off, every task with a live session, only working,
+    // only idle. Kept across opens and restarts as the chip before it was. Off in a file written before it.
+    public Tasks.ClaudeSessionFilter ClaudeFilter { get; init; }
+
+    /// <summary>The switch as a fresh open starts it: ClaudeFilter, or the old chip's "on" read as every live task.</summary>
+    [JsonIgnore]
+    public Tasks.ClaudeSessionFilter ClaudeSwitch =>
+        ClaudeFilter != Tasks.ClaudeSessionFilter.Off ? ClaudeFilter
+        : ClaudeWorking ? Tasks.ClaudeSessionFilter.Any
+        : Tasks.ClaudeSessionFilter.Off;
 
     // The widths of the full task line's resizable columns (task 3df2d28f, Tasks.TaskColumnWidths), as Petre dragged them
     // in the header. Null until he first drags one, and in a file written before it: the defaults then (ColumnWidths).

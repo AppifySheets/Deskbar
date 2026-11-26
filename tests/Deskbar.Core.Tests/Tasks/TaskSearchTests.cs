@@ -134,4 +134,34 @@ public class TaskSearchTests
         Assert.Equal(["Live session"], ClaudeWorking.Narrow(board, on: true).Tasks.Select(t => t.Title));
         Assert.Same(board, ClaudeWorking.Narrow(board, on: false));
     }
+
+    // The three-way switch (task 10b49554): Any is every task with a live session, Working those the busy test says yes
+    // to, Idle the others; a task with no live session is in neither part, and Off returns the same board.
+    [Fact]
+    public void The_Claude_switch_splits_live_tasks_into_working_and_idle()
+    {
+        var ended = TaskBoard.Empty.Create("Ended session", Maybe<Guid>.None, Session("s-ended"), clock, Guid.NewGuid()).Value.Board.SessionEnded("s-ended", clock);
+        var working = ended.Create("Working session", Maybe<Guid>.None, Session("s-working"), clock, Guid.NewGuid()).Value.Board;
+        var idle = working.Create("Idle session", Maybe<Guid>.None, Session("s-idle"), clock, Guid.NewGuid()).Value.Board;
+        var board = idle.AddNote("A note", Maybe<Guid>.None, clock, Guid.NewGuid()).Value.Board;
+        bool Busy(TaskItem t) => t.Title == "Working session";
+        IReadOnlyList<string> Titles(ClaudeSessionFilter part) =>
+            ClaudeWorking.Narrow(board, part, Busy).Tasks.Select(t => t.Title).Order().ToList();
+
+        Assert.Equal(["Idle session", "Working session"], Titles(ClaudeSessionFilter.Any));
+        Assert.Equal(["Working session"], Titles(ClaudeSessionFilter.Working));
+        Assert.Equal(["Idle session"], Titles(ClaudeSessionFilter.Idle));
+        Assert.Same(board, ClaudeWorking.Narrow(board, ClaudeSessionFilter.Off, Busy));
+    }
+
+    // A panel state written while the switch was the "Claude working" chip opens on the switch's Claude part; one written
+    // since reads its own part, and a save clears the chip's flag so it cannot turn the switch back on.
+    [Fact]
+    public void An_old_Claude_working_chip_opens_as_the_Claude_part()
+    {
+        var old = new Deskbar.Core.Persistence.TasksPanelState(true, 460) { ClaudeWorking = true };
+        Assert.Equal(ClaudeSessionFilter.Any, old.ClaudeSwitch);
+        Assert.Equal(ClaudeSessionFilter.Idle, (old with { ClaudeFilter = ClaudeSessionFilter.Idle, ClaudeWorking = false }).ClaudeSwitch);
+        Assert.Equal(ClaudeSessionFilter.Off, (old with { ClaudeWorking = false }).ClaudeSwitch);
+    }
 }
