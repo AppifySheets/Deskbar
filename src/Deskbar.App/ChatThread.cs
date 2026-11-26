@@ -95,7 +95,7 @@ static class ChatThread
     internal const string DayTag = "chat-day";
 
     // "Today", centred, small and dim.
-    static UIElement DayLine(string day) => new TextBlock
+    internal static TextBlock DayLine(string day) => new TextBlock
     {
         Tag = DayTag,
         Text = day,
