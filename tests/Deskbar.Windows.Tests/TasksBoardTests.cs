@@ -4108,6 +4108,23 @@ public class TasksBoardTests
         Assert.Equal([true, false, true], Shown(t)); // after it, the laid-out height does
     });
 
+    // Task 39bc9c4d, Petre on the chat thread's first build: "it's too much vertical separation". The panel's theme gives a
+    // RichTextBox a MinHeight of 32 DIP, so a one-line comment's text stood twice as tall as its line (measured: 32 DIP
+    // for 15.3 of text). In the panel, with its real resources, a one-line comment's text box is its line's height.
+    [Fact]
+    public void A_one_line_comment_is_one_line_tall() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var id = t.Tasks.AddNote("note", t.Gepha).Value.Id;
+        t.Tasks.Comment(id, Maybe<string>.None, "a");
+        t.Controller.Show();
+        t.Controller.ToggleThread(id);
+        t.Window.UpdateLayout();
+        var box = Inside(t.Window).OfType<RichTextBox>()
+            .Last(b => new TextRange(b.Document.ContentStart, b.Document.ContentEnd).Text.Trim() == "a");
+        Assert.InRange(box.ActualHeight, 10, 20);
+    });
+
     // Task 735abbf5 (Petre's third report of the toggles: "it's the snooze and other buttons, which are partly
     // invisible"). The toggles' column was 48 DIP for three 18 DIP toggles (the Flat button's 1 DIP border each side was
     // left out of the sum), so the grid cut 6 DIP off the snooze moon, its whole outer arc. Each button on a line, and

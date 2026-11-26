@@ -9,11 +9,13 @@ namespace Deskbar.App;
 // A TASK'S THREAD DRAWN AS A CHAT (task 39bc9c4d, Petre: "make it prettier, like a chat", option A of the mockup
 // https://claude.ai/artifact/WLQssE276smfMTkQVP3A2n). Until then every comment was an author line over its text with a
 // hairline between comments (task aa42794f), which read like a log. Now:
-//   - Petre's comments are bubbles on the RIGHT, in blue, with no name (they are his);
-//   - a session's and the manager's are bubbles on the LEFT, warm for Claude and violet-named for the manager, named
-//     at the top of the bubble unless the comment above is by the same author on the same day;
+//   - Petre's comments are bubbles on the RIGHT, in blue; a session's and the manager's are bubbles on the LEFT, warm
+//     for Claude and violet for the manager;
+//   - every bubble's author is named on the small line under it, beside its time ("you · 14:28", "Claude · 16:50").
+//     Petre, on the first build: "doesn't say it's me; it's too much vertical separation". His bubbles carried no name
+//     and Claude's had it on a line of its own inside the bubble; on the line under it the name costs no height;
 //   - Deskbar's own lines ("Resumed.", "Stopped, ...") are events, not messages: a small dim line centred in the thread;
-//   - a day line ("Today", "25 Nov") stands above the first comment of each day, so a bubble carries only its time;
+//   - a day line ("Today", "25 Nov") stands above the first comment of each day, so the line under a bubble carries only the time of day, not the date;
 //   - Edit and Settle sit beside the time under the bubble and show only while the mouse (or the keyboard) is on that
 //     comment, so the thread reads clean at rest. Hidden, not collapsed, so nothing moves when they appear.
 // Both thread hosts use it: the tasks panel (TasksWindow.Thread) and the task's own window (TaskDetailWindow.DrawThread).
@@ -28,26 +30,20 @@ static class ChatThread
     static readonly Brush ManagerFill = Frozen(0xFF, 0x29, 0x24, 0x36);
     static readonly Brush ClaudeName = Frozen(0xFF, 0xD9, 0xB9, 0x8A);
     static readonly Brush ManagerName = Frozen(0xFF, 0xB4, 0x8C, 0xFF);
+    // "you" under Petre's bubble: a light shade of his bubble's blue.
+    static readonly Brush MineName = Frozen(0xFF, 0x9D, 0xBB, 0xEB);
     static readonly Brush Dim = Frozen(0xFF, 0x8B, 0x8F, 0x99);
 
     // The share of the thread's width a bubble may take: the rest stays empty on the other side, which is what makes
     // the two sides read as two people. Five sixths, set as a 5:1 star split.
     const double BubbleShare = 5;
 
-    /// <summary>
-    /// The comments in order, each drawn by <paramref name="draw"/>, with a day line before the first comment of each day.
-    /// <paramref name="draw"/> is told whether the bubble should carry its author's name: not when the comment right above
-    /// is by the same author on the same day, the way a chat groups a run of messages.
-    /// </summary>
-    public static IReadOnlyList<UIElement> WithDays(IReadOnlyList<TaskCommentView> comments, Func<TaskCommentView, bool, UIElement> draw) =>
+    /// <summary>The comments in order, each drawn by <paramref name="draw"/>, with a day line before the first comment of each day.</summary>
+    public static IReadOnlyList<UIElement> WithDays(IReadOnlyList<TaskCommentView> comments, Func<TaskCommentView, UIElement> draw) =>
         comments.Select((comment, index) => (comment, before: index == 0 ? null : comments[index - 1]))
-            .SelectMany(x =>
-            {
-                var newDay = x.before is null || x.before.Day != x.comment.Day;
-                var named = newDay || x.before!.Who != x.comment.Who;
-                var drawn = draw(x.comment, named);
-                return newDay && x.comment.Day.Length > 0 ? new[] { DayLine(x.comment.Day), drawn } : new[] { drawn };
-            })
+            .SelectMany(x => x.comment.Day.Length > 0 && (x.before is null || x.before.Day != x.comment.Day)
+                ? new[] { DayLine(x.comment.Day), draw(x.comment) }
+                : new[] { draw(x.comment) })
             .ToArray();
 
     /// <summary>The Tag of a day line, for the tests.</summary>
@@ -61,36 +57,24 @@ static class ChatThread
         FontSize = 10,
         Foreground = Dim,
         HorizontalAlignment = HorizontalAlignment.Center,
-        Margin = new Thickness(0, 2, 0, 6),
+        Margin = new Thickness(0, 1, 0, 3),
     };
 
     /// <summary>
-    /// One comment as a bubble: <paramref name="content"/> (the caller's body, Show more and pictures) inside, its name on
-    /// top for a session or the manager when <paramref name="named"/>, and under it the time with
-    /// <paramref name="actions"/> (Edit, Settle) beside it, shown on hover.
+    /// One comment as a bubble: <paramref name="content"/> (the caller's body, Show more and pictures) inside, and under it
+    /// its author and time with <paramref name="actions"/> (Edit, Settle) beside them, shown on hover.
     /// </summary>
-    public static FrameworkElement Message(TaskCommentView comment, bool named, UIElement content, IReadOnlyList<Button> actions)
+    public static FrameworkElement Message(TaskCommentView comment, UIElement content, IReadOnlyList<Button> actions)
     {
         var mine = comment.Who == CommentAuthor.You;
-        var inside = new StackPanel();
-        if (named && !mine)
-            inside.Children.Add(new TextBlock
-            {
-                Text = comment.Author,
-                FontSize = 10.5,
-                FontWeight = FontWeights.Bold,
-                Foreground = comment.Who == CommentAuthor.Manager ? ManagerName : ClaudeName,
-                Margin = new Thickness(0, 0, 0, 1),
-            });
-        inside.Children.Add(content);
         var bubble = new Border
         {
             Background = mine ? MineFill : comment.Who == CommentAuthor.Manager ? ManagerFill : ClaudeFill,
             // Rounded all round but for the corner nearest its author's side, the "tail" of a chat bubble.
             CornerRadius = mine ? new CornerRadius(12, 12, 3, 12) : new CornerRadius(12, 12, 12, 3),
-            Padding = new Thickness(10, 5, 10, 6),
+            Padding = new Thickness(10, 4, 10, 4),
             HorizontalAlignment = mine ? HorizontalAlignment.Right : HorizontalAlignment.Left,
-            Child = inside,
+            Child = content,
         };
         var (meta, shown) = Meta(comment, actions, mine);
         var column = new StackPanel
@@ -101,7 +85,7 @@ static class ChatThread
             HorizontalAlignment = mine ? HorizontalAlignment.Right : HorizontalAlignment.Left,
             Children = { bubble, meta },
         };
-        var row = new Grid { Margin = new Thickness(0, 0, 0, 6) };
+        var row = new Grid { Margin = new Thickness(0, 0, 0, 4) };
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(mine ? 1 : BubbleShare, GridUnitType.Star) });
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(mine ? BubbleShare : 1, GridUnitType.Star) });
         Grid.SetColumn(column, mine ? 1 : 0);
@@ -122,7 +106,7 @@ static class ChatThread
         var end = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Top, Visibility = Visibility.Hidden };
         actions.ToList().ForEach(button => end.Children.Add(button));
         // Three columns, the outer two of one width, so the event stays centred on the thread with Settle at its end.
-        var row = new Grid { Background = Brushes.Transparent, Margin = new Thickness(0, 0, 0, 8) };
+        var row = new Grid { Background = Brushes.Transparent, Margin = new Thickness(0, 0, 0, 4) };
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(48) });
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(48) });
@@ -137,21 +121,47 @@ static class ChatThread
     /// <summary>Whether a Deskbar line is short enough to carry its time at its end: one line of text, no pictures.</summary>
     public static bool TimeFitsInline(string text) => !text.Trim().Contains('\n') && text.Trim().Length is > 0 and <= 80;
 
-    // The line under a bubble: the time, and the actions next to it on the bubble's inner side (left of the time under
-    // Petre's bubble, right of it under the others), hidden until hover.
+    // The line under a bubble: its author and time ("you · 14:28"), and the actions next to them on the bubble's inner
+    // side (left under Petre's bubble, right under the others), hidden until hover.
     static (StackPanel Meta, UIElement Actions) Meta(TaskCommentView comment, IReadOnlyList<Button> actions, bool mine)
     {
         var buttons = new StackPanel { Orientation = Orientation.Horizontal, Visibility = Visibility.Hidden };
         actions.ToList().ForEach(button => buttons.Children.Add(button));
-        var time = Time(comment, HorizontalAlignment.Left);
-        var meta = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = mine ? HorizontalAlignment.Right : HorizontalAlignment.Left, Margin = new Thickness(4, 1, 4, 0) };
-        (mine ? new UIElement[] { buttons, time } : [time, buttons]).ToList().ForEach(part => meta.Children.Add(part));
+        var signed = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            VerticalAlignment = VerticalAlignment.Center,
+            Children = { AuthorName(comment), Time(comment, HorizontalAlignment.Left, signed: true) },
+        };
+        var meta = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = mine ? HorizontalAlignment.Right : HorizontalAlignment.Left, Margin = new Thickness(4, 0, 4, 0) };
+        (mine ? new UIElement[] { buttons, signed } : [signed, buttons]).ToList().ForEach(part => meta.Children.Add(part));
         return (meta, buttons);
     }
 
-    static TextBlock Time(TaskCommentView comment, HorizontalAlignment alignment) => new()
+    /// <summary>The Tag of the author's name under a bubble, for the tests.</summary>
+    internal const string AuthorTag = "comment-author";
+
+    // "you", "Claude" or "Manager", in the colour of its side.
+    static TextBlock AuthorName(TaskCommentView comment) => new()
     {
-        Text = comment.Time.Length > 0 ? comment.Time : comment.When,
+        Tag = AuthorTag,
+        Text = comment.Author,
+        FontSize = 10,
+        FontWeight = FontWeights.SemiBold,
+        Foreground = comment.Who switch
+        {
+            CommentAuthor.You => MineName,
+            CommentAuthor.Manager => ManagerName,
+            _ => ClaudeName,
+        },
+        VerticalAlignment = VerticalAlignment.Center,
+        Margin = new Thickness(4, 0, 0, 0),
+    };
+
+    // The time, "· 14:28" after an author's name, plain under an event.
+    static TextBlock Time(TaskCommentView comment, HorizontalAlignment alignment, bool signed = false) => new()
+    {
+        Text = (signed ? "· " : "") + (comment.Time.Length > 0 ? comment.Time : comment.When),
         ToolTip = comment.FullWhen.Length > 0 ? comment.FullWhen : null,
         FontSize = 10,
         Foreground = Dim,
@@ -175,8 +185,14 @@ static class ChatThread
     /// here and set as the box's MaxWidth; the bubble around it then follows. A document with anything but plain
     /// paragraphs (a list, a table, a picture inline) keeps the full width, where wrapping matters more than a snug fit.
     /// </summary>
+    /// <remarks>
+    /// It also takes away the box's minimum height. The app's theme gives every RichTextBox a MinHeight of 32 DIP, sized
+    /// for an editing box, so a one-line comment (15 DIP of text) stood in a bubble twice its height: the "too much
+    /// vertical separation" of Petre's first look at the chat (measured in the panel: 32 DIP tall, 15.3 of extent).
+    /// </remarks>
     public static void FitWidth(RichTextBox box)
     {
+        box.MinHeight = 0;
         var width = NaturalWidth(box.Document);
         if (!double.IsInfinity(width)) box.MaxWidth = width;
     }
