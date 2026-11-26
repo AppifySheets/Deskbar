@@ -5064,6 +5064,22 @@ public partial class FloatingBar : Window
             container.AllowDrop = true;
             container.DragOver += (_, e) =>
             {
+                // A link, program or shortcut dragged in from outside (Task 9 of the bookmarks plan). Keyed on the
+                // WORKSPACE ID, not on whether the row shows chips: a workspace with no bookmarks yet must accept
+                // its first. Rows without an id (pinned, unnamed desktops) fall through to the window-only path.
+                // A window drag never gets here: BookmarkDropData.From is none for it.
+                if (rowKey is not null && BookmarkDropData.From(e.Data).TryGetValue(out var offered))
+                {
+                    var verdict = BookmarkDropParser.Precheck(offered);
+                    var effects = verdict.IsSuccess ? e.AllowedEffects & (DragDropEffects.Copy | DragDropEffects.Link) : DragDropEffects.None;
+                    e.Effects = effects;
+                    e.Handled = true;
+                    var ok = verdict.IsSuccess && effects != DragDropEffects.None;
+                    container.Background = ok ? DropHighlight : idle;
+                    ShowReadout(ok ? $"→ bookmark in {groupLabel}" : $"can't bookmark: {(verdict.IsFailure ? verdict.Error : "nothing to copy here")}");
+                    return;
+                }
+
                 var accepted = e.Data.GetDataPresent(DraggedWindow.DragFormat);
                 e.Effects = accepted ? DragDropEffects.Move : DragDropEffects.None;
                 e.Handled = true;
@@ -5111,6 +5127,18 @@ public partial class FloatingBar : Window
                 ClearAim(groupKey);
                 ShowMarker(null);
                 ClearInfo();
+
+                // The bookmark drop: parse what was dropped (reading a .lnk or .url from disk happens here, not in
+                // DragOver), add it through the manager (which runs BookmarkRules.Check) and say any refusal.
+                if (rowKey is { } bookmarkWorkspace && BookmarkDropData.From(e.Data).TryGetValue(out var dropped))
+                {
+                    e.Handled = true;
+                    Report(BookmarkSources is { } sources
+                        ? BookmarkDropParser.Parse(dropped, sources).Bind(b => manager.AddBookmark(bookmarkWorkspace, b))
+                        : Result.Failure<Bookmark>("This copy of Deskbar cannot read dropped items."));
+                    return;
+                }
+
                 if (e.Data.GetData(DraggedWindow.DragFormat) is not DraggedWindow dragged) return;
 
                 var at = e.GetPosition(container);
@@ -5636,6 +5664,9 @@ public partial class FloatingBar : Window
         readoutText.Text = text;
         readout.IsOpen = true;
     }
+
+    // For tests: what the drop readout last said.
+    internal string? ReadoutText => readoutText?.Text;
 
     System.Windows.Controls.Primitives.Popup? readout;
     Border? readoutBody;
@@ -8176,6 +8207,17 @@ public partial class FloatingBar : Window
             // Click, not Checked/Unchecked, for the reason given on the folder item above.
             remember.Click += (_, _) => Report(manager.RememberWorkspace(row.Window.Handle, remember.IsChecked));
             menu.Items.Add(remember);
+        }
+
+        // "Bookmark in this workspace": the window's program or app, as a chip in the workspace it sits in. Left out
+        // where WorkspaceManager.BookmarkFor has no answer (Deskbar's own windows, the shell, a plain browser window).
+        if (BookmarkSources is { } bookmarkSources
+            && manager.WorkspaceOf(row.Window.Handle).TryGetValue(out var home)
+            && manager.BookmarkFor(row.Window.Handle, AppIdOf(row.Window), bookmarkSources).TryGetValue(out var candidate))
+        {
+            var bookmarkItem = new MenuItem { Header = "Bookmark in this workspace", Icon = MenuGlyph("☆") };
+            bookmarkItem.Click += (_, _) => Report(manager.AddBookmark(home.Id, candidate));
+            menu.Items.Add(bookmarkItem);
         }
 
         var restore = new MenuItem { Header = "Restore title", IsEnabled = row.OriginalTitle.HasValue, Icon = MenuGlyph("↺") };
