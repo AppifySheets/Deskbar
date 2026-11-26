@@ -93,7 +93,8 @@ public partial class TasksWindow
         LinesBuilt++;
         var line = Line(row);
         if (idle) line.Opacity = IdleOpacity;
-        return row.Expanded ? [line, Thread(row)] : [line];
+        // The thread capped under its line, so the two always fit in the view together (task ee9bd3fc).
+        return row.Expanded ? [line, Thread(row, under: line)] : [line];
     }
 
     LineBlock Replay(LineBlock kept)
@@ -110,6 +111,9 @@ public partial class TasksWindow
         [
             Since(menuButtons), Since(lineButtons), Since(dragLines), Since(dragEntries), Since(commentBoxes), Since(ages),
             Since(slimTips), Since(selectionFrames), Since(authors), Since(shownComments), Since(closing), Since(pendingRows),
+            // A kept thread's scroller, frame and line (task ee9bd3fc, TasksWindow.ThreadCap.cs), so its scroll is read
+            // at the next draw and ScrollToSelected can show it with its line.
+            Since(cappedThreads),
         ];
         var gridsBefore = fullGrids.Count;
         var elements = draw();

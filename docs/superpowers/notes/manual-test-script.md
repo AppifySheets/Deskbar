@@ -1220,6 +1220,13 @@ TW12. (Task 2088e1ed.) In a thread, a comment cut at six lines has the same band
      has none. Drag it down and up: the comment shows more and less, live. Release halfway: that height stays, and "Show
      more" still opens it whole. Drag one to its bottom: its button says "Show less". Show less brings it back to six
      lines.
+TW13. (Task ee9bd3fc.) A task whose last three comments together are taller than the panel, its line near the bottom
+     of the list. Open its thread: the list scrolls so the line and the whole thread show, the line at the top if need
+     be, and the thread ends above the bottom of the panel. The comments scroll inside the thread and start at the
+     latest; the row of buttons stays above them and "Add a comment…" below. Wheel up inside the thread to its first
+     comment and keep going: the list scrolls instead. Scroll the thread halfway and wait for a status line to change:
+     it stays where you left it. Make the panel shorter: the thread shrinks with it. A subtask opened inside the thread
+     scrolls with the parent's comments and has no scroll of its own. Same in a Matrix cell, against the cell's height.
 
 ## The narrow panel's titles
 

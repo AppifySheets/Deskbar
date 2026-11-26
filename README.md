@@ -524,6 +524,9 @@ one line, "+N more waiting on you", so your important tasks stay in sight right 
 open the tasks panel.
 "+N more" (or "All tasks") opens the tasks panel,
 with every task, its comments, and a Matrix view of the four quadrants side by side.
+A task's open thread is never taller than the list less the task's own line, so the task stays in sight while you
+read: the comments scroll inside the thread, starting at the latest, with its row of buttons above them and the
+comment box below. Opening a thread scrolls the list just enough to show the line and the thread together.
 The panel is a full-height strip docked just inside the bar, on every virtual desktop, and it pushes
 maximized windows aside as the bar does. A window that is not maximized but reaches under the panel when
 it opens or grows is moved out from under it, keeping its size where there is room and narrowed where

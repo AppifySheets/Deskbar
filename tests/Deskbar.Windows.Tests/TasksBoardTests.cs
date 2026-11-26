@@ -3107,9 +3107,105 @@ public class TasksBoardTests
         var scroller = Inside(t.Window).OfType<ScrollViewer>().First(s => s.Content is StackPanel);
         double Right(FrameworkElement e) => e.TransformToAncestor(scroller).TransformBounds(new Rect(e.RenderSize)).Right;
         Assert.True(Right(box) <= scroller.ViewportWidth + 0.5, $"the comment box ends at {Right(box)} in a viewport {scroller.ViewportWidth} wide");
-        var thread = Inside(t.Window).OfType<Border>().Where(b => b.IsAncestorOf(box) && b.Child is StackPanel).OrderBy(b => b.ActualWidth).Last();
+        // The thread's frame by its tag: since its cap (task ee9bd3fc) it holds a DockPanel, as the window's own layout does.
+        var thread = Inside(t.Window).OfType<Border>().Single(b => b.IsAncestorOf(box) && Equals(b.Tag, TasksWindow.ThreadTag));
         Assert.True(Right(thread) <= scroller.ViewportWidth + 0.5, $"the thread ends at {Right(thread)} in a viewport {scroller.ViewportWidth} wide");
     });
+
+    // Task ee9bd3fc, Petre's screenshot of a panel filled top to bottom by one task's comments, its line scrolled off
+    // above: "expanding task comments should limit the task detail height and always show the task itself". The task
+    // sits at the bottom of a long list and the list is at its top; opening its thread scrolls the list so the line and
+    // the whole thread show together, and the thread, with three comments taller than the view, is capped to fit.
+    [Fact]
+    public void An_opened_thread_is_capped_and_shows_with_its_line() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        // Made first, so it is drawn last, under the thirty made after it.
+        var id = t.Tasks.AddNote("the long conversation", t.Gepha).Value.Id;
+        Enumerable.Range(1, 3).ToList().ForEach(_ => t.Tasks.Comment(id, Maybe<string>.None, Long(14)));
+        Enumerable.Range(1, 30).ToList().ForEach(i => t.Tasks.AddNote($"note {i}", t.Gepha));
+        t.Controller.Show();
+        t.Window.UpdateLayout();
+        var list = ListScroller(t, id);
+        list.ScrollToTop();
+        t.Window.UpdateLayout();
+
+        Click(ButtonNamed(LineOf(t.Window, id), "Comments"));
+        t.Window.UpdateLayout();
+        t.Panel.Pump();
+
+        var line = LineOf(t.Window, id);
+        list = ListScroller(t, id);
+        var box = t.Window.CommentBoxOf(id)!;
+        var frame = ThreadFrame(t, id);
+        Rect InList(FrameworkElement e) => e.TransformToAncestor(list).TransformBounds(new Rect(e.RenderSize));
+        // Capped: the comments alone are taller than the view, the frame and its line are not.
+        Assert.True(line.ActualHeight + frame.ActualHeight <= list.ViewportHeight, $"line {line.ActualHeight} + thread {frame.ActualHeight} in a view {list.ViewportHeight} high");
+        // Shown together: the line, the thread and its comment box are all inside the view.
+        new FrameworkElement[] { line, frame, box }.ToList().ForEach(e =>
+        {
+            var at = InList(e);
+            Assert.True(at.Top >= -0.5 && at.Bottom <= list.ViewportHeight + 0.5, $"{e.GetType().Name} at {at.Top}..{at.Bottom} in a view {list.ViewportHeight} high");
+        });
+    });
+
+    // Task ee9bd3fc: a capped thread scrolls inside itself and starts at its latest comment, as a chat does, and keeps
+    // that place through a redraw (a status line changing redraws every line).
+    [Fact]
+    public void A_capped_thread_starts_at_its_latest_comment_and_keeps_its_scroll() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var id = t.Tasks.Create("the long conversation", t.Gepha, Session("s1")).Value.Id;
+        Enumerable.Range(1, 3).ToList().ForEach(_ => t.Tasks.Comment(id, "s1", Long(14)));
+        t.Controller.Show();
+        t.Controller.ToggleThread(id);
+        t.Window.UpdateLayout();
+
+        var inner = ThreadScroller(t, id);
+        Assert.True(inner.ScrollableHeight > 0, "the comments are taller than the cap");
+        Assert.Equal(inner.ScrollableHeight, inner.VerticalOffset, 1);
+
+        inner.ScrollToVerticalOffset(40);
+        t.Window.UpdateLayout();
+        t.Tasks.SetStatusLine(id, "waiting for CI");
+        t.Window.UpdateLayout();
+
+        var redrawn = ThreadScroller(t, id);
+        Assert.NotSame(inner, redrawn);
+        Assert.Equal(40, redrawn.VerticalOffset, 1);
+    });
+
+    // Review of task ee9bd3fc: a thread that fits counts as "at its end", and unfolding its earlier comments must not
+    // then jump to the end and scroll the comments just asked for away above. Only a new latest comment follows the end.
+    [Fact]
+    public void Unfolding_earlier_comments_keeps_the_thread_at_its_top() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var id = t.Tasks.AddNote("the conversation", t.Gepha).Value.Id;
+        // Two long earlier comments folded away, three short ones shown: the thread fits until the fold opens.
+        Enumerable.Range(1, 2).ToList().ForEach(_ => t.Tasks.Comment(id, Maybe<string>.None, Long(14)));
+        Enumerable.Range(1, 3).ToList().ForEach(i => t.Tasks.Comment(id, Maybe<string>.None, $"short {i}"));
+        t.Controller.Show();
+        t.Controller.ToggleThread(id);
+        t.Window.UpdateLayout();
+        Assert.Equal(0, ThreadScroller(t, id).ScrollableHeight, 1);
+
+        Click(Inside(ThreadFrame(t, id)).OfType<Button>().First(b => Inside(b).OfType<TextBlock>().Any(x => x.Text.Contains("earlier"))));
+        t.Window.UpdateLayout();
+
+        var unfolded = ThreadScroller(t, id);
+        Assert.True(unfolded.ScrollableHeight > 0, "the unfolded comments are taller than the cap");
+        Assert.Equal(0, unfolded.VerticalOffset, 1);
+    });
+
+    // The list the task's line is in, and the frame and the scroller of its open thread (task ee9bd3fc).
+    static ScrollViewer ListScroller(Board t, Guid id) =>
+        Inside(t.Window).OfType<ScrollViewer>().First(s => s.Content is StackPanel panel && panel.Children.Contains(LineOf(t.Window, id)));
+
+    static Border ThreadFrame(Board t, Guid id) =>
+        Inside(t.Window).OfType<Border>().Single(b => Equals(b.Tag, TasksWindow.ThreadTag) && b.IsAncestorOf(t.Window.CommentBoxOf(id)!));
+
+    static ScrollViewer ThreadScroller(Board t, Guid id) => Inside(ThreadFrame(t, id)).OfType<ScrollViewer>().First(s => s.Content is StackPanel);
 
     // F2 on the selected line opens it too; Enter saves through Rename; Esc cancels.
     [Fact]
