@@ -506,6 +506,42 @@ public class TasksBoardTests
         Assert.Empty(t.Window.Keys);
     });
 
+    // TASK 44605767 (Petre: "after i close the task, i can't close its details"): a line in its undo window takes no click
+    // but Undo's, so a thread left open under it could not be folded. The close folds it; Undo opens it again, since Undo
+    // is exactly undo (Ruling 31); and a thread that was folded stays folded through a close and its Undo.
+    [Fact]
+    public void Closing_a_task_folds_its_thread_and_undo_opens_it_again() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var open = t.Tasks.AddNote("Show full circles first", t.Gepha).Value.Id;
+        var folded = t.Tasks.AddNote("Dishwasher tablets", t.Gepha).Value.Id;
+        t.Controller.Show();
+        t.Controller.Pick(open);
+        Assert.True(t.Window.ThreadShown(open));
+
+        // The tick closes it: the line stays struck through with Undo, and its thread is gone with the close.
+        Click(ButtonNamed(LineOf(t.Window, open), "Close"));
+        Assert.True(t.Window.IsClosing(open));
+        Assert.False(t.Window.ThreadShown(open));
+
+        // Undo brings the thread back with the task.
+        Click(ButtonNamed(LineOf(t.Window, open), "Undo"));
+        Assert.False(t.Window.IsClosing(open));
+        Assert.True(t.Window.ThreadShown(open));
+
+        // A folded thread is not opened by an Undo.
+        Click(ButtonNamed(LineOf(t.Window, folded), "Close"));
+        Click(ButtonNamed(LineOf(t.Window, folded), "Undo"));
+        Assert.False(t.Window.ThreadShown(folded));
+
+        // Closed for good, the task does not come back with its thread open when the Closed filter shows it.
+        Assert.True(t.Controller.Close(open).IsSuccess);
+        t.Timers.FireAll();
+        t.Controller.Filter(TaskFilter.Closed);
+        Assert.Contains(open, t.Window.Keys);
+        Assert.False(t.Window.ThreadShown(open));
+    });
+
     [Fact]
     public void Rename_move_and_delete_from_the_window() => StaThread.Run(() =>
     {
