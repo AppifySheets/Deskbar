@@ -1,5 +1,6 @@
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Input;
 using Deskbar.Core.Tasks;
 
 namespace Deskbar.App;
@@ -50,6 +51,23 @@ public partial class TasksWindow
         if (InboxPage.Parent is Panel parent) parent.Children.Remove(InboxPage);
         return InboxPage;
     }
+
+    /// <summary>What a comment typed before the page took over goes on from: the box's text, as a redraw would restore it.</summary>
+    internal void SeedDraft(Guid id, string text) => drafts[id] = text;
+
+    /// <summary>A release of the mouse on the page: what a press held back is drawn (the panel's window does this itself).</summary>
+    internal void FlushHeld() => Flush();
+
+    /// <summary>
+    /// A key in the task window while its page shows, whether the page took it: Esc undoes the innermost thing (an editor, a
+    /// comment edit, the subtask box) and goes nowhere else, F2 edits the page's task. Ctrl+F is not the page's: no search
+    /// box is on it.
+    /// </summary>
+    internal bool PressInWindow(Key key, ModifierKeys modifiers) =>
+        (key == Key.Escape && Escape()) || (key == Key.F2 && EditSelected());
+
+    /// <summary>The board's own "Show in the tasks panel" (the page's copy of the actions sends ShowTask to a window).</summary>
+    internal Action<Guid>? ShowInPanel { get; set; }
 
     // A subtask's line or entry in the window's page: its own window, as the old task window's subtasks always opened.
     bool OpensInOwnWindow(Guid id)

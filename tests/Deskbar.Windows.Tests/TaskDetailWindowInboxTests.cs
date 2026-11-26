@@ -32,6 +32,7 @@ public class TaskDetailWindowInboxTests
         public required TasksBoard Board { get; init; }
         public required TaskService Tasks { get; init; }
         public required string Scratch { get; init; }
+        public required List<nint> Brought { get; init; }
 
         public Guid Sparrow => Harness.Manager.State.Workspaces.Single(w => w.Name == "Sparrow").Id;
 
@@ -52,8 +53,20 @@ public class TaskDetailWindowInboxTests
 #pragma warning restore WPF0001
         Assert.True(harness.Manager.SaveTasksPanel(new TasksPanelState(false, 1000) { Inbox = inbox }).IsSuccess);
         var rig = new TasksPanelRig(panel).Docked("right", null);
-        var board = new TasksBoard(panel, rig.Panel, tasks, harness.Manager, _ => Result.Success(), now: () => Start.AddHours(1));
-        return new Rig { Harness = harness, Panel = panel, Board = board, Tasks = tasks, Scratch = scratch };
+        var brought = new List<nint>();
+        var seconds = 0;
+        var board = new TasksBoard(panel, rig.Panel, tasks, harness.Manager, _ => Result.Success(), now: () => Start.AddHours(1))
+        {
+            // A scratch picture folder, a click on a picture recorded rather than opening a viewer, and a click a second
+            // after the last one, so the click guard (a click right after a redraw is dropped) lets it by.
+            NewTaskWindow = () => new TaskDetailWindow
+            {
+                StateDir = scratch, OpenImage = _ => { }, Now = () => Start.AddHours(1),
+                PageClickClock = () => Start.UtcDateTime.AddSeconds(seconds++),
+            },
+            BringTaskWindowForward = brought.Add,
+        };
+        return new Rig { Harness = harness, Panel = panel, Board = board, Tasks = tasks, Scratch = scratch, Brought = brought };
     }
 
     static TaskSession Session(string id) => new(id, @"C:\repos\TaskSpaces", Start, Maybe<DateTimeOffset>.None);
@@ -131,5 +144,66 @@ public class TaskDetailWindowInboxTests
             window.Close();
             renderer.CloseForGood();
         }
+    });
+
+    static Visibility HeaderOf(TaskDetailWindow window) => ((FrameworkElement)window.FindName("Header")).Visibility;
+
+    // Inbox off: the window is the old one, nothing of the page, and every other test of the old window stands.
+    [Fact]
+    public void With_the_inbox_off_the_window_is_the_old_one() => StaThread.Run(() =>
+    {
+        using var t = Build(inbox: false);
+        var id = t.Tasks.AddNote("Long brief", Maybe<Guid>.None).Value.Id;
+
+        Assert.True(t.Board.OpenWindow(id).IsSuccess);
+
+        var window = t.Board.WindowOf(id)!;
+        Assert.False(window.ShowsInboxPage);
+        Assert.Equal(Visibility.Visible, HeaderOf(window));
+        Assert.Null(t.Board.DetailViewFor(id)!.Page);
+    });
+
+    // Inbox on: the page is the window's content: its mark, its title, its comment box, no back arrow, no old header.
+    [Fact]
+    public void With_the_inbox_on_the_window_shows_the_page_without_a_back_arrow() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var id = t.Tasks.AddNote("Store listing refresh", Maybe<Guid>.None).Value.Id;
+        Assert.True(t.Tasks.Describe(id, "New screenshots and copy.").IsSuccess);
+        Assert.True(t.Tasks.Comment(id, Maybe<string>.None, "A first finding").IsSuccess);
+
+        Assert.True(t.Board.OpenWindow(id).IsSuccess);
+
+        var window = t.Board.WindowOf(id)!;
+        Assert.True(window.IsVisible);
+        Assert.True(window.ShowsInboxPage);
+        Assert.Equal(Visibility.Collapsed, HeaderOf(window));
+        Assert.StartsWith("Store listing refresh", window.Title);
+        Assert.Equal(id, window.TaskId);
+        Assert.Contains(Inside(window).OfType<FrameworkElement>(), e => Equals(e.Tag, "inbox-mark"));
+        Assert.DoesNotContain(Inside(window).OfType<Button>(), b => AutomationProperties.GetName(b) == TasksWindow.InboxPageBackText);
+        var box = window.PageRenderer!.CommentBoxOf(id)!;
+        Assert.Same(window, Window.GetWindow(box));
+        Assert.Single(t.Brought);
+    });
+
+    // The page follows its task (a new comment shows, the title moves) and the window closes when the task is deleted.
+    [Fact]
+    public void The_page_follows_its_task_and_the_window_closes_when_it_is_deleted() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var id = t.Tasks.AddNote("Long brief", Maybe<Guid>.None).Value.Id;
+        Assert.True(t.Board.OpenWindow(id).IsSuccess);
+        var window = t.Board.WindowOf(id)!;
+        Assert.Empty(window.PageRenderer!.ShownComments(id));
+
+        Assert.True(t.Tasks.Comment(id, Maybe<string>.None, "A new finding", wakes: false).IsSuccess);
+        Assert.Single(window.PageRenderer!.ShownComments(id));
+        Assert.True(t.Tasks.Rename(id, "A better title").IsSuccess);
+        Assert.StartsWith("A better title", window.Title);
+
+        Assert.True(t.Tasks.Delete(id).IsSuccess);
+        Assert.False(window.IsVisible);
+        Assert.False(t.Board.HasWindow(id));
     });
 }
