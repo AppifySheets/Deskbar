@@ -108,6 +108,13 @@ Right-click a window: "Bookmark in this workspace" adds a bookmark to the worksp
 The item is left out for Deskbar's own windows and for windows with no identity
 (`RosterIdentity`'s `StaysWhereOpened` and `IsShell` cases).
 
+Right-click a workspace row: "Bookmark link from clipboard" (added 2026-11-26, Petre approved). It is
+enabled only while the clipboard's text, trimmed, is an absolute http(s) URL. A click adds a Link
+bookmark to that workspace, named after the URL's host (renamed later from the chip's menu), with no
+dialog. A refusal (a duplicate, or text that stopped being a URL) is reported the way the bar reports
+any other refused action. Its pipe twin is the existing `bookmark add <workspace> --url <url>`, so it
+needs no command of its own.
+
 Builder, measure first: whether an Edge PWA window's AppUserModelID starts it through
 `shell:AppsFolder`, and what a Chromium address-bar drag offers. Both are assumptions until a probe
 says so. If the PWA probe fails (my call), a PWA window becomes a Program bookmark instead: the
