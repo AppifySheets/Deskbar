@@ -150,6 +150,20 @@ public partial class TaskDetailWindow : Window
     /// <summary>The window's handle, made if it is not yet.</summary>
     internal nint EnsureHandle() => new WindowInteropHelper(this).EnsureHandle();
 
+    // A TILE, NOT A FLOATING WINDOW (task 4c746a42, Petre: "detail window should not hover on top, but be docked as
+    // regular windows are"). The tiler keeps every window of this process out of the grid (TasksBoard.KeptFromTiling),
+    // which is right for the bar, Manage, the dialogs and the docked panel, but left a task window floating over the
+    // tiles of a tiled workspace. A task window is an ordinary window (title bar, taskbar, Alt+Tab), so it tiles like
+    // one. The tiler asks by handle, so each task window's handle is listed here from the moment it exists until it is
+    // gone. An immutable set swapped whole, so a reader on any thread sees one consistent set without a lock.
+    static System.Collections.Immutable.ImmutableHashSet<nint> openHandles = [];
+
+    /// <summary>Whether the handle is a task window's (TasksBoard.KeptFromTiling lets these tile).</summary>
+    internal static bool IsTaskWindow(nint hwnd) => openHandles.Contains(hwnd);
+
+    // This window's own entry in openHandles, kept so OnClosed removes exactly what OnSourceInitialized added.
+    nint listedHandle;
+
     // --- showing ---------------------------------------------------------------------------------------------------
 
     /// <summary>
@@ -170,6 +184,10 @@ public partial class TaskDetailWindow : Window
     {
         base.OnSourceInitialized(e);
         var hwnd = new WindowInteropHelper(this).Handle;
+        // Listed as a task window before it is first shown, so the tiler's first look at it already lets it tile; let go
+        // of once the handle is destroyed (OnClosed), so a recycled handle is never mistaken for one.
+        listedHandle = hwnd;
+        System.Collections.Immutable.ImmutableInterlocked.Update(ref openHandles, set => set.Add(hwnd));
         // The title bar in the dark, to match the window (DWMWA_USE_IMMERSIVE_DARK_MODE, Windows 11 and late Windows 10).
         var dark = 1;
         _ = NativeMethods.DwmSetWindowAttribute(hwnd, DwmUseImmersiveDarkMode, ref dark, sizeof(int));
@@ -241,6 +259,10 @@ public partial class TaskDetailWindow : Window
     protected override void OnClosed(EventArgs e)
     {
         base.OnClosed(e);
+        // No longer a task window: Windows may hand this handle to another window now. The handle as it was listed,
+        // since the interop helper's may already read zero while the window is being destroyed.
+        var listed = listedHandle;
+        System.Collections.Immutable.ImmutableInterlocked.Update(ref openHandles, set => set.Remove(listed));
         Leaving?.Invoke();
     }
 

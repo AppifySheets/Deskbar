@@ -86,6 +86,7 @@ The panel is narrow on purpose, which makes a long task hard to read and harder 
 - On a window at least 1100 DIP wide, a column on the right holds the Claude sessions (each with **Open**), **Start Claude on this** while none of them is running, the subtasks (each opens in a window of its own) and the details: quadrant, workspace, assignee, goal, parent, when it was added and its id, which you can select and copy. A narrower window puts the column under the thread.
 - **Edit**, F2 or Ctrl+E turns the title and description into large boxes, with **Markdown** and **Preview** tabs. Pictures paste or drop into the description as in the panel's editor. **Ctrl+S** or **Ctrl+Enter** saves both and **Esc** keeps nothing. Your own comments have **Edit** in place (Ctrl+Enter saves, Esc keeps it).
 - Each task has one window: asking again brings it to the front. It always comes to the desktop you are on, moved there if you left it on another. Every task window opens where you last moved, resized or closed one, maximized if that one was, and a second one open at the same time opens a little down and to the right. Deleting the task closes its window, and the windows close with Deskbar.
+- On a tiled workspace a task window is a tile like any other app's window, not a window floating over the grid. Where the grid puts it is not remembered as the place task windows open at; only a place you gave one on an untiled workspace is.
 - `deskbar.cmd task open <id>` does the same from a script.
 
 ## Links to a task

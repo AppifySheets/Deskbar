@@ -1189,6 +1189,9 @@ TW7. Move and resize the window, close it, open another task's window: it opens 
 TW8. With one task window open, open a second task: the second opens a little down and to the right of the first.
 TW9. A subtask in the side column opens in a window of its own. "Delete for good" from the window's "⋯" menu closes
      the window with the task.
+TW9a. (Task 4c746a42.) On a tiled workspace, open a task's window: it takes a tile beside the other windows instead
+     of floating over them, and closing it gives its tile back. Then open one on an untiled workspace: it opens at the
+     place the last untiled one was left, not at the tile's size.
 TW10. (Task e91f8aa5.) Have a session ask a question of ten lines or more, on a task whose description is long too. Open
      its line in the panel: the question and the description each stop after four lines, cut between two lines, and
      "Show all in window" sits under them. Click it: the task's window opens with both in full. A link inside the four

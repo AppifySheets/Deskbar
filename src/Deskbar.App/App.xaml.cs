@@ -340,7 +340,9 @@ public partial class App : Application
         // "Ours" is decided the way the bar already decides it (FloatingBar.IsOwnWindow: the window's process
         // is this process), so Deskbar never tiles its own bar, Manage, a dialog of its own or the tasks panel, which is
         // docked, not a tile (TasksBoard.KeptFromTiling). The floating tasks window used to be the one exception ("maybe
-        // even tile it", 2026-11-23) until it became the panel (tasks panel plan, Task 6).
+        // even tile it", 2026-11-23) until it became the panel (tasks panel plan, Task 6). A task window
+        // (TaskDetailWindow) does tile: it is an ordinary window, and Petre wants it "docked as regular windows are"
+        // (task 4c746a42).
         tileSurface = new Windows.Tiling.TileSurface(w => TasksBoard.KeptFromTiling(w.Value));
         tiler = new Core.Tiling.Tiler(manager, desktops, monitor, tileSurface,
             // Whether this copy may tile: Pro, or anyone while tiling is free (TilingGate.Free, for now).
@@ -1057,7 +1059,9 @@ public partial class App : Application
         var window = new WindowHandle(hwnd);
         if (desktops is { } service && !OnDesktopInFront(hwnd))
         {
-            var moved = service.CurrentDesktop().Bind(front => service.MoveWindow(window, front));
+            // Through the manager when there is one, so the tiler hears of the move (a task window tiles, task 4c746a42).
+            var moved = service.CurrentDesktop().Bind(front =>
+                manager is { } m ? m.MoveWithoutMemory(window, front) : service.MoveWindow(window, front));
             ClickTrace.Write($"task window 0x{hwnd:X}: moved to the desktop in front: {(moved.IsSuccess ? "ok" : moved.Error)}");
             if (moved.IsFailure) return;
         }
@@ -2673,6 +2677,14 @@ public partial class App : Application
                 // raised and activated through the activator, as the panel is (a `task open` typed in a terminal carries
                 // no foreground right). Each window is an ordinary window, not pinned, so it stays where Petre puts it.
                 BringTaskWindowForward = BringTaskWindowHere,
+                // A task window tiles like any app's window (task 4c746a42); on a workspace the tiler acts on, its place
+                // is the grid's and is not saved as the place task windows open at. Asked of the workspace, not of the
+                // board: a minimized or maximized tile is off the board while its normal rectangle is still the tile's,
+                // and a restore or close then would save it. The same gate the Tiler is given in StartTiling.
+                OnTiledWorkspace = hwnd => tiler is not null && manager is { } m
+                    && m.WorkspaceOf(new WindowHandle(hwnd))
+                        .Map(w => Core.Tiling.TilingGate.Acts(w, Core.Tiling.TilingGate.Allowed(Entitlement.Current.IsPro)))
+                        .GetValueOrDefault(false),
                 // The manager line's click (task 61e4d143): the Manager button's own ManagerActions.Open; a refusal shows
                 // on the panel's problem line.
                 OpenManager = () => managerActions?.Open() ?? Result.Failure(ClaudeActionsNotReady),

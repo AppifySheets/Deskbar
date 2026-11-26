@@ -515,7 +515,8 @@ maximize and Alt+Tab to: the whole description with its links and pictures, the 
 every comment with none cut short, its Claude sessions, its subtasks and its details. Edit (or F2) turns the title and
 description into large boxes, with a Preview tab for the markdown; Ctrl+S or Ctrl+Enter saves and Esc cancels. Ctrl+Enter
 posts a comment. Each task has one window, which opens on the desktop you are on, and every task window opens where you
-last left one, at the size you gave it. A script opens one with `deskbar.cmd task open <id>`.
+last left one, at the size you gave it. On a tiled workspace a task window takes a tile like any other app's window,
+rather than floating over the grid. A script opens one with `deskbar.cmd task open <id>`.
 
 "Copy link" on a task's menu copies a link to the task, ready to paste into a pull request, an issue or a message.
 Clicked, it opens the task in its own window on the PC where Deskbar runs; the link goes through deskbar.app, which

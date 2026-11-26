@@ -74,6 +74,24 @@ public class PlacementRestoreTests
         Assert.Empty(store.Stored.PinnedApps); // the three states are mutually exclusive
     }
 
+    // Task 4c746a42: a task window brought to the desktop in front moves without being remembered (it is not Petre's
+    // drag), but WindowMoved still says so, so the tiler takes it off the board it left and tiles it where it arrives.
+    [Fact]
+    public void Moving_without_memory_moves_tells_window_moved_and_remembers_nothing()
+    {
+        var plain = desktops.Create("Main").Value;
+        var manager = Started(AppState.Empty with { PinnedApps = [BeeperEntry] });
+        monitor.Subject.OnNext(new WindowEvent(WindowEventKind.Appeared, BeeperWindow(0x10)));
+        var moved = new List<WindowHandle>();
+        using var watch = manager.WindowMoved.Subscribe(moved.Add);
+
+        Assert.True(manager.MoveWithoutMemory(new WindowHandle(0x10), plain.Id).IsSuccess);
+
+        Assert.Equal(plain.Id, desktops.WindowPlacements[new WindowHandle(0x10)]);
+        Assert.Equal([new WindowHandle(0x10)], moved);
+        Assert.DoesNotContain(store.Stored.DetachedApps, e => RosterIdentity.Of(e) == RosterIdentity.Of(BeeperEntry));
+    }
+
     [Fact]
     public void Assigning_to_a_workspace_clears_pinned_and_detached_memory()
     {

@@ -4598,6 +4598,13 @@ public sealed class WorkspaceManager(
     public Result PinWithoutMemory(WindowHandle window) =>
         desktops.Pin(window).Tap(() => windowMoved.OnNext(window));
 
+    // Moves a window to a desktop WITHOUT remembering it (MoveToDesktop records the move as placement memory and marks
+    // the window detached, which is Petre's drag saying where a window belongs), but through the one doorway, so
+    // WindowMoved is announced and the tiler takes the window off the board it left and tiles it where it arrives. For a
+    // task window brought to the desktop in front (task 4c746a42, App.BringTaskWindowHere): moved past the manager, it
+    // floated over the arriving workspace's grid at the old tile's rectangle until something unrelated re-tiled.
+    public Result MoveWithoutMemory(WindowHandle window, Guid desktopId) => MoveWindowTo(window, desktopId);
+
     public Result UnpinWindow(WindowHandle window) =>
         desktops.Unpin(window).Tap(() => ForgetPlacement(window));
 

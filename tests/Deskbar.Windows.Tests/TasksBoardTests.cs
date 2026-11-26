@@ -1552,6 +1552,30 @@ public class TasksBoardTests
         Assert.False(surface.CanTile(new Deskbar.Core.Domain.WindowHandle(panel)));
     });
 
+    // Task 4c746a42 (Petre: "detail window should not hover on top, but be docked as regular windows are"): a task
+    // window is the one window of this process that tiles, as an ordinary app window would, while the panel beside it
+    // stays out. Once it closes its handle is no longer counted as a task window.
+    [Fact]
+    public void A_task_window_tiles_while_the_panel_does_not() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var id = t.Tasks.AddNote("Ship the release", t.Gepha).Value.Id;
+        t.Controller.Show();
+        var panel = t.Controller.EnsureHandle();
+        Assert.True(t.Controller.OpenWindow(id).IsSuccess);
+        var shown = t.Controller.WindowOf(id)!;
+        var hwnd = shown.EnsureHandle();
+        var surface = new Deskbar.Windows.Tiling.TileSurface(w => TasksBoard.KeptFromTiling(w.Value));
+
+        Assert.True(TaskDetailWindow.IsTaskWindow(hwnd));
+        Assert.False(TasksBoard.KeptFromTiling(hwnd));
+        Assert.True(surface.CanTile(new Deskbar.Core.Domain.WindowHandle(hwnd)));
+        Assert.True(TasksBoard.KeptFromTiling(panel));
+
+        shown.CloseForGood();
+        Assert.False(TaskDetailWindow.IsTaskWindow(hwnd));
+    });
+
     // The average colour of a bitmap's opaque pixels.
     static (int R, int G, int B) AverageOpaque(System.Windows.Media.Imaging.BitmapSource source)
     {

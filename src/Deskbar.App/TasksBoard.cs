@@ -176,6 +176,13 @@ public sealed class TasksBoard : IDisposable
     internal Action<nint>? BringTaskWindowForward { get; init; }
 
     /// <summary>
+    /// Whether the window lives on a workspace the tiler acts on (task 4c746a42: a task window tiles like any app's
+    /// window). A task window there does not save its place, since the grid chose it, even while it is minimized or
+    /// maximized and so off the grid. The app asks the window's workspace; the tests and a copy with no tiling: never.
+    /// </summary>
+    internal Func<nint, bool> OnTiledWorkspace { get; init; } = _ => false;
+
+    /// <summary>
     /// Opens the manager session (the bar's Manager button, ManagerActions.Open): the manager line's click (task 61e4d143).
     /// None (the tests, a copy without Claude sessions): the panel draws no manager line, as there is nothing to open.
     /// </summary>
@@ -586,9 +593,12 @@ public sealed class TasksBoard : IDisposable
     /// <summary>
     /// The tiling surface's "ours": Deskbar keeps its own windows out of the grid (the bar, Manage, its dialogs), and the
     /// tasks panel with them, since a docked panel is not a tile (spec "The panel window"). The floating window was the
-    /// one exception ("maybe even tile it", 2026-11-23) until it became the panel.
+    /// one exception ("maybe even tile it", 2026-11-23) until it became the panel. A task window (TaskDetailWindow) is
+    /// the exception now: an ordinary window with a title bar, on the taskbar and in Alt+Tab, it tiles like any other
+    /// app's window instead of floating over the grid (task 4c746a42: "should not hover on top, but be docked as regular
+    /// windows are").
     /// </summary>
-    internal static bool KeptFromTiling(nint hwnd) => FloatingBar.IsOwnWindow(hwnd);
+    internal static bool KeptFromTiling(nint hwnd) => FloatingBar.IsOwnWindow(hwnd) && !TaskDetailWindow.IsTaskWindow(hwnd);
 
     /// <summary>
     /// Puts the window at the top of the z-order of its band (the topmost one, for the panel), without activating it and
@@ -638,7 +648,13 @@ public sealed class TasksBoard : IDisposable
             shown = NewTaskWindow();
             shown.Actions = actions;
             // Each move, resize or close saves the one shared place (a no-op when unchanged); a close also lets go of it.
-            shown.PlaceChanged = place => _ = manager.SaveTaskWindow(place);
+            // Not while the window is on a tiled workspace (task 4c746a42): the grid chose that rectangle, not Petre, and
+            // saving it would make the next task window on an untiled workspace open at a tile's size.
+            var window = shown;
+            shown.PlaceChanged = place =>
+            {
+                if (!OnTiledWorkspace(window.EnsureHandle())) _ = manager.SaveTaskWindow(place);
+            };
             shown.Leaving = () => taskWindows.Remove(id);
             shown.Present(DetailOf(task.Value));
             shown.Open(manager.State.TaskWindow, cascade: taskWindows.Count);
