@@ -149,6 +149,92 @@ public sealed class BookmarkFaviconTests : IDisposable
         Assert.Null(server.Seen);
     }
 
+    // THE FALLBACK (FetchDeclared): the bookmarked page, then the icon it declares on its own origin. A server that
+    // answers by path and records every request, so the tests can count them (three in all, with /favicon.ico).
+    sealed class SiteServer(Func<string, HttpResponseMessage> answer) : HttpMessageHandler
+    {
+        public List<HttpRequestMessage> Seen { get; } = [];
+
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancel)
+        {
+            Seen.Add(request);
+            return Task.FromResult(answer(request.RequestUri!.PathAndQuery));
+        }
+    }
+
+    static HttpResponseMessage Page(string html) =>
+        new(HttpStatusCode.OK) { Content = new StringContent(html, System.Text.Encoding.UTF8, "text/html") };
+
+    static HttpResponseMessage Picture() =>
+        new(HttpStatusCode.OK) { Content = new ByteArrayContent(Png) { Headers = { { "Content-Type", "image/png" } } } };
+
+    [Fact]
+    public async Task The_fallback_reads_the_page_then_fetches_its_declared_icon()
+    {
+        var server = new SiteServer(path => path switch
+        {
+            "/" => Page("""<html><head><link rel="icon" href="dist/logo.png"></head></html>"""),
+            "/dist/logo.png" => Picture(),
+            _ => new HttpResponseMessage(HttpStatusCode.NotFound),
+        });
+
+        var result = await new FaviconFetcher(server).FetchDeclared(new Uri("https://me:pw@100.65.0.11:9443/#!/home"), default);
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(Png, result.Value);
+        Assert.Equal(["https://100.65.0.11:9443/", "https://100.65.0.11:9443/dist/logo.png"],
+            server.Seen.Select(r => r.RequestUri!.ToString()));
+        Assert.All(server.Seen, r =>
+        {
+            Assert.Equal("Deskbar", r.Headers.UserAgent.ToString());
+            Assert.Null(r.Headers.Authorization);
+            Assert.False(r.Headers.Contains("Cookie"));
+        });
+    }
+
+    [Fact]
+    public async Task The_fallback_never_asks_another_site()
+    {
+        var server = new SiteServer(_ => Page("""<link rel="icon" href="https://cdn.example.com/logo.png">"""));
+
+        var result = await new FaviconFetcher(server).FetchDeclared(new Uri("https://portainer.local/"), default);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal(["https://portainer.local/"], server.Seen.Select(r => r.RequestUri!.ToString()));
+    }
+
+    [Fact]
+    public async Task The_fallback_takes_only_an_html_page()
+    {
+        var server = new SiteServer(_ => new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent("""{"icon":"x.png"}""", System.Text.Encoding.UTF8, "application/json"),
+        });
+
+        Assert.True((await new FaviconFetcher(server).FetchDeclared(new Uri("https://portainer.local/"), default)).IsFailure);
+        Assert.Single(server.Seen);
+    }
+
+    [Fact]
+    public async Task The_fallback_reads_no_more_than_512_KB_of_the_page()
+    {
+        // The <link> sits past the cap, so a fetcher that read the whole page would find it.
+        var html = "<html><head>" + new string(' ', 600 * 1024) + """<link rel="icon" href="late.png"></head></html>""";
+        var server = new SiteServer(path => path == "/" ? Page(html) : Picture());
+
+        Assert.True((await new FaviconFetcher(server).FetchDeclared(new Uri("https://portainer.local/"), default)).IsFailure);
+        Assert.Single(server.Seen);
+    }
+
+    [Fact]
+    public async Task The_fallback_follows_no_redirect_of_the_page()
+    {
+        var server = new SiteServer(_ => new HttpResponseMessage(HttpStatusCode.Found) { Headers = { Location = new Uri("/login", UriKind.Relative) } });
+
+        Assert.True((await new FaviconFetcher(server).FetchDeclared(new Uri("https://portainer.local/"), default)).IsFailure);
+        Assert.Single(server.Seen);
+    }
+
     // P8: this is the store's guarantee, so it lives here and not in the fetcher's tests. The caller saves only a
     // fetched icon, and a failed fetch leaves nothing on disk to be found at the next start.
     [Fact]

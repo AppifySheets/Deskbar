@@ -142,8 +142,17 @@ Icons:
   has none, a letter tile: the first letter of the bookmark's name on a colour derived from the host,
   so two links still look different. A failed fetch is not cached for good (CLAUDE.md's "never cache
   a lookup failure that can succeed later"); it is tried again on the next start.
+- The declared-icon fallback (added 2026-11-26, Petre's option A, because Portainer answers 404 for
+  `/favicon.ico` and names its logo in the page): when `/favicon.ico` gives nothing Deskbar can decode,
+  one GET of the bookmarked page itself (the URL without its `#fragment` or any user information),
+  `text/html` only and at most 512 KB read while streaming; then the first `<link>` whose `rel`
+  contains `icon` (`icon`, `shortcut icon`, `apple-touch-icon`) with an `href` that, resolved against
+  the page, is on the SAME origin (scheme, host, port) and is not an SVG (WPF cannot decode one); then
+  that icon with the same 256 KB and image-only limits. Three requests at most, never one to another
+  site. Found by a small tolerant scan (`DeclaredIcon` in Core, with tests), not an HTML library. Saved
+  the same way, keyed by origin; a failure is not saved and is tried again at the next start.
 - The favicon request (my calls): a plain GET to the bookmarked origin only, no cookies, no
-  credentials, a `Deskbar` user agent, 5 s timeout, 256 KB cap, image content types only. A
+  credentials, a `Deskbar` user agent, 5 s timeout per request, 256 KB cap, image content types only. A
   certificate error is accepted for this request alone, because the typical target (Portainer) is an
   internal host with a self-signed certificate and what comes back is only decoded as an image. Nothing
   else in the app relaxes certificate checks.
@@ -247,7 +256,7 @@ written for users.
 
 - Exact names and file split, within the repo's patterns (the bar is split into `FloatingBar.*.cs`
   partials; bookmarks get their own, `FloatingBar.Bookmarks.cs`).
-- Whether the favicon fetch also reads the page's `<link rel="icon">` when `/favicon.ico` is missing
-  (v1 may skip it; the letter tile covers the gap).
+- Whether the favicon fetch also reads the page's `<link rel="icon">` when `/favicon.ico` is missing:
+  v1 skipped it, and the second bookmarks PR added it (see Icons above).
 - Tests: Core tests for the model, adding rules, duplicate refusal, the running test and the pipe
   parsing; Windows tests only where the drop parsing needs real data objects.
