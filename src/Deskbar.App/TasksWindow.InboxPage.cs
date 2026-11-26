@@ -341,6 +341,7 @@ public partial class TasksWindow
             link.Margin = new Thickness(0, 0, 6, 4);
             second.Children.Add(link);
         });
+        if (pageInWindow) foreach (var extra in WindowStateRow(row)) second.Children.Add(extra);
 
         var top = new StackPanel();
         top.Children.Add(first);
