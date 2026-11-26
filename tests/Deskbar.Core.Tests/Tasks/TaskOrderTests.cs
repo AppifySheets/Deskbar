@@ -202,6 +202,25 @@ public class TaskOrderTests
         Assert.Equal([id3, id1, id2], board.PinnedPart(TaskStatus.Done).Select(t => t.Id));
     }
 
+    // Task a1debf34: the Done tasks show the full discs (the change runs) first, then the hollow rings (not running yet),
+    // each half in the pin order, under the questions. Without a hollow test the pin order stands alone, and the pins
+    // themselves never move, so PinnedPart (which a drag places in) is untouched.
+    [Fact]
+    public void The_done_tasks_show_full_discs_first_then_hollow_rings_each_in_pin_order()
+    {
+        var board = Notes(id1, id2, id3, id4, id5);
+        board = new[] { id1, id2, id3, id4 }.Aggregate(board, (b, id) => b.MarkDone(id, clock).Value);
+        board = board.Join(id5, Session("s5"), clock).Value.Ask(id5, "Which one?", clock).Value;
+        // Pin order, newest Done on top: id4, id3, id2, id1. The rings are id4 and id2.
+        var rings = new[] { id4, id2 }.ToHashSet();
+        bool Hollow(TaskItem t) => rings.Contains(t.Id);
+
+        Assert.Equal([id5, id3, id1, id4, id2], board.Pinned(Hollow).Select(t => t.Id));
+        Assert.Equal([id5, id3, id1, id4, id2], board.Pile(Hollow).Take(5).Select(t => t.Id));
+        Assert.Equal([id5, id4, id3, id2, id1], board.Pinned().Select(t => t.Id));
+        Assert.Equal([id4, id3, id2, id1], board.PinnedPart(TaskStatus.Done).Select(t => t.Id));
+    }
+
     [Fact]
     public void A_status_line_or_a_comment_never_moves_a_line()
     {

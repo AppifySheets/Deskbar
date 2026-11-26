@@ -137,11 +137,16 @@ public static class TaskViews
     /// Whether a session of the task is working right now (task 10b49554): the Claude working block's tasks it says no to
     /// are drawn in ClaudeIdle after it. None: every task of the block is in ClaudeWorking.
     /// </param>
+    /// <param name="hollow">
+    /// Whether a Done task's tick is the hollow ring (task a1debf34, TaskBoard.Pinned): the Done tasks show the full discs
+    /// first, then the rings. None: the Done tasks in their pin order alone.
+    /// </param>
     public static IReadOnlyList<TaskGroup> Grouped(TaskBoard board, TaskFilter filter, TaskWorkspaceFilter workspaceFilter, TaskAssigneeFilter? who = null,
-        Func<TaskItem, bool>? busy = null) =>
-        Grouped(board, filter, new Admit(workspaceFilter, who ?? TaskAssigneeFilter.All), busy);
+        Func<TaskItem, bool>? busy = null, Func<TaskItem, bool>? hollow = null) =>
+        Grouped(board, filter, new Admit(workspaceFilter, who ?? TaskAssigneeFilter.All), busy, hollow);
 
-    static IReadOnlyList<TaskGroup> Grouped(TaskBoard board, TaskFilter filter, Admit where, Func<TaskItem, bool>? busy = null) =>
+    static IReadOnlyList<TaskGroup> Grouped(TaskBoard board, TaskFilter filter, Admit where, Func<TaskItem, bool>? busy = null,
+        Func<TaskItem, bool>? hollow = null) =>
         (filter switch
         {
             TaskFilter.Closed => [new TaskGroup(TaskGroupKind.Closed,
@@ -151,8 +156,8 @@ public static class TaskViews
             // Waiting on you (questions, then Done), then Claude working (task 93fa0b9b) with its idle part (task 10b49554),
             // then the quadrants without the tasks Claude is at work on. A status filter narrows them all alike; Claude
             // working never holds a question or a Done task, so under those two filters it is empty and left out.
-            TaskFilter.Open => Pinned(board, where, _ => true, busy),
-            _ => Pinned(board, where, t => StatusesOf(filter).Contains(t.Status), busy),
+            TaskFilter.Open => Pinned(board, where, _ => true, busy, hollow),
+            _ => Pinned(board, where, t => StatusesOf(filter).Contains(t.Status), busy, hollow),
         })
         .Where(g => g.Tasks.Count > 0)
         .ToArray();
@@ -162,9 +167,10 @@ public static class TaskViews
     /// then the quadrants), then Snoozed, then Closed, empty groups left out. No filter applies. The search by id's view
     /// (TaskSearch.Found, task 6e4dc116): a task found by its id is shown wherever it is, closed included.
     /// </summary>
-    public static IReadOnlyList<TaskGroup> Everywhere(TaskBoard board) =>
+    // Its Done tasks in the List's order, full discs before rings (task a1debf34, hollow as Grouped takes it).
+    public static IReadOnlyList<TaskGroup> Everywhere(TaskBoard board, Func<TaskItem, bool>? hollow = null) =>
         new[] { TaskFilter.Open, TaskFilter.Snoozed, TaskFilter.Closed }
-            .SelectMany(filter => Grouped(board, filter, TaskWorkspaceFilter.All))
+            .SelectMany(filter => Grouped(board, filter, TaskWorkspaceFilter.All, hollow: hollow))
             .ToArray();
 
     /// <summary>
@@ -177,12 +183,14 @@ public static class TaskViews
     /// </summary>
     // Not split into working and idle (task 10b49554): a compact Matrix line shows no sessions, so a line moving between
     // the two would jump inside its cell with nothing on screen to say why.
-    public static IReadOnlyList<TaskCell> Matrix(TaskBoard board, TaskFilter filter, TaskWorkspaceFilter workspaceFilter, TaskAssigneeFilter? who = null) =>
-        Matrix(board, filter, new Admit(workspaceFilter, who ?? TaskAssigneeFilter.All));
+    // A cell's Done tasks show the full discs first, then the rings, as the List does (task a1debf34, hollow).
+    public static IReadOnlyList<TaskCell> Matrix(TaskBoard board, TaskFilter filter, TaskWorkspaceFilter workspaceFilter, TaskAssigneeFilter? who = null,
+        Func<TaskItem, bool>? hollow = null) =>
+        Matrix(board, filter, new Admit(workspaceFilter, who ?? TaskAssigneeFilter.All), hollow);
 
-    static IReadOnlyList<TaskCell> Matrix(TaskBoard board, TaskFilter filter, Admit where) =>
+    static IReadOnlyList<TaskCell> Matrix(TaskBoard board, TaskFilter filter, Admit where, Func<TaskItem, bool>? hollow) =>
         Quadrants.Select(q => new TaskCell(q.Quadrant, filter is TaskFilter.Closed or TaskFilter.Snoozed ? []
-            : board.Pinned().Where(t => t.Quadrant == q.Quadrant)
+            : board.Pinned(hollow).Where(t => t.Quadrant == q.Quadrant)
                 .Concat(board.Group(q.Quadrant).Where(AtWork))
                 .Concat(board.Group(q.Quadrant).Where(t => !AtWork(t)))
                 .Where(t => where.Admits(t) && StatusesOf(filter).Contains(t.Status) && !t.IsSnoozed)
@@ -212,9 +220,9 @@ public static class TaskViews
                 _ => StatusName(TaskStatus.Closed),
             });
 
-    // The pinned block (TaskBoard.Pinned: the questions, then the Done tasks), narrowed by the filters.
-    static TaskGroup Waiting(TaskBoard board, Admit where, Func<TaskItem, bool> shows) =>
-        new(TaskGroupKind.WaitingOnYou, board.Pinned().Where(t => !t.IsSnoozed && where.Admits(t) && shows(t)).ToArray());
+    // The pinned block (TaskBoard.Pinned: the questions, then the Done tasks, full discs before rings), narrowed by the filters.
+    static TaskGroup Waiting(TaskBoard board, Admit where, Func<TaskItem, bool> shows, Func<TaskItem, bool>? hollow) =>
+        new(TaskGroupKind.WaitingOnYou, board.Pinned(hollow).Where(t => !t.IsSnoozed && where.Admits(t) && shows(t)).ToArray());
 
     /// <summary>
     /// Whether Claude is at work on the task (task 93fa0b9b, see the header): it is open, not Done and not waiting on
@@ -239,8 +247,9 @@ public static class TaskViews
 
     // The open view's groups in their order: Waiting on you, the Claude working block (one group, or its working and idle
     // parts), then the quadrants without the tasks Claude is at work on.
-    static IEnumerable<TaskGroup> Pinned(TaskBoard board, Admit where, Func<TaskItem, bool> shows, Func<TaskItem, bool>? busy) =>
-        new[] { Waiting(board, where, shows) }.Concat(Working(board, where, shows, busy)).Concat(QuadrantGroups(board, where, shows));
+    static IEnumerable<TaskGroup> Pinned(TaskBoard board, Admit where, Func<TaskItem, bool> shows, Func<TaskItem, bool>? busy,
+        Func<TaskItem, bool>? hollow) =>
+        new[] { Waiting(board, where, shows, hollow) }.Concat(Working(board, where, shows, busy)).Concat(QuadrantGroups(board, where, shows));
 
     // A quadrant's group leaves out the tasks Claude is at work on: they are in the Claude working block above.
     static IEnumerable<TaskGroup> QuadrantGroups(TaskBoard board, Admit where, Func<TaskItem, bool> shows) =>

@@ -47,11 +47,23 @@ internal static class TaskDropTarget
     /// The parts of the pinned block a line can be in (task f41d7857): none (a line in a quadrant), the questions waiting
     /// on Petre, or the Done tasks under them.
     /// </summary>
-    internal enum Part { None, Questions, Done }
+    //
+    // The Done tasks are two parts (task a1debf34, TaskBoard.Pinned): the full discs, then the hollow rings under them. A
+    // Done task drawn in one half is drawn there whatever pin it gets, so a drag moves it within its own half only, and
+    // the drop line is drawn where it will land; across the line between the halves it would snap back.
+    internal enum Part { None, Questions, Done, DoneRing }
 
-    /// <summary>The part of the pinned block a task of this status is in.</summary>
-    internal static Part PartOf(TaskStatus status) =>
-        status switch { TaskStatus.WaitingOnYou => Part.Questions, TaskStatus.Done => Part.Done, _ => Part.None };
+    /// <summary>
+    /// The part of the pinned block a task of this status is in; a Done task whose tick is the hollow ring
+    /// (<paramref name="hollow"/>, TaskDelivery.Shipping) is in the rings' part.
+    /// </summary>
+    internal static Part PartOf(TaskStatus status, bool hollow = false) =>
+        status switch
+        {
+            TaskStatus.WaitingOnYou => Part.Questions,
+            TaskStatus.Done => hollow ? Part.DoneRing : Part.Done,
+            _ => Part.None,
+        };
 
     /// <summary>
     /// A line on show: its task, its quadrant, whether it is pinned (waiting on Petre or Done), and its box in the drag's

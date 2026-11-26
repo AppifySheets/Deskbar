@@ -1031,11 +1031,11 @@ public partial class TasksWindow : Window
         if (inThreadOf is { } threadParent)
         {
             if (row.Status != TaskStatus.Closed && !row.Closing)
-                dragEntries[row.Id] = (line, threadParent, row.Quadrant, TaskDropTarget.PartOf(row.Status));
+                dragEntries[row.Id] = (line, threadParent, row.Quadrant, TaskDropTarget.PartOf(row.Status, row.Delivery.Shipping));
         }
         else
             dragLines[row.Id] = (row.Quadrant, row.Status.IsPinned() && !row.Closing, row.Closing || row.Status == TaskStatus.Closed, row.Nested,
-                row.Closing ? TaskDropTarget.Part.None : TaskDropTarget.PartOf(row.Status));
+                row.Closing ? TaskDropTarget.Part.None : TaskDropTarget.PartOf(row.Status, row.Delivery.Shipping));
         // A right-click anywhere on the line opens its menu at the pointer, Edit first (Ruling 44, OpenMenuFor).
         line.PreviewMouseRightButtonUp += (_, e) =>
         {
@@ -2171,7 +2171,8 @@ public partial class TasksWindow : Window
         // that stays a click is still the entry's Click above. A closed one, or one in its undo window, arms nothing.
         if (sub.Status != TaskStatus.Closed && !sub.Closing)
         {
-            dragEntries[sub.Id] = (entry, parent, sub.Quadrant, TaskDropTarget.PartOf(sub.Status));
+            // A thread entry carries its row only once unfolded; without one it counts as a full disc (task a1debf34).
+            dragEntries[sub.Id] = (entry, parent, sub.Quadrant, TaskDropTarget.PartOf(sub.Status, sub.Row?.Delivery.Shipping ?? false));
             entry.PreviewMouseLeftButtonDown += (_, e) => DragPress(sub.Id, DragMouse.Position(e, DragSurface), fromThread: true);
         }
         // ITS TICK IN FRONT (task 0eb943d8, Petre: "how do i close subtasks?"): a subtask folded into its parent's thread

@@ -45,9 +45,11 @@ public static class TaskOverview
     /// <param name="now">Reserved for the caller's clock; the board's own snooze mark decides what is snoozed.</param>
     /// <param name="workspaceName">A workspace's name by id, or none when it is gone.</param>
     /// <param name="busy">Whether a session is busy in the latest `claude agents` list, or none when it is not listed.</param>
-    public static string Text(TaskBoard board, DateTimeOffset now, Func<Guid, string> workspaceName, Func<string, Maybe<bool>> busy)
+    /// <param name="hollow">Whether a Done task's tick is the hollow ring: the Done tasks then list the full discs first, as the bar does (task a1debf34).</param>
+    public static string Text(TaskBoard board, DateTimeOffset now, Func<Guid, string> workspaceName, Func<string, Maybe<bool>> busy,
+        Func<TaskItem, bool>? hollow = null)
     {
-        var pile = board.Pile();
+        var pile = board.Pile(hollow);
         var shown = pile.Where(t => !t.IsSnoozed).ToArray();
         var shownIds = shown.Select(t => t.Id).ToHashSet();
         var children = shown.Where(t => t.ParentId.HasValue && shownIds.Contains(t.ParentId.Value))

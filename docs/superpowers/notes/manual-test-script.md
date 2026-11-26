@@ -1365,6 +1365,10 @@ DR7. A task with pull requests in Deskbar and in another repository: it keeps th
      in the copy you run, the other reported deployed), and the tooltip then says "Deployed: <note> Running in this
      Deskbar (version)." With `gh` signed out, a reported task still shows the full disc; an unreported one in another
      repository keeps the full disc too (unknown draws as before).
+DR8. With several Done tasks under the questions, some full discs and some hollow rings (task a1debf34): on the bar,
+     in the tasks panel's List and in each Matrix cell, the full discs come first and the rings after them, each half
+     in the order you dragged it. When a ring fills (DR2, DR6) its line moves up among the discs. `deskbar.cmd task
+     list` prints them in the same order.
 
 ## The bar's waiting block folds after three
 
