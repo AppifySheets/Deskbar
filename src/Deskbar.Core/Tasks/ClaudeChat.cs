@@ -116,26 +116,73 @@ public static class ClaudeChat
 
     // WHETHER A TOOL USE IS DESKBAR HOUSEKEEPING: a shell command that is a call of Deskbar's own shim (`deskbar.cmd task
     // status-line ...`, `task comment`, `task ask`, `task join`, in any path form: `"$APPDATA/Deskbar/deskbar.cmd" task ...`,
-    // `& "C:\x\deskbar.cmd" task ...`, a leading `cd <folder> &&` allowed). A task session makes dozens of them: they
-    // report to the board (whose own lines and comments already show the result), so listing them under "N steps" is noise
-    // (the owner's ruling for the Inbox steps, 2026-11-26). Only the command's own start counts, so `git log` run next to
-    // one is a step as ever. ClaudeChatStream drops them; the reader still reports them, flagged, so nothing is lost here.
+    // `& "C:\x\deskbar.cmd" task ...`). A task session makes dozens of them: they report to the board (whose own lines and
+    // comments already show the result), so listing them under "N steps" is noise (the owner's ruling for the Inbox steps,
+    // 2026-11-26).
+    //
+    // THE RULE (tester finding M4): a command whose ONLY real program is deskbar.cmd (or deskbar) with `task` as its verb.
+    // The shim may stand anywhere in the command, so the forms Claude really writes all count: first or after a pipe, `&`,
+    // `;` or `&&`; quoted, with a path that has spaces, with forward or back slashes, as `$env:APPDATA\Deskbar\deskbar.cmd`,
+    // `$APPDATA/Deskbar/deskbar.cmd`, `%APPDATA%\...` or a full path; fed by `echo x |`, `printf ... |`, `cat <<'EOF' |`, a
+    // `$text | &` pipe or a here-string `@' ... '@ | &`; with a heredoc body or a redirection after it. What else may stand
+    // in the command: only words that run nothing of their own (echo, printf, cat, type, Write-Output, Write-Host,
+    // Get-Content, cd, Set-Location, a `$variable = ...`, a bare quoted string). One other program (`git log; deskbar.cmd task
+    // done`) makes it an ordinary step, which is shown as ever. The reader still reports a housekeeping step, flagged, so
+    // nothing is lost here; ClaudeChatStream drops it.
     internal static bool IsHousekeeping(string tool, JsonElement input) =>
         tool is "Bash" or "PowerShell"
         && input.ValueKind == JsonValueKind.Object && input.TryGetProperty("command", out var command) && command.ValueKind == JsonValueKind.String
         && command.GetString() is { } text
-        && LeadingCd.Replace(text.TrimStart(), "") is var start
-        && DeskbarCall.IsMatch(start);
+        && OnlyDeskbarCalls(text);
 
-    static readonly Regex DeskbarCall = new(@"^(?:&\s*)?[""']?(?:[^\s""']*[\\/])?deskbar(?:\.cmd)?[""']?\s+task\b", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    static bool OnlyDeskbarCalls(string command)
+    {
+        // Bodies first: a here-string's or heredoc's text is data (it may even mention deskbar.cmd), never a program.
+        var text = HereStringBody.Replace(command, " ");
+        // The rest of the heredoc's own line (`| deskbar.cmd task ...`) stays: it is the command.
+        text = HeredocBody.Replace(text, "$3 ");
+        // The shim, followed by its verb `task`, becomes one word; then quoted strings are data too, and so are redirections.
+        text = ShimBeforeTask.Replace(text, "DESKBARCALL");
+        text = QuotedString.Replace(text, "Q");
+        text = Redirection.Replace(text, " ");
+        var calls = 0;
+        foreach (var segment in CommandBreak.Split(text).Select(s => s.Trim()).Where(s => s.Length > 0))
+        {
+            var program = segment.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries)[0];
+            if (program == "DESKBARCALL") calls++;
+            else if (!RunsNothing(program)) return false;
+        }
+        return calls > 0;
+    }
+
+    static bool RunsNothing(string program) =>
+        program is "Q" or "(" or ")" or "{" or "}" or "@" || program.StartsWith('$')
+        || NoProgram.Contains(program);
+
+    static readonly HashSet<string> NoProgram = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "echo", "printf", "cat", "type", "write-output", "write-host", "get-content", "cd", "set-location", "pushd", "popd", "export", "set", "true",
+    };
+
+    static readonly Regex HereStringBody = new(@"@'[\s\S]*?'@|@""[\s\S]*?""@", RegexOptions.Compiled);
+    static readonly Regex HeredocBody = new(@"<<-?\s*([""']?)(\w+)\1([^\n]*)\n(?:[^\n]*\n)*?[ \t]*\2[ \t]*(?:\r?\n|$)", RegexOptions.Compiled);
+    static readonly Regex ShimBeforeTask = new(
+        @"(?<![\w.-])(?:""(?:[^""]*[\\/])?deskbar(?:\.cmd)?""|'(?:[^']*[\\/])?deskbar(?:\.cmd)?'|(?:[^\s""'|&;]*[\\/])?deskbar(?:\.cmd)?)(?=\s+task\b)",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    static readonly Regex QuotedString = new(@"""[^""]*""|'[^']*'", RegexOptions.Compiled);
+    static readonly Regex Redirection = new(@"\d*>&\d+|\d*>>?\s*[^\s|;&]+|<\s*[^\s|;&<]+", RegexOptions.Compiled);
+    static readonly Regex CommandBreak = new(@"[|;&\r\n]+", RegexOptions.Compiled);
 
     // SECRETS NEVER REACH THE PAGE. A step's label is a piece of a command line or a URL, and a command line can hold a
     // credential (`curl -H "Authorization: Bearer ..."`, `--token=...`, `gh api ... -f password=...`). The label is
     // redacted BEFORE it is cut to 60 characters, so a secret that straddles the cut is not shown in part. What goes:
     //   * the value of an Authorization header, to the end of its line or its closing quote;
     //   * the token after the word Bearer or Basic;
-    //   * whatever follows `token=`, `key=`, `password=`, `secret=` (also in api_key=, access_token=, client_secret=),
-    //     case-insensitive, quoted or not. Only `=` counts, so a word before a colon in ordinary text stays readable;
+    //   * the value of any NAME that holds a secret word (token, key, secret, password, passwd, pwd, credential, auth),
+    //     written `NAME=value`, `NAME = value`, `NAME: value`, `"NAME": "value"` (JSON) or `--NAME=value`, also behind
+    //     `$env:` and as a header such as `X-Api-Key: value`;
+    //   * the word after `--password`, `--token`, `--secret`, `--api-key`, `-p` or `-P` and after `setx NAME`, the part after
+    //     the colon of `-u user:pass`, and the password of `scheme://user:pass@host` (tester finding M1, 2026-11-26);
     //   * a long run of hex (32 or more) or of base64 characters (32 or more with a digit and a letter in it), which is
     //     what a pasted key or hash-like token looks like. A path stays readable because `.` and `\` end a run.
     // The label shows `***` where a value was. This is a filter, not a guarantee: a secret written as a bare word of
@@ -145,14 +192,41 @@ public static class ClaudeChat
         if (string.IsNullOrEmpty(label)) return label;
         var text = Authorization.Replace(label, "$1***");
         text = BearerToken.Replace(text, "$1***");
-        text = KeywordValue.Replace(text, "$1***");
+        text = UserInfo.Replace(text, "$1***");
+        text = BasicAuthFlag.Replace(text, "$1***");
+        text = SecretOption.Replace(text, "$1***");
+        text = SetxValue.Replace(text, "$1***");
+        text = NamedValue.Replace(text, "$1***");
         text = HexRun.Replace(text, "***");
         return Base64Run.Replace(text, match => match.Value.Any(char.IsDigit) && match.Value.Any(char.IsLetter) ? "***" : match.Value);
     }
 
+    // The words that make a name a secret's. Also found inside longer names (Authorization, X-Api-Key, API_TOKEN, DB_PASSWORD,
+    // client_secret, even "author"): masking a little too much is fine, too little is not.
+    const string SecretWords = "(?:token|key|secret|password|passwd|pwd|credential|auth)";
+
     static readonly Regex Authorization = new(@"(?i)(authorization\s*[:=]\s*[""']?)[^\r\n""']+", RegexOptions.Compiled);
     static readonly Regex BearerToken = new(@"(?i)\b((?:bearer|basic)\s+)[^\s""']+", RegexOptions.Compiled);
-    static readonly Regex KeywordValue = new(@"(?i)(\b[\w-]*(?:token|key|password|secret)=)(?:""[^""]*""|'[^']*'|[^\s&""']+)", RegexOptions.Compiled);
+
+    // NAME=value, NAME = value, NAME: value, "NAME": "value", $env:NAME = value, X-Api-Key: value, --token=value: a name that
+    // holds a secret word, a `=` or `:` (spaces allowed on both sides, a closing quote allowed before it), then the value,
+    // quoted (it may hold spaces) or one bare word.
+    static readonly Regex NamedValue = new(@"(?i)(\b[\w-]*" + SecretWords + @"[\w-]*[""']?\s*[=:]\s*)(?:""[^""]*""|'[^']*'|[^\s&""',}]+)", RegexOptions.Compiled);
+
+    // --password x, --token x, --secret x, --api-key x, -p x, -P x: the word after the option, unless that is an option too.
+    // `-p` also masks the harmless word of `mkdir -p dir`, which is the price of not missing `mysql -p secret`.
+    static readonly Regex SecretOption = new(
+        @"(?i)(?<![\w-])((?:--(?:password|passwd|pwd|pass|token|access-token|secret|api-key|apikey|key|credential|auth)|-p)\s+)(?!-)(?:""[^""]*""|'[^']*'|[^\s""']+)",
+        RegexOptions.Compiled);
+
+    // setx NAME value: the value of a secret-named variable.
+    static readonly Regex SetxValue = new(@"(?i)(\bsetx\s+[\w-]*" + SecretWords + @"[\w-]*\s+)(?:""[^""]*""|'[^']*'|\S+)", RegexOptions.Compiled);
+
+    // -u user:pass and --user user:pass (curl and friends): the part after the colon.
+    static readonly Regex BasicAuthFlag = new(@"(?i)(?<![\w-])((?:-u|--user)\s+[""']?[^\s:""']+:)[^\s""']*", RegexOptions.Compiled);
+
+    // The password of user:pass@host in any URL, with or without its scheme (a WebFetch label has the scheme cut off).
+    static readonly Regex UserInfo = new(@"((?:[a-zA-Z][a-zA-Z0-9+.-]*://)?[^\s:/@""']+:)[^\s@/""']+(?=@)", RegexOptions.Compiled);
     static readonly Regex HexRun = new(@"\b[0-9a-fA-F]{32,}\b", RegexOptions.Compiled);
     static readonly Regex Base64Run = new(@"[A-Za-z0-9+_-]{32,}", RegexOptions.Compiled);
 
