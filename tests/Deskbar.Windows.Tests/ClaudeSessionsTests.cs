@@ -125,6 +125,8 @@ public class ClaudeSessionsTests
         public string? ManagerFolder { get; set; }
         public ClaudeSessions? Sessions { get; private set; }
         public List<string> Traces { get; } = [];
+        // Folders that no longer exist (a removed worktree, task 0bdf74d0); every other made-up folder counts as there.
+        public HashSet<string> GoneFolders { get; } = [];
 
         // When Begin ran: the first read happens then.
         public DateTimeOffset T0 { get; private set; }
@@ -145,7 +147,7 @@ public class ClaudeSessionsTests
         {
             T0 = Clock.Now;
             Sessions = new ClaudeSessions(Tasks, Manager, Cli, Clock, WorkspaceOfFolder, Home, background: Scheduler.Immediate, trace: Traces.Add,
-                windowOpen: task => WindowOpen(task), managerFolder: ManagerFolder);
+                windowOpen: task => WindowOpen(task), managerFolder: ManagerFolder, folderExists: folder => !GoneFolders.Contains(folder));
             return Sessions;
         }
 
@@ -364,6 +366,25 @@ public class ClaudeSessionsTests
         var resumes = rig.Cli.Resumes;
         Assert.Equal(Enumerable.Range(0, 20).Select(i => Settle + Seconds(5 * i)), resumes.Select(c => rig.Since(c)));
         Assert.Equal(dead.Select(d => d.SessionId).Order(), resumes.Select(c => c.Arguments[2]).Order());
+    }
+
+    // Task 0bdf74d0: a session whose folder is gone (its worktree was removed) cannot be resumed, so it is not Resumable
+    // (the thread then offers Start instead of an Open that fails) and the keeper never tries it. One beside it, whose
+    // folder is there, is resumed as usual.
+    [Fact]
+    public void A_session_whose_folder_is_gone_is_not_resumable_and_never_resumed()
+    {
+        using var rig = new Rig();
+        rig.GoneFolders.Add(@"E:\repos\Removed worktree");
+        var gone = rig.Dead("Worktree removed", folder: @"E:\repos\Removed worktree");
+        var there = rig.Dead("Folder still there", folder: @"E:\repos\Work");
+        rig.Begin();
+
+        rig.RunTo(Settle + Seconds(10));
+
+        Assert.False(rig.Sessions!.Resumable(rig.Task(gone.TaskId).Sessions.Single()));
+        Assert.True(rig.Sessions.Resumable(rig.Task(there.TaskId).Sessions.Single()));
+        Assert.Equal(there.SessionId, Assert.Single(rig.Cli.Resumes).Arguments[2]);
     }
 
     // The continue message goes only to a session whose last turn was cut off; the arguments are exact, and the resume
@@ -814,6 +835,72 @@ public class ClaudeSessionsTests
         Assert.True(failed.IsCompleted);
         Assert.Contains("Workspace not trusted", (await failed).Error);
         Assert.Contains(rig.Task(taskId).Comments, c => c.Markdown.Contains("Workspace not trusted"));
+    }
+
+    // Task 0bdf74d0: a resume failed (the session's worktree was gone), and Petre clicked again and again. Each click within
+    // the grace used to look for the session in the list and say "was resumed, but Claude Code did not list it", five
+    // times, though nothing had been resumed. Now a click within the grace of a failed resume hands the failure back and
+    // says nothing more; once the grace is over, a click tries again.
+    [Fact]
+    public async Task Clicks_after_a_failed_resume_say_the_failure_once_and_never_claim_a_resume()
+    {
+        using var rig = new Rig();
+        Assert.True(rig.Manager.SetClaudeResume(false).IsSuccess);
+        var (taskId, _) = rig.Dead("Worktree gone");
+        rig.Begin();
+        rig.RunTo(Seconds(1));
+        var session = rig.Task(taskId).Sessions.Single();
+        rig.Cli.Resume = _ => Result.Failure<string>("Could not run claude: the folder E:\\gone no longer exists.");
+
+        var first = rig.Sessions!.ResumeNow(taskId, session);
+        rig.Run(Seconds(1));
+        var again = Enumerable.Range(0, 4).Select(_ =>
+        {
+            var click = rig.Sessions.ResumeNow(taskId, session);
+            rig.Run(Seconds(1));
+            return click;
+        }).ToList();
+        rig.Run(Seconds(15));
+
+        Assert.True(first.IsCompleted && again.All(click => click.IsCompleted));
+        Assert.All(await Task.WhenAll(again), answer => Assert.Contains("no longer exists", answer.Error));
+        Assert.Single(rig.Cli.Resumes);
+        Assert.Single(rig.Task(taskId).Comments, c => c.Markdown.StartsWith("Could not resume", StringComparison.Ordinal));
+        Assert.DoesNotContain(rig.Task(taskId).Comments, c => c.Markdown.Contains("did not list it"));
+
+        // Past the grace, a click is a new try.
+        rig.Run(SessionKeeper.Grace);
+        var later = rig.Sessions.ResumeNow(taskId, session);
+        rig.Run(Seconds(1));
+        Assert.True(later.IsCompleted);
+        Assert.Equal(2, rig.Cli.Resumes.Count);
+    }
+
+    // Clicks that come while a woken session is looked for in the list share that one look: however many there are, the
+    // thread gets one "did not list it", not one per click.
+    [Fact]
+    public async Task Clicks_while_a_resumed_session_is_looked_for_share_one_look()
+    {
+        using var rig = new Rig();
+        Assert.True(rig.Manager.SetClaudeResume(false).IsSuccess);
+        var (taskId, _) = rig.Dead("Slow to list");
+        rig.Cli.ListedAfter = Seconds(120);
+        rig.Begin();
+        rig.RunTo(Seconds(1));
+        var session = rig.Task(taskId).Sessions.Single();
+
+        var clicks = Enumerable.Range(0, 4).Select(_ =>
+        {
+            var click = rig.Sessions!.ResumeNow(taskId, session);
+            rig.Run(Seconds(1));
+            return click;
+        }).ToList();
+        rig.Run(Seconds(20));
+
+        Assert.True(clicks.All(click => click.IsCompleted));
+        Assert.All(await Task.WhenAll(clicks), answer => Assert.True(answer.IsFailure));
+        Assert.Single(rig.Cli.Resumes);
+        Assert.Single(rig.Task(taskId).Comments, c => c.Markdown.Contains("did not list it"));
     }
 
     // --- starting --------------------------------------------------------------------------------

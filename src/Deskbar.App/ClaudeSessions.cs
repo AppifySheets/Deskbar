@@ -150,6 +150,21 @@ public sealed class ClaudeSessions : IDisposable
     // When each recent resume ANSWERED; a session is not resumed again within SessionKeeper.Grace of that (Settled).
     ImmutableDictionary<string, DateTimeOffset> answered = ImmutableDictionary<string, DateTimeOffset>.Empty;
 
+    // What the latest resume of each session failed with, while it is the latest answer (a success removes it). A click
+    // within the grace of a FAILED resume hands this back instead of looking for the session in the list: nothing was
+    // started, so the look could only end in "was resumed, but Claude Code did not list it", which is untrue (task
+    // 0bdf74d0: five clicks on a session whose worktree was gone put five of those under the real reason).
+    ImmutableDictionary<string, string> failedWith = ImmutableDictionary<string, string>.Empty;
+
+    // The wake a click has under way for each session, resume and look together (WakeNow), for the clicks after it to share.
+    ImmutableDictionary<string, IObservable<Result<ClaudeAgent>>> clickWakes =
+        ImmutableDictionary<string, IObservable<Result<ClaudeAgent>>>.Empty;
+
+    // The list wait under way for each session (LookFor). A click that comes while one runs shares it, so however many
+    // clicks there are, one answer comes back and the thread gets at most one "did not list it".
+    ImmutableDictionary<string, IObservable<Result<ClaudeAgent>>> looking =
+        ImmutableDictionary<string, IObservable<Result<ClaudeAgent>>>.Empty;
+
     // The latest list that could be read. Empty until the first good read; only used to re-check a queued resume, and
     // the queue is empty until a good read has filled it.
     IReadOnlyCollection<ClaudeAgent> lastLive = [];
@@ -222,8 +237,10 @@ public sealed class ClaudeSessions : IDisposable
     /// <param name="longPath">Expands 8.3 short forms when comparing folders; the file system's answer unless a test says otherwise.</param>
     public ClaudeSessions(TaskService tasks, WorkspaceManager manager, IClaudeCli cli, IScheduler scheduler,
         Func<string, Maybe<Guid>> workspaceOfFolder, string claudeHome, IScheduler? background = null, Action<string>? trace = null,
-        Func<TaskItem, bool>? windowOpen = null, string? managerFolder = null, Func<string, string>? longPath = null)
+        Func<TaskItem, bool>? windowOpen = null, string? managerFolder = null, Func<string, string>? longPath = null,
+        Func<string, bool>? folderExists = null)
     {
+        this.folderExists = folderExists ?? Directory.Exists;
         this.managerFolder = managerFolder;
         this.longPath = longPath ?? Deskbar.Windows.Control.LongPath.Of;
         this.windowOpen = windowOpen ?? (_ => false);
@@ -278,6 +295,7 @@ public sealed class ClaudeSessions : IDisposable
     {
         ledger = ledger.Forget(sessionId);
         givenUp = givenUp.Remove(sessionId);
+        failedWith = failedWith.Remove(sessionId);
     }
 
     /// <summary>
@@ -353,16 +371,28 @@ public sealed class ClaudeSessions : IDisposable
     // session wakes to instead of the usual (a comment, ResumeWith).
     IObservable<Result<ClaudeAgent>> WakeNow(Guid taskId, TaskSession session, string? message = null)
     {
+        // Another click is waking it right now: this one shares that wake and its answer, so it neither looks for the
+        // session before the resume has answered (a look begun then could end first and call a good resume a failure)
+        // nor says anything of its own (review of task 0bdf74d0).
+        if (message is null && clickWakes.TryGetValue(session.Id, out var underWay))
+            return underWay;
+
+        // Woken a moment ago, but that resume FAILED: nothing runs, so there is nothing to look for. Its reason is in the
+        // thread already and the task asks about it, so the failure is handed back and nothing more is said. Once the
+        // grace has passed, a click tries again.
+        if (!Waking(session.Id) && AnsweredWithinGrace(session.Id) && failedWith.TryGetValue(session.Id, out var failure))
+            return Observable.Return(Result.Failure<ClaudeAgent>(failure));
+
         // Already being woken, or woken a moment ago and not listed yet: a second resume would start a copy.
         if (Waking(session.Id) || AnsweredWithinGrace(session.Id))
-            return Listed(taskId, session.Id, FindAttempts);
+            return LookFor(taskId, session.Id);
 
         // Waiting its turn in the queue: woken now instead, so the queue does not wake it a second time.
         queue = ImmutableQueue.CreateRange(queue.Where(r => r.Session.Id != session.Id));
         var at = scheduler.Now;
         ledger = ledger.Record(session.Id, at);
         wakingNow = wakingNow.Add(session.Id);
-        return OffThread(async () =>
+        var wake = OffThread(async () =>
             {
                 // Read here, on `background`, for the reason given in Heard.
                 var cutOff = CutOff(session);
@@ -382,9 +412,31 @@ public sealed class ClaudeSessions : IDisposable
                     // the list would call a late listing a failure (final review, I4).
                     ? message is not null
                         ? Observable.Return(Result.Success(new ClaudeAgent(session.Id, Maybe<string>.None, session.Folder, true, true, "")))
-                        : Listed(taskId, session.Id, FindAttempts)
+                        : LookFor(taskId, session.Id)
                     : Observable.Return(Result.Failure<ClaudeAgent>(answer.Result.Error));
             });
+        if (message is not null) return wake;
+
+        // A click's wake is shared with the clicks that come while it runs (above), and leaves `clickWakes` once answered.
+        var shared = wake
+            .Finally(() => clickWakes = clickWakes.Remove(session.Id))
+            .Replay(1)
+            .RefCount();
+        clickWakes = clickWakes.SetItem(session.Id, shared);
+        return shared;
+    }
+
+    // Looks for the session in the list (Listed), or joins the look already under way for it. The shared look leaves
+    // `looking` once it ends, on `scheduler` like every other field change here, so the next click after it starts afresh.
+    IObservable<Result<ClaudeAgent>> LookFor(Guid taskId, string sessionId)
+    {
+        if (looking.TryGetValue(sessionId, out var underWay)) return underWay;
+        var look = Listed(taskId, sessionId, FindAttempts)
+            .Finally(() => looking = looking.Remove(sessionId))
+            .Replay(1)
+            .RefCount();
+        looking = looking.SetItem(sessionId, look);
+        return look;
     }
 
     // Being resumed right now: the queue's one in flight, or a click's.
@@ -394,7 +446,11 @@ public sealed class ClaudeSessions : IDisposable
     // Not found in time is said in the task's thread, so a click that opened nothing has its reason where Petre looks.
     IObservable<Result<ClaudeAgent>> Listed(Guid taskId, string sessionId, int attemptsLeft) =>
         OffThread(() => cli.Run(AgentsArguments, null, ReadTimeout))
-            .SelectMany(read => read.Bind(ClaudeAgents.Parse)
+            .SelectMany(read => FailedMeanwhile(sessionId) is { HasValue: true } failed
+                // The resume this look waited on (another click's, or the queue's) failed while it looked: nothing will
+                // be listed, its reason is in the thread already, and "was resumed" would be untrue (review of 0bdf74d0).
+                ? Observable.Return(Result.Failure<ClaudeAgent>(failed.Value))
+                : read.Bind(ClaudeAgents.Parse)
                     .Map(list => list.TryFirst(agent => agent.SessionId == sessionId))
                     .GetValueOrDefault(Maybe<ClaudeAgent>.None) is { HasValue: true } found
                 ? Observable.Return(Result.Success(found.Value))
@@ -402,6 +458,10 @@ public sealed class ClaudeSessions : IDisposable
                     ? Observable.Timer(FindPause, scheduler).SelectMany(_ => Listed(taskId, sessionId, attemptsLeft - 1))
                     : Observable.Return(Said(taskId, Result.Failure<ClaudeAgent>(
                         $"Session {sessionId} was resumed, but Claude Code did not list it within {FindAttempts * FindPause.TotalSeconds:0} seconds, so no window was opened on it."))));
+
+    // The session's latest resume answered with a failure and none is under way now. Runs on `scheduler`.
+    Maybe<string> FailedMeanwhile(string sessionId) =>
+        !Waking(sessionId) && failedWith.TryGetValue(sessionId, out var error) ? error : Maybe<string>.None;
 
     // A click's failure, said in the task's thread and handed back.
     Result<ClaudeAgent> Said(Guid taskId, Result<ClaudeAgent> failure)
@@ -512,7 +572,7 @@ public sealed class ClaudeSessions : IDisposable
         // The manager is left out of what the keeper sees: it is never adopted as a task nor stopped as a finished one.
         var keeperView = KeeperView(listed);
         SessionKeeper.Plan(tasks.Board, keeperView, ledger,
-                resuming ? TranscriptExists : _ => true,
+                resuming ? Resumable : _ => true,
                 // Whether a turn was cut off is read when the resume is ISSUED, off the UI thread (Issue), not here: a
                 // transcript can run to tens of MB and this runs on every poll for every session waiting in the queue.
                 _ => false,
@@ -679,6 +739,9 @@ public sealed class ClaudeSessions : IDisposable
                     // Ruling 13: a fault is traced, not thrown onto the dispatcher, and the queue moves on. The ledger
                     // already holds this resume, so the keeper's grace and loop guard still apply to the session.
                     Settled(session.Id);
+                    // A fault says nothing about whether claude started (a kill that failed, say), so an older failure is
+                    // forgotten and a click within the grace looks for the session instead of handing that back.
+                    failedWith = failedWith.Remove(session.Id);
                     trace?.Invoke($"claude sessions: resume of {session.Id} threw: {error.Message}");
                     Drain();
                 });
@@ -722,6 +785,8 @@ public sealed class ClaudeSessions : IDisposable
 
     void Answered(Guid taskId, string sessionId, bool cutOff, Result<string> result)
     {
+        // Kept for a click within the grace (WakeNow), so it hands this back instead of looking for a session that never started.
+        failedWith = result.IsSuccess ? failedWith.Remove(sessionId) : failedWith.SetItem(sessionId, result.Error);
         if (result.IsSuccess)
         {
             // The thread's header already names Deskbar and the time (task aa42794f, "too much bla bla"), so the line
@@ -775,6 +840,19 @@ public sealed class ClaudeSessions : IDisposable
                 .Tap(path => transcriptFound[session.Id] = path);
 
     public bool TranscriptExists(TaskSession session) => TranscriptOf(session).HasValue;
+
+    /// <summary>
+    /// Whether a session can be resumed at all: its transcript is there AND the folder it ran in still is (task 0bdf74d0).
+    /// `claude --bg --resume` runs in that folder, so a session whose git worktree was removed after its work merged can
+    /// never come back, however often it is clicked. Such a session counts as expired everywhere this is the seam (the
+    /// thread, the keeper, a comment's wake): the thread then offers Start Claude on this instead of an Open that fails.
+    /// A session with no folder recorded ("") is judged on its transcript alone, as before.
+    /// </summary>
+    public bool Resumable(TaskSession session) =>
+        (string.IsNullOrEmpty(session.Folder) || folderExists(session.Folder)) && TranscriptExists(session);
+
+    // Directory.Exists in the app; tests pass their own, since their sessions' folders are made-up paths.
+    readonly Func<string, bool> folderExists;
 
     // The folders under <claudeHome>\projects, or none when it cannot be listed (no Claude Code yet, or no access): then
     // only the joined folder's own path is tried, which is how this behaved before.

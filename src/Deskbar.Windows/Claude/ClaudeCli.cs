@@ -41,10 +41,15 @@ public sealed class ClaudeCli(string? executable = null) : IClaudeCli
     // The name failures carry: the given program, or "claude" for the located one, whose full path adds nothing.
     string Name => executable ?? "claude";
 
+    // A folder that is gone fails here, in words Petre can act on, before Windows answers "The directory name is
+    // invalid." (task 0bdf74d0: a probe session's git worktree had been removed, and its task showed only that line).
     public Task<Result<string>> Run(IReadOnlyList<string> arguments, string? workingDirectory, TimeSpan timeout) =>
-        (executable is not null ? Maybe.From(executable) : ClaudeLocator.Find()) is { HasValue: true } program
-            ? RunProgram(program.Value, arguments, workingDirectory, timeout)
-            : Task.FromResult(Result.Failure<string>(ClaudeLocator.NotFound));
+        !string.IsNullOrEmpty(workingDirectory) && !Directory.Exists(workingDirectory)
+            ? Task.FromResult(Result.Failure<string>(
+                $"Could not run {Name}: the folder {workingDirectory} no longer exists (a git worktree that was removed, for example)."))
+            : (executable is not null ? Maybe.From(executable) : ClaudeLocator.Find()) is { HasValue: true } program
+                ? RunProgram(program.Value, arguments, workingDirectory, timeout)
+                : Task.FromResult(Result.Failure<string>(ClaudeLocator.NotFound));
 
     async Task<Result<string>> RunProgram(string program, IReadOnlyList<string> arguments, string? workingDirectory, TimeSpan timeout)
     {
