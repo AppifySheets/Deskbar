@@ -713,7 +713,7 @@ public sealed partial class TasksBoard : IDisposable
     // What a task window draws: the task's line with its thread open (comments, sessions, subtasks), the workspaces for
     // its "Move to…" menu, and the clock its times are told against.
     TaskDetailView DetailOf(TaskItem task) =>
-        new(RowOf(task, open: true), WorkspaceChipMenu.Entries(manager.State, withNone: true), now());
+        WithInboxPage(new(RowOf(task, open: true), WorkspaceChipMenu.Entries(manager.State, withNone: true), now()), task);
 
     public void Filter(TaskFilter shown)
     {
@@ -2284,7 +2284,7 @@ internal sealed partial record TasksWindowActions(
 /// What a task window draws (task dca4ebeb): the task's line with its thread open, the workspaces for its "Move to…"
 /// menu (WorkspaceChipMenu's entries) and the time "now" is, for the task's age.
 /// </summary>
-internal sealed record TaskDetailView(TaskRowView Row, IReadOnlyList<WorkspaceChipMenu.Entry> Places, DateTimeOffset Now);
+internal sealed partial record TaskDetailView(TaskRowView Row, IReadOnlyList<WorkspaceChipMenu.Entry> Places, DateTimeOffset Now);
 
 /// <summary>A subtask as its parent's open thread lists it: id, title (first line), status and status line.</summary>
 internal sealed record SubtaskView(Guid Id, string Title, TaskStatus Status, string StatusLine)

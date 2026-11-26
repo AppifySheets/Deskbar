@@ -1,3 +1,4 @@
+using CSharpFunctionalExtensions;
 using Deskbar.Core.Tasks;
 
 namespace Deskbar.App;
@@ -64,6 +65,42 @@ public sealed partial class TasksBoard
             FiltersOn = InboxTabs.FiltersOn(filter, claudeFilter, where, assigneeFilter, goalFilter, PanelState.HideSubtasks),
         };
     }
+
+
+    // A TASK WINDOW IN THE INBOX LOOK (TaskDetailWindow.Inbox.cs). While the Inbox is the chosen view (PanelState.Inbox, not
+    // InboxShown: Stats laid over the Inbox must not flip a window's look) a task window draws the Inbox's page for its
+    // task. The page is drawn by a TasksWindow of its own, from a view of one task: its line with the thread open as
+    // DetailOf made it, and the mark the Inbox's own split gives it (went quiet and the usage limit included, which the row
+    // alone cannot tell). The List's filters, tabs and search have no part in it: a task window shows its task whatever
+    // the panel filters.
+    TaskDetailView WithInboxPage(TaskDetailView detail, TaskItem task)
+    {
+        if (!PanelState.Inbox) return detail;
+        var group = new TaskGroup(TaskViews.KindOf(detail.Row.Quadrant), [task]);
+        var inbox = InboxTabs.Split([group], new HashSet<Guid>(), tasks.Board, InboxMarks.StoppedOnLimit,
+            busy: knowsActivity() ? Busy : null,
+            hollow: t => tasks.DeliveryOf(t).Shipping,
+            tabbed: false);
+        var page = new TasksView([], "", where, detail.Places, [new TaskGroupView(group.Kind, "", [detail.Row])], "",
+            PlaceOf(manager.CurrentWorkspaceId))
+        {
+            Inbox = inbox,
+        };
+        return detail with { Page = page };
+    }
+
+    /// <summary>For the tests: what a task window would be handed for the task now, null for an unknown task.</summary>
+    internal TaskDetailView? DetailViewFor(Guid id) =>
+        tasks.Board.Tasks.TryFirst(t => t.Id == id).Match(task => (TaskDetailView?)DetailOf(task), () => null);
+}
+
+internal sealed partial record TaskDetailView
+{
+    /// <summary>
+    /// The Inbox's page for this task, as a view for the page's own window (TasksWindow.ShowPage). Set only while the Inbox
+    /// is the chosen view; null otherwise, and the task window then draws as it always did.
+    /// </summary>
+    public TasksView? Page { get; init; }
 }
 
 internal sealed partial record TasksView
