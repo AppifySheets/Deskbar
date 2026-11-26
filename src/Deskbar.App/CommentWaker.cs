@@ -53,7 +53,11 @@ sealed class CommentWaker : IDisposable
         // queue, so a press and a comment never race each other into one session.
         var comments = tasks.Commented.Select(commented => new Delivery(commented.TaskId, "a comment",
             task => SessionBriefing.Commented(task, tasks.ExpandImages(commented.Comment.Markdown), commented.Comment.ByManager)));
-        var reevaluations = tasks.Reevaluations.Select(taskId => new Delivery(taskId, "a reevaluate request", SessionBriefing.Reevaluate));
+        var reevaluations = tasks.Reevaluations.Select(taskId => new Delivery(taskId, "a reevaluate request", SessionBriefing.Reevaluate)
+        {
+            // CommentWake's own words name a comment, which a press of Reevaluate is not.
+            Unsent = "No session of this task can be resumed, so Claude was not asked to reevaluate it.",
+        });
         subscription = comments.Merge(reevaluations)
             .Where(_ => enabled())
             .Select(delivery => live.Take(1).SelectMany(listed => Observable.FromAsync(() => Deliver(delivery, listed)))
@@ -70,7 +74,11 @@ sealed class CommentWaker : IDisposable
 
     // What goes to a task's session: its task, what it is (for the trace) and its words, made from the task as it stands
     // when it is delivered.
-    sealed record Delivery(Guid TaskId, string What, Func<TaskItem, string> Message);
+    // Unsent, when set, is the thread's line in place of CommentWake's when no session can take it.
+    sealed record Delivery(Guid TaskId, string What, Func<TaskItem, string> Message)
+    {
+        public string? Unsent { get; init; }
+    }
 
     async Task<System.Reactive.Unit> Deliver(Delivery delivery, IReadOnlyCollection<ClaudeAgent> listed)
     {
@@ -100,7 +108,7 @@ sealed class CommentWaker : IDisposable
                 await Resumed(taskId, session, message);
                 break;
             case WakePlan.Nothing(var why):
-                tasks.Note(taskId, why);
+                tasks.Note(taskId, delivery.Unsent ?? why);
                 break;
         }
         return System.Reactive.Unit.Default;

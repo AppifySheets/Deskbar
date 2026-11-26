@@ -1192,6 +1192,8 @@ public class RemoteControlTaskTests
              "goal <id> <goal-id>|none",
              // Task 6da8d7eb: the snooze button's twins.
              "snooze <id> 1h|3h|tomorrow|monday|<n>m|<n>h|<n>d", "wake <id>",
+             // Task 3dd07539: the Reevaluate button's twin.
+             "reevaluate <id>",
              // Task e7aa49b1: a pull request on a task by hand.
              "pr <id> <url>",
              // Task 8470d176, phase 2: "Mark deployed"'s twin.
