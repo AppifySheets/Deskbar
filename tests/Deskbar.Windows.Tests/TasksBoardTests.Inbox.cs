@@ -891,4 +891,36 @@ public partial class TasksBoardTests
         Click(ButtonNamed(t.Window.InboxPageContent!, TasksWindow.InboxPageBackText));
         Assert.Null(t.Window.InboxPageShown);
     });
+
+    // A real click on a workspace in the chip's move menu moves the task.
+    [Fact]
+    public void A_click_in_the_chips_move_menu_moves_the_task() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var k = InboxTasks(t);
+        t.Controller.Show();
+        ChooseInbox(t);
+
+        Click(ButtonNamed(LineOf(t.Window, k.Asking), TasksWindow.PlaceChipName));
+        var move = t.Window.OpenedMenu!;
+        Click(WorkspaceChipMenu.Chips(move).Single(c => AutomationProperties.GetName(c) == "Sparrow"));
+
+        Assert.Equal(t.Sparrow, t.Tasks.Board.Tasks.Single(x => x.Id == k.Asking).WorkspaceId.Value);
+    });
+
+    // A task's id typed in the window's search box finds it, past the tabs.
+    [Fact]
+    public void An_id_typed_in_the_search_box_finds_its_task() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var k = InboxTasks(t);
+        t.Controller.Show();
+        ChooseInbox(t);
+
+        Assert.True(t.Window.Press(Key.F, ModifierKeys.Control));
+        t.Window.SearchBox.Text = k.Note.ToString()[..8];
+
+        Assert.False(t.Window.InboxShown!.Tabbed);
+        Assert.Equal([k.Note], DrawnInboxLines(t));
+    });
 }
