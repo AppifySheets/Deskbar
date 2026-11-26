@@ -1100,8 +1100,9 @@ public sealed record TaskBoard(IReadOnlyList<TaskItem> Tasks)
     /// manual order (<see cref="Group"/>). Nothing here reads UpdatedAt, so a status line, a comment or a session ending
     /// cannot move a line. Closed tasks are left out.
     /// </summary>
-    public IReadOnlyList<TaskItem> Pile() =>
-        Pinned().Concat(Enum.GetValues<Quadrant>().SelectMany(Group)).ToArray();
+    /// <param name="hollow">Whether a Done task's tick is the hollow ring (see <see cref="Pinned"/>); none keeps the pin order.</param>
+    public IReadOnlyList<TaskItem> Pile(Func<TaskItem, bool>? hollow = null) =>
+        Pinned(hollow).Concat(Enum.GetValues<Quadrant>().SelectMany(Group)).ToArray();
 
     /// <summary>
     /// The pinned "Waiting on you" block (task eefb986a, TaskStatusPinning): the tasks waiting on Petre's answer first,
@@ -1109,8 +1110,26 @@ public sealed record TaskBoard(IReadOnlyList<TaskItem> Tasks)
     /// one on top, then where he drags it, task f41d7857). A question goes above a Done task because a session is
     /// stopped on it, while a Done task only waits for a look and a close.
     /// </summary>
-    public IReadOnlyList<TaskItem> Pinned() =>
-        PinnedPart(TaskStatus.WaitingOnYou).Concat(PinnedPart(TaskStatus.Done)).ToArray();
+    /// <param name="hollow">
+    /// Whether a Done task's tick is drawn as the hollow ring, its change not running yet (task 8470d176,
+    /// TaskDelivery.Shipping). Given, the Done part shows the full discs first and the rings after them (see
+    /// <see cref="FullDiscsFirst"/>); none keeps the pin order alone.
+    /// </param>
+    public IReadOnlyList<TaskItem> Pinned(Func<TaskItem, bool>? hollow = null) =>
+        PinnedPart(TaskStatus.WaitingOnYou).Concat(FullDiscsFirst(PinnedPart(TaskStatus.Done), hollow)).ToArray();
+
+    // FULL DISCS FIRST, THEN HOLLOW RINGS (task a1debf34, 2026-11-26, Petre: "show full circles first, then hollow ones",
+    // with a screenshot of the Done tasks under the questions, rings and discs mixed). A full disc is a change that runs
+    // here, ready to try and close; a ring still waits on a merge or a deploy and needs nothing from him yet, so the ones
+    // he can act on go on top. Whether a tick is a ring is a fact about the running build (TaskService.DeliveryOf), not
+    // about the task, so the board does not know it and the caller that draws hands it in.
+    //
+    // OrderBy is a stable sort, so each half keeps the pin order (a new one on top, then where he drags it). The pins are
+    // left as they are: a drag still places a task beside its neighbour in PinnedPart, and a task dragged across the line
+    // between the halves keeps its new pin but is drawn back in its own half until its tick changes. A ring that fills
+    // moves up into the discs at its pin's place among them.
+    static IEnumerable<TaskItem> FullDiscsFirst(IReadOnlyList<TaskItem> done, Func<TaskItem, bool>? hollow) =>
+        hollow is null ? done : done.OrderBy(hollow);
 
     /// <summary>
     /// One part of the pinned block in its order: the tasks of <paramref name="status"/> (Waiting on you, or Done),

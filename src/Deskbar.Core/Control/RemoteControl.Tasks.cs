@@ -124,7 +124,8 @@ public sealed partial class RemoteControl
             ["done"] or ["answered"] or ["join", _] or ["new", _] or ["status-line", _] or ["ask", _] or ["later", _] or ["subtask", _] or ["pr", _]
                 or ["duplicate-of", _] or ["relate", _] or ["unrelate", _] or ["deployed", _] =>
                 ControlReply.Fail($"task {args[0]} is a session's form and needs --session <id>"),
-            ["list"] => Success(service.Board.Pile().Select(Listed).ToArray()),
+            // In the bar's order, the Done tasks' full discs before their hollow rings (task a1debf34, TaskBoard.Pinned).
+            ["list"] => Success(service.Board.Pile(t => service.DeliveryOf(t).Shipping).Select(Listed).ToArray()),
             // The closed tasks, which every other view leaves out, so one closed by mistake can be found and reopened.
             // The latest closed first: closing stamps UpdatedAt, and nothing but Petre's own edits moves it after that.
             ["list", "--closed"] => Success(service.Board.Tasks.Where(t => t.Status == TaskStatus.Closed)
@@ -137,7 +138,7 @@ public sealed partial class RemoteControl
                 : ControlReply.Fail("task stats --days takes a whole number of days from 1 to 366"),
             // The manager session's cheap look at the board (TaskOverview): one line per open task, where `list` is JSON
             // with every thread. `show` is the other half: one task as `list` prints it, thread text included.
-            ["overview"] => Said(TaskOverview.Text(service.Board, service.Now, id => WorkspaceNameOf(id) ?? "", Busy)),
+            ["overview"] => Said(TaskOverview.Text(service.Board, service.Now, id => WorkspaceNameOf(id) ?? "", Busy, t => service.DeliveryOf(t).Shipping)),
             ["show", var id] => service.Board.Find(id).Match(t => Success(Listed(t)), ControlReply.Fail),
             ["add", .. var more] => TaskAdd(service, more, from),
             // A task Claude is still working on refuses a plain close (task 37cd7081, TaskBoard.Close), and the refusal

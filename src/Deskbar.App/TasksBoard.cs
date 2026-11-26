@@ -1193,7 +1193,10 @@ public sealed class TasksBoard : IDisposable
         // such a line is Nested, so it shows the arrow without the parent's name. The Claude working block is split into
         // its working and idle parts by Busy (task 10b49554), once there is a list to tell them by (knowsActivity).
         var split = knowsActivity() ? Busy : (Func<TaskItem, bool>?)null;
-        var (underParents, nested) = TaskViews.UnderParents(foundById.Match(TaskViews.Everywhere, () => TaskViews.Grouped(board, filter, shown, assigneeFilter, split)));
+        // The Done tasks show the full discs first, then the hollow rings, in the List and in the Matrix alike (task
+        // a1debf34, TaskBoard.Pinned): whether a tick is a ring is the running build's fact, so it comes from the service.
+        bool Hollow(TaskItem t) => tasks.DeliveryOf(t).Shipping;
+        var (underParents, nested) = TaskViews.UnderParents(foundById.Match(found => TaskViews.Everywhere(found, Hollow), () =>TaskViews.Grouped(board, filter, shown, assigneeFilter, split, Hollow)));
         // The "Subtasks" checkbox unticked (task 173ef268): the lines drawn under a parent are left out, and the parent's
         // own "· N subtasks" says they are there. Read from the saved state, as OpenFresh reads CurrentWorkspace.
         // A search by id never folds (task 6e4dc116): the subtask asked for by its id would vanish under its parent.
@@ -1239,7 +1242,7 @@ public sealed class TasksBoard : IDisposable
         // The Matrix's four cells (Ruling 28), drawn instead of the groups while the switch says so (AppState.TasksMatrix).
         // Not split by Busy (task 10b49554 review): a compact Matrix line shows no sessions, so a line moving between
         // working and idle would jump inside its cell with nothing on screen to say why.
-        var matrix = TaskViews.Matrix(board, filter, shown, assigneeFilter);
+        var matrix = TaskViews.Matrix(board, filter, shown, assigneeFilter, Hollow);
         var cellTasks = showsSubtasks ? matrix : TaskViews.FoldSubtasks(matrix, selection.Current, snoozedFamily);
         var cellIds = cellTasks.SelectMany(c => c.Tasks).Select(t => t.Id).ToHashSet();
         var cells = cellTasks

@@ -214,7 +214,7 @@ public partial class FloatingBar
             .Select(b => (TaskLine)b.Tag is var line
                 ? new TaskDropTarget.Drawn(new TaskDropTarget.Placed(line.Id, line.Quadrant, line.Status.IsPinned(),
                     new Rect(b.TranslatePoint(new Point(0, 0), taskLinesPanel), b.RenderSize))
-                    { TakesChild = parents.Contains(line.Id), Pinned = TaskDropTarget.PartOf(line.Status) }, line.ShownIn is not null)
+                    { TakesChild = parents.Contains(line.Id), Pinned = TaskDropTarget.PartOf(line.Status, line.Delivery.Shipping) }, line.ShownIn is not null)
                 : null)
             .OfType<TaskDropTarget.Drawn>()
             .ToList();
@@ -222,7 +222,7 @@ public partial class FloatingBar
         if (TaskDropTarget.InOwnBlock(drawn, dragged, inList)) return null;
         var task = taskService.Board.Tasks.FirstOrDefault(t => t.Id == dragged);
         return TaskDropTarget.At(TaskDropTarget.Anchors(drawn), [], task?.Quadrant ?? Quadrant.IV, inList,
-                task is null ? TaskDropTarget.Part.None : TaskDropTarget.PartOf(task.Status), self: dragged) is { } drop
+                task is null ? TaskDropTarget.Part.None : TaskDropTarget.PartOf(task.Status, taskService.DeliveryOf(task).Shipping), self: dragged) is { } drop
             ? new TaskDropPreview(drop.Quadrant, drop.Place, drop.LineY) { Into = drop.Into, IntoBounds = drop.IntoBounds }
             : null;
     }

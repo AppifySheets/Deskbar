@@ -542,7 +542,8 @@ public partial class FloatingBar
         Func<TaskItem, TaskDelivery>? delivery = null) =>
         // A snoozed task is off the bar until it comes back (task 6da8d7eb, TaskItem.SnoozedUntil); the tasks panel's
         // "Snoozed" filter is where it can be found meanwhile.
-        board.Pile().Where(t => !t.IsSnoozed).Select(t => new TaskLine(
+        // The Done tasks show the full discs first, then the hollow rings (task a1debf34, TaskBoard.Pinned).
+        board.Pile(delivery is null ? null : t => delivery(t).Shipping).Where(t => !t.IsSnoozed).Select(t => new TaskLine(
             t.Id,
             t.Title,
             DetailOf(t, withDescription: true, plain: true),
