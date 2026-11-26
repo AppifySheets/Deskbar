@@ -18,7 +18,7 @@ namespace Deskbar.Windows.Tests;
 // The window is the docked tasks panel (plan 2026-11-23-tasks-panel, Task 6), behind a TasksPanel whose seams are all
 // faked (TasksPanelRig): it docks on a made-up screen far off every real monitor, so a run never reserves a strip of
 // a real screen, and it is Quiet, never activating itself, so a run neither flashes it nor takes the keyboard.
-public class TasksBoardTests
+public partial class TasksBoardTests
 {
     sealed class MemoryStore : ITaskStore
     {
