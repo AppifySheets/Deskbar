@@ -91,6 +91,25 @@ static class ChatThread
     // (task 968c2216), as both thread hosts decide it.
     static bool IsBubble(TaskCommentView comment) => comment.Who != CommentAuthor.Deskbar || comment.Asks;
 
+    /// <summary>
+    /// A bubble that <see cref="Message"/> drew NAMED, signed again in place as a run decides now: its author's name shown
+    /// or collapsed, its time with or without the "· ", and the gap under it, exactly as a bubble drawn with
+    /// <see cref="TaskCommentView.NamesAuthor"/> would look. For the Inbox's stream (ChatStreamPanel), which never
+    /// re-creates a message it has drawn, so a message that a new one joins loses its name where it is. A bubble drawn
+    /// unnamed has no name to show, and anything that is not such a bubble, is left as it is.
+    /// </summary>
+    internal static void NameAuthor(FrameworkElement row, bool names)
+    {
+        if (row is not Grid { Children.Count: > 0 } grid || grid.Children[0] is not StackPanel { Children.Count: 2 } column
+            || column.Children[1] is not StackPanel meta) return;
+        var signed = meta.Children.OfType<StackPanel>().FirstOrDefault(panel => panel.Children.OfType<TextBlock>().Any(t => Equals(t.Tag, AuthorTag)));
+        if (signed?.Children.OfType<TextBlock>().ToList() is not [var author, var time] || !Equals(author.Tag, AuthorTag)) return;
+        author.Visibility = names ? Visibility.Visible : Visibility.Collapsed;
+        var bare = time.Text.StartsWith("· ", StringComparison.Ordinal) ? time.Text[2..] : time.Text;
+        time.Text = names ? "· " + bare : bare;
+        grid.Margin = new Thickness(0, 0, 0, names ? 4 : 2);
+    }
+
     /// <summary>The Tag of a day line, for the tests.</summary>
     internal const string DayTag = "chat-day";
 

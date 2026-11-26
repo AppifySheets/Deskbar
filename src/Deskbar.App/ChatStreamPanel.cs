@@ -96,9 +96,11 @@ internal sealed class ChatStreamPanel : StackPanel
         var view = ClaudeChatStream.Build(items, comments.Select(c => new StreamComment(c.Key, c.At)).ToList(), earlierFolded);
         var commentOf = comments.ToDictionary(c => c.Key, c => c.Element, StringComparer.Ordinal);
         var wanted = new List<Slot>();
+        var unnamed = Unnamed(view.Entries);
         using (ChatThread.Using(ChatThread.InboxLook))
             foreach (var entry in view.Entries)
             {
+                var names = !unnamed.Contains(entry.Key);
                 if (slots.TryGetValue(entry.Key, out var slot))
                 {
                     if (entry.Item is { } item) { if (!Same(slot.Item, item)) Refresh(slot, item); }
@@ -108,6 +110,12 @@ internal sealed class ChatStreamPanel : StackPanel
                 {
                     slot = entry.Item is { } created ? Create(entry, created) : new Slot(entry.Key, entry.At, commentOf[entry.Key], null);
                     slots[entry.Key] = slot;
+                }
+                // A message joined by the next one, or no longer joined, is signed again where it is (Unnamed).
+                if (entry.Item is ChatMessage && slot.Names != names && slot.Element is FrameworkElement signedRow)
+                {
+                    ChatThread.NameAuthor(signedRow, names);
+                    slot.Names = names;
                 }
                 wanted.Add(slot);
             }
@@ -154,7 +162,20 @@ internal sealed class ChatStreamPanel : StackPanel
         public UIElement Element { get; set; } = element;
         public ChatItem? Item { get; set; } = item;
         public TextBlock? DayLine { get; set; }
+        /// <summary>Whether a message's line names its author as drawn (see Unnamed); every message is drawn named.</summary>
+        public bool Names { get; set; } = true;
     }
+
+    // A RUN OF ONE AUTHOR'S MESSAGES NAMES THE AUTHOR ONCE, under its last (task 85218923, the rule ChatThread.Grouped keeps
+    // for the comments): the keys of the session's messages whose next entry is a message of the same role on the same day.
+    // A run of steps, a marker or a comment between them ends the run (TasksWindow.GroupedInStream groups the comments). A
+    // message that a new one joins loses its name in place (ChatThread.NameAuthor), so nothing is re-created for it.
+    internal static HashSet<string> Unnamed(IReadOnlyList<StreamEntry> entries) =>
+        entries.Zip(entries.Skip(1))
+            .Where(p => p.First.Item is ChatMessage a && p.Second.Item is ChatMessage b && a.Role == b.Role
+                && p.First.At.ToLocalTime().Date == p.Second.At.ToLocalTime().Date)
+            .Select(p => p.First.Key)
+            .ToHashSet(StringComparer.Ordinal);
 
     // Whether the drawn item and the new one say the same: a run by its steps (the list is a new object every snapshot), the
     // rest by value.
@@ -183,6 +204,8 @@ internal sealed class ChatStreamPanel : StackPanel
         if (slot.Element is ChatStepsView view && item is ChatSteps run) view.Update(run);
         else if (item is ChatMessage message)
         {
+            // Drawn named, as every new message is; Apply signs it again if a run holds it.
+            slot.Names = true;
             var index = Children.IndexOf(slot.Element);
             var fresh = MessageOf(message);
             Created++;

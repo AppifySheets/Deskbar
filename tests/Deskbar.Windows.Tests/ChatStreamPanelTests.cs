@@ -186,6 +186,49 @@ public class ChatStreamPanelTests
         Assert.Equal(before, panel.Children.Cast<UIElement>());
     });
 
+    // A run of one author's bubbles names the author once, under its last (task 85218923, ChatThread.Grouped), in the
+    // stream too, and without re-creating the message a new one joins.
+    static string[] Named(object scope) =>
+        Inside(scope).OfType<TextBlock>().Where(t => Equals(t.Tag, ChatThread.AuthorTag) && t.Visibility == Visibility.Visible).Select(t => t.Text).ToArray();
+
+    [Fact]
+    public void A_run_of_Claudes_messages_names_Claude_once_and_a_new_one_takes_the_name_in_place() => StaThread.Run(() =>
+    {
+        var panel = Panel();
+        panel.Apply([Typed("Hello", 0), Said("Hi", 10)]);
+        Assert.Equal(["you", "Claude"], Named(panel));
+        var before = panel.Children.Cast<UIElement>().ToArray();
+        var hi = before[^1];
+        var created = panel.Created;
+
+        panel.Apply([Typed("Hello", 0), Said("Hi", 10), Said("Second", 20, "m20")]);
+
+        Assert.Equal(["you", "Claude"], Named(panel));
+        Assert.Empty(Named(hi));
+        Assert.DoesNotContain(Words(hi), w => w.StartsWith("· ", StringComparison.Ordinal));
+        Assert.Equal(created + 1, panel.Created);
+        Assert.Equal(before, panel.Children.Cast<UIElement>().Take(before.Length));
+
+        // Steps between them end the run: the first message is named again, still the same element.
+        panel.Apply([Typed("Hello", 0), Said("Hi", 10), Run("r", Step("a", StepKind.Read, "A.cs", at: 15)), Said("Second", 20, "m20")]);
+
+        Assert.Equal(["you", "Claude", "Claude"], Named(panel));
+        Assert.Contains(hi, panel.Children.Cast<UIElement>());
+        Assert.Contains(Words(hi), w => w.StartsWith("· ", StringComparison.Ordinal));
+    });
+
+    [Fact]
+    public void Comments_in_the_stream_are_one_run_only_with_nothing_of_the_session_between_them()
+    {
+        static TaskCommentView Mine(int seconds) =>
+            new(Guid.NewGuid(), "you", false, "", "words") { Who = CommentAuthor.You, Day = "Today", At = Now.AddSeconds(seconds) };
+        var shown = new[] { Mine(0), Mine(5), Mine(30) };
+
+        var named = TasksWindow.GroupedInStream(shown, [Said("Between", 10)], earlierFolded: false).Select(c => c.NamesAuthor);
+
+        Assert.Equal([false, true, true], named);
+    }
+
     // The comments are the window's own elements; an item older than a comment falls before it.
     [Fact]
     public void An_item_older_than_a_comment_is_put_before_it_and_the_comment_is_never_recreated() => StaThread.Run(() =>
