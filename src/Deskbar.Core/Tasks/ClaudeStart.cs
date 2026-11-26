@@ -66,10 +66,19 @@ public static class ClaudeStart
     // thread), finish with `task done`, which for a recurring task ends the run and puts it to sleep until the next, and
     // ask only when the user must act, since a question holds every following occurrence back. It is the line that is
     // kept whole, so it stays well under the 1000-character cap with any schedule's label.
+    //
+    // Two more things it says (final review, item 2). `task join` replies WITHOUT the comments' text
+    // (RemoteControl.Tasks.cs, withText: false), so a run that a comment of Petre's started (CommentWake) would never see
+    // that comment: the run reads the thread with `task show` first and answers anything posted since the last run,
+    // before the description's job. And it leaves no background job or monitor running when it finishes: Claude Code
+    // lists a session with one busy, and SessionKeeper.Stops only stops an idle run, so it would stay alive, and every
+    // later occurrence skips while a session of the task is listed (RecurringRuns.Plan, rule 3).
     static string ScheduledRun(Guid id, TaskRepeat repeat) =>
         $"This is a scheduled run of a recurring task ({repeat.Schedule.Label}). Join it (deskbar task join {id}), "
-        + "do what its description says, comment once with the result only if there is something to say, and finish "
-        + "with deskbar task done. Use deskbar task ask only when the user must act.";
+        + $"then read its thread (deskbar task show {id}) and answer any comment posted since the last run before "
+        + "doing what its description says. Comment once with the result only if there is something to say, and finish "
+        + "with deskbar task done. Do not leave a background job or monitor running when you finish: a run still busy "
+        + "makes every later run skip. Use deskbar task ask only when the user must act.";
 
     // THE MODEL A TASK SESSION RUNS ON (design docs/superpowers/specs/2026-11-25-session-model-pick-design.md). Deskbar
     // names it on every start, so a task session never runs on whatever `~/.claude/settings.json` holds that day:

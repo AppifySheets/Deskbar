@@ -175,6 +175,30 @@ public class ClaudeStartTests
         Assert.EndsWith("\n" + lastLine, cut);
     }
 
+    // Final review, item 2. `task join` replies without the comments' text, so a run started by a comment would never see
+    // it: the run is told to read the thread with `task show` and answer anything posted since the last run, before the
+    // description's job. And a background job or a monitor left running keeps the session listed busy, so every later
+    // occurrence would skip: the run is told to leave none. The last line stays whole and under the cap with any schedule.
+    [Theory]
+    [InlineData("every 1h 09:00-19:00")]
+    [InlineData("weekly wednesday 09:00")]
+    [InlineData("every 24h 00:00-23:59")]
+    public void A_scheduled_run_reads_the_thread_first_and_leaves_nothing_running(string schedule)
+    {
+        var repeat = new TaskRepeat(TaskRepeats.Parse(schedule).Value, "sonnet", @"E:\repos\TaskSpaces");
+        var task = Task(taskId, "Check the build", Maybe<Guid>.None) with { Repeat = repeat };
+
+        var message = ClaudeStart.FirstMessage(task);
+        var lastLine = message[(message.LastIndexOf('\n') + 1)..];
+
+        Assert.Contains($"deskbar task show {taskId}", lastLine);
+        Assert.Contains("comment posted since the last run", lastLine);
+        Assert.True(lastLine.IndexOf("task show", StringComparison.Ordinal) < lastLine.IndexOf("description", StringComparison.Ordinal));
+        Assert.Contains("background", lastLine);
+        Assert.Contains("monitor", lastLine);
+        Assert.True(lastLine.Length < 1000);
+    }
+
     [Fact]
     public void A_plain_task_starts_as_before() =>
         Assert.Equal(
