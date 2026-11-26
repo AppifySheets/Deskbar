@@ -119,6 +119,9 @@ public partial class FloatingBar
         if (line.ParentId is { } parentId && OpenParentTask is { } openParent)
             menu.Items.Add(TaskMenuItem(TasksWindow.OpenParentText, () => Dispatcher.BeginInvoke(() => openParent(parentId),
                 System.Windows.Threading.DispatcherPriority.Input)));
+        // COPY LINK (task 5016d533): the markdown link that opens this task in Deskbar from a pull request, an issue or
+        // anywhere else (TaskLinkClipboard), as the panel's line menu has it.
+        menu.Items.Add(TaskMenuItem(TaskLinkClipboard.CopyLinkText, () => TaskLinkClipboard.Copy(id)));
         menu.Items.Add(new Separator());
         menu.Items.Add(TaskMenuItem("Important", () => taskService?.SetFlag(id, TaskFlag.Important, !line.Important), line.Important));
         menu.Items.Add(TaskMenuItem("Urgent", () => taskService?.SetFlag(id, TaskFlag.Urgent, !line.Urgent), line.Urgent));

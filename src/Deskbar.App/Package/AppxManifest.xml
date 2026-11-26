@@ -87,6 +87,18 @@
             <desktop:ExecutionAlias Alias="deskbar.exe" />
           </uap3:AppExecutionAlias>
         </uap3:Extension>
+
+        <!-- Task links (task 5016d533): deskbar://task/<id> starts Deskbar.exe with the link, which
+             hands `task open <id>` to the running copy (TaskLinkCommandLine). The direct build
+             registers the same protocol under HKCU (TaskLinkProtocol); the package declares it here
+             so Windows removes it with the package. uap3's Protocol, because its Parameters
+             attribute, for full-trust apps only, is what passes the link on the command line as the
+             one argument TaskLinkCommandLine.Wants looks for; quoted so it stays one argument. -->
+        <uap3:Extension Category="windows.protocol" Executable="Deskbar.exe" EntryPoint="Windows.FullTrustApplication">
+          <uap3:Protocol Name="deskbar" Parameters="&quot;%1&quot;">
+            <uap:DisplayName>Deskbar task link</uap:DisplayName>
+          </uap3:Protocol>
+        </uap3:Extension>
       </Extensions>
     </Application>
   </Applications>

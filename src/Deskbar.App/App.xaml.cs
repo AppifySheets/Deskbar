@@ -1409,6 +1409,10 @@ public partial class App : Application
         // (StartMenuShortcut). Same owner rule as the Run entry. A failure only costs the shortcut.
         StartMenuShortcut.Ensure().TapError(error => ClickTrace.Write($"start menu: {error}"));
 
+        // ...and the deskbar: protocol, so a task link clicked in a pull request or anywhere else starts this exe with
+        // it and the task opens here (task 5016d533, TaskLinkProtocol). Same owner rule; a failure only costs the links.
+        TaskLinkProtocol.Ensure().TapError(error => ClickTrace.Write($"task links: {error}"));
+
         // ...and in the same breath, ask Windows to bring the app back if it DIES. Petre: "maybe you
         // could add a simple monitor job which will start the taskspaces when it dies", and, on the
         // cause, "it usually dies because of memory problems, i guess, but restarting is good" -- which
@@ -2809,7 +2813,8 @@ public partial class App : Application
             MarkerExists: File.Exists(Path.Combine(AppPaths.NewStateDir, PackagedTakeover.MarkerName)),
             RootOverridden: AppPaths.RootOverridden,
             DirectRunValueExists: StartupRegistration.IsEnabled,
-            DirectShortcutExists: File.Exists(StartMenuShortcut.ShortcutPath));
+            DirectShortcutExists: File.Exists(StartMenuShortcut.ShortcutPath),
+            DirectProtocolExists: TaskLinkProtocol.DirectKeyExists);
         PackagedTakeoverApplier.Apply(PackagedTakeover.Plan(takeoverFacts), AppPaths.NewStateDir, ClickTrace.Write);
     }
 

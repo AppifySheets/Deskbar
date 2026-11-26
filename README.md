@@ -508,6 +508,11 @@ description into large boxes, with a Preview tab for the markdown; Ctrl+S or Ctr
 posts a comment. Each task has one window, which opens on the desktop you are on, and every task window opens where you
 last left one, at the size you gave it. A script opens one with `deskbar.cmd task open <id>`.
 
+"Copy link" on a task's menu copies a link to the task, ready to paste into a pull request, an issue or a message.
+Clicked, it opens the task in its own window on the PC where Deskbar runs; the link goes through deskbar.app, which
+hands it to Deskbar, so the browser asks once whether to open Deskbar. Claude sessions put their task's link at the top
+of every pull request, issue, mockup and page they make for it. A script gets the link with `deskbar.cmd task link <id>`.
+
 Tasks can be linked. "Duplicate of…" on a task's menu in the tasks panel closes it as a duplicate of another task
 you pick by typing part of its title, and the closed list says "Duplicate of" that task; "Related to…" links two
 tasks, and both threads list the link. A note a Claude session leaves for later is linked to the session's task

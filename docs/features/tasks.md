@@ -88,6 +88,16 @@ The panel is narrow on purpose, which makes a long task hard to read and harder 
 - Each task has one window: asking again brings it to the front. It always comes to the desktop you are on, moved there if you left it on another. Every task window opens where you last moved, resized or closed one, maximized if that one was, and a second one open at the same time opens a little down and to the right. Deleting the task closes its window, and the windows close with Deskbar.
 - `deskbar.cmd task open <id>` does the same from a script.
 
+## Links to a task
+
+**Copy link** on a task's menu, in the tasks panel and on the bar, copies a link to the task as markdown: `[Deskbar task 5016d533](https://deskbar.app/task#5016d533-...)`. Paste it into a pull request, an issue, a comment or a message, and a click on it opens the task in its own window on the PC where Deskbar runs, on the desktop you are on.
+
+- The link goes through a page on deskbar.app, because GitHub and most other places only keep web links. That page hands the link to Deskbar, so your browser asks once whether to open Deskbar; tick its "always allow" box and later links open straight away. The task's id stays in the part after `#`, which a browser never sends to the site.
+- Deskbar registers the `deskbar:` link type for you when it starts, so a `deskbar://task/<id>` link opens the task too. If Deskbar is not running, the click starts it and then opens the task.
+- A task link inside Deskbar, in a comment, a description or a question, opens the task's window directly, without the browser.
+- Claude sessions on a task are told to put the task's link at the top of everything they make for it that you open outside Deskbar: pull requests, issues, published pages and mockups, documents and reports. Each of them leads back to its task.
+- `deskbar.cmd task link <id>` prints the same markdown link.
+
 ## Stats
 
 **Stats**, after **List** and **Matrix** at the top right of the tasks panel, shows how the work is going. It is there at every width. While Stats is on, **List** shows too, even on a narrow panel, as the way back. **Matrix** goes back as well where the panel is wide enough for it. The search box and the filter chips step aside while Stats shows, because Stats counts every task, whatever the filters say. The panel opens on the List or the Matrix again the next time, so Stats is not remembered.
@@ -172,6 +182,7 @@ The full set:
 - `task comment-settle <comment-id> --session <id>`, a session settling one of its own comments (another's is refused); `task list`'s `thread` shows each comment's `settled` time, or null
 - `task describe <id> <markdown>|-`, the description Edit sets (empty clears it), and `task comment-edit <comment-id> <markdown>|-`, which rewrites one of your own comments and refuses a session's; `task list` gives each task's `description` and its `thread`, each comment's id, `you` or `claude` for who wrote it, and its `markdown`, the comment's text; in both, a pasted picture's line carries its full path, ready for a session to read
 - `task open <id>`, the menus' **Open in window**: the task in a window of its own, or its window brought forward onto the desktop you are on
+- `task link <id>`, the menus' **Copy link**: the markdown link that opens the task in Deskbar when clicked (see [Links to a task](#links-to-a-task))
 - `task goal <id> <goal-id>|none`, the **Goal** menu's twin; `task list` gives each task's `goal` (see [Goals](goals.md))
 - `task add <title> --parent <id>` adds a subtask; without `--workspace` it goes on the parent's workspace
 - `task parent <id> <parent-id>|none` puts a task under another, or makes it a plain task again; a second level is refused

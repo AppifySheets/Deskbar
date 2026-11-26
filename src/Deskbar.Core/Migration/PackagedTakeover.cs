@@ -7,8 +7,10 @@ namespace Deskbar.Core.Migration;
 // marker file PackagedTakeover.MarkerName is already in the state folder, meaning a packaged start has
 // done the takeover before. RootOverridden: DESKBAR_APPDATA is set, a rehearsal. DirectRunValueExists:
 // the HKCU Run value `Deskbar` the direct build writes. DirectShortcutExists: the direct build's
-// Deskbar.lnk in the per-user Start menu.
-public sealed record TakeoverFacts(bool Packaged, bool MarkerExists, bool RootOverridden, bool DirectRunValueExists, bool DirectShortcutExists);
+// Deskbar.lnk in the per-user Start menu. DirectProtocolExists: the HKCU\Software\Classes\deskbar key the direct build
+// writes for task links (task 5016d533, TaskLinkProtocol); false by default, for the facts written before it existed.
+public sealed record TakeoverFacts(bool Packaged, bool MarkerExists, bool RootOverridden, bool DirectRunValueExists, bool DirectShortcutExists,
+    bool DirectProtocolExists = false);
 
 // One thing the takeover does. The App layer (PackagedTakeoverApplier) applies them in the order listed.
 public abstract record TakeoverStep;
@@ -18,6 +20,11 @@ public sealed record DeleteDirectRunValue : TakeoverStep;
 
 // Delete %APPDATA%\Microsoft\Windows\Start Menu\Programs\Deskbar.lnk, the direct build's Start entry.
 public sealed record DeleteDirectShortcut : TakeoverStep;
+
+// Delete HKCU\Software\Classes\deskbar, the direct build's task link protocol (task 5016d533). Left in place it would
+// go on sending every task link to the direct exe beside the package's own windows.protocol, and with Deskbar down that
+// exe would start the direct build again, undoing the takeover.
+public sealed record DeleteDirectProtocol : TakeoverStep;
 
 // Write the marker file into the state folder, so the takeover never runs again.
 public sealed record WriteMarker : TakeoverStep;
@@ -45,6 +52,7 @@ public static class PackagedTakeover
             ? [
                 .. facts.DirectRunValueExists ? [new DeleteDirectRunValue()] : Array.Empty<TakeoverStep>(),
                 .. facts.DirectShortcutExists ? [new DeleteDirectShortcut()] : Array.Empty<TakeoverStep>(),
+                .. facts.DirectProtocolExists ? [new DeleteDirectProtocol()] : Array.Empty<TakeoverStep>(),
                 new WriteMarker(),
             ]
             : [];

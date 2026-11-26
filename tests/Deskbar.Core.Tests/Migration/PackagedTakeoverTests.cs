@@ -36,6 +36,13 @@ public class PackagedTakeoverTests
     public void Only_the_marker_when_there_is_nothing_to_delete() =>
         Assert.Equal([new WriteMarker()], PackagedTakeover.Plan(new(true, false, false, false, false)));
 
+    // Task 5016d533: the direct build's deskbar: protocol key goes too, after the shortcut, so task links reach the
+    // package rather than starting the direct build again.
+    [Fact]
+    public void Deletes_the_direct_builds_task_link_protocol_too() =>
+        Assert.Equal([new DeleteDirectRunValue(), new DeleteDirectShortcut(), new DeleteDirectProtocol(), new WriteMarker()],
+            PackagedTakeover.Plan(new(true, false, false, true, true, DirectProtocolExists: true)));
+
     [Fact]
     public void Only_the_run_value_when_there_is_no_shortcut() =>
         Assert.Equal([new DeleteDirectRunValue(), new WriteMarker()],

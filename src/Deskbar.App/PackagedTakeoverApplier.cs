@@ -34,6 +34,10 @@ static class PackagedTakeoverApplier
                 () => StartupRegistration.Disable()),
             DeleteDirectShortcut => Run($"deleting the direct build's Start menu shortcut {StartMenuShortcut.ShortcutPath}",
                 () => Result.Try(() => File.Delete(StartMenuShortcut.ShortcutPath), error => error.Message)),
+            // Task 5016d533: the direct build's deskbar: key, through reg.exe outside the package for the reason the Run
+            // value goes that way (TaskLinkProtocol.DeleteDirectKey).
+            DeleteDirectProtocol => Run(@"deleting the direct build's task link protocol HKCU\Software\Classes\deskbar",
+                TaskLinkProtocol.DeleteDirectKey),
             // The folder first: on a fresh Store install nothing may have created %APPDATA%\Deskbar yet, and
             // a marker that cannot be written would run the takeover again at the next start.
             WriteMarker => Run($"writing the marker {PackagedTakeover.MarkerName}",
