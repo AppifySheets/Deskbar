@@ -41,20 +41,10 @@ public partial class FloatingBar
     // which hands the same object to the control pipe so a chip and `bookmark open` cannot differ. Left null (as most
     // tests leave it) every bookmark shows and a click says this copy cannot open them.
     //
-    // Setting it redraws the rows once, as TimeToday does: the constructor has already drawn them by the time an
-    // object initializer assigns this, so without the redraw a running program's chip would show until some window
-    // event happened to rebuild the bar.
-    public BookmarkOpener? BookmarkOpener
-    {
-        get => bookmarkOpener;
-        init
-        {
-            bookmarkOpener = value;
-            if (value is not null) Rebuild();
-        }
-    }
-
-    BookmarkOpener? bookmarkOpener;
+    // Setting it does NOT redraw the rows by itself. The constructor has drawn them before an object initializer gets
+    // here, so they first show every bookmark; the redraw that TimeToday's init makes, later in the same initializer
+    // (App.xaml.cs), is the one that draws with the opener. A second redraw here would only repeat it at startup.
+    public BookmarkOpener? BookmarkOpener { get; init; }
 
     // The disk and shell lookups a drop or a window's "Bookmark this" asks (Task 9). Set by the composition root.
     public IBookmarkSources? BookmarkSources { get; init; }
@@ -242,9 +232,13 @@ public partial class FloatingBar
 // THE CHIPS' PICTURES, kept for the app's life (one per bar; the composition root makes it once).
 //
 //   Program  the exe's own icon, from the loader the bar uses for windows (IconCache.For).
-//   App      the app's icon from its shell item, as a pin's is (ITaskbarPins.ImageOfApp), kept per app id. A miss is
-//            NOT kept, so an app whose icon the shell could not give yet is asked again next time (CLAUDE.md, "Never
-//            cache a lookup failure that can succeed later").
+//   App      the app's icon from its shell item, as a pin's is (ITaskbarPins.ImageOfApp), kept per app id. Asked on a
+//            POOL thread, never in the rebuild: the shell lookup is synchronous COM, and FloatingBar.Pins.cs records the
+//            same kind of call adding seconds to a rebuild. The raw pixels come back through `toUi`, are judged (an
+//            all-transparent picture is "not an answer yet", as IconCache.AskShell says) and become a bitmap only on
+//            the UI thread, then `arrived` redraws. A miss is NOT kept for good (CLAUDE.md, "Never cache a lookup
+//            failure that can succeed later"), but it is asked again at most once a minute (AppMissRetry), so an
+//            uninstalled app does not cost a shell call per rebuild.
 //   Link     the site's favicon: from memory, else from the store on disk, else a letter tile drawn now while ONE
 //            fetch per origin per run goes out on a pool thread.
 //
@@ -252,8 +246,13 @@ public partial class FloatingBar
 //
 //   * one FaviconFetcher for the app's life (it owns an HttpClient), handed in by the composition root;
 //   * an origin already stored is never fetched again;
-//   * the bytes come back to the UI thread and are decoded THERE (BitmapDecoder, the frame nearest 32 px, frozen),
-//     inside a catch, so a body WPF cannot read never throws into the dispatcher;
+//   * the bytes come back to the UI thread and are decoded THERE, BOUNDED (Decode): the header is read first and an
+//     image whose frames are all larger than 256 px is refused before a pixel is decoded, so a 256 KB PNG that
+//     declares 60000 x 60000 cannot expand to gigabytes. Then one frame, the one nearest 32 px, is decoded: at most
+//     256 x 256 x 4 bytes. All of it inside a catch, so a body WPF cannot read never throws into the dispatcher. Not
+//     on the pool thread: any WPF bitmap made there gives that thread a Dispatcher and a hidden window (IconCache.
+//     AskShell has the measurement), and with the header checked first the UI thread's share is small and bounded;
+//   * an oversized or undecodable image is a failure like a network one: not saved, tried again at the next start;
 //   * only a decoded icon is saved, so the store never holds something that would fail again at the next start;
 //   * a failure marks the origin tried for THIS run only: it is asked again after a restart, and meanwhile the letter
 //     tile stands (the privacy page promises exactly that);
@@ -266,6 +265,14 @@ sealed class BookmarkIcons
     readonly FaviconStore? store;
     readonly FaviconFetcher? fetcher;
     readonly Action<Action> toUi;
+    readonly Func<string, Maybe<PinImage>> appImage;
+    readonly Func<DateTime> now;
+
+    // How long an app id whose icon the shell did not give waits before it is asked again.
+    internal static readonly TimeSpan AppMissRetry = TimeSpan.FromMinutes(1);
+
+    // The largest favicon frame, either side, that is decoded at all. A real favicon is 16 to 256 px.
+    internal const int MaxFaviconPixels = 256;
 
     // Decoded favicons by origin (FaviconKey), app icons by app id, letter tiles by letter and hue.
     readonly Dictionary<string, ImageSource> favicons = new(StringComparer.Ordinal);
@@ -273,31 +280,65 @@ sealed class BookmarkIcons
     readonly Dictionary<(char Letter, double Hue), ImageSource> tiles = [];
     // Origins looked up this run (read from the store, fetched, being fetched, or failed): never asked again until a restart.
     readonly HashSet<string> tried = new(StringComparer.Ordinal);
+    // App ids being asked on a pool thread now, and those whose last answer was a miss, with when to ask again.
+    readonly HashSet<string> appsAsking = new(StringComparer.OrdinalIgnoreCase);
+    readonly Dictionary<string, DateTime> appMissUntil = new(StringComparer.OrdinalIgnoreCase);
 
     // `toUi` posts work to the UI thread: the dispatcher of the thread that made this object, unless a test says
     // otherwise. With no store and no fetcher, links keep their letter tiles and nothing touches disk or network.
-    internal BookmarkIcons(FaviconStore? store = null, FaviconFetcher? fetcher = null, Action<Action>? toUi = null)
+    // `appImage` is the shell's app icon lookup (IconCache.Shell at 48 px, as for a pin) and `now` the clock for the
+    // miss retry; both are seams for the tests.
+    internal BookmarkIcons(FaviconStore? store = null, FaviconFetcher? fetcher = null, Action<Action>? toUi = null,
+        Func<string, Maybe<PinImage>>? appImage = null, Func<DateTime>? now = null)
     {
         this.store = store;
         this.fetcher = fetcher;
         var dispatcher = Dispatcher.CurrentDispatcher;
         this.toUi = toUi ?? (work => dispatcher.BeginInvoke(work));
+        this.appImage = appImage ?? (id => IconCache.Shell.ImageOfApp(id, 48));
+        this.now = now ?? (() => DateTime.UtcNow);
     }
 
     // The picture for a chip, now. UI thread only. `arrived` is called (on the UI thread) if a better picture turns up
-    // later, which only a link's favicon can.
+    // later: an app's icon or a link's favicon.
     internal ImageSource For(Bookmark bookmark, Action arrived) =>
         (bookmark.Kind switch
         {
             BookmarkKind.Program => IconCache.For(bookmark.Target),
-            BookmarkKind.App => AppIcon(bookmark.Target),
+            BookmarkKind.App => AppIcon(bookmark.Target, arrived),
             _ => LinkIcon(bookmark, arrived),
         }) ?? Tile(bookmark);
 
-    ImageSource? AppIcon(string appId) =>
-        apps.TryGetValue(appId, out var known)
-            ? known
-            : IconCache.Shell.ImageOfApp(appId, 48).Map(IconCache.ToImageSource).Tap(found => apps[appId] = found).GetValueOrDefault();
+    // Known, or asked once on a pool thread; meanwhile (and after a miss, for AppMissRetry) the letter tile stands.
+    ImageSource? AppIcon(string appId, Action arrived)
+    {
+        if (apps.TryGetValue(appId, out var known)) return known;
+        if (appsAsking.Contains(appId) || (appMissUntil.TryGetValue(appId, out var until) && until > now())) return null;
+
+        appsAsking.Add(appId);
+        // A lookup that throws is a miss like any other. The pool thread makes no WPF object: raw pixels only.
+        Task.Run(() => appImage(appId))
+            .ContinueWith(done =>
+            {
+                var image = done.IsCompletedSuccessfully ? done.Result : Maybe<PinImage>.None;
+                toUi(() => TakeApp(appId, image, arrived));
+            }, TaskScheduler.Default);
+        return null;
+    }
+
+    // Back on the UI thread. A blank picture is a store app still loading, so it is a miss, not an answer.
+    void TakeApp(string appId, Maybe<PinImage> image, Action arrived)
+    {
+        appsAsking.Remove(appId);
+        if (image.HasNoValue || IconCache.IsBlank(image.Value))
+        {
+            appMissUntil[appId] = now() + AppMissRetry;
+            return;
+        }
+        appMissUntil.Remove(appId);
+        apps[appId] = IconCache.ToImageSource(image.Value);
+        arrived();
+    }
 
     ImageSource? LinkIcon(Bookmark bookmark, Action arrived)
     {
@@ -333,7 +374,7 @@ sealed class BookmarkIcons
     // Back on the UI thread: decode, and only then keep, save and redraw.
     void Take(Uri link, string key, Result<byte[]> fetched, Action arrived)
     {
-        var decoded = fetched.Bind(bytes => Decode(bytes).ToResult("The answer is not an image WPF can read.").Map(image => (Bytes: bytes, Image: image)));
+        var decoded = fetched.Bind(bytes => Decode(bytes).ToResult($"The answer is not an image WPF can read, or is over {MaxFaviconPixels} px.").Map(image => (Bytes: bytes, Image: image)));
         if (ClickTrace.On) ClickTrace.Write($"bookmark favicon {key}: {(decoded.IsSuccess ? "ok" : decoded.Error)}");
         if (decoded.IsFailure) return;
 
@@ -344,19 +385,36 @@ sealed class BookmarkIcons
     }
 
     // An icon file, a PNG or anything else WPF's decoders read, as the frame nearest 32 px (the bar draws a chip at 20
-    // DIP on screens up to 200%), frozen so it can be shared. Nothing a decoder throws gets out of here.
+    // DIP on screens up to 200%), frozen so it can be shared. BOUNDED, because the bytes come from any web server:
+    //
+    //   1. the decoder is opened with no cache (BitmapCacheOption.None), which reads the header and the frames' sizes
+    //      and decodes no pixels;
+    //   2. frames larger than MaxFaviconPixels either side are left out, and none left means no icon;
+    //   3. only the chosen frame is decoded, converted to Pbgra32 and copied out, so the work is at most 256 x 256 x 4
+    //      bytes whatever the file declares, and the copy keeps no hold on the stream.
+    //
+    // Nothing a decoder throws gets out of here.
     internal static Maybe<ImageSource> Decode(byte[] bytes)
     {
         try
         {
-            using var stream = new MemoryStream(bytes);
-            var decoder = BitmapDecoder.Create(stream, BitmapCreateOptions.PreservePixelFormat, BitmapCacheOption.OnLoad);
+            using var stream = new MemoryStream(bytes, writable: false);
+            var decoder = BitmapDecoder.Create(stream,
+                BitmapCreateOptions.PreservePixelFormat | BitmapCreateOptions.IgnoreColorProfile, BitmapCacheOption.None);
             var frame = decoder.Frames
+                .Where(f => f.PixelWidth is > 0 and <= MaxFaviconPixels && f.PixelHeight is > 0 and <= MaxFaviconPixels)
                 .OrderBy(f => Math.Abs(f.PixelWidth - 32))
                 .ThenByDescending(f => f.PixelWidth)
-                .First();
-            frame.Freeze();
-            return frame;
+                .FirstOrDefault();
+            if (frame is null) return Maybe<ImageSource>.None;
+
+            var converted = new FormatConvertedBitmap(frame, PixelFormats.Pbgra32, null, 0);
+            var stride = frame.PixelWidth * 4;
+            var pixels = new byte[stride * frame.PixelHeight];
+            converted.CopyPixels(pixels, stride, 0);
+            var image = BitmapSource.Create(frame.PixelWidth, frame.PixelHeight, 96, 96, PixelFormats.Pbgra32, null, pixels, stride);
+            image.Freeze();
+            return image;
         }
         catch
         {
