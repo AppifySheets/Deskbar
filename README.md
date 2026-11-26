@@ -450,6 +450,9 @@ with six seconds to undo.
 An important task's title is bold and an urgent one's italic, which sorts the list into Covey's four
 quadrants; set them from a line's right-click menu or the toggles in the tasks panel, and drag a line up
 or down to reorder it. When there are more tasks than fit, the list scrolls with the mouse wheel.
+Tasks waiting on you come first, but only three of them get a line (one on a floating bar): the rest fold into
+one line, "+N more waiting on you", so your important tasks stay in sight right under it. Click that line to
+open the tasks panel.
 "+N more" (or "All tasks") opens the tasks panel,
 with every task, its comments, and a Matrix view of the four quadrants side by side.
 The panel is a full-height strip docked just inside the bar, on every virtual desktop, and it pushes

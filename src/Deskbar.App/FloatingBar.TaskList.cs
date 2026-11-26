@@ -60,7 +60,11 @@ namespace Deskbar.App;
 //                   and the task goes to the top of the quadrant it lands in. The groups (the Waiting on you block, then each quadrant) are told apart by a
 //                   little space above a group's first line, and nothing names them: the bar stays compact (the
 //                   window's List view has the captions).
-//   "+N more"       a small line under the last line when more open tasks are out of sight, scrolled above the view or
+//   the group line  "+N more waiting on you": the Waiting on you block keeps three lines (one on a floating bar,
+//                   whose view is three lines tall) and the rest fold into this
+//                   one, so the important tasks stay in sight under it; a click opens the tasks panel (FoldWaiting,
+//                   WaitingGroupButton; task 39f4cc8a).
+//   "+N more"      a small line under the last line when more open tasks are out of sight, scrolled above the view or
 //                   still below it, recounted as the list scrolls. When some of the hidden
 //                   ones wait on Petre it says so in the asking orange ("+2 waiting"), so no ask is out of sight
 //                   without a sign (spec, "The bar's order"). It toggles the docked tasks panel (ToggleTasksPanel,
@@ -163,6 +167,13 @@ public partial class FloatingBar
     // when the list had it out of view (BringSelectedIntoSight).
     void PaintTaskSelection()
     {
+        // A task selected from elsewhere (its Claude terminal brought to the front, #477) whose line is folded into the
+        // Waiting on you group line has no line to light: the paint draws it in its own place (FoldWaiting's `keep`),
+        // and the highlight below then finds it.
+        // And the other way round (review finding 2): a line drawn only because it was selected folds as soon as the
+        // selection leaves it, in answer to that click, not at some later paint that would move the lines on its own.
+        if ((selection.Current is { HasValue: true } picked && waitingFold.Folded.Any(l => l.Id == picked.Value)) || waitingFold.KeptSelected)
+            PaintTaskList();
         (taskLinesPanel?.Children.OfType<Button>() ?? []).Where(b => b.Tag is TaskLine).ToList().ForEach(button =>
         {
             if (button.Content is not Border frame) return;
@@ -348,7 +359,9 @@ public partial class FloatingBar
     {
         if (taskListExpanded || LineRoom() is not { } room) return Maybe<int>.None;
         RememberLineHeights();
-        var known = allTaskLines.Select(line => taskLineHeights.TryGetValue(HeightKeyOf(line), out var h) ? h : (double?)null).ToArray();
+        var known = allTaskLines.Select(line => taskLineHeights.TryGetValue(HeightKeyOf(line), out var h) ? h : (double?)null).ToList();
+        // The Waiting on you group line (FoldWaiting) takes a place among the lines, at its own height once laid out.
+        if (waitingFold.Any) known.Insert(Math.Min(waitingFold.At, known.Count), waitingGroupHeight);
         var tallest = known.OfType<double>().DefaultIfEmpty(0).Max();
         if (tallest <= 0) return Maybe<int>.None;
         // Each line's height, a line never drawn counting as the tallest; then how many of the running totals fit. A
@@ -392,7 +405,15 @@ public partial class FloatingBar
             .ForEach(b => taskLineHeights[HeightKeyOf((TaskLine)b.Tag)] = b.ActualHeight + b.Margin.Top + b.Margin.Bottom);
         var current = allTaskLines.Select(HeightKeyOf).ToHashSet();
         taskLineHeights.Keys.Where(key => !current.Contains(key)).ToList().ForEach(key => taskLineHeights.Remove(key));
+        // The group line's height (one line of text, so its words never change it; the text size does, and the next
+        // layout reads it again).
+        (taskLinesPanel?.Children.OfType<Button>() ?? []).Where(b => Equals(b.Tag, WaitingGroupTag) && b.ActualHeight > 0).Take(1).ToList()
+            .ForEach(b => waitingGroupHeight = b.ActualHeight + b.Margin.Top + b.Margin.Bottom);
     }
+
+    // The Waiting on you group line's height as last laid out, or none before it ever was (LinesThatFit then counts it
+    // as the tallest line).
+    double? waitingGroupHeight;
 
     // What a line's height follows: everything it shows, and the text size.
     // Since Ruling 41 a line's text can wrap to two lines, so the width it is laid out at is part of the key as well:
@@ -594,6 +615,103 @@ public partial class FloatingBar
     // closed ones in their undo window included, so the space sits where the eye sees a group begin.
     internal static IReadOnlyList<TaskLine> WithGroupStarts(IReadOnlyList<TaskLine> lines) =>
         lines.Select((line, i) => line with { StartsGroup = i > 0 && lines[i - 1].GroupKey != line.GroupKey }).ToArray();
+
+    // THE WAITING BLOCK FOLDS AFTER THREE LINES (task 39f4cc8a; Petre, with a screenshot of a docked bar whose Waiting on
+    // you block of questions and Done tasks filled the whole list: "group tasks waiting on me in the main bar after 3;
+    // clicking the group or the button should open the tasks bar", and "so that i can see what tasks i have that are
+    // important"). The first WaitingShown lines of the pinned block (TaskLine.GroupKey "waiting": the questions, then
+    // the Done tasks, with the subtasks drawn under them) keep their lines; the rest become ONE line, "+N more waiting
+    // on you" (WaitingGroupButton), drawn where the block ends, so quadrant I starts right under it and the important
+    // tasks stay in sight. The group line opens the tasks panel, where the whole block is (OpenTasksFromGroup).
+    //
+    // What never folds, and why:
+    //   - a line in its undo window (Closing): it must stay where it was for its six seconds, or the lines would move
+    //     under the pointer (Ruling 10). A closed line among the first three still takes one of the three places, so
+    //     nothing slides up until its undo window ends.
+    //   - the selected task (`keep`), the rule FoldSubtasks has for the same reason (task b0526e18): a Claude terminal
+    //     brought to the front selects its task (#477), and a folded line could not show that selection. It is drawn
+    //     in its own place in the block, above the group line.
+    // A group line that would stand for a single task saves no room and hides that task's title, so the block folds
+    // only when at least two lines would go (FoldsFrom). The lines are counted as drawn, so a subtask drawn under a
+    // waiting parent takes a place like any line.
+    //
+    // ON A FLOATING BAR ONE LINE, NOT THREE. Its viewer is three lines tall (TaskListSlots), so three waiting lines
+    // would fill it and push both the group line and quadrant I below the view, where the fold changes nothing Petre
+    // sees (review of this change, finding 1). There the block keeps one line, so the view reads: the newest
+    // question, the group line, the first important task. A docked bar keeps three, as asked; its slot count comes
+    // from the free height, and the kept count does not follow it, since the fit pass counts the lines the fold
+    // leaves and a kept count that moved with the slots could flip between two answers on every pass.
+    internal const int WaitingShown = 3;
+
+    internal const int FloatingWaitingShown = 1;
+
+    // How many waiting lines this bar keeps (see above).
+    int WaitingKept => SizeToContent == SizeToContent.Manual ? WaitingShown : FloatingWaitingShown;
+
+    // The fewest lines worth a group line: one line folded into "+1 more waiting on you" would hide a title for nothing.
+    const int FoldsFrom = 2;
+
+    /// <summary>
+    /// The lines the bar draws after folding the Waiting on you block (<see cref="FoldWaiting"/>): <paramref
+    /// name="Lines"/> in order without the folded ones, the <paramref name="Folded"/> lines in the group line, and
+    /// <paramref name="At"/>, the index in <paramref name="Lines"/> before which the group line is drawn (-1: no group
+    /// line, nothing folded).
+    /// </summary>
+    internal sealed record WaitingFold(IReadOnlyList<TaskLine> Lines, IReadOnlyList<TaskLine> Folded, int At)
+    {
+        public static WaitingFold None(IReadOnlyList<TaskLine> lines) => new(lines, [], -1);
+
+        public bool Any => Folded.Count > 0;
+
+        // Whether a line past the kept ones was drawn only because it is selected (or a selected subtask is drawn under
+        // it): once the selection moves on, the fold must be taken again at once (PaintTaskSelection), not at some
+        // later paint that would then move the lines below it with nothing done by Petre.
+        public bool KeptSelected { get; init; }
+
+        // How many of the folded lines are questions (Waiting on you), the rest being Done tasks: the group line turns
+        // the asking orange when there is one, as "+N waiting" does, so no question is out of sight without a sign.
+        public int Questions => Folded.Count(l => l.Status == TaskStatus.WaitingOnYou);
+    }
+
+    /// <summary>Folds the Waiting on you block after <paramref name="shown"/> lines (see the comment above).</summary>
+    internal static WaitingFold FoldWaiting(IReadOnlyList<TaskLine> lines, int shown, Maybe<Guid> keep = default)
+    {
+        // The selected line stays, and so does every task it is drawn under (review finding 3): a subtask drawn under a
+        // folded parent would sit, arrow and all, under whichever line preceded it, and read as that one's subtask (the
+        // drag code would treat it so too). So its parent, and the parent's parent, keep their lines with it.
+        var byId = lines.GroupBy(l => l.Id).ToDictionary(g => g.Key, g => g.First());
+        IEnumerable<Guid> WithParents(Guid id) =>
+            byId.TryGetValue(id, out var line) && line.ShownIn is not null && line.ParentId is { } parent && parent != id
+                ? WithParents(parent).Prepend(id)
+                : [id];
+        var kept = keep.HasValue ? WithParents(keep.Value).Take(lines.Count).ToHashSet() : [];
+        var tail = lines.Where(l => l.GroupKey == "waiting").Skip(shown).ToArray();
+        var folded = tail.Where(l => !l.Closing && !kept.Contains(l.Id)).ToArray();
+        // Set whether or not anything folds: a selected line can be the one that keeps the fold below two lines, and the
+        // fold must still be taken once the selection leaves it.
+        var keptSelected = tail.Any(l => kept.Contains(l.Id));
+        if (folded.Length < FoldsFrom) return WaitingFold.None(lines) with { KeptSelected = keptSelected };
+        var gone = folded.Select(l => l.Id).ToHashSet();
+        var drawn = lines.Where(l => !gone.Contains(l.Id)).ToArray();
+        // Right after the leading run of waiting lines: the block sits at the top of the pile, so this is where quadrant
+        // I (or whatever group follows) begins. The leading run, not the last waiting line anywhere: a closing line put
+        // back at its old place (WithPendingCloses) can fall past the block's end once the block has shrunk, and the
+        // group line must not follow it in among the quadrant lines (review finding 4).
+        return new WaitingFold(drawn, folded, drawn.TakeWhile(l => l.GroupKey == "waiting").Count()) { KeptSelected = keptSelected };
+    }
+
+    // The group line's words: how many more tasks wait on Petre. One phrase whatever the mix of questions and Done
+    // tasks, since both are "waiting on you" (the block's own name in the tasks panel); the ink says whether a
+    // question is among them, the tooltip lists them. A plain subtask drawn under a waiting parent folds with the
+    // block but does not wait on him, so when the group holds some it says so the way "+N more, K waiting" does,
+    // rather than count them as waiting (review of this change).
+    internal static string WaitingGroupText(WaitingFold fold)
+    {
+        var waiting = fold.Folded.Count(l => l.Status.IsPinned());
+        return waiting == fold.Folded.Count ? $"+{waiting} more waiting on you"
+            : waiting == 0 ? $"+{fold.Folded.Count} more"
+            : $"+{fold.Folded.Count} more, {waiting} waiting on you";
+    }
 
     // What follows the title: the question while the task waits on Petre, else its status line, else (`withDescription`,
     // the bar's own lines) the first line of his description (Ruling 58: it shows where a Claude task shows its status
@@ -1014,19 +1132,32 @@ public partial class FloatingBar
         // in the pile under its own line.
         pendingCloses.Where(p => open.Any(l => l.Id == p.Line.Id)).ToList().ForEach(p => ForgetPendingClose(p, repaint: false));
         var slots = TaskSlotsNow;
-        if (open.Count <= slots) taskListExpanded = false;
-        var all = WithGroupStarts(FoldSubtasks(WithPendingCloses(flat, pendingCloses), Subtasks, underOpenParent, selection.Current));
+        // Expanded in place only while something would be out of sight: more lines than slots, or a Waiting on you block
+        // that folds (the group line's click expands the list too, OpenTasksFromGroup; review finding 5).
+        if (open.Count <= slots && !FoldWaiting(open, WaitingKept, selection.Current).Any) taskListExpanded = false;
+        var unfolded = FoldSubtasks(WithPendingCloses(flat, pendingCloses), Subtasks, underOpenParent, selection.Current);
+        // The Waiting on you block folds after three lines (task 39f4cc8a, FoldWaiting), except while the list is
+        // expanded in place (no tasks panel behind the bar: the group line's click expands it, and then every line shows).
+        var fold = taskListExpanded ? WaitingFold.None(unfolded) : FoldWaiting(unfolded, WaitingKept, selection.Current);
+        var all = WithGroupStarts(fold.Lines);
         allTaskLines = all;
         var problem = taskService.LoadProblem;
         // The manager's question is part of the shape (task 61e4d143), so asking, replacing or clearing it repaints.
         var managerAsk = ManagerAsks?.Invoke();
+        // The group line is part of the shape too: where it sits, whether a selected line holds the fold open, and each
+        // folded line's status (the ink, the tooltip's "Done: ") and title (the tooltip).
         var shape = string.Join("\n", all.Select(ShapeOf).Prepend(
-            $"{taskListExpanded}|{ToggleTasksPanel is null}|{TextOffset}|{problem.GetValueOrDefault("")}|{slots}|{editingTask}|{managerAsk}"));
+            $"{taskListExpanded}|{ToggleTasksPanel is null}|{TextOffset}|{problem.GetValueOrDefault("")}|{slots}|{editingTask}|{managerAsk}|" +
+            $"{fold.At}|{fold.KeptSelected}|{string.Join(',', fold.Folded.Select(l => $"{l.Id}:{l.Status}:{l.Title}"))}"));
         if (shape == lastTaskListShape) return;
         lastTaskListShape = shape;
 
         // Every line is drawn; the viewer shows `slots` of them (or eight expanded in place) and the rest scroll.
         shownTaskLines = all;
+        // The lines before the fold, which a closing line's place is counted in (CloseWithUndo), so it goes back to the
+        // same place among them however the fold has changed meanwhile.
+        unfoldedTaskLines = unfolded;
+        waitingFold = fold;
         openTaskLines = open;
         taskLinesCap = taskListExpanded ? ExpandedSlots : slots;
         taskLinesPanel.Children.Clear();
@@ -1037,13 +1168,16 @@ public partial class FloatingBar
         }
         PaintManagerLine(managerAsk);
         shownTaskLines.ToList().ForEach(line => taskLinesPanel.Children.Add(TaskLineButton(line)));
+        // The folded Waiting on you lines' one line, where the block ends (FoldWaiting).
+        if (fold.Any) taskLinesPanel.Children.Insert(fold.At, WaitingGroupButton(fold));
         // When the lines on show changed places (which tasks, in which order, which are closing), the click guard
         // distrusts a click for the next half second (TaskClickIgnored). A paint that only rewrote what lines say (a
         // session's status line) moved nothing and does not start it, or frequent status pulses would eat clicks. The
         // text size and the failed-load line move every line too (a bigger font, a line above them), so they are part
         // of the key (review minor 3 of 187cf4a).
         // The manager line showing or going moves every task line down or up, so it is part of the key too.
-        var placesKey = string.Join('|', shownTaskLines.Select(l => $"{l.Id}{l.Closing}").Prepend($"{TextOffset}|{problem.HasValue}|{managerAsk is not null}"));
+        // The group line coming, going or moving moves the lines below it, so its place is part of the key as well.
+        var placesKey = string.Join('|', shownTaskLines.Select(l => $"{l.Id}{l.Closing}").Prepend($"{TextOffset}|{problem.HasValue}|{managerAsk is not null}|{fold.At}"));
         if (placesKey != taskLinePlaces)
         {
             taskLinePlaces = placesKey;
@@ -1056,6 +1190,10 @@ public partial class FloatingBar
 
     // The open lines of the last paint, for "+N more" recounted on a scroll (ScrollChanged), between paints.
     IReadOnlyList<TaskLine> openTaskLines = [];
+
+    // The last paint's lines before the Waiting on you fold, and the fold itself (FoldWaiting, task 39f4cc8a).
+    IReadOnlyList<TaskLine> unfoldedTaskLines = [];
+    WaitingFold waitingFold = WaitingFold.None([]);
 
     // How many lines the viewer is as tall as: the slots (three floating, the free height's worth docked), or eight
     // while the list is expanded in place.
@@ -1108,7 +1246,8 @@ public partial class FloatingBar
     void CapTaskLines()
     {
         if (taskLinesScroller is null || taskLinesPanel is null) return;
-        if (shownTaskLines.Count <= taskLinesCap)
+        // Counted over everything drawn, the group line included (FoldWaiting): it takes a line's place in the viewer.
+        if (taskLinesPanel.Children.Count <= taskLinesCap)
         {
             taskLinesScroller.MaxHeight = double.PositiveInfinity;
             taskLinesScroller.ScrollToTop();
@@ -1134,20 +1273,28 @@ public partial class FloatingBar
 
     // The lines in sight: every line while nothing scrolls; before the lines are laid out, the first taskLinesCap (the
     // view at its top); else each line at least half inside the view.
-    IReadOnlyList<TaskLine> LinesInSight()
+    IReadOnlyList<TaskLine> LinesInSight() =>
+        ButtonsInSight().Where(b => b.Tag is TaskLine).Select(b => (TaskLine)b.Tag).ToArray();
+
+    // Whether the Waiting on you group line (FoldWaiting) is in sight, by the same measure as a task line.
+    bool WaitingGroupInSight() => ButtonsInSight().Any(b => Equals(b.Tag, WaitingGroupTag));
+
+    // Every button drawn in the viewer that is in sight, task lines and the group line alike, so the group line takes
+    // its place in "the first taskLinesCap" as it does in the viewer's ceiling (CapTaskLines).
+    IReadOnlyList<Button> ButtonsInSight()
     {
         if (taskLinesScroller is null || taskLinesPanel is null) return [];
-        var buttons = taskLinesPanel.Children.OfType<Button>().Where(b => b.Tag is TaskLine).ToList();
-        if (double.IsPositiveInfinity(taskLinesScroller.MaxHeight)) return buttons.Select(b => (TaskLine)b.Tag).ToArray();
+        var buttons = taskLinesPanel.Children.OfType<Button>().ToList();
+        if (double.IsPositiveInfinity(taskLinesScroller.MaxHeight)) return buttons;
         if (taskLinesScroller.ViewportHeight <= 0 || buttons.Any(b => b.ActualHeight <= 0 || !b.IsDescendantOf(taskLinesPanel)))
-            return buttons.Take(taskLinesCap).Select(b => (TaskLine)b.Tag).ToArray();
+            return buttons.Take(taskLinesCap).ToArray();
         var top = taskLinesScroller.VerticalOffset;
         var bottom = top + taskLinesScroller.ViewportHeight;
         return buttons.Where(b =>
         {
             var y = b.TranslatePoint(new Point(0, 0), taskLinesPanel).Y;
             return Math.Min(y + b.ActualHeight, bottom) - Math.Max(y, top) >= b.ActualHeight / 2;
-        }).Select(b => (TaskLine)b.Tag).ToArray();
+        }).ToArray();
     }
 
     // THE SELECTED LINE IS BROUGHT INTO SIGHT when the selection changes and its line is scrolled away (a Claude terminal
@@ -1204,8 +1351,11 @@ public partial class FloatingBar
     void PaintTaskMore(IReadOnlyList<TaskLine> open)
     {
         if (taskMoreButton is null || taskMoreLabel is null) return;
-        // Out of sight now means scrolled above the view or still below it (THE LIST SCROLLS).
-        var onShow = LinesInSight().Select(l => l.Id).ToHashSet();
+        // Out of sight now means scrolled above the view or still below it (THE LIST SCROLLS). The lines folded into the
+        // Waiting on you group line (FoldWaiting) are counted by that line while it is in sight, so they are not counted
+        // here again; with the group line scrolled away they are out of sight like any line, and "+N waiting" says so.
+        var onShow = LinesInSight().Select(l => l.Id)
+            .Concat(WaitingGroupInSight() ? waitingFold.Folded.Select(l => l.Id) : []).ToHashSet();
         var hidden = open.Where(l => !onShow.Contains(l.Id)).ToArray();
         var waiting = hidden.Count(l => l.Status == TaskStatus.WaitingOnYou);
         // The Manager button follows the wiring on every paint: the list is built in the constructor, before the init
@@ -1397,6 +1547,83 @@ public partial class FloatingBar
             if (TaskClickClock() - taskLinesChangedAt >= RepaintGrace) OnTaskLineOpen(line);
         };
         return button;
+    }
+
+    // The group line's tag, which tells it from a task line (whose tag is its TaskLine) wherever the drawn buttons are read.
+    internal const string WaitingGroupTag = "task-waiting-group";
+
+    // THE WAITING ON YOU GROUP LINE (task 39f4cc8a, FoldWaiting): "+N more waiting on you", drawn like a task line (the
+    // same template, so it lights up under the pointer the same way, and the same 3 DIP edge, clear here) so the block
+    // reads as one block ending in it. Its words are in the asking orange when a question is among the folded tasks,
+    // as "+N waiting" is (no question out of sight without a sign), else in the dim ink. The tooltip names every folded
+    // task, so a glance tells what is behind it without opening anything. A click opens the tasks panel, where the whole
+    // block is (OpenTasksFromGroup); no right-click menu and no drag, since it is not a task.
+    Button WaitingGroupButton(WaitingFold fold)
+    {
+        var text = new TextBlock
+        {
+            Tag = "task-waiting-group-text",
+            Text = WaitingGroupText(fold),
+            FontSize = Text(9.5),
+            TextTrimming = TextTrimming.CharacterEllipsis,
+            LineStackingStrategy = LineStackingStrategy.BlockLineHeight,
+            LineHeight = TaskTextLineHeight,
+            Foreground = fold.Questions > 0 ? TaskOrange : TaskDimInk,
+            Margin = new Thickness(4, 0, 4, 0),
+        };
+        var edge = new Border
+        {
+            BorderThickness = new Thickness(3, 0, 0, 0),
+            BorderBrush = Brushes.Transparent,
+            Background = Brushes.Transparent,
+            CornerRadius = new CornerRadius(4),
+            Padding = new Thickness(5, 1, 5, 1),
+            Child = text,
+        };
+        // The selection frame's 2 DIP, clear (the group line is never selected), so its words line up with the lines'.
+        var frame = new Border
+        {
+            BorderThickness = new Thickness(2, 0, 0, 0),
+            BorderBrush = Brushes.Transparent,
+            CornerRadius = new CornerRadius(4),
+            Child = edge,
+        };
+        var titles = fold.Folded.Select(l => $"{(l.Status == TaskStatus.Done ? "Done: " : "")}{FirstLine(l.Title)}");
+        var button = new Button
+        {
+            Tag = WaitingGroupTag,
+            Content = frame,
+            Padding = new Thickness(0),
+            Margin = new Thickness(0, 0, 0, 1),
+            Background = Brushes.Transparent,
+            BorderThickness = new Thickness(0),
+            Template = TaskLineTemplate,
+            HorizontalContentAlignment = HorizontalAlignment.Stretch,
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            Focusable = false,
+            Cursor = Cursors.Hand,
+            ToolTip = string.Join("\n", titles.Prepend(ToggleTasksPanel is not null
+                ? "Open the tasks panel to see them all:" : "Show them all:")),
+        };
+        AutomationProperties.SetName(button, "More waiting tasks");
+        button.Click += (_, _) =>
+        {
+            MarkPressConsumed();
+            // The click guard, as on a task line: a click landing within half a second of the lines moving was aimed at
+            // whatever sat here before (#48).
+            if (TaskClickClock() - taskLinesChangedAt < RepaintGrace) return;
+            OpenTasksFromGroup();
+        };
+        return button;
+    }
+
+    // The group line's click: the tasks panel opened, never closed (Petre: "clicking the group ... should open the tasks
+    // bar"), so a click while it is shown leaves it there; the "+N more" button keeps toggling it. With no panel behind
+    // the bar (its tests), the list expands in place as "+N more" does, which unfolds the block (PaintTaskList).
+    void OpenTasksFromGroup()
+    {
+        if (ToggleTasksPanel is not null && tasksPanelOn) return;
+        OnTaskMoreClick();
     }
 
     // Left of the text: the tick box, or "Undo" in its place on a line just closed, and nothing else. No CLAUDE tag since
@@ -1709,7 +1936,9 @@ public partial class FloatingBar
             OpenStopClaudeMenu(line);
             return;
         }
-        var index = shownTaskLines.ToList().FindIndex(l => l.Id == line.Id);
+        // The place among the lines BEFORE the Waiting on you fold (unfoldedTaskLines), the list WithPendingCloses puts
+        // it back into: counted among the lines drawn, a line below a group line of six would land six places too high.
+        var index = unfoldedTaskLines.ToList().FindIndex(l => l.Id == line.Id);
         var pending = new PendingClose(line with { Closing = true }, Math.Max(index, 0), line.Status, Disposable.Empty)
         {
             Question = taskService.Board.Tasks.TryFirst(t => t.Id == line.Id).Bind(t => t.Question),

@@ -1286,6 +1286,24 @@ DR3. A done note, and a done task without a pull request, keep the full disc thr
 DR4. A done task marked done while its pull request is still open: ring, chip "PR open"; merge it and within a minute
      the chip says "Merged".
 
+## The bar's waiting block folds after three
+
+(Task 39f4cc8a.) A docked bar, the tasks panel closed, Subtasks ticked.
+
+WG1. With six tasks waiting on you (questions or Done) and one important note: the bar shows three waiting lines,
+     then one line "+3 more waiting on you", then the important note right under it. The group line is orange when a
+     question is among the three it holds, grey when they are all Done. Hover it: the tooltip names the three.
+WG2. Click the group line: the tasks panel opens, with the whole Waiting on you block at its top. Click the group
+     line again: the panel stays open. "All tasks" still closes it.
+WG3. With exactly four tasks waiting: all four show, no group line.
+WG4. Bring to the front the Claude terminal of a task inside the group: its line appears in the block, selected, and
+     the group line counts one fewer.
+WG5. Tick one of the three waiting lines: it stays struck through in its place for six seconds, the group line does
+     not move, and after the undo window the next waiting task takes the free place.
+WG6. On a floating bar (three lines) with the same tasks: one waiting line, the group line "+5 more waiting on you",
+     then the important note, all three in view without scrolling.
+WG7. Select a task inside the group (WG4), then click another line: the first one folds back into the group at once.
+
 ## Results (2026-08-01)
 
 Status: **pending human execution.** An agent cannot observe the desktop, Task View,

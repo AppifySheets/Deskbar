@@ -211,22 +211,25 @@ public class FloatingBarTaskListTests
         Assert.Equal("+2 more", t.Bar.TaskListMoreText);
     });
 
-    // Waiting on you sorts first, so hidden waiting tasks only exist when more than three wait; the button says so,
-    // in the asking orange, so none is out of sight without a sign.
+    // Waiting on you sorts first, and on a floating bar (three lines) the block keeps ONE line (task 39f4cc8a,
+    // FloatingWaitingShown): the newest question, then the group line holding the rest in the asking orange, so none is
+    // out of sight without a sign, then the important task, all three in view.
     [Fact]
     public void Hidden_waiting_tasks_are_counted_in_orange() => StaThread.Run(() =>
     {
         using var t = Build();
+        var important = t.Tasks.AddNote("important", t.Gepha).Value.Id;
+        t.Tasks.SetFlag(important, TaskFlag.Important, true);
         Enumerable.Range(1, 5).ToList().ForEach(i =>
         {
             var made = t.Tasks.Create($"Task {i}", t.Gepha, Session($"s{i}")).Value;
             t.Tasks.Ask(made.Id, $"Question {i}?");
         });
 
-        Assert.Equal(3, t.Lines.Count);
-        Assert.Equal("+2 waiting", t.Bar.TaskListMoreText);
-        var label = Inside(ButtonNamed(t.List, "More tasks")).OfType<TextBlock>().Single();
-        Assert.Equal(Orange, ((SolidColorBrush)label.Foreground).Color);
+        Assert.Equal(["Task 5", "important"], t.Lines.Select(TitleOf));
+        var words = Inside(ButtonNamed(t.List, "More waiting tasks")).OfType<TextBlock>().Single();
+        Assert.Equal("+4 more waiting on you", words.Text);
+        Assert.Equal(Orange, ((SolidColorBrush)words.Foreground).Color);
     });
 
     [Fact]
@@ -1476,7 +1479,8 @@ public class FloatingBarTaskListTests
         using var t = Build();
         var gepha = t.Gepha; // looked up by name, so taken before the rename
         Assert.True(t.Harness.Manager.RenameWorkspace(gepha, "Customer onboarding portal").IsSuccess);
-        // Four waiting and two more: three waiting lines show, and the hidden ones are one waiting and two more.
+        // Four waiting and two more: on a floating bar one waiting line shows, then the group line holding the other
+        // three (task 39f4cc8a), then Note 2; Note 1 is the one line out of sight. The group line is checked below too.
         Enumerable.Range(1, 2).ToList().ForEach(i => t.Tasks.AddNote($"Note {i}", gepha));
         Enumerable.Range(1, 4).ToList().ForEach(i => t.Tasks.Ask(t.Tasks.Create($"Ask {i}", gepha, Session($"s{i}")).Value.Id, "OK?"));
         t.Bar.ApplyWidth(176); // MinimumWidth at the default scale: (18 + 150 + 8) DIP
@@ -1484,7 +1488,8 @@ public class FloatingBarTaskListTests
         ClickBox(t);
         t.Bar.UpdateLayout();
 
-        Assert.Equal("+3 more, 1 waiting", t.Bar.TaskListMoreText);
+        Assert.Equal("+1 more", t.Bar.TaskListMoreText);
+        Assert.True(ButtonNamed(t.List, "More waiting tasks").IsVisible);
         Assert.Contains("Customer onboarding portal", Inside(t.Chips).OfType<TextBlock>().Select(b => b.Text));
         var width = t.List.ActualWidth;
         var checkedParts = Inside(t.List).OfType<FrameworkElement>()
@@ -3497,6 +3502,10 @@ public class FloatingBarTaskListTests
     public void The_subtasks_checkbox_folds_subtasks_on_the_bar_too() => StaThread.Run(() =>
     {
         using var t = Build();
+        // Docked, where the Waiting on you block keeps three lines: on a floating bar it keeps one (task 39f4cc8a), and
+        // the parent's two subtasks would fold into the group line whatever the checkbox says.
+        t.Bar.SizeToContent = SizeToContent.Manual;
+        t.Bar.Height = 900;
         var parent = t.Tasks.Create("Parent", t.Gepha, Session("p")).Value.Id;
         t.Tasks.Ask(parent, "Parent question?");
         var plain = t.Tasks.AddNote("Plain", t.Gepha, Quadrant.IV, parent).Value.Id;
@@ -3808,4 +3817,193 @@ public class FloatingBarTaskListTests
         }
         finally { Directory.Delete(root, true); }
     });
+
+    // --- THE WAITING ON YOU BLOCK FOLDS AFTER THREE LINES (task 39f4cc8a, FloatingBar.FoldWaiting) ---------------------
+
+    static TaskLine Pinned(string title, Deskbar.Core.Tasks.TaskStatus status = Deskbar.Core.Tasks.TaskStatus.WaitingOnYou) =>
+        new(Guid.NewGuid(), title, "", status, true, null, null, Maybe<nint>.None);
+
+    static TaskLine Plain(string title, bool important = false) =>
+        new(Guid.NewGuid(), title, "", Deskbar.Core.Tasks.TaskStatus.Backlog, false, null, null, Maybe<nint>.None) { Important = important };
+
+    // Three lines of the block stay, the rest (questions and Done tasks alike) go into the group line, which sits where
+    // the block ends, so the important task follows it straight away.
+    [Fact]
+    public void The_waiting_block_folds_after_three_lines()
+    {
+        var lines = new[]
+        {
+            Pinned("q1"), Pinned("q2"), Pinned("q3"), Pinned("q4"), Pinned("d1", Deskbar.Core.Tasks.TaskStatus.Done),
+            Plain("important", important: true), Plain("plain"),
+        };
+
+        var fold = FloatingBar.FoldWaiting(lines, FloatingBar.WaitingShown);
+
+        Assert.Equal(["q1", "q2", "q3", "important", "plain"], fold.Lines.Select(l => l.Title));
+        Assert.Equal(["q4", "d1"], fold.Folded.Select(l => l.Title));
+        Assert.Equal(3, fold.At);
+        Assert.Equal(1, fold.Questions);
+        Assert.Equal("+2 more waiting on you", FloatingBar.WaitingGroupText(fold));
+    }
+
+    // A group line standing for one task would hide its title and save no room, so four waiting lines all show.
+    [Fact]
+    public void One_line_past_three_is_drawn_not_folded()
+    {
+        var lines = new[] { Pinned("q1"), Pinned("q2"), Pinned("q3"), Pinned("q4"), Plain("plain") };
+
+        var fold = FloatingBar.FoldWaiting(lines, FloatingBar.WaitingShown);
+
+        Assert.False(fold.Any);
+        Assert.Equal(-1, fold.At);
+        Assert.Equal(lines, fold.Lines);
+    }
+
+    // The selected line (a terminal brought to the front selects its task) and a line in its undo window never fold: the
+    // first must show its selection, the second must not move for its six seconds. A closing line among the first three
+    // still takes one of the three places, so nothing slides up under the pointer.
+    [Fact]
+    public void The_selected_line_and_a_closing_line_never_fold()
+    {
+        var closingEarly = Pinned("q2") with { Closing = true };
+        var picked = Pinned("q5");
+        var closingLate = Pinned("q7") with { Closing = true };
+        var lines = new[] { Pinned("q1"), closingEarly, Pinned("q3"), Pinned("q4"), picked, Pinned("q6"), closingLate, Plain("plain") };
+
+        var fold = FloatingBar.FoldWaiting(lines, FloatingBar.WaitingShown, picked.Id);
+
+        Assert.Equal(["q1", "q2", "q3", "q5", "q7", "plain"], fold.Lines.Select(l => l.Title));
+        Assert.Equal(["q4", "q6"], fold.Folded.Select(l => l.Title));
+        Assert.Equal(5, fold.At);
+    }
+
+    // On the bar: three questions, the group line in the asking orange, then the important task in sight; "All tasks"
+    // does not count the folded questions again while the group line shows them; a click on the group line opens the panel.
+    [Fact]
+    public void The_group_line_keeps_the_important_task_in_sight_and_opens_the_panel() => StaThread.Run(() =>
+    {
+        var opened = 0;
+        using var t = Build(openWindow: () => opened++);
+        t.Bar.SizeToContent = SizeToContent.Manual;
+        t.Bar.Height = 900;
+        var important = t.Tasks.AddNote("important", t.Gepha).Value.Id;
+        t.Tasks.SetFlag(important, TaskFlag.Important, true);
+        Enumerable.Range(1, 6).ToList().ForEach(i =>
+        {
+            var made = t.Tasks.Create($"Task {i}", t.Gepha, Session($"s{i}")).Value;
+            t.Tasks.Ask(made.Id, $"Question {i}?");
+        });
+        Settle(t);
+
+        Assert.Equal(3, t.Lines.Count(l => ((TaskLine)l.Tag).Status == Deskbar.Core.Tasks.TaskStatus.WaitingOnYou));
+        Assert.Equal("important", TitleOf(t.Lines[3]));
+        var drawn = Inside(t.List).OfType<Button>().Where(b => b.Tag is TaskLine || Equals(b.Tag, FloatingBar.WaitingGroupTag)).ToList();
+        var group = ButtonNamed(t.List, "More waiting tasks");
+        Assert.Equal(3, drawn.IndexOf(group));
+        var words = Inside(group).OfType<TextBlock>().Single();
+        Assert.Equal("+3 more waiting on you", words.Text);
+        Assert.Equal(Orange, ((SolidColorBrush)words.Foreground).Color);
+        Assert.Equal("All tasks", t.Bar.TaskListMoreText);
+
+        Click(group);
+
+        Assert.Equal(1, opened);
+    });
+
+    // With no tasks panel behind the bar the group line expands the list in place, as "+N more" does, and every
+    // waiting line shows.
+    [Fact]
+    public void Without_a_panel_the_group_line_expands_the_list() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        Enumerable.Range(1, 5).ToList().ForEach(i =>
+        {
+            var made = t.Tasks.Create($"Task {i}", t.Gepha, Session($"s{i}")).Value;
+            t.Tasks.Ask(made.Id, $"Question {i}?");
+        });
+        Assert.Equal(1, t.Drawn.Count);
+
+        Click(ButtonNamed(t.List, "More waiting tasks"));
+
+        Assert.Equal(5, t.Drawn.Count);
+        Assert.False(HasButtonNamed(t.List, "More waiting tasks"));
+    });
+
+    // A folded task selected from elsewhere gets its line back, in its place in the block, lit as selected.
+    [Fact]
+    public void A_folded_task_selected_from_elsewhere_gets_its_line() => StaThread.Run(() =>
+    {
+        using var t = Build(openWindow: () => { });
+        t.Bar.SizeToContent = SizeToContent.Manual;
+        t.Bar.Height = 900;
+        var made = Enumerable.Range(1, 6).Select(i =>
+        {
+            var task = t.Tasks.Create($"Task {i}", t.Gepha, Session($"s{i}")).Value;
+            t.Tasks.Ask(task.Id, $"Question {i}?");
+            return task.Id;
+        }).ToList();
+        Settle(t);
+        var folded = made[0]; // the first asked sits lowest in the block
+        Assert.DoesNotContain(t.Drawn, l => ((TaskLine)l.Tag).Id == folded);
+
+        t.Bar.Selection.Select(folded);
+        Settle(t);
+
+        Assert.Contains(t.Drawn, l => ((TaskLine)l.Tag).Id == folded);
+        Assert.True(t.Bar.TaskLineSelected(folded));
+        Assert.Equal("+2 more waiting on you", Inside(ButtonNamed(t.List, "More waiting tasks")).OfType<TextBlock>().Single().Text);
+
+        // Picking another task folds it again at once, not at some later paint.
+        t.Bar.Selection.Select(made[5]);
+        Settle(t);
+
+        Assert.DoesNotContain(t.Drawn, l => ((TaskLine)l.Tag).Id == folded);
+        Assert.Equal("+3 more waiting on you", Inside(ButtonNamed(t.List, "More waiting tasks")).OfType<TextBlock>().Single().Text);
+    });
+
+    // A selected subtask drawn under a waiting parent keeps its parent's line too, so it is never drawn under some other
+    // task's line, as if it were that one's subtask.
+    [Fact]
+    public void A_selected_subtask_keeps_its_parent_out_of_the_fold()
+    {
+        var parent = Pinned("q5");
+        var child = Plain("child") with { ParentId = parent.Id, ShownIn = "waiting" };
+        var lines = new[] { Pinned("q1"), Pinned("q2"), Pinned("q3"), Pinned("q4"), parent, child, Pinned("q6"), Pinned("q7"), Plain("plain") };
+
+        var fold = FloatingBar.FoldWaiting(lines, FloatingBar.WaitingShown, child.Id);
+
+        Assert.Equal(["q1", "q2", "q3", "q5", "child", "plain"], fold.Lines.Select(l => l.Title));
+        Assert.Equal(["q4", "q6", "q7"], fold.Folded.Select(l => l.Title));
+        Assert.True(fold.KeptSelected);
+    }
+
+    // A plain subtask drawn under a waiting parent folds with the block but is not counted as waiting on Petre.
+    [Fact]
+    public void A_folded_plain_subtask_is_not_counted_as_waiting()
+    {
+        var parent = Pinned("q4");
+        var child = Plain("child") with { ParentId = parent.Id, ShownIn = "waiting" };
+        var lines = new[] { Pinned("q1"), Pinned("q2"), Pinned("q3"), parent, child, Plain("plain") };
+
+        var fold = FloatingBar.FoldWaiting(lines, FloatingBar.WaitingShown);
+
+        Assert.Equal("+2 more, 1 waiting on you", FloatingBar.WaitingGroupText(fold));
+    }
+
+    // A closing line put back past the block's end (the block shrank in its undo window) does not drag the group line
+    // in among the quadrant lines: the group line goes after the leading run of waiting lines.
+    [Fact]
+    public void The_group_line_follows_the_leading_waiting_lines()
+    {
+        var lines = new[]
+        {
+            Pinned("q1"), Pinned("q2"), Pinned("q3"), Pinned("q4"), Pinned("q5"), Plain("i1", important: true),
+            Pinned("q8") with { Closing = true }, Plain("i2", important: true),
+        };
+
+        var fold = FloatingBar.FoldWaiting(lines, FloatingBar.WaitingShown);
+
+        Assert.Equal(["q4", "q5"], fold.Folded.Select(l => l.Title));
+        Assert.Equal(3, fold.At);
+    }
 }
