@@ -54,7 +54,7 @@ public sealed partial class TasksBoard
     TasksView WithInbox(TasksView view, IReadOnlyList<TaskGroup> listed, IReadOnlySet<Guid> nested, bool foundById)
     {
         if (!InboxShown) return view;
-        var inbox = InboxTabs.Split(listed, nested, tasks.Board, StoppedOnLimit,
+        var inbox = InboxTabs.Split(listed, nested, tasks.Board, InboxMarks.StoppedOnLimit,
             busy: knowsActivity() ? Busy : null,
             hollow: t => tasks.DeliveryOf(t).Shipping,
             tabbed: InboxTabs.TabsApply(filter, search.IsBlank, foundById));
@@ -64,10 +64,6 @@ public sealed partial class TasksBoard
             FiltersOn = InboxTabs.FiltersOn(filter, claudeFilter, where, assigneeFilter, goalFilter, PanelState.HideSubtasks),
         };
     }
-
-    // Stopped on the usage limit: the status line Deskbar writes for such a stop, and clears once the limit has reset
-    // (ClaudeSessions.NoteLimits). Only Deskbar's own line, never a session's.
-    static bool StoppedOnLimit(TaskItem task) => task.StatusLine.StartsWith(ClaudeSessions.LimitLine, StringComparison.Ordinal);
 }
 
 internal sealed partial record TasksView
