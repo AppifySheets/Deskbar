@@ -298,6 +298,8 @@ static class ClaudeSkill
     // SessionBriefing.Commands, which says the same in fewer words). Once it is merged the task is done, with what to try
     // in its status line, never a second ask to test it (task b326761d; reasoning in SessionBriefing.Commands too). The
     // ask names what to open as a link the tasks panel can click (task 08cdb052; reasoning above SessionBriefing.Commands).
+    // A change to another app is reported once it runs there, `task deployed` (task 8470d176, phase 2; reasoning above
+    // SessionBriefing.Commands and in RunningChanges' header).
     const string YourTask = """
         ## Your task
 
@@ -361,6 +363,12 @@ static class ClaudeSkill
           `deskbar.cmd task link <task id>` prints it as markdown, [Deskbar task 1a2b3c4d](https://deskbar.app/task#...);
           in a page, use an <a> to the same address. Clicked, it opens the task in Deskbar, so the user can get from
           the pull request or the mockup back to the task.
+        - Report the deploy. For a change to an app deployed somewhere other than Deskbar itself, a done task's tick
+          stays a hollow ring until the deploy is reported: after the merge, check that the deployed app runs the
+          version carrying it (its logs, health page or deploy output) and run `deskbar.cmd task deployed - --session
+          <id>` with that evidence on stdin ("2026.11.25.39-3749d21 in the portal logs"). Deskbar checks its own
+          repository by itself. `task done` stops your idle session, so when the deploy follows within your session,
+          report it first; otherwise say in the status line that checking the deploy is the user's step.
         - Subtasks. A task can have subtasks, one level deep. When you join one, the join reply's `family` names the
           parent, the siblings and their sessions with transcript files: read the end of the parent session's
           transcript before you start, and stay clear of what the siblings are doing. `deskbar.cmd task family

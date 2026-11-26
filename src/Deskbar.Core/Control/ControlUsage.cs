@@ -145,6 +145,11 @@ public static class ControlUsage
             new("task", "pr <url> --session <session>",
                 "a pull request the session opened, on its own task, so the tasks panel's search finds the task by its\n"
                 + "      number. A `gh pr create` is recorded by itself; this is for one opened another way"),
+            // Task 8470d176, phase 2: a session reports the deploy it checked (RunningChanges, TaskBoard.MarkDeployed).
+            new("task", "deployed <note>|- --session <session>",
+                "the session's own task's change runs where its app is deployed: the note is the evidence (the version\n"
+                + "      seen in the app's logs, health page or deploy output). Until then a done task with a pull request\n"
+                + "      outside Deskbar's own repository shows a hollow ring; Deskbar checks its own repository by itself"),
             new("task", "family --session <session>",
                 "the parent, the siblings, the linked tasks and their sessions (with transcript files) of the session's own\n"
                 + "      task, as the task join reply gives them; read it again when they may have moved on"),
@@ -191,6 +196,9 @@ public static class ControlUsage
             new("task", "wake <id>",
                 "bring a snoozed task back now, as \"Wake now\" does"),
             new("task", "pr <id> <url>", "put a GitHub pull request on a task, so the tasks panel's search finds the task by its number"),
+            new("task", "deployed <id> <note>|-",
+                "record that a task's change runs where its app is deployed, as \"Mark deployed\" on a line's menu does;\n"
+                + "      the note says how you know. Needs a pull request recorded on the task (task pr)"),
         ]),
         new("Goals", [
             new("goal", "list [--week [<date>] | --month [<date>] | --all]",

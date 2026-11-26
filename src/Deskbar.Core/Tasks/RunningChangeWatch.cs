@@ -6,17 +6,23 @@ using CSharpFunctionalExtensions;
 
 namespace Deskbar.Core.Tasks;
 
-// ASKS GITHUB WHETHER EACH DONE TASK'S CHANGE IS IN THE RUNNING BUILD (task 8470d176; the rules are in RunningChanges).
-// Every Poll it reads the board for the pull requests of Done tasks in this build's repository that have no settled
-// answer (RunningChanges.ToLook). With none it does nothing at all, so a machine without such tasks, or without `gh`,
-// runs nothing. Otherwise it asks GitHub about each, off the UI thread, and back on it hands the whole set of answers to
-// TaskService.Arrived, which pulses the views only when something changed.
+// ASKS GITHUB WHERE EACH DONE TASK'S CHANGE STANDS (task 8470d176; the rules are in RunningChanges). Every Poll it reads
+// the board for the recorded pull requests of Done tasks that have no settled answer (RunningChanges.ToLook): those of
+// this build's repository, and those of any other that no deploy report covers yet. With none it asks nothing, so a
+// machine without such tasks, or without `gh`, runs nothing; it still tells TaskService which build runs, once, so a
+// task decided by reports alone shows its hover line. Otherwise it asks GitHub about each, off the UI thread, and back
+// on it hands the whole set of answers to TaskService.Arrived, which pulses the views only when something changed.
+//
+// TWO KINDS OF LOOK. A pull request of this build's repository is asked with the running commit, and the look answers
+// whether that commit holds the merge (`gh pr view`, then GitHub's compare). One of another repository is asked with
+// none (Maybe.None): there is no running commit of that app to compare with, so the look is `gh pr view` alone and says
+// only open, merged or closed. Whether it runs is the session's report (TaskItem.Deployed), which arrives on the board.
 //
 // THE PACE. Most answers are asked once per Deskbar start: a merged or closed pull request is settled for the life of
 // the process (PullRequestArrival.Settled), since the running commit cannot change without a restart. Only an open one
 // (a session that marked its task Done before the merge) is asked again every Poll. A minute is soon enough for a task
-// that just turned Done to get its ring, and a look is two gh calls of about a second each (`gh pr view`, then GitHub's
-// compare; measured 2026-11-25). The pull requests of one look are asked ONE AFTER ANOTHER, not all at once: Petre's
+// that just turned Done to get its ring, and a look is one or two gh calls of about a second each (`gh pr view`, then
+// GitHub's compare for this build's repository; measured 2026-11-25). The pull requests of one look are asked ONE AFTER ANOTHER, not all at once: Petre's
 // board held 13 links on 9 Done tasks on 2026-11-26, and 26 gh processes at once is a burst for nothing. A look still
 // out when the next tick comes makes that tick skip, so a slow or hung gh never piles calls up.
 //
@@ -39,7 +45,7 @@ public sealed class RunningChangeWatch : IDisposable
 
     readonly TaskService tasks;
     readonly RunningBuild build;
-    readonly Func<PullRequestLink, string, Task<Result<PullRequestArrival>>> look;
+    readonly Func<PullRequestLink, Maybe<string>, Task<Result<PullRequestArrival>>> look;
     readonly IScheduler scheduler;
     readonly IScheduler background;
     readonly Action<string>? trace;
@@ -61,8 +67,11 @@ public sealed class RunningChangeWatch : IDisposable
     bool failing;
 
     /// <param name="build">The build this Deskbar runs (RunningBuild.Of).</param>
-    /// <param name="look">What GitHub says about one pull request against the running commit (GitHubCli.Arrival in the app).</param>
-    public RunningChangeWatch(TaskService tasks, RunningBuild build, Func<PullRequestLink, string, Task<Result<PullRequestArrival>>> look,
+    /// <param name="look">
+    /// What GitHub says about one pull request (GitHubCli.Arrival in the app), given the running commit for a pull request
+    /// of this build's repository and none for another's (see the header).
+    /// </param>
+    public RunningChangeWatch(TaskService tasks, RunningBuild build, Func<PullRequestLink, Maybe<string>, Task<Result<PullRequestArrival>>> look,
         IScheduler scheduler, IScheduler? background = null, Action<string>? trace = null)
     {
         this.tasks = tasks;
@@ -82,7 +91,13 @@ public sealed class RunningChangeWatch : IDisposable
         var links = RunningChanges.ToLook(tasks.Board, build, known)
             .Where(l => !failedAt.TryGetValue(l.Key, out var at) || now - at >= FailureBackoff)
             .ToArray();
-        if (links.Length == 0) return;
+        if (links.Length == 0)
+        {
+            // Nothing to ask, but the views still learn which build runs (a no-op after the first time): a task decided by
+            // deploy reports alone needs no look, and without this its hover line would wait for an unrelated one.
+            tasks.Arrived(build, known);
+            return;
+        }
         looking = true;
         // A fault `look` did not turn into a Result would otherwise escape on the dispatcher and leave `looking` set, so
         // nothing would ever be looked at again (as in PullRequestWatch).
@@ -107,7 +122,10 @@ public sealed class RunningChangeWatch : IDisposable
     async Task<IReadOnlyList<(PullRequestLink Link, Result<PullRequestArrival> Arrival)>> OneByOne(IReadOnlyList<PullRequestLink> links) =>
         await links.Aggregate(
             Task.FromResult(ImmutableList<(PullRequestLink Link, Result<PullRequestArrival> Arrival)>.Empty),
-            async (asked, link) => (await asked).Add((link, await look(link, build.Commit))));
+            async (asked, link) => (await asked).Add((link, await look(link, CommitFor(link)))));
+
+    // The running commit for a pull request of this build's repository; none for another's, whose look reads its state alone.
+    Maybe<string> CommitFor(PullRequestLink link) => build.Builds(link) ? build.Commit : Maybe<string>.None;
 
     void Heard(IReadOnlyList<(PullRequestLink Link, Result<PullRequestArrival> Arrival)> answers)
     {

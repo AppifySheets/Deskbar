@@ -355,6 +355,8 @@ public sealed partial class RemoteControl
     //   task family --session <sid>             the family and linked tasks of the session's own task (subtasks spec)
 //   task pr <url> --session <sid>           a pull request the session opened some other way than `gh pr create`, on its
 //                                           own task (task e7aa49b1; the hook records `gh pr create` by itself)
+    //   task deployed <note> --session <sid>    the session's own task's change was seen running where its app is deployed,
+    //                                           the note the evidence (task 8470d176, phase 2; TaskBoard.MarkDeployed)
     //   task duplicate-of <id> --session <sid>  the session's own task closes as a duplicate of <id> (task links spec)
     //   task relate <id> --session <sid>        links the session's own task to <id> as related
     //   task unrelate <id> --session <sid>      removes that link
@@ -416,6 +418,11 @@ public sealed partial class RemoteControl
             ["pr", var url] => AskedPullRequests.In(url) is [var link]
                 ? Changed(Own().Bind(t => service.AddPullRequest(t.Id, link).Map(() => t)))
                 : ControlReply.Fail($"'{url}' is not a GitHub pull request link (https://github.com/<owner>/<repo>/pull/<n>)"),
+            // A DEPLOY SEEN RUNNING (task 8470d176, phase 2; RunningChanges' header). The session checked the deployed
+            // app's logs, health page or deploy output for the version carrying its merge, and the note is what it saw
+            // ("2026.11.25.39-3749d21 in the portal logs"), usually on stdin. Every recorded pull request of its own task
+            // not reported yet is recorded; a blank note, or a task with no recorded pull request, is refused.
+            ["deployed", var note] => Changed(Own().Bind(t => service.MarkDeployed(t.Id, note).Map(() => t))),
             _ => ControlReply.Fail($"Wrong arguments for a session's task form.\n{TaskUsage()}"),
         };
     }

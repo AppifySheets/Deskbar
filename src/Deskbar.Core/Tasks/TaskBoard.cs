@@ -176,6 +176,31 @@ public sealed record TaskBoard(IReadOnlyList<TaskItem> Tasks)
             ? this
             : Replaced(task with { PullRequests = [.. task.PullRequests, link], UpdatedAt = now }));
 
+    /// <summary>Why `task deployed` and "Mark deployed" refuse a task with no recorded pull request.</summary>
+    public const string NoPullRequestToDeploy = "task has no pull request recorded; add one with task pr";
+
+    /// <summary>
+    /// The task's change was seen running where its app is deployed (task 8470d176, phase 2; TaskItem.Deployed): every
+    /// recorded pull request not reported yet is recorded with <paramref name="now"/> and the trimmed
+    /// <paramref name="note"/>, the evidence ("2026.11.25.39-3749d21 in the portal logs", or "Marked deployed by hand").
+    /// Refused with a blank note (the note is the claim's evidence, and a report without one says nothing) and on a task
+    /// with no recorded pull request (there is nothing a deploy could be of). When every one is reported already it
+    /// returns this same board, so a session reporting twice saves nothing. Only Deployed and UpdatedAt change: the line
+    /// keeps its status and place, and Raised does not move, since a deploy asks nothing of Petre. Any status takes it,
+    /// as AddPullRequest does: a deploy often follows a task Petre has already closed, and the record stays true.
+    /// </summary>
+    public Result<TaskBoard> MarkDeployed(Guid id, string note, DateTimeOffset now) =>
+        CleanText(note, "A deploy needs a note: where the deployed app was seen running the change (its logs, health page or deploy output)")
+            .Bind(text => Lookup(id).Bind(task => task.PullRequests.Count == 0
+                ? Result.Failure<TaskBoard>(NoPullRequestToDeploy)
+                : task.PullRequests.Where(p => task.Deployed.All(d => d.Key != p.Key)).DistinctBy(p => p.Key).ToArray() is { Length: > 0 } fresh
+                    ? Replaced(task with
+                    {
+                        Deployed = [.. task.Deployed, .. fresh.Select(p => new DeployedPullRequest(p.Key, now, text.Trim()))],
+                        UpdatedAt = now,
+                    })
+                    : Result.Success(this)));
+
     /// <summary>A session needs a decision: the task waits on Petre, shows the question and moves to the top.</summary>
     public Result<TaskBoard> Ask(Guid id, string question, DateTimeOffset now) =>
         CleanText(question, "An ask needs a question").Bind(q =>

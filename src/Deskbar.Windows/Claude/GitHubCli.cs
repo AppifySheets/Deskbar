@@ -33,20 +33,21 @@ public static class GitHubCli
             : Task.FromResult(Result.Failure<PullRequestFacts>("gh.exe is not on the PATH or in %ProgramFiles%\\GitHub CLI"));
 
     /// <summary>
-    /// What GitHub says about one pull request against the running commit (task 8470d176; RunningChanges holds the
-    /// rules): <c>gh pr view &lt;url&gt; --json state,closedAt,mergeCommit</c>, and for a merged one GitHub's compare of
-    /// its merge commit with <paramref name="runningCommit"/> (<c>gh api repos/o/r/compare/&lt;merge&gt;...&lt;running&gt;
-    /// --jq .status</c>). `per_page=1` keeps the compare's list of commits to one; only its status is read. A failure
-    /// when gh cannot be run, either answer is not what was expected, or GitHub does not know the running commit (a
-    /// local build answers 404).
+    /// What GitHub says about one pull request (task 8470d176; RunningChanges holds the rules): <c>gh pr view &lt;url&gt;
+    /// --json state,closedAt,mergeCommit</c>, and, given <paramref name="runningCommit"/> (a pull request of the running
+    /// build's own repository), for a merged one GitHub's compare of its merge commit with it (<c>gh api
+    /// repos/o/r/compare/&lt;merge&gt;...&lt;running&gt; --jq .status</c>). `per_page=1` keeps the compare's list of commits
+    /// to one; only its status is read. Without a running commit (a pull request of another repository, whose deploy a
+    /// session reports) only the state is asked, and Running is false. A failure when gh cannot be run, either answer is
+    /// not what was expected, or GitHub does not know the running commit (a local build answers 404).
     /// </summary>
-    public static Task<Result<PullRequestArrival>> Arrival(PullRequestLink link, string runningCommit) =>
+    public static Task<Result<PullRequestArrival>> Arrival(PullRequestLink link, Maybe<string> runningCommit) =>
         Find() is { HasValue: true } gh
             ? new ClaudeCli(gh.Value).Run(["pr", "view", link.Url, "--json", "state,closedAt,mergeCommit"], null, Timeout)
                 .Bind(RunningChanges.ParseMerge)
-                .Bind(pr => pr.State == PullRequestState.Merged
+                .Bind(pr => pr.State == PullRequestState.Merged && runningCommit.HasValue
                     ? new ClaudeCli(gh.Value)
-                        .Run(["api", $"repos/{link.Owner}/{link.Repo}/compare/{pr.MergeCommit.Value}...{runningCommit}?per_page=1", "--jq", ".status"], null, Timeout)
+                        .Run(["api", $"repos/{link.Owner}/{link.Repo}/compare/{pr.MergeCommit.Value}...{runningCommit.Value}?per_page=1", "--jq", ".status"], null, Timeout)
                         .Bind(RunningChanges.Contains)
                         .Map(running => new PullRequestArrival(pr.State, running))
                     : Task.FromResult(Result.Success(new PullRequestArrival(pr.State, false))))

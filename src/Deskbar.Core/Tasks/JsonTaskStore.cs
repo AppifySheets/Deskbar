@@ -142,7 +142,17 @@ public sealed class JsonTaskStore(string baseDirectory, Action<string>? trace = 
         // TaskItem.Related, the ids linked from this task or null for none (so a file without links is unchanged).
         // Still version 2.
         Guid? DuplicateOf = null,
-        IReadOnlyList<Guid>? Related = null);
+        IReadOnlyList<Guid>? Related = null,
+        // TaskItem.Deployed (task 8470d176, phase 2): the recorded pull requests reported running where their app is
+        // deployed, each as {key, at, note}. Left out of the file while empty, like PullRequests, and read as tolerantly:
+        // anything but an array reads as none, and an entry without a key, a time and a note is skipped
+        // (TolerantDeployedListConverter). Still version 2; an older build ignores the field and drops it on its next
+        // save, which costs the reports (those tasks go back to the hollow ring) and never a task.
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull), JsonConverter(typeof(TolerantDeployedListConverter))]
+        IReadOnlyList<DeployedDto>? Deployed = null);
+
+    // One reported deploy (TaskItem.Deployed): the pull request's key (PullRequestLink.Key), when, and the evidence.
+    sealed record DeployedDto(string Key, DateTimeOffset At, string Note);
 
     // One status change (TaskItem.StatusLog). Both statuses go through the tolerant converter, like the task's own.
     sealed record StatusChangeDto(DateTimeOffset At, TaskStatus From, TaskStatus To);
@@ -248,7 +258,8 @@ public sealed class JsonTaskStore(string baseDirectory, Action<string>? trace = 
             t.StatusLog.Count > 0 ? t.StatusLog.Select(c => new StatusChangeDto(c.At.ToUniversalTime(), c.From, c.To)).ToArray() : null,
             t.PullRequests.Count > 0 ? t.PullRequests.Select(p => p.Url).ToArray() : null,
             t.DuplicateOf.HasValue ? t.DuplicateOf.Value : null,
-            t.Related.Count > 0 ? t.Related : null);
+            t.Related.Count > 0 ? t.Related : null,
+            t.Deployed.Count > 0 ? t.Deployed.Select(d => new DeployedDto(d.Key, d.At.ToUniversalTime(), d.Note)).ToArray() : null);
 
     static TaskItem FromDto(TaskDto d) =>
         new(d.Id, d.Title ?? "",
@@ -286,6 +297,9 @@ public sealed class JsonTaskStore(string baseDirectory, Action<string>? trace = 
             PullRequests = (d.PullRequests ?? []).SelectMany(AskedPullRequests.In).DistinctBy(p => p.Key).ToArray(),
             DuplicateOf = d.DuplicateOf is { } original ? original : Maybe<Guid>.None,
             Related = (d.Related ?? []).Distinct().ToArray(),
+            // Each pull request once, its first report kept (MarkDeployed never records one twice; a hand edit might).
+            Deployed = (d.Deployed ?? []).Select(p => new DeployedPullRequest(p.Key, p.At.ToUniversalTime(), p.Note))
+                .DistinctBy(p => p.Key).ToArray(),
         };
 
     // A pin for a task saved before pins existed: the later raised, the higher (smaller is higher), so the pinned block
@@ -392,6 +406,51 @@ public sealed class JsonTaskStore(string baseDirectory, Action<string>? trace = 
     }
 
     // A time written as a string that parses, or absent.
+    // The `deployed` array (task 8470d176, phase 2, TaskItem.Deployed): anything that is not an array reads as absent,
+    // and an entry that is not an object with a string key, a date-time string at and a string note is skipped, so one
+    // hand-edited entry never fails the whole file. The key is kept lower case, as PullRequestLink.Key makes it.
+    sealed class TolerantDeployedListConverter : JsonConverter<IReadOnlyList<DeployedDto>?>
+    {
+        public override IReadOnlyList<DeployedDto>? Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+        {
+            using var document = JsonDocument.ParseValue(ref reader);
+            return document.RootElement.ValueKind != JsonValueKind.Array
+                ? null
+                : document.RootElement.EnumerateArray().Select(Entry).Where(e => e is not null).Select(e => e!).ToArray();
+        }
+
+        // One entry, or null when it lacks any of its three parts (property names in any case, as the Web defaults read).
+        static DeployedDto? Entry(JsonElement entry) =>
+            entry.ValueKind == JsonValueKind.Object
+            && Text(entry, "key") is { Length: > 0 } key
+            && Text(entry, "note") is { } note
+            && Text(entry, "at") is { } at
+            && DateTimeOffset.TryParse(at, System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.RoundtripKind, out var when)
+                ? new DeployedDto(key.ToLowerInvariant(), when, note)
+                : null;
+
+        // A string property's value by its name in any case, or null when it is missing or not a string.
+        static string? Text(JsonElement entry, string name) =>
+            entry.EnumerateObject().FirstOrDefault(p => p.Name.Equals(name, StringComparison.OrdinalIgnoreCase)) is
+                { Value.ValueKind: JsonValueKind.String } property
+                ? property.Value.GetString()
+                : null;
+
+        public override void Write(Utf8JsonWriter writer, IReadOnlyList<DeployedDto>? value, JsonSerializerOptions options)
+        {
+            writer.WriteStartArray();
+            (value ?? []).ToList().ForEach(d =>
+            {
+                writer.WriteStartObject();
+                writer.WriteString("key", d.Key);
+                writer.WriteString("at", d.At);
+                writer.WriteString("note", d.Note);
+                writer.WriteEndObject();
+            });
+            writer.WriteEndArray();
+        }
+    }
+
     sealed class TolerantTimeConverter : JsonConverter<DateTimeOffset?>
     {
         public override DateTimeOffset? Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)

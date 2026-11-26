@@ -68,6 +68,15 @@ public sealed record TaskSession(string Id, string Folder, DateTimeOffset Joined
 public sealed record StatusChange(DateTimeOffset At, TaskStatus From, TaskStatus To);
 
 /// <summary>
+/// One entry of a task's <see cref="TaskItem.Deployed"/> (task 8470d176, phase 2): the pull request whose
+/// <see cref="PullRequestLink.Key"/> is <see cref="Key"/> was reported running where it is deployed, at
+/// <see cref="At"/>, with <see cref="Note"/> saying how that was seen ("2026.11.25.39-3749d21 in the portal logs", or
+/// "Marked deployed by hand"). Deskbar cannot see another app's deployment, so this record is the only way a Done task
+/// in another repository gets its full tick (RunningChanges).
+/// </summary>
+public sealed record DeployedPullRequest(string Key, DateTimeOffset At, string Note);
+
+/// <summary>
 /// One comment in a task's thread, as markdown. <see cref="SessionId"/> names the Claude session that wrote it;
 /// none means Petre wrote it, <see cref="DeskbarAuthor"/> means Deskbar itself did (a resume, a stop, a failure), and <see cref="ManagerAuthor"/> means the manager session did.
 /// </summary>
@@ -308,6 +317,17 @@ public sealed record TaskItem(
     /// list of URLs; absent in a file means none.
     /// </summary>
     public IReadOnlyList<PullRequestLink> PullRequests { get; init; } = [];
+
+    /// <summary>
+    /// The recorded pull requests reported running where their app is deployed, oldest first, each once (task 8470d176,
+    /// phase 2; Petre: "it's not about deskbar only, but all other software tasks"). Deskbar checks its own repository by
+    /// itself against the build it runs, but it cannot see another app's servers, so the session that did the work checks
+    /// the deployed app's logs or health page for the version carrying the merge and reports it (`task deployed`), or
+    /// Petre marks it by hand ("Mark deployed" on a line's menu). Written only by TaskBoard.MarkDeployed. What it is for:
+    /// a Done task's tick stays a hollow ring until each of its pull requests outside this build's repository is here
+    /// (RunningChanges.Of). An init property like PullRequests, stored as an optional `deployed` list; absent means none.
+    /// </summary>
+    public IReadOnlyList<DeployedPullRequest> Deployed { get; init; } = [];
 
     /// <summary>
     /// The task this one duplicates, or none (task links, docs/superpowers/specs/2026-11-25-task-links-design.md; Petre:

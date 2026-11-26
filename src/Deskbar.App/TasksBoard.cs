@@ -295,6 +295,8 @@ public sealed class TasksBoard : IDisposable
             MarkDuplicate = (id, of) => Report(tasks.MarkDuplicate(id, of)).IsSuccess,
             Relate = (id, other) => Report(tasks.Relate(id, other)).IsSuccess,
             Unrelate = (id, other) => Report(tasks.Unrelate(id, other)),
+            // "Mark deployed" on a Done line (task 8470d176, phase 2): Petre saw it running, so the ring fills.
+            MarkDeployed = id => Report(tasks.MarkDeployed(id, TaskService.MarkedByHand)),
         };
 
         // Taken before the subscriptions below exist, so the first StateChanged pulse is compared with this state
@@ -1340,6 +1342,9 @@ public sealed class TasksBoard : IDisposable
         PullRequests = task.PullRequests,
         // Whether a Done task's change runs in this Deskbar yet: the ring and the outlined chip until it does (task 8470d176).
         Delivery = tasks.DeliveryOf(task),
+        // Whether its menu offers "Mark deployed": merged, and a pull request outside this build's repository not
+        // reported yet (task 8470d176, phase 2; TaskService.CanMarkDeployed).
+        CanMarkDeployed = tasks.CanMarkDeployed(task),
         // Null for no goal and for a link to a goal that no longer exists, which reads as no goal everywhere.
         Goal = goals?.GoalOf(task).Map(ChoiceOf).GetValueOrDefault(),
         // Only an open thread shows them, and an ended one's state looks on disk for its transcript (see the header).
@@ -1523,6 +1528,12 @@ internal sealed record TaskRowView(Guid Id, string Title, string Detail, TaskSta
     /// ring and the outlined "Merged" chip, and the Note goes in the line's tooltip. None for anything it cannot tell.
     /// </summary>
     public TaskDelivery Delivery { get; init; } = TaskDelivery.None;
+
+    /// <summary>
+    /// Whether the line's menu offers "Mark deployed" (task 8470d176, phase 2; TaskService.CanMarkDeployed): the change is
+    /// merged, and a recorded pull request outside this build's repository has no deploy reported yet.
+    /// </summary>
+    public bool CanMarkDeployed { get; init; }
 
     public Quadrant Quadrant => QuadrantOf.Flags(Important, Urgent);
 
@@ -1829,6 +1840,12 @@ internal sealed record TasksWindowActions(
 
     /// <summary>Removes the related link between two tasks, a related line's cross.</summary>
     public Action<Guid, Guid>? Unrelate { get; init; }
+
+    /// <summary>
+    /// "Mark deployed" on a line whose change is merged in another repository but not reported running (task 8470d176,
+    /// phase 2; TaskRowView.CanMarkDeployed): TaskService.MarkDeployed with TaskService.MarkedByHand. None, no item.
+    /// </summary>
+    public Action<Guid>? MarkDeployed { get; init; }
 }
 
 /// <summary>

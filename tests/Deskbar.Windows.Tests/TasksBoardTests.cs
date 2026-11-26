@@ -1739,6 +1739,65 @@ public class TasksBoardTests
         Assert.False(HasRing());
     });
 
+    // Task 8470d176, phase 2: a Done task whose pull request in ANOTHER repository is merged keeps the ring until a deploy
+    // is reported, and its line menu offers "Mark deployed", which records one by hand and fills the ring. A Deskbar
+    // pull request waiting for the running build gets no such item: no report can fill that ring.
+    [Fact]
+    public void Mark_deployed_fills_the_ring_of_a_change_merged_elsewhere() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var done = t.Tasks.Create("portal accounts", t.Gepha, Session("s3")).Value.Id;
+        var pr = new PullRequestLink("AppifySheets", "iam.ge", 537);
+        t.Tasks.AddPullRequest(done, pr);
+        t.Tasks.MarkDone(done);
+        var build = new RunningBuild("AppifySheets", "Deskbar", "2.6.23", new string('a', 40));
+        t.Controller.Show();
+        // A menu holds the view's redraw back until its Closed, which arrives through the dispatcher (as in
+        // A_rebuild_waits_while_a_menu_is_open), so each menu is shut and the dispatcher run before the view is read.
+        void Shut(ContextMenu menu)
+        {
+            menu.IsOpen = false;
+            t.Window.Dispatcher.Invoke(() => { }, System.Windows.Threading.DispatcherPriority.Background);
+            t.Window.UpdateLayout();
+        }
+        MenuItem? MarkItem(ContextMenu menu) =>
+            menu.Items.OfType<MenuItem>().SingleOrDefault(i => i.Header is TextBlock { Text: TasksWindow.MarkDeployedText });
+        bool Offered(Guid id)
+        {
+            var menu = t.Window.OpenMenuFor(id);
+            var offered = MarkItem(menu) is not null;
+            Shut(menu);
+            return offered;
+        }
+
+        t.Tasks.Arrived(build, new Dictionary<string, PullRequestArrival> { [pr.Key] = new(PullRequestState.Merged, false) });
+        t.Window.UpdateLayout();
+        Assert.Equal("Merged", StatusWordOf(LineOf(t.Window, done)));
+
+        var menu = t.Window.OpenMenuFor(done);
+        MarkItem(menu)!.RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+        Shut(menu);
+
+        Assert.Equal([TaskService.MarkedByHand], t.Tasks.Board.Tasks.Single(x => x.Id == done).Deployed.Select(d => d.Note));
+        Assert.Equal("Done", StatusWordOf(LineOf(t.Window, done)));
+        Assert.True(HasDoneTick(LineOf(t.Window, done)));
+        Assert.False(Offered(done));
+
+        // A Deskbar change merged but not in this build: the ring, and no "Mark deployed".
+        var here = t.Tasks.Create("bar tick", t.Gepha, Session("s4")).Value.Id;
+        var ours = new PullRequestLink("AppifySheets", "Deskbar", 573);
+        t.Tasks.AddPullRequest(here, ours);
+        t.Tasks.MarkDone(here);
+        t.Tasks.Arrived(build, new Dictionary<string, PullRequestArrival>
+        {
+            [pr.Key] = new(PullRequestState.Merged, false),
+            [ours.Key] = new(PullRequestState.Merged, false),
+        });
+        t.Window.UpdateLayout();
+        Assert.Equal("Merged", StatusWordOf(LineOf(t.Window, here)));
+        Assert.False(Offered(here));
+    });
+
     // Petre's screenshot: the placeholder "Comment as you, in markdow…" was cut off and the box squeezed. A short
     // placeholder, the hint in the tooltip, the box across the thread, and nothing clipped at the minimum width.
     [Fact]

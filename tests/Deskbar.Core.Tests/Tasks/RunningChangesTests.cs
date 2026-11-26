@@ -28,6 +28,9 @@ public sealed class RunningChangesTests
     static readonly PullRequestArrival Open = new(PullRequestState.Open, false);
     static readonly PullRequestArrival Closed = new(PullRequestState.Closed, false);
 
+    // Another repository's merged pull request, as its look answers it: the state alone, never Running.
+    static readonly PullRequestArrival MergedElsewhere = new(PullRequestState.Merged, false);
+
     // A board with one task, given the status and recorded pull requests.
     static (TaskBoard Board, Guid Id) Board(TaskStatus status, params PullRequestLink[] links)
     {
@@ -41,6 +44,15 @@ public sealed class RunningChangesTests
         var (board, id) = Board(status, links);
         return board.Tasks.Single(t => t.Id == id);
     }
+
+    // A Done task with these pull requests, all reported deployed with the note.
+    static TaskItem Reported(string note, params PullRequestLink[] links)
+    {
+        var (board, id) = Board(TaskStatus.Done, links);
+        return board.MarkDeployed(id, note, Made.AddHours(1)).Value.Tasks.Single(t => t.Id == id);
+    }
+
+    const string Portal = "2026.11.25.39-3749d21 in the portal logs";
 
     static Dictionary<string, PullRequestArrival> Facts(params (PullRequestLink Link, PullRequestArrival Arrival)[] facts) =>
         facts.ToDictionary(f => f.Link.Key, f => f.Arrival);
@@ -103,13 +115,131 @@ public sealed class RunningChangesTests
     }
 
     [Fact]
-    public void Only_done_tasks_with_a_pull_request_of_this_repository_count()
+    public void Only_done_tasks_with_a_recorded_pull_request_count()
     {
-        var facts = Facts((Pr573, MergedNotHere), (Elsewhere, MergedNotHere));
+        var facts = Facts((Pr573, MergedNotHere), (Elsewhere, MergedElsewhere));
 
         Assert.Equal(TaskDelivery.None, RunningChanges.Of(Task(TaskStatus.InProgress, Pr573), Build, facts));
+        Assert.Equal(TaskDelivery.None, RunningChanges.Of(Task(TaskStatus.InProgress, Elsewhere), Build, facts));
         Assert.Equal(TaskDelivery.None, RunningChanges.Of(Task(TaskStatus.Done), Build, facts));
-        Assert.Equal(TaskDelivery.None, RunningChanges.Of(Task(TaskStatus.Done, Elsewhere), Build, facts));
+    }
+
+    // --- another repository: a reported deploy (phase 2) ----------------------------------------------------------------
+
+    [Fact]
+    public void A_change_merged_elsewhere_waits_for_its_deploy_report()
+    {
+        var delivery = RunningChanges.Of(Task(TaskStatus.Done, Elsewhere), Build, Facts((Elsewhere, MergedElsewhere)));
+
+        Assert.Equal(DeliveryStage.Merged, delivery.Stage);
+        Assert.True(delivery.Shipping);
+        Assert.Equal("Merged in iam.ge #537, not reported deployed yet.", delivery.Note);
+    }
+
+    [Fact]
+    public void A_change_open_elsewhere_says_it_is_not_merged()
+    {
+        var delivery = RunningChanges.Of(Task(TaskStatus.Done, Elsewhere), Build, Facts((Elsewhere, Open)));
+
+        Assert.Equal(DeliveryStage.Open, delivery.Stage);
+        Assert.Equal("iam.ge #537 is not merged yet.", delivery.Note);
+    }
+
+    [Fact]
+    public void A_reported_deploy_runs_with_its_evidence()
+    {
+        var delivery = RunningChanges.Of(Reported(Portal, Elsewhere), Build, Facts((Elsewhere, MergedElsewhere)));
+
+        Assert.Equal(DeliveryStage.Running, delivery.Stage);
+        Assert.False(delivery.Shipping);
+        Assert.Equal($"Deployed: {Portal}", delivery.Note);
+    }
+
+    [Fact]
+    public void A_reported_deploy_runs_without_any_word_from_GitHub()
+    {
+        // gh missing or signed out: the report was measured where the app runs, so it is enough.
+        Assert.Equal(DeliveryStage.Running, RunningChanges.Of(Reported(Portal, Elsewhere), Build, Facts()).Stage);
+    }
+
+    [Fact]
+    public void Unknown_and_unreported_elsewhere_keeps_the_full_tick() =>
+        Assert.Equal(TaskDelivery.None, RunningChanges.Of(Task(TaskStatus.Done, Elsewhere), Build, Facts()));
+
+    [Fact]
+    public void A_task_in_both_repositories_needs_both()
+    {
+        var task = Reported(Portal, Pr573, Elsewhere);
+
+        var waiting = RunningChanges.Of(task, Build, Facts((Pr573, MergedNotHere)));
+        Assert.Equal(DeliveryStage.Merged, waiting.Stage);
+        Assert.Equal("Merged in Deskbar #573, not in this Deskbar (2.6.23) yet; it ships with the next release.", waiting.Note);
+
+        var running = RunningChanges.Of(task, Build, Facts((Pr573, Running)));
+        Assert.Equal(DeliveryStage.Running, running.Stage);
+        Assert.Equal($"Deployed: {Portal} Running in this Deskbar (2.6.23).", running.Note);
+    }
+
+    [Fact]
+    public void A_report_never_overrides_the_running_build()
+    {
+        // A Deskbar pull request reported deployed still waits for this copy to hold it.
+        var delivery = RunningChanges.Of(Reported(Portal, Pr573), Build, Facts((Pr573, MergedNotHere)));
+
+        Assert.Equal(DeliveryStage.Merged, delivery.Stage);
+    }
+
+    [Fact]
+    public void A_pull_request_recorded_after_the_report_holds_the_ring_and_the_latest_note_is_shown()
+    {
+        var second = new PullRequestLink("AppifySheets", "iam.ge", 540);
+        var (board, id) = Board(TaskStatus.Done, Elsewhere);
+        var first = board.MarkDeployed(id, Portal, Made.AddHours(1)).Value.AddPullRequest(id, second, Made.AddHours(2)).Value;
+        var facts = Facts((Elsewhere, MergedElsewhere), (second, MergedElsewhere));
+
+        var waiting = RunningChanges.Of(first.Tasks.Single(), Build, facts);
+        Assert.Equal(DeliveryStage.Merged, waiting.Stage);
+        Assert.Equal("Merged in iam.ge #540, not reported deployed yet.", waiting.Note);
+
+        var both = first.MarkDeployed(id, "2026.11.26.4-aa11bb2 on the health page", Made.AddHours(3)).Value;
+        Assert.Equal("Deployed: 2026.11.26.4-aa11bb2 on the health page", RunningChanges.Of(both.Tasks.Single(), Build, facts).Note);
+    }
+
+    // --- recording a deploy (TaskBoard.MarkDeployed) -------------------------------------------------------------------
+
+    [Fact]
+    public void A_deploy_needs_a_note()
+    {
+        var (board, id) = Board(TaskStatus.Done, Elsewhere);
+
+        Assert.True(board.MarkDeployed(id, "  ", Made).IsFailure);
+    }
+
+    [Fact]
+    public void A_deploy_needs_a_recorded_pull_request()
+    {
+        var (board, id) = Board(TaskStatus.Done);
+
+        var refused = board.MarkDeployed(id, Portal, Made);
+
+        Assert.True(refused.IsFailure);
+        Assert.Equal(TaskBoard.NoPullRequestToDeploy, refused.Error);
+    }
+
+    [Fact]
+    public void A_deploy_records_every_pull_request_once()
+    {
+        var (board, id) = Board(TaskStatus.Done, Pr573, Elsewhere);
+        var at = Made.AddHours(4);
+
+        var once = board.MarkDeployed(id, $"  {Portal}\n", at).Value;
+        var task = once.Tasks.Single();
+
+        Assert.Equal([new DeployedPullRequest(Pr573.Key, at, Portal), new DeployedPullRequest(Elsewhere.Key, at, Portal)], task.Deployed);
+        Assert.Equal(at, task.UpdatedAt);
+        Assert.Equal(TaskStatus.Done, task.Status);
+        // Reported again: nothing to record, the same board, so nothing is saved.
+        Assert.Same(once, once.MarkDeployed(id, "again", at.AddHours(1)).Value);
     }
 
     [Fact]
@@ -131,9 +261,19 @@ public sealed class RunningChangesTests
         var other = board.Create("Still going", Maybe<Guid>.None, Session, Made, Guid.NewGuid()).Value;
         var both = other.Board.AddPullRequest(other.Task.Id, new PullRequestLink("AppifySheets", "Deskbar", 600), Made).Value;
 
-        Assert.Equal([Pr573.Key, Pr574.Key], RunningChanges.ToLook(both, Build, Facts()).Select(l => l.Key));
-        Assert.Equal([Pr574.Key], RunningChanges.ToLook(both, Build, Facts((Pr573, MergedNotHere), (Pr574, Open))).Select(l => l.Key));
-        Assert.Empty(RunningChanges.ToLook(both, Build, Facts((Pr573, Running), (Pr574, Closed))));
+        Assert.Equal([Pr573.Key, Pr574.Key, Elsewhere.Key], RunningChanges.ToLook(both, Build, Facts()).Select(l => l.Key));
+        Assert.Equal([Pr574.Key, Elsewhere.Key], RunningChanges.ToLook(both, Build, Facts((Pr573, MergedNotHere), (Pr574, Open))).Select(l => l.Key));
+        Assert.Empty(RunningChanges.ToLook(both, Build, Facts((Pr573, Running), (Pr574, Closed), (Elsewhere, MergedElsewhere))));
+    }
+
+    [Fact]
+    public void A_pull_request_elsewhere_reported_deployed_is_not_looked_at()
+    {
+        var (board, id) = Board(TaskStatus.Done, Pr573, Elsewhere);
+        var reported = board.MarkDeployed(id, Portal, Made).Value;
+
+        // The Deskbar one still is: the running build decides it, not the report.
+        Assert.Equal([Pr573.Key], RunningChanges.ToLook(reported, Build, Facts()).Select(l => l.Key));
     }
 
     // --- reading gh and the version ------------------------------------------------------------------------------------
@@ -198,6 +338,8 @@ public sealed class RunningChangesTests
         public TestScheduler Clock { get; } = new();
         public Dictionary<string, Result<PullRequestArrival>> GitHub { get; } = [];
         public List<string> Looked { get; } = [];
+        // The running commit each look was given, by pull request: this build's commit, or none for another repository.
+        public Dictionary<string, Maybe<string>> Commits { get; } = [];
         public TaskService Tasks { get; }
         public RunningChangeWatch Watcher { get; }
         public int Pulses { get; private set; }
@@ -210,7 +352,7 @@ public sealed class RunningChangesTests
             Tasks.Changed.Subscribe(_ => Pulses++);
             Watcher = new RunningChangeWatch(Tasks, Build, (link, commit) =>
             {
-                Assert.Equal(Commit, commit);
+                Commits[link.Key] = commit;
                 Looked.Add(link.Key);
                 return System.Threading.Tasks.Task.FromResult(GitHub.TryGetValue(link.Key, out var answer) ? answer : Result.Failure<PullRequestArrival>("unknown"));
             }, Clock, System.Reactive.Concurrency.Scheduler.Immediate);
@@ -230,6 +372,7 @@ public sealed class RunningChangesTests
 
         watch.Clock.AdvanceBy(TimeSpan.FromSeconds(1).Ticks);
         Assert.Equal(DeliveryStage.Merged, watch.Delivery.Stage);
+        Assert.Equal(Maybe.From(Commit), watch.Commits[Pr573.Key]);
 
         // Settled for this run: the running build cannot change without a restart.
         watch.Clock.AdvanceBy(RunningChangeWatch.Poll.Ticks * 5);
@@ -270,6 +413,53 @@ public sealed class RunningChangesTests
         watch.Clock.AdvanceBy(RunningChangeWatch.FailureBackoff.Ticks);
         Assert.Equal(2, watch.Looked.Count);
         Assert.Equal(DeliveryStage.Merged, watch.Delivery.Stage);
+    }
+
+    [Fact]
+    public void Another_repository_is_asked_without_a_commit_and_marked_by_hand()
+    {
+        var (board, id) = Board(TaskStatus.Done, Elsewhere);
+        using var watch = new Watch(board);
+        watch.GitHub[Elsewhere.Key] = MergedElsewhere;
+
+        watch.Clock.AdvanceBy(TimeSpan.FromSeconds(1).Ticks);
+
+        Assert.True(watch.Commits[Elsewhere.Key].HasNoValue);
+        Assert.Equal(DeliveryStage.Merged, watch.Delivery.Stage);
+        Assert.True(watch.Tasks.CanMarkDeployed(watch.Tasks.Board.Tasks.Single()));
+
+        // "Mark deployed": the ring fills at once (the board's own pulse redraws), and the item goes.
+        Assert.True(watch.Tasks.MarkDeployed(id, TaskService.MarkedByHand).IsSuccess);
+        Assert.Equal(new TaskDelivery(DeliveryStage.Running, "Deployed: Marked deployed by hand"), watch.Delivery);
+        Assert.False(watch.Tasks.CanMarkDeployed(watch.Tasks.Board.Tasks.Single()));
+        watch.Clock.AdvanceBy(RunningChangeWatch.Poll.Ticks * 3);
+        Assert.Single(watch.Looked);
+    }
+
+    [Fact]
+    public void A_task_decided_by_its_report_alone_asks_nothing_and_still_shows_its_note()
+    {
+        var (board, id) = Board(TaskStatus.Done, Elsewhere);
+        using var watch = new Watch(board.MarkDeployed(id, Portal, Made).Value);
+
+        watch.Clock.AdvanceBy(TimeSpan.FromSeconds(1).Ticks);
+
+        Assert.Empty(watch.Looked);
+        Assert.Equal(new TaskDelivery(DeliveryStage.Running, $"Deployed: {Portal}"), watch.Delivery);
+    }
+
+    [Fact]
+    public void Mark_deployed_is_offered_only_for_a_change_merged_elsewhere()
+    {
+        var (board, _) = Board(TaskStatus.Done, Pr573);
+        using var watch = new Watch(board);
+        watch.GitHub[Pr573.Key] = MergedNotHere;
+
+        watch.Clock.AdvanceBy(TimeSpan.FromSeconds(1).Ticks);
+
+        // Merged into Deskbar but not in this build: no report can fill that ring, so no item.
+        Assert.Equal(DeliveryStage.Merged, watch.Delivery.Stage);
+        Assert.False(watch.Tasks.CanMarkDeployed(watch.Tasks.Board.Tasks.Single()));
     }
 
     [Fact]

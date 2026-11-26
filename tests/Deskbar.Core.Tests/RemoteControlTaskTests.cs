@@ -1149,6 +1149,8 @@ public class RemoteControlTaskTests
              "subtask <title>|- --session <session>",
              // Task e7aa49b1: a pull request the session opened another way than gh pr create.
              "pr <url> --session <session>",
+             // Task 8470d176, phase 2: a session reports the deploy it checked.
+             "deployed <note>|- --session <session>",
              "family --session <session>",
              // Task links: a session links its own task, or closes it as a duplicate.
              "duplicate-of <id> --session <session>", "relate <id> --session <session>", "unrelate <id> --session <session>",
@@ -1162,7 +1164,9 @@ public class RemoteControlTaskTests
              // Task 6da8d7eb: the snooze button's twins.
              "snooze <id> 1h|3h|tomorrow|monday|<n>m|<n>h|<n>d", "wake <id>",
              // Task e7aa49b1: a pull request on a task by hand.
-             "pr <id> <url>"],
+             "pr <id> <url>",
+             // Task 8470d176, phase 2: "Mark deployed"'s twin.
+             "deployed <id> <note>|-"],
             ControlUsage.All.Where(c => c.Verb == "task").Select(c => c.Arguments));
 
     // --- Task 9: go, start, open-session ---------------------------------------------------------------------------
