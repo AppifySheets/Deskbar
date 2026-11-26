@@ -5802,6 +5802,104 @@ public class TasksBoardTests
         Assert.False(t.Window.AddBoxShown);
     });
 
+    // Task a78ce57a ("i can't really tell the subtask is closed"). In its parent's thread a closed
+    // subtask shows a ticked box where the tick box was, its title struck through, and the rest of its line at 0.45, as a
+    // line in its undo window is, with the ticked box in the tick column instead of Undo. An open sibling beside it, and a
+    // closed line at the top (the Closed filter), look as they did.
+    static TextBlock TitleBlockOf(Button line) => Inside(line).OfType<TextBlock>().First(b => Equals(b.Tag, "task-title"));
+
+    static bool Struck(TextBlock title) => title.TextDecorations?.Contains(TextDecorations.Strikethrough[0]) == true;
+
+    // The grid cell that holds the line's title. An open line's quiet buttons rest below full opacity until the pointer is
+    // on the line, so "not faded" is read on the title's cell, not on every part.
+    static UIElement TitleCellOf(Button line) =>
+        GridOf(line).Children.OfType<UIElement>().First(part => Inside(part).OfType<TextBlock>().Any(b => Equals(b.Tag, "task-title")));
+
+    static IEnumerable<Border> ClosedBoxesIn(object scope) =>
+        Inside(scope).OfType<Border>().Where(b => (AutomationProperties.GetName(b) ?? "").StartsWith("Closed"));
+
+    [Fact]
+    public void A_closed_subtask_in_its_parents_thread_has_a_ticked_box_a_struck_title_and_a_faded_line() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var parent = t.Tasks.AddNote("Ship the release", t.Gepha).Value;
+        var closed = t.Tasks.AddNote("Write the notes", t.Gepha, parent: parent.Id).Value;
+        var open = t.Tasks.AddNote("Book the venue", t.Gepha, parent: parent.Id).Value;
+        t.Controller.Show();
+        // Subtasks folded into the parent's thread, so both are drawn there as lines of their own (Nested).
+        Click(ButtonNamed(t.Window, "Subtasks"));
+        t.Controller.ToggleThread(parent.Id);
+        t.Controller.Close(closed.Id);
+        t.Timers.FireAll();
+        t.Window.UpdateLayout();
+        Assert.Equal(TaskStatus.Closed, t.Tasks.Board.Tasks.Single(x => x.Id == closed.Id).Status);
+
+        var line = LineOf(t.Window, closed.Id);
+        var box = Assert.Single(ClosedBoxesIn(line));
+        Assert.Equal("Closed", box.ToolTip);
+        Assert.Equal("Closed Write the notes", AutomationProperties.GetName(box));
+        Assert.Equal((11d, 11d), (box.Width, box.Height));
+        Assert.NotNull(box.Child); // the check mark
+        Assert.True(Struck(TitleBlockOf(line)));
+        // Every part but the tick column is at 0.45, the box itself is not.
+        var grid = GridOf(line);
+        var tickColumn = Grid.GetColumn(box);
+        Assert.Equal(1, box.Opacity);
+        var rest = grid.Children.OfType<UIElement>().Where(part => Grid.GetColumn(part) != tickColumn).ToList();
+        Assert.NotEmpty(rest);
+        Assert.All(rest, part => Assert.Equal(0.45, part.Opacity));
+
+        // The open sibling in the same thread: no strike, no "Closed" mark, full opacity.
+        var sibling = LineOf(t.Window, open.Id);
+        Assert.Empty(ClosedBoxesIn(sibling));
+        Assert.False(Struck(TitleBlockOf(sibling)));
+        Assert.Equal(1, TitleCellOf(sibling).Opacity);
+        Assert.True(HasButtonNamed(sibling, $"Close {open.Title}"));
+    });
+
+    // A subtask folded into its parent's thread as an entry (it has a line of its own elsewhere in the view, here under the
+    // Closed filter, where the closed parent and its closed subtask both have lines) gets the ticked box in its tick slot.
+    [Fact]
+    public void A_closed_subtask_entry_in_a_thread_has_the_ticked_box() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var parent = t.Tasks.AddNote("Ship the release", t.Gepha).Value;
+        var child = t.Tasks.AddNote("Write the notes", t.Gepha, parent: parent.Id).Value;
+        t.Controller.Show();
+        t.Controller.Close(child.Id);
+        t.Controller.Close(parent.Id);
+        t.Timers.FireAll();
+        t.Controller.Filter(TaskFilter.Closed);
+        t.Controller.ToggleThread(parent.Id);
+        t.Window.UpdateLayout();
+
+        var entry = ButtonNamed(t.Window, "Subtask Write the notes");
+        var slot = Assert.IsType<DockPanel>(entry.Parent);
+        var box = Assert.Single(ClosedBoxesIn(slot));
+        Assert.Equal("Closed Write the notes", AutomationProperties.GetName(box));
+        Assert.Equal("Closed", box.ToolTip);
+        // The two top-level closed lines (parent and child) have none.
+        Assert.Single(ClosedBoxesIn(t.Window));
+    });
+
+    // A closed line at the top level, as under the Closed filter where every line is closed, stays as it was.
+    [Fact]
+    public void A_closed_task_at_the_top_level_has_no_ticked_box_no_strike_and_no_fade() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var id = t.Tasks.AddNote("Dishwasher tablets", t.Gepha).Value.Id;
+        t.Controller.Show();
+        t.Controller.Close(id);
+        t.Timers.FireAll();
+        t.Controller.Filter(TaskFilter.Closed);
+        t.Window.UpdateLayout();
+
+        var line = LineOf(t.Window, id);
+        Assert.Empty(ClosedBoxesIn(line));
+        Assert.False(Struck(TitleBlockOf(line)));
+        Assert.Equal(1, TitleCellOf(line).Opacity);
+    });
+
     // Task 54b39c4c (Petre: "subtask should show its parent and have a way to open the parent easily"): an open subtask's
     // thread starts with "↑ Subtask of <parent>", a button that shows the parent, picked, with its own thread open (its
     // thread lists the subtask back, once it has folded away). A plain task's thread has no such line.
