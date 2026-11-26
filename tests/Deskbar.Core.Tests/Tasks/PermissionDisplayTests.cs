@@ -123,4 +123,14 @@ public class PermissionDisplayTests
         Assert.Equal("Ba⟨U+202E⟩sh", text.Tool);
         Assert.Equal("C:\\a⟨U+200B⟩b", text.Folder);
     }
+
+    // The review's L2: an MCP tool names its own fields, so a field's name is marked as its value is.
+    [Fact]
+    public void A_fields_name_is_shown_with_marks_too()
+    {
+        var text = PermissionDisplay.Of(Request("mcp__x__run", ("sql\u202E", "drop table t"), ("db\nname", "main")));
+
+        Assert.Equal(new[] { "sql⟨U+202E⟩", "db⟨U+000A⟩name" }, text.Parts.Select(p => p.Label));
+        Assert.Equal("sql⟨U+202E⟩", text.Parts.Single(p => p.Main).Label);
+    }
 }
