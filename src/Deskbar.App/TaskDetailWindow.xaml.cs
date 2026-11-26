@@ -124,11 +124,11 @@ public partial class TaskDetailWindow : Window
     /// <summary>The window is closing, by Petre or because its task was deleted: TasksBoard lets go of it.</summary>
     internal Action? Leaving { get; set; }
 
-    // Pictures are saved under, and read from, the app's state folder; a click on one opens it in the default viewer.
-    // Seams, as in the panel, so the tests use a scratch folder and record the click.
+    // Pictures are saved under, and read from, the app's state folder; a click on one enlarges it in a lightbox
+    // (PictureViewer, task e5d85e5e). Seams, as in the panel, so the tests use a scratch folder and record the click.
     internal string StateDir { get; init; } = AppPaths.NewStateDir;
 
-    internal Action<string> OpenImage { get; init; } = TasksWindow.OpenInViewer;
+    internal Action<string> OpenImage { get; init; } = PictureViewer.Show;
 
     internal Func<DateTimeOffset> Now { get; init; } = () => DateTimeOffset.UtcNow;
 

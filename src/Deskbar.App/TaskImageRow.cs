@@ -14,9 +14,11 @@ namespace Deskbar.App;
 // inside that box would be cut in half or hidden. Kept apart, the text folds as before and the pictures always show.
 // The markdown that reaches MarkdownBlocks is the text alone (TaskImages.Split), so no path is ever shown as text either.
 //
-// Each picture is a flat button holding its thumbnail, at most MaxHeight tall and the row's width wide, aspect kept, with
-// a thin edge so a white screenshot does not melt into the panel. A click opens the file itself (the window's OpenImage:
-// the default image viewer). Only TaskImages' own paths ever get here (Split drops anything else back into the text), so
+// Each picture is a flat button holding its thumbnail, at most MaxHeight tall and MaxWidth wide, aspect kept, with a thin
+// edge so a white screenshot does not melt into the panel. Small on purpose (task e5d85e5e, "make comment photos small,
+// enlarge when i click on them"): at 160 DIP tall a screenshot took the whole width of a chat bubble and pushed the
+// conversation apart. A click enlarges it (the window's OpenImage: PictureViewer, a lightbox inside Deskbar). Only
+// TaskImages' own paths ever get here (Split drops anything else back into the text), so
 // a click can only ever open one of Deskbar's own pictures. A picture whose file cannot be read shows its relative path,
 // dim, instead: never an exception, never an empty gap, and the next redraw tries again (TaskImageFiles.Thumbnail).
 static class TaskImageRow
@@ -27,10 +29,13 @@ static class TaskImageRow
     /// <summary>The Tag of the text standing in for a picture that cannot be read.</summary>
     internal const string MissingTag = "task-image-missing";
 
-    /// <summary>The tallest a thumbnail is drawn, in DIP.</summary>
-    internal const double MaxHeight = 160;
+    /// <summary>The tallest a thumbnail is drawn, in DIP. The same height as a picture waiting in the comment editor.</summary>
+    internal const double MaxHeight = 64;
 
-    // Decoded at this width: sharp at 200% for a thumbnail up to 160 DIP wide, and far smaller than the picture itself.
+    /// <summary>The widest a thumbnail is drawn, in DIP, so a wide screenshot stays a small strip rather than a banner.</summary>
+    internal const double MaxWidth = 160;
+
+    // Decoded at this width: sharp at 200% for a thumbnail up to MaxWidth DIP wide, and far smaller than the picture itself.
     const int DecodeWidth = 320;
 
     static readonly Brush Edge = Frozen(Color.FromArgb(0x55, 0xFF, 0xFF, 0xFF));
@@ -67,7 +72,7 @@ static class TaskImageRow
             Padding = new Thickness(0),
             Margin = new Thickness(0, 0, 6, 4),
             Cursor = Cursors.Hand,
-            ToolTip = "Open full size",
+            ToolTip = "Click to enlarge",
             Focusable = false,
             Template = BareTemplate,
             Content = new Border
@@ -75,10 +80,10 @@ static class TaskImageRow
                 BorderBrush = Edge,
                 BorderThickness = new Thickness(1),
                 CornerRadius = new CornerRadius(3),
-                Child = new Image { Source = thumbnail, MaxHeight = MaxHeight, Stretch = Stretch.Uniform, StretchDirection = StretchDirection.DownOnly },
+                Child = new Image { Source = thumbnail, MaxHeight = MaxHeight, MaxWidth = MaxWidth, Stretch = Stretch.Uniform, StretchDirection = StretchDirection.DownOnly },
             },
         };
-        System.Windows.Automation.AutomationProperties.SetName(button, "Open picture");
+        System.Windows.Automation.AutomationProperties.SetName(button, "Enlarge picture");
         button.Click += (_, e) =>
         {
             e.Handled = true;

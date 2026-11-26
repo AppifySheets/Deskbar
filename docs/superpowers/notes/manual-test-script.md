@@ -982,7 +982,11 @@ TI2. Copy two PNG files in Explorer and Ctrl+V in the box, or drop them on it: t
 TI3. Copy plain text and Ctrl+V in the box: the text is pasted as before, no thumbnail.
 TI4. Paste a picture, then let a session change its status line before posting: the picture is still
      waiting after the redraw.
-TI5. Click a thumbnail in the thread: it opens full size in the default image viewer.
+TI5. A thumbnail in the thread is small (at most 64 DIP tall, 160 wide). Click it: the picture opens
+     large over the screen under the cursor, the rest dimmed, never bigger than its own pixels. A click
+     anywhere, Esc, or Alt+Tab closes it; "Open in viewer" opens the file in the default image viewer.
+TI5a. Two screens with different scaling: click a thumbnail on each screen; the picture opens on the
+     screen that was clicked, sharp, filling no more than that screen.
 TI6. A comment with long text and a picture: folded to three lines, the picture still shows in full
      under "Show more".
 TI7. Edit a task (F2): paste a picture into the description box, Enter. The open line shows the

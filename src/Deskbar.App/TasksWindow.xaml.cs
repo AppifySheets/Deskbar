@@ -259,11 +259,12 @@ public partial class TasksWindow : Window
 
     // IMAGES IN TASKS (docs/superpowers/specs/2026-11-24-task-images-design.md). StateDir is the folder pasted pictures are
     // saved under (task-images\<task id>\) and read from; OpenImage is what a click on a thumbnail does with the picture's
-    // absolute path: the default image viewer, through the shell. Both are seams so the tests use a scratch folder and
+    // absolute path: PictureViewer enlarges it in a lightbox over the screen under the cursor (task e5d85e5e), and its
+    // "Open in viewer" button still reaches OpenInViewer below. Both are seams so the tests use a scratch folder and
     // record the click instead of opening a viewer.
     internal string StateDir { get; init; } = AppPaths.NewStateDir;
 
-    internal Action<string> OpenImage { get; init; } = OpenInViewer;
+    internal Action<string> OpenImage { get; init; } = PictureViewer.Show;
 
     // A refusal (no viewer registered for PNG) is traced, never thrown: a click in the panel must not take the app down.
     internal static void OpenInViewer(string path)
