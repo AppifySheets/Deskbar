@@ -303,6 +303,7 @@ public sealed partial class TasksBoard : IDisposable
             ShowMatrix: on =>
             {
                 statsShown = false;
+                LeaveInbox();
                 Report(manager.SetTasksMatrix(on));
                 Refresh();
             },
@@ -365,6 +366,8 @@ public sealed partial class TasksBoard : IDisposable
             MarkDeployed = id => Report(tasks.MarkDeployed(id, TaskService.MarkedByHand), id),
             // "Reevaluate" (task 3dd07539): the task's session looks at the task again; a refusal shows on the task's line.
             Reevaluate = id => Report(tasks.Reevaluate(id), id),
+            ShowInbox = ShowInbox,
+            OpenPage = OpenPage,
         };
 
         // Taken before the subscriptions below exist, so the first StateChanged pulse is compared with this state
@@ -446,7 +449,7 @@ public sealed partial class TasksBoard : IDisposable
     string ShownStateKey() =>
         string.Join('|', manager.State.Workspaces.Select(w => $"{w}"))
         + "|" + string.Join('|', manager.State.Groups.Select(g => $"{g}"))
-        + $"|{manager.CurrentWorkspaceId}|{manager.State.TasksMatrix}"
+        + $"|{manager.CurrentWorkspaceId}|{manager.State.TasksMatrix}|{manager.State.TasksPanel?.Inbox}"
         // The manager's question (task 61e4d143): `task ask`, `task answered` and the user's reply change only
         // AppState.Manager, so without this the open panel would drop their pulse and show the line late.
         + $"|{manager.State.Manager?.Question}|{manager.State.Manager?.AskedAt}";
@@ -1417,7 +1420,7 @@ public sealed partial class TasksBoard : IDisposable
         var width = dockedWidth.GetValueOrDefault(PanelState.Width);
         var matrixAllowed = TasksPanelLayout.MatrixAllowed(width);
         // The view carries the CHOICE (where), not the resolved filter, so the toolbar can tick its "Current workspace" checkbox.
-        return new TasksView(filters, WorkspaceFilterLabel(shown), where, places, heldGroups, EmptyText(), addTarget)
+        return WithInbox(new TasksView(filters, WorkspaceFilterLabel(shown), where, places, heldGroups, EmptyText(), addTarget)
         {
             // The manager's open question (task 61e4d143, ManagerQuestion), whatever the filters: it is not a task, and it
             // has priority. Only while there is a manager to open; the Stats view leaves it out (TasksWindow draws it).
@@ -1426,7 +1429,7 @@ public sealed partial class TasksBoard : IDisposable
             // leaves AppState.TasksMatrix as it is, so widening it again brings the Matrix back.
             // A search by id shows the List even under the Matrix setting: the Matrix has no Closed or Snoozed cell, and
             // the task asked for could be either (task 6e4dc116).
-            Matrix = manager.State.TasksMatrix && matrixAllowed && foundById.HasNoValue,
+            Matrix = manager.State.TasksMatrix && matrixAllowed && foundById.HasNoValue && !InboxShown,
             MatrixAllowed = matrixAllowed,
             Slim = TasksPanelLayout.Slim(width),
             Cells = heldCells,
@@ -1447,7 +1450,7 @@ public sealed partial class TasksBoard : IDisposable
             // shows (spec 2026-11-25-task-stats-design.md, "What it shows"). Made only while it shows.
             Stats = statsShown ? TaskStats.Of(tasks.Board, now(), TimeZoneInfo.Local, TaskStats.DaysToShow(tasks.Board, now(), TimeZoneInfo.Local)) : null,
             Columns = PanelState.ColumnWidths,
-        };
+        }, listed, nested, foundById.HasValue);
     }
 
     // What an empty list says: under a search or the Claude switch, that THEY found nothing, since "Nothing open" would be
@@ -2028,7 +2031,7 @@ internal sealed record TaskGroupView(TaskGroupKind Kind, string Header, IReadOnl
 /// Everything the window draws: the filter chips, the workspace filter (its label and its value), the workspaces for
 /// its menus (WorkspaceChipMenu's entries), the groups, what an empty view says, and where a note added now would go.
 /// </summary>
-internal sealed record TasksView(IReadOnlyList<TaskFilterChip> Filters, string WorkspaceFilterLabel, TaskWorkspaceFilter Where,
+internal sealed partial record TasksView(IReadOnlyList<TaskFilterChip> Filters, string WorkspaceFilterLabel, TaskWorkspaceFilter Where,
     IReadOnlyList<WorkspaceChipMenu.Entry> Places,
     IReadOnlyList<TaskGroupView> Groups, string EmptyText, TaskPlaceChoice AddTarget)
 {
@@ -2108,7 +2111,7 @@ internal sealed record TasksView(IReadOnlyList<TaskFilterChip> Filters, string W
 /// Search is the search box's text on every keystroke and FilterClaude a click on the three-way Claude switch (Task 7's
 /// chip, split into Claude, working and idle by task 10b49554).
 /// </summary>
-internal sealed record TasksWindowActions(
+internal sealed partial record TasksWindowActions(
     Action<Guid> Go,
     Action<Guid> Pick,
     Action<Guid> ToggleThread,
