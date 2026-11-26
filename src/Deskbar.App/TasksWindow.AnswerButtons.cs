@@ -1,6 +1,7 @@
 using System.Windows;
 using System.Windows.Automation;
 using System.Windows.Controls;
+using CSharpFunctionalExtensions;
 
 namespace Deskbar.App;
 
@@ -89,4 +90,10 @@ public partial class TasksWindow
         else answerNote.Remove(taskId);
         if (latest is not null) Draw(latest);
     }
+}
+
+internal sealed partial record TasksWindowActions
+{
+    /// <summary>An answer button under the question (TasksBoard.AnswerWithOption), with the list it was drawn from.</summary>
+    public Func<Guid, int, IReadOnlyList<string>, Result>? AnswerWithOption { get; init; }
 }
