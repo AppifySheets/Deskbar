@@ -164,6 +164,12 @@ public sealed class TasksBoard : IDisposable
     /// </summary>
     internal Func<Result>? OpenManager { get; init; }
 
+    /// <summary>
+    /// What finally opens a link once OpenLink has gone to the task's workspace: MarkdownBlocks.Open, the default browser
+    /// for a web address and FileLink's plan for a file. The tests replace it, so a run never starts a browser.
+    /// </summary>
+    internal Action<Uri> OpenUri { get; init; } = MarkdownBlocks.Open;
+
     // What Undo gives back (Ruling 31): the status, the question of a task that waited on Petre, and the selection.
     sealed record PendingClose(TaskStatus Was, IDisposable Timer)
     {
@@ -279,6 +285,8 @@ public sealed class TasksBoard : IDisposable
             OpenFromStats = OpenFromStats,
             // "Subtask of" in a subtask's thread and "Open parent" in its line's menu (task 54b39c4c).
             OpenParent = OpenParent,
+            // A link in a task's text opens in the task's workspace (task 26f15d70, OpenLink).
+            OpenLink = OpenLink,
             ResizeColumns = ResizeColumns,
             // Task links: the picker's candidates, and what a pick, a cross or the menu does.
             LinkCandidates = (id, typed, duplicate) => tasks.Board.LinkCandidates(id, typed, duplicate).Take(LinkChoicesShown)
@@ -792,6 +800,29 @@ public sealed class TasksBoard : IDisposable
     /// to, its thread open, and let through any filter that would hide it, since Petre asked for that very task.
     /// </summary>
     public void OpenParent(Guid parentId) => ShowTaskPastFilters(parentId);
+
+    // A LINK IN A TASK'S TEXT (task 26f15d70, Petre: "when opening links from the tasks, they should be opened in the
+    // task's workspace"). The panel shows the tasks of every workspace, so a link on a Services task clicked while Petre
+    // stands in Deskbar used to open on Deskbar, among that workspace's windows. Now the click goes to the task's
+    // workspace first, the switch a click on the task's line makes, and only then opens the link.
+    //
+    // Why switch-then-open rather than a new browser window started in the background (what `deskbar.cmd open` does for
+    // a session in a background workspace, RemoteControl.Open): this is Petre's own click, so he wants to see the page,
+    // and a page opened somewhere he is not looking would look like a click that did nothing. Once his desktop is the
+    // task's, the usual open is the right one: a Chromium browser puts the link in its window on the desktop in front, or
+    // opens a new one there when that desktop has none, so the workspace does not gain a browser window per click. A file
+    // link's program or Explorer window opens on the desktop in front in the same way.
+    //
+    // Stays as before when there is nowhere to go: a note on no workspace, or a task already in the current workspace. A
+    // switch that fails (the workspace's desktop was lost, say) is said on the problem line, and the link still opens
+    // where Petre is, since a link that opens on the wrong desktop is better than one that does not open at all.
+    void OpenLink(Guid id, Uri uri)
+    {
+        var target = tasks.Board.Tasks.TryFirst(t => t.Id == id).Bind(t => t.WorkspaceId);
+        var elsewhere = target.HasValue && manager.CurrentWorkspaceId.Map(current => current != target.Value).GetValueOrDefault(true);
+        if (elsewhere) Report(manager.Switch(target.Value));
+        OpenUri(uri);
+    }
 
     // OpenFromStats's and OpenParent's shared half: a filter that would hide the task is let through first (see
     // OpenFromStats for which and how), then the task is shown (ShowTask).
@@ -1718,6 +1749,13 @@ internal sealed record TasksWindowActions(
     /// "Open parent" in its line's menu (TasksBoard.OpenParent). None, neither shows.
     /// </summary>
     public Action<Guid>? OpenParent { get; init; }
+
+    /// <summary>
+    /// A click on a link in a task's text (its question or status line, description, comments, pull requests), given the
+    /// task's id and the address (task 26f15d70): TasksBoard.OpenLink, which goes to the task's workspace first so the
+    /// page opens there. None (a window built without a controller), the link opens on the desktop in front, as before.
+    /// </summary>
+    public Action<Guid, Uri>? OpenLink { get; init; }
 
     /// <summary>
     /// The header's divider drag end (task 3df2d28f): the full line's new column widths, saved with the panel. None, the

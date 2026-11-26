@@ -1066,6 +1066,21 @@ QL3. The bar's line for the task reads "Merge Deskbar #1, see https://deskbar.ap
 QL4. Start a new Claude session and ask it to ask you to merge a pull request: its question names the pull request as
      a link you can click.
 
+## Links open in the task's workspace
+
+(Task 26f15d70.) Two workspaces, A and B, with a browser window open on each. A task on workspace B whose question or
+description has a web link, and a comment on it with another link. Stand on workspace A with the tasks panel open.
+
+TW-L1. Click the question's link: Deskbar switches to B and the page opens as a tab in B's browser window, not in A's.
+TW-L2. Back on A, open the task's thread and click the comment's link: the same, B in front with the page there.
+TW-L3. Close B's browser window, go back to A and click a link again: B comes to the front with a new browser window
+       holding the page, and A's browser window is untouched.
+TW-L4. On B, click a link of the same task: no switch, the page opens in B's browser as before.
+TW-L5. A note on no workspace with a link in its description: open it in its window (Open in window) and click the
+       link: it opens on the desktop you are on, with no switch.
+TW-L6. Open the B task in its own window while on A and click a link in its description or its pull requests: the
+       same as TW-L1.
+
 ## A merge settles its question
 
 (Task b7f987b4.) The tasks panel open, `gh` signed in. Open a throwaway pull request on a repository of yours, and from a

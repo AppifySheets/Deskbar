@@ -135,6 +135,15 @@ public partial class TaskDetailWindow : Window
     /// <summary>The task this window shows (Guid.Empty before the first Present).</summary>
     internal Guid TaskId => latest?.Row.Id ?? Guid.Empty;
 
+    // A click on a link in this task's text (task 26f15d70): the controller's OpenLink, which goes to the task's workspace
+    // before opening it. The task's id is read at the click, not when the link was drawn. Without a controller (a test
+    // that builds the window alone), MarkdownBlocks' own default: the desktop in front.
+    void OpenLink(Uri uri)
+    {
+        if (Actions?.OpenLink is { } open) open(TaskId, uri);
+        else MarkdownBlocks.Open(uri);
+    }
+
     /// <summary>For the tests: whether the description editor is open.</summary>
     internal bool IsEditing => editing;
 
@@ -367,7 +376,7 @@ public partial class TaskDetailWindow : Window
         DetailText.Foreground = waits ? Orange : DimInk;
         DetailText.FontWeight = waits ? FontWeights.SemiBold : FontWeights.Normal;
         DetailText.Inlines.Clear();
-        MarkdownBlocks.InlinesOf(row.Detail).ToList().ForEach(DetailText.Inlines.Add);
+        MarkdownBlocks.InlinesOf(row.Detail, OpenLink).ToList().ForEach(DetailText.Inlines.Add);
     }
 
     // The description: its text rendered, links clickable, then its pictures; a dim line when there is none.
@@ -396,7 +405,7 @@ public partial class TaskDetailWindow : Window
     // A read-only rendered markdown block whose links are clickable, with nothing drawn around it.
     RichTextBox Rendered(string markdown, double size, string? tag = null)
     {
-        var document = MarkdownBlocks.Render(markdown);
+        var document = MarkdownBlocks.Render(markdown, OpenLink);
         document.FontSize = size;
         document.Foreground = Ink;
         var box = new RichTextBox
@@ -854,7 +863,7 @@ public partial class TaskDetailWindow : Window
         PreviewField.Visibility = markdown ? Visibility.Collapsed : Visibility.Visible;
         if (!markdown)
         {
-            var document = MarkdownBlocks.Render(DescriptionBox.Text);
+            var document = MarkdownBlocks.Render(DescriptionBox.Text, OpenLink);
             document.FontSize = 13;
             document.Foreground = Ink;
             PreviewBox.Document = document;

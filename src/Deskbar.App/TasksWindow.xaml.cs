@@ -1568,6 +1568,10 @@ public partial class TasksWindow : Window
         return link;
     }
 
+    // What a click on a link in one task's text does (task 26f15d70): the controller's OpenLink, which goes to the task's
+    // workspace before opening it. Null without a controller, so MarkdownBlocks opens it on the desktop in front.
+    Action<Uri>? LinkOpener(Guid taskId) => Actions?.OpenLink is { } open ? uri => open(taskId, uri) : null;
+
     internal const string ShowAllText = "Show all in window";
     internal const string ShowAllTag = "task-show-all";
 
@@ -1595,7 +1599,7 @@ public partial class TasksWindow : Window
         };
         // Plain text stays the Text it always was: a TextBlock filled with inlines reports an empty Text (measured: the
         // window tests reading a status line through it saw ""), so inlines are used only when there is markdown to draw.
-        var inlines = MarkdownBlocks.InlinesOf(row.Detail);
+        var inlines = MarkdownBlocks.InlinesOf(row.Detail, LinkOpener(row.Id));
         if (inlines.All(inline => inline is Run { Tag: null } run && run.Text.Length > 0)) text.Text = row.Detail;
         else inlines.ToList().ForEach(text.Inlines.Add);
         return text;
@@ -1607,7 +1611,7 @@ public partial class TasksWindow : Window
     RichTextBox DescriptionBlock(TaskRowView row)
     {
         // The text alone: its pictures are the row under it (TaskImageRow), never a path shown as text.
-        var document = MarkdownBlocks.Render(TaskImages.Split(row.Description).Text);
+        var document = MarkdownBlocks.Render(TaskImages.Split(row.Description).Text, LinkOpener(row.Id));
         document.FontSize = 11;
         document.Foreground = DimInk;
         return new RichTextBox
@@ -1809,7 +1813,7 @@ public partial class TasksWindow : Window
         if (settledCount > 0) panel.Children.Add(SettledFold(row.Id, settledCount, unfolded));
         if (earlier > 0) panel.Children.Add(EarlierFold(row.Id, earlier, open));
         // A hairline between comments (task aa42794f, ThreadHairline), 8 DIP each side: CommentOf's bottom margin.
-        ThreadHairline.Separated(shown.Select(CommentOf), 8).ToList().ForEach(comment => panel.Children.Add(comment));
+        ThreadHairline.Separated(shown.Select(comment => CommentOf(comment, row.Id)), 8).ToList().ForEach(comment => panel.Children.Add(comment));
         panel.Children.Add(CommentBox(row.Id));
         authors[row.Id] = shown.Select(c => c.Author).ToArray();
         shownComments[row.Id] = shown.Select(c => c.Id).ToArray();
@@ -2021,7 +2025,9 @@ public partial class TasksWindow : Window
         _ => "expired",
     };
 
-    UIElement CommentOf(TaskCommentView comment)
+    // `taskId` is the task the comment is on, the one whose workspace a link in it opens in (LinkOpener): the subtask's
+    // own for a subtask's thread drawn inside its parent's.
+    UIElement CommentOf(TaskCommentView comment, Guid taskId)
     {
         var header = new StackPanel { Orientation = Orientation.Horizontal };
         header.Children.Add(new TextBlock { Tag = "comment-author", Text = comment.Author, FontWeight = FontWeights.Bold, FontSize = 11, Foreground = comment.ByClaude ? ClaudeInk : Ink });
@@ -2045,7 +2051,7 @@ public partial class TasksWindow : Window
         // Images in tasks: the body renders the comment's text alone; its pictures are a row of their own after it
         // (TaskImageRow), outside the clipped box, so folding to three lines cuts text, never a picture.
         var split = TaskImages.Split(comment.Markdown);
-        var document = MarkdownBlocks.Render(split.Text);
+        var document = MarkdownBlocks.Render(split.Text, LinkOpener(taskId));
         document.FontSize = 11.5;
         document.Foreground = Ink;
         var body = new RichTextBox

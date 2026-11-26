@@ -2,6 +2,7 @@ using System.IO;
 using System.Windows;
 using System.Windows.Automation;
 using System.Windows.Controls;
+using System.Windows.Documents;
 using CSharpFunctionalExtensions;
 using Deskbar.App;
 using Deskbar.Core.Persistence;
@@ -30,6 +31,7 @@ public class TaskDetailWindowTests
         public required TasksBoard Board { get; init; }
         public required TaskService Tasks { get; init; }
         public required List<nint> Brought { get; init; }
+        public required List<Uri> Opened { get; init; }
 
         public void Dispose()
         {
@@ -49,14 +51,17 @@ public class TaskDetailWindowTests
         Assert.True(harness.Manager.SaveTasksPanel(new TasksPanelState(false, 800)).IsSuccess);
         var rig = new TasksPanelRig(panel).Docked("right", null);
         var brought = new List<nint>();
+        var opened = new List<Uri>();
         var board = new TasksBoard(panel, rig.Panel, tasks, harness.Manager, _ => Result.Success(), now: () => Start.AddHours(1))
         {
             // A scratch picture folder, and a click on a picture recorded rather than opening a viewer.
             NewTaskWindow = () => new TaskDetailWindow { StateDir = scratch, OpenImage = _ => { }, Now = () => Start.AddHours(1) },
             // Recorded instead of moved between desktops and activated: the App's seam.
             BringTaskWindowForward = brought.Add,
+            // A link's final open (task 26f15d70) recorded, never a real browser.
+            OpenUri = opened.Add,
         };
-        return new Rig { Harness = harness, Panel = panel, Board = board, Tasks = tasks, Brought = brought };
+        return new Rig { Harness = harness, Panel = panel, Board = board, Tasks = tasks, Brought = brought, Opened = opened };
     }
 
     static IEnumerable<object> Inside(object node) =>
@@ -84,6 +89,24 @@ public class TaskDetailWindowTests
         Assert.Equal(5, CommentsShown(window));
         Assert.Contains(Inside(window).OfType<RichTextBox>(), box => Equals(box.Tag, TaskDetailWindow.DescriptionTag));
         Assert.Single(t.Brought);
+    });
+
+    // Task 26f15d70: a link in the task window's description goes to the task's workspace first, as in the panel.
+    [Fact]
+    public void A_link_in_the_window_opens_in_the_tasks_workspace() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var sparrow = t.Harness.Manager.State.Workspaces.Single(w => w.Name == "Sparrow");
+        var id = t.Tasks.AddNote("Services ticket", sparrow.Id).Value.Id;
+        Assert.True(t.Tasks.Describe(id, "The [ticket](https://example.com/browse/SHAR-13).").IsSuccess);
+        Assert.True(t.Board.OpenWindow(id).IsSuccess);
+
+        var description = Inside(t.Board.WindowOf(id)!).OfType<RichTextBox>().Single(box => Equals(box.Tag, TaskDetailWindow.DescriptionTag));
+        var link = Assert.Single(description.Document.Blocks.OfType<Paragraph>().SelectMany(p => p.Inlines.OfType<Hyperlink>()));
+        link.RaiseEvent(new RoutedEventArgs(Hyperlink.ClickEvent));
+
+        Assert.Equal([sparrow.DesktopId!.Value], t.Harness.Desktops.Switched);
+        Assert.Equal([new Uri("https://example.com/browse/SHAR-13")], t.Opened);
     });
 
     // One window per task: asking again brings the same window forward, and an unknown task opens nothing.

@@ -93,7 +93,7 @@ public class TasksBoardTests
         Func<TaskItem, IReadOnlyList<SessionView>>? sessionsOf = null, Action<Guid>? startClaude = null,
         Func<TaskItem, string, Result>? openSession = null, IObservable<System.Reactive.Unit>? sessionsChanged = null,
         string edge = "right", double width = Wide, Func<TaskItem, int>? workingOf = null, double? screenDips = null,
-        string? stateDir = null, Action<string>? openImage = null, Func<Result>? openManager = null)
+        string? stateDir = null, Action<string>? openImage = null, Func<Result>? openManager = null, Action<Uri>? openUri = null)
     {
         var harness = Harness.Build();
         var minutes = 0;
@@ -128,6 +128,8 @@ public class TasksBoardTests
         {
             // The manager line's click (task 61e4d143); none by default, so no manager line is drawn.
             OpenManager = openManager,
+            // A link's final open (task 26f15d70), recorded or dropped: a run never starts a browser.
+            OpenUri = openUri ?? (_ => { }),
         };
         return new Board { Harness = harness, Window = window, Controller = controller, Panel = panel, Tasks = tasks, Timers = timers, WentTo = went };
     }
@@ -3278,6 +3280,70 @@ public class TasksBoardTests
 
         t.Controller.ToggleThread(id);
         Assert.Equal(2, Links().Length);
+    });
+
+    // Task 26f15d70 ("when opening links from the tasks, they should be opened in the task's workspace"): a link in a
+    // task's question goes to the task's workspace first, then opens, so the browser puts the page on that desktop. The
+    // open is recorded with the desktop in front at that moment, which is the order that matters.
+    [Fact]
+    public void A_link_on_a_task_in_another_workspace_opens_there() => StaThread.Run(() =>
+    {
+        var opened = new List<(Uri Uri, Guid Desktop)>();
+        Board? board = null;
+        using var t = board = Build(openUri: uri => opened.Add((uri, board!.Harness.Desktops.CurrentId)));
+        var id = t.Tasks.Create("Jira ticket", t.Sparrow, Session("s1")).Value.Id;
+        t.Tasks.Ask(id, "Merge [CRM2Alta 287](https://github.com/example/crm2alta/pull/287)");
+        t.Controller.Show();
+        var sparrowDesktop = t.Harness.Manager.State.Workspaces.Single(w => w.Id == t.Sparrow).DesktopId!.Value;
+
+        var link = Assert.Single(Inside(LineOf(t.Window, id)).OfType<TextBlock>().Single(b => Equals(b.Tag, TasksWindow.DetailTag)).Inlines.OfType<Hyperlink>());
+        link.RaiseEvent(new RoutedEventArgs(Hyperlink.ClickEvent));
+
+        Assert.Equal([sparrowDesktop], t.Harness.Desktops.Switched);
+        Assert.Equal([(new Uri("https://github.com/example/crm2alta/pull/287"), sparrowDesktop)], opened);
+    });
+
+    // The same in a comment of the task's open thread: the comment's task decides where its links open.
+    [Fact]
+    public void A_link_in_a_comment_opens_in_its_tasks_workspace() => StaThread.Run(() =>
+    {
+        var opened = new List<Uri>();
+        using var t = Build(openUri: opened.Add);
+        var id = t.Tasks.AddNote("Services ticket", t.Sparrow).Value.Id;
+        Assert.True(t.Tasks.Comment(id, Maybe<string>.None, "See https://example.com/browse/SHAR-13").IsSuccess);
+        t.Controller.Show();
+        t.Controller.ToggleThread(id);
+
+        Assert.True(t.Window.ThreadShown(id));
+        // The thread is drawn under the line, not inside its button, so the window is searched; it has this one task.
+        var link = Assert.Single(Inside(t.Window).OfType<RichTextBox>()
+            .Where(box => box.IsDocumentEnabled)
+            .SelectMany(box => box.Document.Blocks.OfType<Paragraph>().SelectMany(p => p.Inlines.OfType<Hyperlink>())));
+        link.RaiseEvent(new RoutedEventArgs(Hyperlink.ClickEvent));
+
+        var sparrowDesktop = t.Harness.Manager.State.Workspaces.Single(w => w.Id == t.Sparrow).DesktopId!.Value;
+        Assert.Equal([sparrowDesktop], t.Harness.Desktops.Switched);
+        Assert.Equal([new Uri("https://example.com/browse/SHAR-13")], opened);
+    });
+
+    // Nowhere to go, so no switch: a task in the workspace in front, and a note on no workspace. Both links still open.
+    [Fact]
+    public void A_link_on_a_task_here_or_on_no_workspace_opens_without_a_switch() => StaThread.Run(() =>
+    {
+        var opened = new List<Uri>();
+        using var t = Build(openUri: opened.Add);
+        var here = t.Tasks.Create("Here", t.Gepha, Session("s1")).Value.Id;
+        t.Tasks.Ask(here, "See https://example.com/here");
+        var free = t.Tasks.Create("Free", Maybe<Guid>.None, Session("s2")).Value.Id;
+        t.Tasks.Ask(free, "See https://example.com/free");
+        t.Controller.Show();
+
+        new[] { here, free }.ToList().ForEach(id =>
+            Inside(LineOf(t.Window, id)).OfType<TextBlock>().Single(b => Equals(b.Tag, TasksWindow.DetailTag))
+                .Inlines.OfType<Hyperlink>().Single().RaiseEvent(new RoutedEventArgs(Hyperlink.ClickEvent)));
+
+        Assert.Empty(t.Harness.Desktops.Switched);
+        Assert.Equal([new Uri("https://example.com/here"), new Uri("https://example.com/free")], opened);
     });
 
     [Fact]
