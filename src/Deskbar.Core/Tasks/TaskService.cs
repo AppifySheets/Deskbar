@@ -456,9 +456,8 @@ public sealed class TaskService(ITaskStore store, Func<DateTimeOffset> now, Func
 
     public Result SwitchStarted(Guid id, PendingSwitch pending) => ApplyIfChanged(Board.SwitchStarted(id, pending, now()));
 
-    public Result SwitchIssued(Guid id, SessionSettings to) => ApplyIfChanged(Board.SwitchIssued(id, to, now()));
-
-    public Result SwitchCopyNamed(Guid id, string shortId) => ApplyIfChanged(Board.SwitchCopyNamed(id, shortId, now()));
+    public Result SwitchIssued(Guid id, SessionSettings to, string shortId, DateTimeOffset issuedAt) =>
+        ApplyIfChanged(Board.SwitchIssued(id, to, shortId, issuedAt, now()));
 
     public Result SessionSwitched(Guid id, string fromSessionId, TaskSession copy) => ApplyIfChanged(Board.SessionSwitched(id, fromSessionId, copy, now()));
 

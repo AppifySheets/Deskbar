@@ -52,6 +52,8 @@ public class ClaudeSessionsSwitchTests
         public Func<string, bool> StopFails { get; set; } = _ => false;
         // Heard while a stop is out, before it answers (what Cancel meets then).
         public Action<string>? OnStop { get; set; }
+        // Heard while a resume is out, before it answers (what the board and Cancel show meanwhile).
+        public Action<string>? OnResume { get; set; }
         // A session Claude Code holds no saved options for: the resume keeps its id (measured with an ended `-p` one).
         public bool KeepsId { get; set; }
         int made;
@@ -67,6 +69,7 @@ public class ClaudeSessionsSwitchTests
         {
             Calls.Add(new Call(clock.Now, arguments.ToList(), workingDirectory));
             if (arguments is ["stop", var stopping]) OnStop?.Invoke(stopping);
+            if (arguments is ["--bg", "--resume", var resuming, ..]) OnResume?.Invoke(resuming);
             return Task.FromResult(arguments switch
             {
                 ["agents", "--json"] => AgentsFail ? Result.Failure<string>("claude exited with code 1.") : Result.Success(Json()),
@@ -330,8 +333,7 @@ public class ClaudeSessionsSwitchTests
         var (taskId, original) = rig.Running();
         var copyId = "c00000aa-0000-4000-8000-000000000000";
         Assert.True(rig.Tasks.SwitchStarted(taskId, new PendingSwitch(original, SonnetLow, rig.Clock.Now)).IsSuccess);
-        Assert.True(rig.Tasks.SwitchIssued(taskId, SonnetLow).IsSuccess);
-        Assert.True(rig.Tasks.SwitchCopyNamed(taskId, copyId[..8]).IsSuccess);
+        Assert.True(rig.Tasks.SwitchIssued(taskId, SonnetLow, copyId[..8], rig.Clock.Now).IsSuccess);
         rig.Cli.Listed.Add(new Row(copyId, Folder, rig.Clock.Now));
         rig.Run(Seconds(5));
 
@@ -346,15 +348,15 @@ public class ClaudeSessionsSwitchTests
         Assert.Empty(rig.Cli.Stops);
     }
 
-    // Review M3: Deskbar closed before Claude named the copy. A session in the original's folder is never claimed by its
-    // folder: the switch is given up at once, the original untouched, nothing stopped, and the thread says so.
+    // Reviews M3 and N6: Deskbar closed while `claude` made the copy, before the one write that records it as issued. The
+    // board holds only the request, so the next Deskbar claims nothing in the folder (the stranger is not taken), leaves
+    // the original as it was, and copies again at the next pause.
     [Fact]
-    public void A_restarted_Deskbar_never_claims_an_unnamed_copy_by_its_folder()
+    public void A_restart_before_the_issue_write_claims_nothing_and_copies_again_at_the_next_pause()
     {
         using var rig = new Rig();
         var (taskId, original) = rig.Running();
         Assert.True(rig.Tasks.SwitchStarted(taskId, new PendingSwitch(original, SonnetLow, rig.Clock.Now)).IsSuccess);
-        Assert.True(rig.Tasks.SwitchIssued(taskId, SonnetLow).IsSuccess);
         rig.Run(Seconds(1));
         var stranger = "c00000bb-0000-4000-8000-000000000000";
         rig.Cli.Listed.Add(new Row(stranger, Folder, rig.Clock.Now));
@@ -362,11 +364,46 @@ public class ClaudeSessionsSwitchTests
         rig.Begin();
 
         var task = rig.Of(taskId);
-        Assert.True(task.Switching.HasNoValue);
         Assert.DoesNotContain(task.Sessions, s => s.Id == stranger);
-        Assert.Equal(original, SettingsSwitch.SessionOf(rig.Tasks.Board, task).Value.Id);
-        Assert.Contains(task.Comments, c => c.ByDeskbar && c.Markdown == SettingsSwitch.NoShortId);
-        Assert.Empty(rig.Cli.Changes);
+        Assert.Equal(ClaudeStart.SwitchArguments(original, SonnetLow), Assert.Single(rig.Cli.Resumes).Arguments);
+        Assert.Empty(rig.Cli.Stops);
+        Assert.Equal(rig.Cli.Last!.SessionId[..8], task.Switching.Value.CopyShortId.Value);
+    }
+
+    // Review N6: while `claude` makes the copy the board still holds the request, so the row shows the copy being made and
+    // Cancel is refused (dropping the request then would leave the copy claimed by nothing); the issue is written once,
+    // with the printed id. A task closed meanwhile cannot take the copy, which is then stopped by that id.
+    [Fact]
+    public void While_the_copy_is_made_Cancel_is_refused_and_a_task_closed_meanwhile_gets_its_copy_stopped()
+    {
+        using var rig = new Rig();
+        var (taskId, _) = rig.Running();
+        rig.Begin();
+        Result? cancel = null;
+        SessionPickRow? during = null;
+        Maybe<PendingSwitch> stored = default;
+        rig.Cli.OnResume = _ =>
+        {
+            cancel = rig.Sessions!.CancelPick(taskId);
+            during = rig.Sessions.PickRow(taskId);
+            stored = rig.Of(taskId).Switching;
+        };
+
+        rig.Pick(taskId, SonnetLow);
+
+        Assert.Equal(ClaudeSessions.CopyBeingMade, cancel!.Value.Error);
+        Assert.Equal((PickPhase.Switching, false), (during!.Phase, during.CanCancel));
+        Assert.True(stored.Value.Issued.HasNoValue);
+        Assert.True(rig.Of(taskId).Switching.Value.Issued.HasValue);
+
+        using var closing = new Rig();
+        var (closedId, closedOriginal) = closing.Running();
+        closing.Begin();
+        closing.Cli.OnResume = _ => Assert.True(closing.Tasks.Close(closedId, stoppingClaude: true).IsSuccess);
+        closing.Pick(closedId, SonnetLow);
+
+        Assert.Equal(["stop", closing.Cli.Last!.SessionId[..8]], Assert.Single(closing.Cli.Stops).Arguments);
+        Assert.Contains(closing.Cli.Listed, r => r.SessionId == closedOriginal);
     }
 
     // Review M3: Claude printed no short id for the resume: the switch is given up at once, nothing claimed or stopped.
@@ -395,8 +432,7 @@ public class ClaudeSessionsSwitchTests
         var (taskId, original) = rig.Running();
         Assert.True(rig.Tasks.Want(taskId, SonnetLow).IsSuccess);
         Assert.True(rig.Tasks.SwitchStarted(taskId, new PendingSwitch(original, SonnetLow, rig.Clock.Now)).IsSuccess);
-        Assert.True(rig.Tasks.SwitchIssued(taskId, SonnetLow).IsSuccess);
-        Assert.True(rig.Tasks.SwitchCopyNamed(taskId, "c00000cc").IsSuccess);
+        Assert.True(rig.Tasks.SwitchIssued(taskId, SonnetLow, "c00000cc", rig.Clock.Now).IsSuccess);
 
         rig.Begin();
         rig.Run(SettingsSwitch.RecoverWithin + Poll);
@@ -534,8 +570,7 @@ public class ClaudeSessionsSwitchTests
         using var rig = new Rig();
         var (taskId, original) = rig.Task();
         Assert.True(rig.Tasks.SwitchStarted(taskId, new PendingSwitch(original, SonnetLow, rig.Clock.Now)).IsSuccess);
-        Assert.True(rig.Tasks.SwitchIssued(taskId, SonnetLow).IsSuccess);
-        Assert.True(rig.Tasks.SwitchCopyNamed(taskId, original[..8]).IsSuccess);
+        Assert.True(rig.Tasks.SwitchIssued(taskId, SonnetLow, original[..8], rig.Clock.Now).IsSuccess);
         rig.Cli.Listed.Add(new Row(original, Folder, rig.Clock.Now));
 
         rig.Begin();
@@ -576,19 +611,36 @@ public class ClaudeSessionsSwitchTests
         Assert.True(rig.Of(taskId).Switching.HasNoValue);
     }
 
-    // Review M3: every `claude stop` of a switch is checked in one place. A joined switch whose original Deskbar did not
-    // start (it could only get there by a hand-edited file) never has the original stopped: refused, and traced.
+    // Review N2: a session from before the picker has no launch record, and it is still the task's background session: it
+    // is switched, and its original stopped at its pause, through the one stop gate.
     [Fact]
-    public void A_switch_never_stops_a_session_Deskbar_did_not_start()
+    public void A_background_session_with_no_launch_record_is_switched()
     {
         using var rig = new Rig();
         var (taskId, original) = rig.Task(ours: false);
         rig.Cli.Listed.Add(new Row(original, Folder, rig.Clock.Now.AddHours(-1)));
+        rig.Begin();
+
+        Assert.IsType<SwitchStep.CopyNow>(rig.Pick(taskId, SonnetLow));
+        rig.Replied(rig.Cli.Last!.SessionId);
+        rig.Run(Poll);
+
+        Assert.Equal(["stop", original[..8]], Assert.Single(rig.Cli.Stops).Arguments);
+        Assert.True(rig.Of(taskId).Switching.HasNoValue);
+    }
+
+    // The original of a joined switch that the list no longer shows as a background session (it is now in a window of the
+    // user's own) is never stopped: the switch is done with the copy as the task's session, and the original runs on.
+    [Fact]
+    public void A_switch_never_stops_an_original_the_list_does_not_show_in_the_background()
+    {
+        using var rig = new Rig();
+        var (taskId, original) = rig.Task();
         var copy = "c00000dd-0000-4000-8000-000000000000";
         Assert.True(rig.Tasks.SwitchStarted(taskId, new PendingSwitch(original, SonnetLow, rig.Clock.Now)).IsSuccess);
-        Assert.True(rig.Tasks.SwitchIssued(taskId, SonnetLow).IsSuccess);
-        Assert.True(rig.Tasks.SwitchCopyNamed(taskId, copy[..8]).IsSuccess);
+        Assert.True(rig.Tasks.SwitchIssued(taskId, SonnetLow, copy[..8], rig.Clock.Now).IsSuccess);
         Assert.True(rig.Tasks.SessionSwitched(taskId, original, rig.Tasks.NewSession(copy, Folder) with { LaunchedWith = SonnetLow }).IsSuccess);
+        rig.Cli.Listed.Add(new Row(original, Folder, rig.Clock.Now.AddHours(-1)) { Background = false });
         rig.Cli.Listed.Add(new Row(copy, Folder, rig.Clock.Now));
         rig.Run(Seconds(1));
         rig.Replied(copy);
@@ -597,7 +649,8 @@ public class ClaudeSessionsSwitchTests
         rig.Run(Poll * 2);
 
         Assert.Empty(rig.Cli.Stops);
-        Assert.Contains(rig.Traces, line => line.Contains($"stop of {original[..8]} refused", StringComparison.Ordinal));
+        Assert.True(rig.Of(taskId).Switching.HasNoValue);
+        Assert.Equal(copy, SettingsSwitch.SessionOf(rig.Tasks.Board, rig.Of(taskId)).Value.Id);
     }
 
     // Review L3: a task closed during a switch, before the copy answered: the copy is stopped, the original stays.
@@ -663,6 +716,31 @@ public class ClaudeSessionsSwitchTests
         Assert.Equal(["stop", copy[..8]], Assert.Single(rig.Cli.Stops).Arguments);
         rig.Run(Poll * 2);
         Assert.Single(rig.Cli.Stops);
+    }
+
+    // Review L3: a deleted task's copy whose stop fails is tried again after a while, never on every poll; once the copy
+    // is no longer listed, the remembered switch is dropped and nothing more is tried.
+    [Fact]
+    public void A_deleted_task_s_failed_stop_backs_off_and_ends_once_the_copy_is_gone()
+    {
+        using var rig = new Rig();
+        var (taskId, _) = rig.Running();
+        rig.Begin();
+        rig.Pick(taskId, SonnetLow);
+        var copy = rig.Cli.Last!.SessionId;
+        rig.Run(Poll);
+        rig.Cli.StopFails = _ => true;
+
+        Assert.True(rig.Tasks.Delete(taskId).IsSuccess);
+        rig.Run(Poll * 6);
+        Assert.Single(rig.Cli.Stops);
+
+        rig.Run(TimeSpan.FromMinutes(10));
+        Assert.Equal(2, rig.Cli.Stops.Count);
+
+        rig.Cli.Listed.RemoveAll(r => r.SessionId == copy);
+        rig.Run(TimeSpan.FromMinutes(30));
+        Assert.Equal(2, rig.Cli.Stops.Count);
     }
 
     // Expired: nothing to resume. The pick waits for the next start, which passes it and records it on the session.
@@ -791,8 +869,8 @@ public class ClaudeSessionsSwitchTests
         Assert.Contains(rig.Cli.Listed, r => r.SessionId == original);
 
         Assert.True(rig.Tasks.SwitchStarted(taskId, new PendingSwitch(original, SonnetLow, rig.Clock.Now)).IsSuccess);
-        Assert.True(rig.Tasks.SwitchIssued(taskId, SonnetLow).IsSuccess);
-        Assert.True(rig.Sessions.CancelPick(taskId).IsFailure);
+        Assert.True(rig.Tasks.SwitchIssued(taskId, SonnetLow, "c0000009", rig.Clock.Now).IsSuccess);
+        Assert.Equal(ClaudeSessions.CopyBeingMade, rig.Sessions.CancelPick(taskId).Error);
     }
 
     // The original's stop closes a window attached to it: one is opened on the copy a moment later, only when one was open.

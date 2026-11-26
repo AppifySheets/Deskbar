@@ -52,8 +52,8 @@ public sealed record SessionPickRow(
 // the first start will pass. A value not set reads as Claude Code's own ("default effort", "Claude Code's setting").
 //
 // READ-ONLY: the task's session is listed and runs in a window of its own (VS Code, a terminal: no short id, or not a
-// background row), or is a background session Deskbar did not start. A switch never copies or stops such a session
-// (SettingsSwitch), so the buttons are disabled, and the tooltip says why, never hidden.
+// background row: SettingsSwitch.IsBackground). A switch never copies or stops such a session, so the buttons are
+// disabled, and the tooltip says why (it runs in its own window), never hidden, and never claims who started it.
 //
 // "THE TASK'S SESSION" is SettingsSwitch.SessionOf, the one rule every switch question uses: an ended entry, or a
 // session that has moved to another task, is not it, and the row then shows the pick for the next start.
@@ -63,8 +63,9 @@ public sealed record SessionPickRow(
 public static class SessionPicker
 {
     public const string FirstStartTip = "No session yet. Your pick is used by the first session Deskbar starts on this task.";
-    public const string NoLiveSessionTip = "No session runs on this task now. Your pick is used by the next session Deskbar starts on it.";
-    public const string LastReplyTip = "Deskbar did not start this session, so it shows the model of its last reply. Pick to change it.";
+    // Review N3: a comment or Open Claude resumes the OLD session, which keeps its own settings; only a new one takes the pick.
+    public const string NoLiveSessionTip = "No session runs on this task now. Your pick is used when a new session starts on this task; resuming the old one keeps its settings.";
+    public const string LastReplyTip = "Deskbar has no record of this session's settings, so it shows the model of its last reply. Pick to change it.";
     public const string NextPauseTip = "Applies at Claude's next pause.";
     public const string ConfirmingWords = "Switched. The earlier session stops once this one has answered.";
 
@@ -76,9 +77,7 @@ public static class SessionPicker
     {
         var current = SettingsSwitch.SessionOf(board, task);
         var readOnly = current.Bind(s => listed.TryFirst(a => a.SessionId == s.Id).Map(a => (Session: s, Agent: a)))
-            .Bind(x => !x.Agent.Background || x.Agent.ShortId.HasNoValue ? Maybe.From(SettingsSwitch.NotDeskbars)
-                : !SettingsSwitch.StartedByDeskbar(x.Session) ? Maybe.From(SettingsSwitch.NotStartedByDeskbar)
-                : Maybe<string>.None);
+            .Bind(x => SettingsSwitch.IsBackground(x.Agent) ? Maybe<string>.None : Maybe.From(SettingsSwitch.NotDeskbars));
 
         if (task.Switching is { HasValue: true } switching)
         {

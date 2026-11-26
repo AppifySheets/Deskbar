@@ -73,6 +73,8 @@ A folder Claude Code has never been told to trust cannot start a background sess
 
 A task's thread lists its sessions, newest first, with when each joined and whether it is working, idle, ended or expired. Open on a line does what the double-click does for that session. An expired session is one whose transcript Claude Code has deleted (after 30 days by default), so it has no Open.
 
+Under the comment box on a task's page, two buttons show the session's model with its effort and its permission mode, and their menus change them. Claude Code cannot change a running session's model, so Deskbar has Claude Code make a copy of the session with the new settings and the same conversation, moves the task to the copy, and stops the earlier session once the copy has answered and the earlier one is at a pause. Until the copy has answered, Cancel goes back. A session in a window of its own (VS Code, a terminal) cannot be restarted from outside, so its buttons are disabled; change it there with `/model`, `/effort` and Shift+Tab. A pick on a task whose session has ended is kept for the next new session on the task: resuming the old session, by a comment or Open Claude, keeps the settings it had.
+
 ## Tasks keep their sessions running
 
 A task that is open (backlog, in progress or waiting on you) is meant to have a session running. A reboot, a sign-out, a crash of Claude Code's background daemon or a closed VS Code session ends sessions, and Deskbar resumes the ones on open tasks, one every five seconds, a cut-off turn told to continue. Each resume adds a line to the task's thread.

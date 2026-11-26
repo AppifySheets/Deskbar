@@ -36,13 +36,13 @@ public class SessionPickerTests
     [Fact]
     public void A_session_Deskbar_did_not_set_shows_its_last_reply_s_model_or_defaults()
     {
-        // Listed in the background but not started by Deskbar: shown, and read-only, with why.
+        // A background session with no launch record (from before the picker): shown, and pickable (review N2).
         var seen = Row(Task(), lastModel: "claude-opus-5-5");
         Assert.Equal("claude-opus-5-5 (last reply) · default effort", seen.ModelWords);
-        Assert.Equal(SettingsSwitch.NotStartedByDeskbar, seen.ReadOnlyWhy.Value);
+        Assert.True(seen.Pickable);
+        Assert.Equal(SessionPicker.LastReplyTip, seen.Tip);
+        Assert.DoesNotContain("did not start", seen.Tip);
         Assert.Equal("Claude Code's setting", seen.ModeWords);
-        // Not listed yet: the last reply's model, and the tip says where it comes from.
-        Assert.Equal(SessionPicker.LastReplyTip, Row(Task(), [], lastModel: "claude-opus-5-5").Tip);
 
         Assert.Equal("Default model · default effort", Row(Task()).ModelWords);
     }
