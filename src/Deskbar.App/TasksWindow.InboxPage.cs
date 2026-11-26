@@ -98,6 +98,7 @@ public partial class TasksWindow
     bool OpenSubtaskPage(Guid id)
     {
         if (inboxPage is not { } parent || latest?.Inbox is null) return false;
+        if (pageInWindow) return OpensInOwnWindow(id);
         inboxPageStack.Push(parent);
         inboxPage = id;
         Actions?.OpenPage?.Invoke(id);
@@ -118,7 +119,7 @@ public partial class TasksWindow
     // Esc on a page (Escape): back, unless the keyboard is in a comment box, where Esc is the box's (review M5 of the List).
     bool InboxBack()
     {
-        if (inboxPage is null || latest?.Inbox is null) return false;
+        if (inboxPage is null || latest?.Inbox is null || pageInWindow) return false;
         if (EscapeIgnoresThreadWhile?.Invoke() ?? commentBoxes.Values.Any(box => box.IsKeyboardFocusWithin)) return false;
         BackFromPage();
         return true;
@@ -255,10 +256,10 @@ public partial class TasksWindow
         // Opened: at its end, where the newest comments and the comment box are. Redrawn: where it was.
         var scroller = pageScroller;
         pageScrolledFor = row.Id;
-        UpdateLayout();
+        InboxPage.UpdateLayout();
         if (keep is { } offset) scroller.ScrollToVerticalOffset(offset);
         else scroller.ScrollToEnd();
-        UpdateLayout();
+        InboxPage.UpdateLayout();
     }
 
     // The mark a task's page shows when the task has no Inbox line of its own (a subtask opened from its parent's page).
@@ -291,7 +292,7 @@ public partial class TasksWindow
         var first = new DockPanel { LastChildFill = true };
         var back = GlyphButton("back", InboxPageBackText, BackFromPage, "Back (Esc)");
         DockPanel.SetDock(back, Dock.Left);
-        first.Children.Add(back);
+        if (!pageInWindow) first.Children.Add(back);
         var tile = new Border
         {
             Tag = InboxMarkTag, Width = 28, Height = 28, CornerRadius = new CornerRadius(9), Background = InboxLook.Raised,
