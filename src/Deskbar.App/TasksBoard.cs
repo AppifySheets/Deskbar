@@ -1322,6 +1322,8 @@ public sealed class TasksBoard : IDisposable
         Urgent = task.Urgent,
         SnoozedUntil = task.SnoozedUntil.Map(until => (DateTimeOffset?)until).GetValueOrDefault(),
         PullRequests = task.PullRequests,
+        // Whether a Done task's change runs in this Deskbar yet: the ring and the outlined chip until it does (task 8470d176).
+        Delivery = tasks.DeliveryOf(task),
         // Null for no goal and for a link to a goal that no longer exists, which reads as no goal everywhere.
         Goal = goals?.GoalOf(task).Map(ChoiceOf).GetValueOrDefault(),
         // Only an open thread shows them, and an ended one's state looks on disk for its transcript (see the header).
@@ -1495,6 +1497,12 @@ internal sealed record TaskRowView(Guid Id, string Title, string Detail, TaskSta
     /// "Pull requests" section, one link each.
     /// </summary>
     public IReadOnlyList<PullRequestLink> PullRequests { get; init; } = [];
+
+    /// <summary>
+    /// Whether a Done task's change runs in this Deskbar yet (task 8470d176, RunningChanges): Shipping draws the hollow
+    /// ring and the outlined "Merged" chip, and the Note goes in the line's tooltip. None for anything it cannot tell.
+    /// </summary>
+    public TaskDelivery Delivery { get; init; } = TaskDelivery.None;
 
     public Quadrant Quadrant => QuadrantOf.Flags(Important, Urgent);
 

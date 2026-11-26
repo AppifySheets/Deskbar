@@ -372,6 +372,34 @@ public class FloatingBarTaskListTests
         Assert.False(Ticked(LineFor(done)));
     });
 
+    // Task 8470d176, Petre's pick A ("ring fills on arrival"): a Done task whose pull request merged but is not in the
+    // running Deskbar has a hollow ring in place of the disc, and its tooltip says so; once GitHub says the running build
+    // holds the merge, the disc is back.
+    [Fact]
+    public void A_done_change_not_running_yet_has_the_ring_until_it_runs() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var done = t.Tasks.Create("Subtask tick in thread", t.Gepha, Session("s1")).Value.Id;
+        var pr = new PullRequestLink("AppifySheets", "Deskbar", 573);
+        t.Tasks.AddPullRequest(done, pr);
+        t.Tasks.MarkDone(done);
+        var build = new RunningBuild("AppifySheets", "Deskbar", "2.6.23", new string('a', 40));
+        bool Has(string tag) => Inside(t.Lines.Single()).OfType<FrameworkElement>().Any(e => Equals(e.Tag, tag));
+
+        // Nothing known yet: the full disc, as before.
+        Assert.True(Has(TaskStatusMarks.DoneTickTag));
+
+        t.Tasks.Arrived(build, new Dictionary<string, PullRequestArrival> { [pr.Key] = new(PullRequestState.Merged, false) });
+        Assert.True(Has(TaskStatusMarks.ShippingTickTag));
+        Assert.False(Has(TaskStatusMarks.DoneTickTag));
+        Assert.Contains("not in this Deskbar (2.6.23) yet", (string)t.Lines.Single().ToolTip);
+
+        t.Tasks.Arrived(build, new Dictionary<string, PullRequestArrival> { [pr.Key] = new(PullRequestState.Merged, true) });
+        Assert.True(Has(TaskStatusMarks.DoneTickTag));
+        Assert.False(Has(TaskStatusMarks.ShippingTickTag));
+        Assert.Contains("Running in this Deskbar (2.6.23).", (string)t.Lines.Single().ToolTip);
+    });
+
     // Every Claude line, a Done one included, has the tick box and no close button: all lines look alike.
     [Fact]
     public void A_done_claude_task_closes_from_its_tick_box() => StaThread.Run(() =>
