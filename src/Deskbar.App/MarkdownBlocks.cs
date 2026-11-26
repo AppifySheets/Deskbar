@@ -36,7 +36,9 @@ namespace Deskbar.App;
 // "as usual" (RemoteControl.Open's last branch): the shell hands it to the default browser, on the desktop in front
 // (a file link goes by FileLink's plan instead, see OpenFile).
 // That is the right branch here, because Petre clicked it on the desktop he is looking at; the background-workspace
-// branch of `open` is for a session working somewhere else.
+// branch of `open` is for a session working somewhere else. The tasks panel and the task window hand in an opener that
+// goes to the task's workspace first (task 26f15d70, TasksBoard.OpenLink), so a task's link opens among that task's
+// windows; it then opens through this same default.
 internal static class MarkdownBlocks
 {
     /// <summary>The Tag of an inline code run, for the tests and the window's styling.</summary>
@@ -251,7 +253,8 @@ internal static class MarkdownBlocks
     }
 
     // The default opener: the shell hands a web address to the default browser, and a file link goes by its plan.
-    static void Open(Uri uri) =>
+    // Internal for TasksBoard.OpenLink, which opens a task's link through it once it has gone to the task's workspace.
+    internal static void Open(Uri uri) =>
         FileLink.LocalPath(uri).Match(OpenFile, () => Start(new System.Diagnostics.ProcessStartInfo(uri.AbsoluteUri) { UseShellExecute = true }, uri.ToString()));
 
     // A file link's click, by FileLink.Plan: a document opens in its own program; a folder opens in Explorer; any
