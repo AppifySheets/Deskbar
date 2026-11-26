@@ -1855,9 +1855,6 @@ public partial class TasksWindow : Window
         // thread, and the name is a button that opens the parent (TasksBoard.OpenParent).
         if (!inParent && row.ParentId is { } parentId && row.ParentTitle is { } parentTitle && Actions?.OpenParent is { } openParent)
             panel.Children.Add(ParentEntry(parentId, parentTitle, openParent));
-        // A SUBTASK OPENED IN PLACE SHOWS ITS REFUSAL (task 41f08dba): it has no line of its own for TextOf to draw it on,
-        // and TasksBoard counts it as drawn (RowDraws), so its thread says it, first, or the refusal would show nowhere.
-        if (inParent && row.Problem is { Length: > 0 } problem) panel.Children.Add(ProblemOf(problem));
         // A SUBTASK OPENED IN PLACE SHOWS ITS DESCRIPTION (task b2ff3fb7; Petre, of a subtask whose two screenshots were
         // nowhere to be seen once it sat under another task: "subtask may have lost its image after being moved into
         // another task"). A task's description and its pictures are drawn by its LINE (TextOf), under the title. This
