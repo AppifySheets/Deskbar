@@ -90,6 +90,8 @@ internal static class InboxMarks
         ["agent"] = [Ring(8, 3.5, 1.75), Ring(3.5, 12.5, 1.75), Ring(12.5, 12.5, 1.75), S("M8 5.25v2.5M8 7.75H3.5v3M8 7.75h4.5v3")],
         ["fail"] = [Ring(8, 8, 6.25), S("M5.8 5.8l4.4 4.4M10.2 5.8l-4.4 4.4")],
         ["tick"] = [S("M3.5 8.5l3 3 6-6.5")],
+        // A step with no result and none to come (its session ended, or it is in an older run): a ring with a dash.
+        ["blank"] = [Ring(8, 8, 6.25), S("M5.4 8h5.2")],
         ["chevR"] = [S("M6 3.5L10.5 8 6 12.5")],
         ["chevD"] = [S("M3.5 6L8 10.5 12.5 6")],
         ["image"] = [Box(2, 3, 12, 10, 2), Disc(5.5, 6.5, 1), S("M2.5 12l3.5-3.5 2.5 2.5 2-2 3 3")],

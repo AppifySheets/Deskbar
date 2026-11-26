@@ -63,17 +63,44 @@ public class ClaudeChatStreamTests
         Assert.Equal(["one", "untimed", "comment:c", "later"], Texts(view));
     }
 
+    // THE CAP IS ON THE SESSION'S ITEMS ALONE: a comment is never counted and never cut (tester M2).
     [Fact]
-    public void The_stream_keeps_only_the_last_entries_and_counts_the_rest()
+    public void The_stream_keeps_only_the_last_items_and_counts_the_rest()
     {
         var lines = Enumerable.Range(0, 10).Select(i => Said($"m{i}", i * 10)).ToArray();
 
         var view = ClaudeChatStream.Build(Chat(lines), [new("c", T0.AddSeconds(95))], earlierCommentsFolded: false, maxDrawn: 4);
 
-        Assert.Equal(["m7", "m8", "m9", "comment:c"], Texts(view));
-        Assert.Equal(7, view.Earlier);
+        Assert.Equal(["m6", "m7", "m8", "m9", "comment:c"], Texts(view));
+        Assert.Equal(6, view.Earlier);
     }
 
+    [Fact]
+    public void A_comment_on_the_cut_side_stays_in_the_stream()
+    {
+        var lines = Enumerable.Range(0, 10).Select(i => Said($"m{i}", i * 10)).ToArray();
+        var comments = new StreamComment[] { new("old", T0.AddSeconds(15)), new("older", T0.AddSeconds(-5)), new("middle", T0.AddSeconds(35)) };
+
+        var view = ClaudeChatStream.Build(Chat(lines), comments, earlierCommentsFolded: false, maxDrawn: 4);
+
+        // Every comment is there, before the first kept item, in its order by time; the items before them are the "earlier".
+        Assert.Equal(["comment:older", "comment:old", "comment:middle", "m6", "m7", "m8", "m9"], Texts(view));
+        Assert.Equal(6, view.Earlier);
+        Assert.Equal(comments.Length, view.Entries.Count(e => e.IsComment));
+    }
+
+    [Fact]
+    public void Asking_for_more_items_brings_the_earlier_ones_back_in_their_place()
+    {
+        var lines = Enumerable.Range(0, 10).Select(i => Said($"m{i}", i * 10)).ToArray();
+        var comments = new StreamComment[] { new("c", T0.AddSeconds(15)) };
+
+        var more = ClaudeChatStream.Build(Chat(lines), comments, earlierCommentsFolded: false, maxDrawn: 4 + 4);
+
+        Assert.Equal(["m2", "m3", "m4", "m5", "m6", "m7", "m8", "m9"], Texts(more).Where(t => !t.StartsWith("comment:")));
+        Assert.Equal(2, more.Earlier);
+        Assert.Equal("comment:c", Texts(ClaudeChatStream.Build(Chat(lines), comments, false, maxDrawn: 10))[2]);
+    }
     // The thread folds all but its latest comments; the history before the oldest shown one folds with them.
     [Fact]
     public void Items_older_than_the_oldest_shown_comment_fold_with_the_earlier_comments()
