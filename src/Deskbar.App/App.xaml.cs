@@ -194,6 +194,11 @@ public partial class App : Application
             // makes the news arrive sooner without making the app any noisier. It also makes the whole
             // path testable in a coffee break rather than overnight.
             //
+            // Since every merge started releasing, "once per release" became twenty dialogs on a busy day, so
+            // ordinary releases are now offered at most once a day (task 5e1e1a12, UpdateCadence). The tick stays
+            // at five minutes for the two cases that still want speed: a critical release, and a copy whose owner
+            // ticked "every release" in Manage.
+            //
             // The cost is twelve requests an hour to GitHub's unauthenticated releases endpoint, whose
             // limit is sixty an hour PER IP. Fine for one machine, and worth knowing for a shared
             // office address: five colleagues running this would sit exactly on the limit, and a
@@ -381,6 +386,11 @@ public partial class App : Application
             : latest.Value.HasNoValue ? $"update check: {UpdateService.RunningVersion} is current"
             : $"update check: {latest.Value.Value.Version} available, running {UpdateService.RunningVersion}");
 
+        // Nothing newer, so this copy is current: start the daily clock here if it has never run (task 5e1e1a12,
+        // UpdateCadence), so the day counts from now rather than from the first release that comes out after it.
+        if (latest.IsSuccess && latest.Value.HasNoValue && manager is { State.LastUpdateOffer: null } current)
+            current.StampUpdateOffer(DateTimeOffset.Now, null);
+
         // A failure is today's answer, not a problem: no network, a proxy, GitHub rate-limiting a
         // shared IP. Tomorrow's tick asks again, and the user is never told any of it.
         if (latest.IsFailure || latest.Value.HasNoValue) return;
@@ -407,6 +417,35 @@ public partial class App : Application
         {
             ClickTrace.Write($"update {release.Version} already announced, staying quiet");
             return;
+        }
+
+        // HOW OFTEN (task 5e1e1a12, UpdateCadence has the rule): at most one ordinary offer a day, unless this copy
+        // asked for every release (Manage's box, Petre's copy) or the release fixes something critical that no offer
+        // has covered yet. A release held back gets no dialog and no balloon, and the next tick asks again; by the
+        // time the day is up it is usually a newer release that gets offered.
+        if (manager is { } state)
+        {
+            var now = DateTimeOffset.Now;
+            var verdict = UpdateCadence.Decide(UpdateService.RunningVersion, release, state.State.UpdateEveryRelease,
+                state.State.LastUpdateOffer, state.State.LastUpdateOfferVersion, now);
+            ClickTrace.Write($"update {release.Version}: {verdict}" +
+                $" (critical since {release.CriticalSince ?? "none"}, every release {state.State.UpdateEveryRelease}," +
+                $" last offer {state.State.LastUpdateOfferVersion ?? "none"} at {state.State.LastUpdateOffer?.ToString("u") ?? "never"})");
+            if (verdict != UpdateCadence.Verdict.Offer)
+            {
+                if (verdict == UpdateCadence.Verdict.StartClock) state.StampUpdateOffer(now, null);
+                // An earlier offer already said no and left its "Update to ..." item on the menus. Move that item up to
+                // this newer release quietly, with no dialog and no balloon, so taking it later installs the newest
+                // build rather than the one offered this morning. With no earlier offer there is no item to move.
+                if (availableUpdate is not null)
+                {
+                    availableUpdate = release;
+                    pendingUpdate = ($"Update to {release.Version}…", () => OfferUpdate(release));
+                    RefreshTrayMenu();
+                }
+                return;
+            }
+            state.StampUpdateOffer(now, release.Version);
         }
         availableUpdate = release;
 

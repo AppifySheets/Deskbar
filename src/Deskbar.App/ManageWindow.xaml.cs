@@ -55,6 +55,14 @@ public partial class ManageWindow : Window
         // saying yes to the Store's offer does install. The one setting governs both checks.
         if (PackageIdentity.IsPackaged)
             CheckForUpdates.Content = "Check the Microsoft Store for new versions";
+        // The cadence box (task 5e1e1a12): same harmless Checked as above, SetUpdateEveryRelease ignores an unchanged
+        // value. Collapsed in the Store copy, where the Store decides when an update arrives and this rule never runs.
+        UpdateEveryRelease.IsChecked = manager.State.UpdateEveryRelease;
+        if (PackageIdentity.IsPackaged)
+        {
+            UpdateEveryRelease.Visibility = Visibility.Collapsed;
+            UpdateEveryReleaseNote.Visibility = Visibility.Collapsed;
+        }
         // Same pattern, and the same reason it is harmless: SetDockBar ignores an unchanged value.
         DockBar.IsChecked = manager.State.DockBar;
         // Same again: SetClaudeSkill ignores an unchanged value.
@@ -296,6 +304,10 @@ public partial class ManageWindow : Window
     // composition root for no outcome anybody would notice.
     void OnCheckForUpdatesToggled(object s, RoutedEventArgs e) =>
         manager.SetCheckForUpdates(CheckForUpdates.IsChecked == true).TapError(Complain);
+
+    // Read by the next automatic check, so it takes effect within five minutes and needs no restart.
+    void OnUpdateEveryReleaseToggled(object s, RoutedEventArgs e) =>
+        manager.SetUpdateEveryRelease(UpdateEveryRelease.IsChecked == true).TapError(Complain);
 
     // The bar follows the setting from the state pulse this sends (FloatingBar.FollowDockSetting).
     void OnDockBarToggled(object s, RoutedEventArgs e) =>

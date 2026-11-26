@@ -118,3 +118,35 @@ Describe 'Test-Releasable' {
         Test-Releasable @() 0 | Should Be $false
     }
 }
+
+Describe 'Get-CriticalSince' {
+    It 'makes this release the floor when a pull request in its range is labelled critical-update' {
+        Get-CriticalSince -PullRequests @((New-Pr 1 ''), (New-Pr 2 '' @('critical-update'))) -Version '2.6.40' `
+            -PreviousBody '<!-- deskbar-critical-since: 2.6.12 -->' | Should Be '2.6.40'
+    }
+
+    It 'carries the previous release''s floor forward when nothing in the range is critical' {
+        Get-CriticalSince -PullRequests @((New-Pr 1 '' @('no-release'))) -Version '2.6.41' `
+            -PreviousBody "**Critical update.** x`n`n<!-- deskbar-critical-since: 2.6.40 -->`n- notes" | Should Be '2.6.40'
+    }
+
+    It 'answers nothing when no release was ever critical' {
+        Get-CriticalSince -PullRequests @((New-Pr 1 '')) -Version '2.6.41' -PreviousBody '- notes' | Should BeNullOrEmpty
+        Get-CriticalSince -PullRequests @() -Version '2.6.41' -PreviousBody $null | Should BeNullOrEmpty
+    }
+}
+
+Describe 'Format-ImportanceNotes' {
+    It 'says so in words and in the marker when this release is the critical one' {
+        Format-ImportanceNotes -CriticalSince '2.6.40' -Version '2.6.40' |
+            Should Be "**Critical update.** Deskbar offers it straight away rather than with the daily update.`n`n<!-- deskbar-critical-since: 2.6.40 -->`n"
+    }
+
+    It 'writes only the hidden marker when the floor is an earlier release' {
+        Format-ImportanceNotes -CriticalSince '2.6.40' -Version '2.6.41' | Should Be "<!-- deskbar-critical-since: 2.6.40 -->`n"
+    }
+
+    It 'writes nothing when there is no floor' {
+        Format-ImportanceNotes -CriticalSince $null -Version '2.6.41' | Should BeNullOrEmpty
+    }
+}

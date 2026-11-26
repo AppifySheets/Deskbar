@@ -2148,6 +2148,18 @@ public sealed class WorkspaceManager(
             ? Result.Success()
             : Result.Success().Tap(() => Persist(State with { CheckForUpdates = enabled }));
 
+    // The update cadence box in Manage (AppState.UpdateEveryRelease). A no-op when unchanged, for the reason
+    // SetCheckForUpdates gives.
+    public Result SetUpdateEveryRelease(bool enabled) =>
+        State.UpdateEveryRelease == enabled
+            ? Result.Success()
+            : Result.Success().Tap(() => Persist(State with { UpdateEveryRelease = enabled }));
+
+    // The automatic update check showed an offer of `version`, or started its clock with no offer (version null,
+    // which keeps the last offered version). AppState.LastUpdateOffer and LastUpdateOfferVersion, UpdateCadence.
+    public void StampUpdateOffer(DateTimeOffset when, string? version) =>
+        Persist(State with { LastUpdateOffer = when, LastUpdateOfferVersion = version ?? State.LastUpdateOfferVersion });
+
     // The docking setting (AppState.DockBar). The bar follows it from the pulse Persist sends, so Manage,
     // `deskbar.cmd bar dock|undock` and anything else that sets it all go through one path. A no-op
     // when unchanged, for the reason SetCheckForUpdates gives.

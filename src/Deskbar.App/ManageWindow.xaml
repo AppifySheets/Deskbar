@@ -65,6 +65,16 @@
                         <CheckBox x:Name="CheckForUpdates" Margin="0,6,0,0"
                                   Content="Check GitHub for new versions (tells you; never installs anything)"
                                   Checked="OnCheckForUpdatesToggled" Unchecked="OnCheckForUpdatesToggled"/>
+                        <!-- How often an ordinary update is offered (AppState.UpdateEveryRelease, task 5e1e1a12,
+                             Deskbar.Core.Updates.UpdateCadence). Off: at most once a day, critical fixes at once. On: every
+                             release as soon as it is out, which is the copy that follows main. Indented under the box above
+                             because it only means something while that one is on. The Store copy collapses it from code:
+                             the Store decides when its updates arrive. -->
+                        <CheckBox x:Name="UpdateEveryRelease" Margin="20,4,0,0"
+                                  Content="Offer every new version as soon as it is out"
+                                  Checked="OnUpdateEveryReleaseToggled" Unchecked="OnUpdateEveryReleaseToggled"/>
+                        <TextBlock x:Name="UpdateEveryReleaseNote" TextWrapping="Wrap" Margin="40,2,0,0" Opacity="0.75"
+                                   Text="Otherwise Deskbar offers an update at most once a day, and a critical fix straight away."/>
                         <!-- The Claude Code skill (AppState.ClaudeSkill, ClaudeSkill.cs). Petre: "add a skill for claude per
                              user". On by default, and it only ever writes when Claude Code's own folder exists. What it
                              writes is under the box rather than in its label, which ran off the window's edge. -->

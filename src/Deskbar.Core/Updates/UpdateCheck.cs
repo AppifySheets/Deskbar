@@ -9,7 +9,13 @@ namespace Deskbar.Core.Updates;
 // exe is the download, and a release without one can still be announced and linked but cannot be
 // fetched. Downstream reads "no asset" as "link only", which is also what an asset that failed a
 // safety check becomes.
-public sealed record ReleaseInfo(string Version, string PageUrl, string? AssetName, string? AssetUrl);
+//
+// CriticalSince is the newest CRITICAL release as of this one (task 5e1e1a12), read from a marker the release
+// workflow writes into the release body: "critical-update" on any pull request in a release makes that release
+// the new floor, and a release without one carries the previous release's floor forward. A running version
+// below it is missing a critical fix, so the offer skips the daily wait (UpdateCadence). Null when the body has
+// no marker, which is every release made before the marker existed, and reads as "nothing critical".
+public sealed record ReleaseInfo(string Version, string PageUrl, string? AssetName, string? AssetUrl, string? CriticalSince = null);
 
 // Petre: "check for updates -- tell the user a new version exists and offer a link to the new
 // file... may also download the new version and offer to start it... never silently self-replace."
@@ -116,15 +122,33 @@ public static class UpdateCheck
 
             // Both dropped together unless both survive their checks, so "there is an asset" is one
             // question downstream rather than two that can disagree.
+            var criticalSince = CriticalSinceIn(Text(root, "body"));
             return IsSafeAsset(assetName, assetUrl)
-                ? new ReleaseInfo(version, page, assetName, assetUrl)
-                : new ReleaseInfo(version, page, null, null);
+                ? new ReleaseInfo(version, page, assetName, assetUrl, criticalSince)
+                : new ReleaseInfo(version, page, null, null, criticalSince);
         }
         catch (JsonException e)
         {
             return Result.Failure<ReleaseInfo>($"unreadable release payload: {e.Message}");
         }
     }
+
+    // The marker scripts/ReleaseNotes.psm1 (Format-ImportanceNotes) writes into a release body, as an HTML comment
+    // so the release page does not show it: "<!-- deskbar-critical-since: 2.6.40 -->". The version is kept only
+    // when it parses as one, so a mangled marker reads as no marker: "nothing critical" falls back to the daily
+    // offer, which is late rather than wrong, the direction this file always errs in.
+    static readonly System.Text.RegularExpressions.Regex CriticalMarker =
+        new(@"<!--\s*deskbar-critical-since:\s*v?(?<version>[0-9]+(\.[0-9]+){1,3})\s*-->",
+            System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+
+    public static string? CriticalSinceIn(string? body) =>
+        body is not null && CriticalMarker.Match(body) is { Success: true } match && Parse(match.Groups["version"].Value) is not null
+            ? match.Groups["version"].Value
+            : null;
+
+    // Whether the running build is older than the newest critical release, so the update must not wait.
+    public static bool IsCriticalFor(string? running, ReleaseInfo release) =>
+        release.CriticalSince is { } floor && IsNewer(running, floor);
 
     // An installer is recognised by "Setup" in its file name, ordinal and case-insensitive.
     static bool IsSetup(string? name) =>

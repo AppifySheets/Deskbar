@@ -505,11 +505,31 @@ jobs:
             exit 0
           }
 
+          # HOW URGENT (task 5e1e1a12, scripts/ReleaseNotes.psm1 has the reasoning): the body carries the newest
+          # critical release so far, as a hidden marker the app reads. This release is that floor when a pull
+          # request in its range is labelled critical-update; otherwise the previous release's floor is copied
+          # forward. A previous body that cannot be read only loses the floor, which makes copies treat the update
+          # as ordinary (offered within a day), so it warns rather than fails.
+          $previousBody = $null
+          if ($range.Previous) {
+            $previousBody = gh release view $range.Previous --json body --jq .body 2>$null
+            if ($LASTEXITCODE -ne 0) { "::warning::Could not read $($range.Previous)'s notes; the critical floor is not carried forward."; $previousBody = $null }
+            else { $previousBody = $previousBody -join "`n" }
+          }
+          $criticalSince = Get-CriticalSince -PullRequests $range.PullRequests -Version $env:VERSION -PreviousBody $previousBody
+          $importance = Format-ImportanceNotes -CriticalSince $criticalSince -Version $env:VERSION
+          if ($criticalSince) { "Critical since: v$criticalSince$(if ($criticalSince -eq $env:VERSION) { ' (this release)' })" }
+
           $notes = Join-ReleaseNotes $range.PullRequests
           if ($notes) {
-            Set-Content -LiteralPath release-notes.md -Value $notes -Encoding utf8
+            Set-Content -LiteralPath release-notes.md -Value ($importance + $notes) -Encoding utf8
             "Notes since $($range.Previous), from: $(($range.PullRequests | ForEach-Object { "#$($_.number)" }) -join ', ')"
             gh release create $tag --draft --target $env:SHA --title $tag --notes-file release-notes.md $env:ASSET
+          } elseif ($importance) {
+            # --notes-file with --generate-notes: gh puts the given text in front of the generated notes.
+            Set-Content -LiteralPath release-notes.md -Value $importance -Encoding utf8
+            "Notes: generated, since no pull request since $($range.Previous) has a Release notes section."
+            gh release create $tag --draft --target $env:SHA --title $tag --notes-file release-notes.md --generate-notes $env:ASSET
           } else {
             "Notes: generated, since no pull request since $($range.Previous) has a Release notes section."
             gh release create $tag --draft --target $env:SHA --title $tag --generate-notes $env:ASSET

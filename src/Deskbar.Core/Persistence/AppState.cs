@@ -437,6 +437,18 @@ public sealed record AppState(
     // without it: no request leaves the machine, and nothing is announced.
     public bool CheckForUpdates { get; init; } = true;
 
+    // How often the automatic check offers an ordinary update (task 5e1e1a12, Deskbar.Core.Updates.UpdateCadence).
+    // UpdateEveryRelease: offer each release as soon as it is out, the way every copy did before. Off by default:
+    // every merge to main releases, and Petre wants that stream on his copy only, so everyone else gets at most one
+    // ordinary offer a day (critical releases still come at once). A box in Manage for the GitHub copy.
+    // LastUpdateOffer: when the automatic check last showed an offer, which is what the day counts from. Null until
+    // the first successful check of a build with this rule, which stamps it. LastUpdateOfferVersion: the version
+    // that offer was for, so a critical release is offered at once only until an offer has covered it. A
+    // state.json without these keys loads as off and never stamped, so no migration.
+    public bool UpdateEveryRelease { get; init; }
+    public DateTimeOffset? LastUpdateOffer { get; init; }
+    public string? LastUpdateOfferVersion { get; init; }
+
     // Whether the bar docks to a screen edge as an app bar, the way the taskbar does, so windows keep
     // clear of it (see the docking section of FloatingBar). Petre, once it worked: "make this a config
     // setting and disable by default" ("docking i mean").

@@ -106,6 +106,47 @@ function Test-Releasable {
     return ($free.Count -gt 0)
 }
 
+# HOW URGENT A RELEASE IS (task 5e1e1a12). Copies of Deskbar offer an ordinary release at most once a day, so a
+# merge burst does not put twenty dialogs in front of people; a release that fixes something serious is offered
+# at once. A pull request says it is serious with the `critical-update` label.
+#
+# The app reads only releases/latest, and someone can be several releases behind, so a flag on the one release
+# would be lost as soon as an ordinary release followed it. So every release body carries the FLOOR: the newest
+# critical release so far. A release with a `critical-update` pull request in its range is the new floor; any
+# other release copies the floor from the previous release's body. The app then compares its own version against
+# the floor (Deskbar.Core.Updates.UpdateCheck.CriticalSinceIn and IsCriticalFor).
+
+# The marker, as an HTML comment so the release page does not show it. The app's regex matches this exact shape.
+$script:CriticalMarkerPattern = '<!--\s*deskbar-critical-since:\s*v?([0-9]+(\.[0-9]+){1,3})\s*-->'
+
+# The floor this release carries: $Version when a pull request in its range is labelled critical-update,
+# otherwise the floor in the previous release's body, or $null when there is none. $Version without a leading v.
+function Get-CriticalSince {
+    param([object[]] $PullRequests, [Parameter(Mandatory)] [string] $Version, [AllowNull()][AllowEmptyString()][string] $PreviousBody)
+
+    $critical = @($PullRequests | Where-Object { $_ -and (@($_.labels) -contains 'critical-update') })
+    if ($critical.Count -gt 0) { return $Version }
+    if ([string]::IsNullOrWhiteSpace($PreviousBody)) { return $null }
+    $match = [regex]::Match($PreviousBody, $script:CriticalMarkerPattern)
+    if ($match.Success) { return $match.Groups[1].Value } else { return $null }
+}
+
+# What goes in front of the notes: a line people can read when THIS release is the critical one, then the hidden
+# marker. Empty when there is no floor. The workflow puts it before the joined notes, or passes it in --notes-file
+# with --generate-notes, which GitHub puts in front of the generated text.
+function Format-ImportanceNotes {
+    param([AllowNull()][AllowEmptyString()][string] $CriticalSince, [Parameter(Mandatory)] [string] $Version)
+
+    if ([string]::IsNullOrWhiteSpace($CriticalSince)) { return '' }
+    $lines = @()
+    if ($CriticalSince -eq $Version) {
+        $lines += '**Critical update.** Deskbar offers it straight away rather than with the daily update.'
+        $lines += ''
+    }
+    $lines += "<!-- deskbar-critical-since: $CriticalSince -->"
+    return (($lines -join "`n") + "`n")
+}
+
 # THE IMPURE PART: asks git and the GitHub API what a release from $Head would contain.
 #
 # Returns an object with:
@@ -198,4 +239,4 @@ function Get-ReleaseRange {
     return $result
 }
 
-Export-ModuleMember -Function Select-PreviousRelease, Get-ReleaseNotesSection, Join-ReleaseNotes, Test-Releasable, Get-ReleaseRange
+Export-ModuleMember -Function Select-PreviousRelease, Get-ReleaseNotesSection, Join-ReleaseNotes, Test-Releasable, Get-CriticalSince, Format-ImportanceNotes, Get-ReleaseRange

@@ -1024,7 +1024,11 @@ Before the first signed release:
    on your machine is `major.minor.<git height>` and its patch says nothing about the release
    numbers. Label the pull request
    `no-release` when the change must not ship on its own yet; it then goes out with the next
-   release. A minor bump (2.5.0) is a pull request that edits `version.json`.
+   release. Label it `critical-update` when the fix should not wait: copies of Deskbar offer an
+   ordinary release at most once a day, and a critical one at once. The release then says so in
+   its notes and carries a hidden marker every later release copies forward, so a copy several
+   releases behind still sees it (`scripts/ReleaseNotes.psm1`). A minor bump (2.5.0) is a pull
+   request that edits `version.json`.
 2. Merge it. A merge that changes something under `src/` starts the Release workflow by itself;
    any other merge starts nothing. The workflow looks at everything merged since the last
    published release. It skips quietly when the merged commit is already in a release, or when

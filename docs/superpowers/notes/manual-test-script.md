@@ -1408,6 +1408,21 @@ WI8. With "working" on, select the working task and open its thread, then let it
 WI9. Drag an idle line and drop it where it was, or press Esc: it is still drawn dimmer. The Matrix keeps its old order
      and does not split working from idle (a compact line shows no sessions).
 
+## Update offers once a day, critical ones at once
+
+Task 5e1e1a12. Run on the GitHub copy with tracing on (`trace.on`), reading `update ...` lines in the trace log.
+
+UC1. Manage → Settings: "Offer every new version as soon as it is out" sits under "Check GitHub for new versions",
+     unticked, with the once-a-day note under it. The Store copy does not show it.
+UC2. Untick it on a copy one release behind. The first check after start logs `StartClock` and nothing is offered;
+     later checks log `Wait`. Set `LastUpdateOffer` in state.json to a time more than a day ago (Deskbar exited) and
+     start it: the newest release is offered within 30 seconds, and the trace logs `Offer`.
+UC3. Tick it: the next check (within five minutes) offers the newest release at once.
+UC4. Merge a pull request labelled `critical-update`. Its release notes open with "Critical update." and carry the
+     hidden marker (`gh release view vX --json body`); the next ordinary release's body carries the same marker. A
+     copy below that release with the box unticked is offered the update at its next check, without the day.
+UC5. "Check for updates…" from the tray finds the newest release whatever the day, box or no box.
+
 ## Results (2026-08-01)
 
 Status: **pending human execution.** An agent cannot observe the desktop, Task View,
