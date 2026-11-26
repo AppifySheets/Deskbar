@@ -1,5 +1,6 @@
 using System.Collections.Immutable;
 using System.IO;
+using System.Reactive.Concurrency;
 using System.Reactive.Linq;
 using System.Reactive.Threading.Tasks;
 using CSharpFunctionalExtensions;
@@ -34,8 +35,9 @@ namespace Deskbar.App;
 //      moved on before the switch could be made. The original was never touched.
 // A Deskbar that closes at any point leaves a stored phase, and the first good read after it starts again carries on.
 //
-// NOT HERE: a window attached to the original is closed by its stop (measured 2026-11-25) and is not reopened on the
-// copy; opening windows is ClaudeTaskActions' job and the picker's drawing step will decide it.
+// A WINDOW of Deskbar's attached to the original is closed by its stop (measured 2026-11-25). When one was open, a window
+// is opened on the task's session, the copy, a moment after the stop (ReopenWindow, which the app hands to
+// ClaudeTaskActions; opening windows is not this class's job).
 public sealed partial class ClaudeSessions
 {
     // Tasks whose switch has a `claude` call out right now: the poll leaves them alone until it answers.
@@ -200,6 +202,8 @@ public sealed partial class ClaudeSessions
         var now = scheduler.Now;
         if (switchStopTried.TryGetValue(pending.FromSession, out var tried) && now - tried < StopRetry) return;
         switchStopTried = switchStopTried.SetItem(pending.FromSession, now);
+        // A window of Deskbar's attached to the original closes with its stop (measured 2026-11-25); asked before the stop.
+        var hadWindow = tasks.Board.Tasks.TryFirst(t => t.Id == taskId).Map(windowOpen).GetValueOrDefault(false);
         // Its comment waiter goes before its process does, as before every stop and resume (task daeaa26c).
         retireWaiter(pending.FromSession);
         StopForSwitch(taskId, stopOriginal.Value, stopped =>
@@ -207,7 +211,76 @@ public sealed partial class ClaudeSessions
             if (!stopped) return;
             switchStopTried = switchStopTried.Remove(pending.FromSession);
             Confirmed(taskId);
+            if (hadWindow) ReopenLater(taskId);
         });
+    }
+
+    /// <summary>
+    /// Opens a window on the task's session again (the app: ClaudeTaskActions, the way Open Claude does) after a switch
+    /// stopped the original that a window of Deskbar's was attached to. None: no window is reopened.
+    /// </summary>
+    public Action<Guid>? ReopenWindow { get; set; }
+
+    // The stopped window may still be on its way out for a moment, and the opener brings forward a window with the task's
+    // title when it finds one; so the reopen waits for the old one to go.
+    static readonly TimeSpan ReopenAfter = TimeSpan.FromSeconds(2);
+
+    void ReopenLater(Guid taskId) =>
+        scheduler.Schedule(ReopenAfter, () =>
+        {
+            if (tasks.Board.Tasks.Any(t => t.Id == taskId && t.IsOpen)) ReopenWindow?.Invoke(taskId);
+        });
+
+    /// <summary>
+    /// The picker's Cancel. A pick still waiting for a pause is dropped (TaskBoard.Unwant); a joined switch goes back to the
+    /// original, which still runs, and the copy is stopped. While the copy is being made there is nothing to cancel yet.
+    /// Called on the UI thread.
+    /// </summary>
+    public Result CancelPick(Guid taskId)
+    {
+        if (tasks.Board.Tasks.FirstOrDefault(t => t.Id == taskId) is not { } task) return Result.Failure("The task is gone.");
+        if (task.Switching is not { HasValue: true } switching) return tasks.Unwant(taskId);
+        var pending = switching.Value;
+        if (pending.Issued.HasNoValue) return tasks.Unwant(taskId);
+        if (pending.CopyId is not { HasValue: true } copyId) return Result.Failure("The copy is being made right now. Cancel once it shows.");
+        // The list's short id, else the one Claude printed, else the id's first eight characters (a background session's
+        // short id is those, measured): the copy may have joined after the last poll, so the list may not show it yet.
+        var listedShortId = lastLive.TryFirst(a => a.SessionId == copyId.Value).Bind(a => a.ShortId);
+        var copyShortId = listedShortId.HasValue ? listedShortId.Value
+            : pending.CopyShortId.GetValueOrDefault(copyId.Value[..Math.Min(8, copyId.Value.Length)]);
+        return tasks.SwitchReverted(taskId)
+            .Tap(() =>
+            {
+                Say(taskId, "Cancelled. The task is back on its earlier session, which never stopped.");
+                retireWaiter(copyId.Value);
+                StopForSwitch(taskId, copyShortId, _ => { });
+            });
+    }
+
+    /// <summary>What the task's picker row shows (SessionPicker.RowOf) on the latest list. Called on the UI thread.</summary>
+    public SessionPickRow? PickRow(Guid taskId) =>
+        tasks.Board.Tasks.FirstOrDefault(t => t.Id == taskId) is { } task ? SessionPicker.RowOf(task, lastLive, CachedLastModel) : null;
+
+    // The page asks on every redraw, so the model of a session's last reply is read from its transcript once per change of
+    // the file (its length and write time), as LastTurnError is.
+    readonly Dictionary<string, (long Length, DateTime Written, Maybe<string> Model)> lastModels = [];
+
+    Maybe<string> CachedLastModel(TaskSession session)
+    {
+        try
+        {
+            if (TranscriptOf(session).GetValueOrDefault() is not { } path) return Maybe<string>.None;
+            var file = new FileInfo(path);
+            var (length, written) = (file.Length, file.LastWriteTimeUtc);
+            if (lastModels.TryGetValue(path, out var known) && known.Length == length && known.Written == written) return known.Model;
+            var model = ClaudeTranscript.LastModel(Tail(path));
+            lastModels[path] = (length, written, model);
+            return model;
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            return Maybe<string>.None;
+        }
     }
 
     void Confirmed(Guid taskId)

@@ -375,6 +375,7 @@ public sealed partial class TasksBoard : IDisposable
             ShowInbox = ShowInbox,
             OpenPage = OpenPage,
             PermissionsOf = PermissionsOf, AnswerPermission = AnswerPermission,
+            SessionPickOf = SessionPickOf, PickSession = PickSession, CancelPick = CancelPick, AnswerWithOption = AnswerWithOption,
         };
 
         // Taken before the subscriptions below exist, so the first StateChanged pulse is compared with this state

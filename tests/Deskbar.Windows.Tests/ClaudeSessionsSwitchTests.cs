@@ -120,11 +120,11 @@ public class ClaudeSessionsSwitchTests
         }
 
         // A restart builds a new ClaudeSessions over the same board, as a Deskbar that closed and started again does.
-        public ClaudeSessions Begin()
+        public ClaudeSessions Begin(Func<TaskItem, bool>? windowOpen = null)
         {
             Sessions?.Dispose();
             Sessions = new ClaudeSessions(Tasks, Manager, Cli, Clock, _ => Maybe<Guid>.None, Home, background: Scheduler.Immediate,
-                trace: Traces.Add, folderExists: _ => true);
+                trace: Traces.Add, folderExists: _ => true, windowOpen: windowOpen);
             Run(Seconds(1));
             return Sessions;
         }
@@ -531,5 +531,86 @@ public class ClaudeSessionsSwitchTests
         Assert.Empty(rig.Cli.Changes);
         Assert.True(rig.Of(taskId).Switching.HasNoValue);
         Assert.Equal(SonnetLow, rig.Of(taskId).Wanted.Value);
+    }
+
+    // --- the picker row's side: its words, Cancel, and the window ----------------------------------------------------
+
+    [Fact]
+    public void The_row_follows_the_switch_through_its_phases()
+    {
+        using var rig = new Rig();
+        var (taskId, _) = rig.Running();
+        var row = rig.Cli.Listed.Single();
+        row.Status = "busy";
+        row.State = "working";
+        rig.Begin();
+
+        rig.Pick(taskId, SonnetLow);
+        var waiting = rig.Sessions!.PickRow(taskId)!;
+        Assert.Equal(PickPhase.Waiting, waiting.Phase);
+        Assert.Equal("Sonnet · low", waiting.ModelWords);
+        Assert.True(waiting.CanCancel);
+
+        row.Status = "idle";
+        row.State = "done";
+        rig.Run(Poll);
+        var joined = rig.Sessions.PickRow(taskId)!;
+        Assert.Equal(PickPhase.Confirming, joined.Phase);
+        Assert.Equal(SessionPicker.ConfirmingWords, joined.PhaseWords);
+
+        rig.Replied(rig.Cli.Last!.SessionId);
+        rig.Run(Poll);
+        var done = rig.Sessions.PickRow(taskId)!;
+        Assert.Equal(PickPhase.Settled, done.Phase);
+        Assert.Equal("Sonnet · low", done.ModelWords);
+    }
+
+    // Cancel while waiting drops the pick; Cancel once joined goes back to the original, which never stopped, and stops
+    // the copy; while the copy is being made there is nothing to cancel yet.
+    [Fact]
+    public void Cancel_drops_a_waiting_pick_or_goes_back_from_a_joined_one()
+    {
+        using var rig = new Rig();
+        var (taskId, original) = rig.Running();
+        var row = rig.Cli.Listed.Single();
+        row.Status = "busy";
+        rig.Begin();
+        rig.Pick(taskId, SonnetLow);
+
+        Assert.True(rig.Sessions!.CancelPick(taskId).IsSuccess);
+        Assert.True(rig.Of(taskId).Switching.HasNoValue);
+        Assert.True(rig.Of(taskId).Wanted.HasNoValue);
+
+        row.Status = "idle";
+        rig.Pick(taskId, SonnetLow);
+        var copy = rig.Cli.Last!.SessionId;
+        Assert.True(rig.Sessions.CancelPick(taskId).IsSuccess);
+        rig.Run(Seconds(1));
+
+        Assert.Equal(["stop", copy[..8]], Assert.Single(rig.Cli.Stops).Arguments);
+        Assert.Equal(original, SettingsSwitch.Current(rig.Of(taskId)).Value.Id);
+        Assert.Contains(rig.Cli.Listed, r => r.SessionId == original);
+
+        Assert.True(rig.Tasks.SwitchStarted(taskId, new PendingSwitch(original, SonnetLow, rig.Clock.Now)).IsSuccess);
+        Assert.True(rig.Tasks.SwitchIssued(taskId, SonnetLow).IsSuccess);
+        Assert.True(rig.Sessions.CancelPick(taskId).IsFailure);
+    }
+
+    // The original's stop closes a window attached to it: one is opened on the copy a moment later, only when one was open.
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void A_window_on_the_original_is_reopened_on_the_copy(bool windowWasOpen)
+    {
+        using var rig = new Rig();
+        var (taskId, _) = rig.Running();
+        var reopened = new List<Guid>();
+        rig.Begin(windowOpen: _ => windowWasOpen).ReopenWindow = reopened.Add;
+        rig.Pick(taskId, SonnetLow);
+        rig.Replied(rig.Cli.Last!.SessionId);
+
+        rig.Run(Poll + Seconds(3));
+        Assert.Single(rig.Cli.Stops);
+        Assert.Equal(windowWasOpen ? [taskId] : [], reopened);
     }
 }
