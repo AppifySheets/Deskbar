@@ -32,7 +32,7 @@ namespace Deskbar.Core.Tasks;
 // Id, so the page matches it with the one it drew before.
 public static class ClaudeChatStream
 {
-    /// <summary>How many elements the page draws at most (the older ones fold behind "N earlier").</summary>
+    /// <summary>How many of the session's items the page draws first, and how many more each press of "N earlier" adds. Comments are not counted.</summary>
     public const int MaxDrawn = 60;
 
     /// <summary>
@@ -66,6 +66,12 @@ public static class ClaudeChatStream
         if (earlierCommentsFolded && ordered.Count > 0)
             keyed = keyed.Where(k => k.Key >= ordered[0].At).ToList();
 
+        // THE CAP IS ON THE SESSION'S ITEMS ALONE (tester finding M2): every comment given is always in the stream, so an old
+        // comment never falls off the page behind the cut. The last `maxDrawn` items stay; a comment older than the first
+        // of them goes before it, in its place by time.
+        var earlier = Math.Max(0, keyed.Count - Math.Max(1, maxDrawn));
+        keyed = keyed.Skip(earlier).ToList();
+
         var entries = new List<StreamEntry>();
         var next = 0;
         foreach (var (key, item) in keyed)
@@ -75,8 +81,7 @@ public static class ClaudeChatStream
         }
         for (; next < ordered.Count; next++) entries.Add(new StreamEntry(ordered[next].Key, ordered[next].At, null));
 
-        var earlier = Math.Max(0, entries.Count - Math.Max(1, maxDrawn));
-        return new StreamView(entries.Skip(earlier).ToList(), earlier);
+        return new StreamView(entries, earlier);
     }
 
     // Each item with the moment it sorts by: its own time, else the previous item's, else the very start.

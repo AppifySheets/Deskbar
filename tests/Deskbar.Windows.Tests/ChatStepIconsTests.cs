@@ -17,7 +17,7 @@ public class ChatStepIconsTests
     [Fact]
     public void A_failed_step_a_finished_step_and_the_fold_chevrons_are_shapes_of_their_own() => StaThread.Run(() =>
     {
-        var names = new[] { "fail", "tick", "chevR", "chevD", "image" }.Concat(Enum.GetValues<StepKind>().Select(ChatStepIcons.IconOf)).ToArray();
+        var names = new[] { "fail", "tick", "blank", "chevR", "chevD", "image" }.Concat(Enum.GetValues<StepKind>().Select(ChatStepIcons.IconOf)).ToArray();
         var shapes = names.Select(InboxMarks.ShapeOfIcon).ToArray();
 
         Assert.Equal(names.Distinct().Count(), shapes.Distinct().Count());

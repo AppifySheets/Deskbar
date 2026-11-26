@@ -104,7 +104,7 @@ public partial class TasksWindow
         if (stream is null || transcript is null) return;
         var scroller = pageScroller;
         var pinned = scroller is null || scroller.VerticalOffset >= scroller.ScrollableHeight - 24;
-        stream.Apply(transcript.Latest?.Items ?? [], NoteOf(transcript));
+        stream.Apply(transcript.Latest?.Items ?? [], NoteOf(transcript), transcript.Source.Kind == ChatSourceKind.Live);
         if (scroller is not null && pinned)
         {
             scroller.UpdateLayout();
@@ -146,7 +146,7 @@ public partial class TasksWindow
             if (stream.Parent is Panel old) old.Children.Remove(stream);
             stream.SetComments(comments, earlierFolded);
         }
-        stream.Apply(poll.Latest?.Items ?? [], NoteOf(poll));
+        stream.Apply(poll.Latest?.Items ?? [], NoteOf(poll), poll.Source.Kind == ChatSourceKind.Live);
         return [stream];
     }
 

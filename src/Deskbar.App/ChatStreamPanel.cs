@@ -59,8 +59,12 @@ internal sealed class ChatStreamPanel : StackPanel
     IReadOnlyList<(string Key, DateTimeOffset At, UIElement Element)> comments;
     bool earlierFolded;
     readonly Dictionary<string, Slot> slots = new(StringComparer.Ordinal);
-    TextBlock? earlierLine;
+    Button? earlierButton;
+    TextBlock? earlierWords;
     TextBlock? noteLine;
+    // How many times "N earlier" was pressed: each shows MaxDrawn more of the session's items (tester finding M2).
+    int pages;
+    (IReadOnlyList<ChatItem> Items, string? Note, bool Live) last = ([], null, true);
 
     public ChatStreamPanel(ChatStreamDeps deps, IReadOnlyList<(string Key, DateTimeOffset At, UIElement Element)> comments, bool earlierFolded)
     {
@@ -91,9 +95,16 @@ internal sealed class ChatStreamPanel : StackPanel
     /// Brings the stream to the session's items as they are now, with an optional dim line at its end ("Session ended").
     /// Draws what is new, updates what changed, drops what left the window, and touches nothing else.
     /// </summary>
-    public void Apply(IReadOnlyList<ChatItem> items, string? note = null)
+    /// <param name="live">
+    /// Whether the session runs. Only then can the newest run have a step still running; for an ended session, or an older
+    /// run, a step with no result says so (ChatStepsView.Update, tester finding M3).
+    /// </param>
+    public void Apply(IReadOnlyList<ChatItem> items, string? note = null, bool live = true)
     {
-        var view = ClaudeChatStream.Build(items, comments.Select(c => new StreamComment(c.Key, c.At)).ToList(), earlierFolded);
+        last = (items, note, live);
+        var view = ClaudeChatStream.Build(items, comments.Select(c => new StreamComment(c.Key, c.At)).ToList(), earlierFolded,
+            ClaudeChatStream.MaxDrawn * (1 + pages));
+        var newestRun = view.Entries.LastOrDefault(e => e.Item is ChatSteps)?.Key;
         var commentOf = comments.ToDictionary(c => c.Key, c => c.Element, StringComparer.Ordinal);
         var wanted = new List<Slot>();
         var unnamed = Unnamed(view.Entries);
@@ -101,14 +112,24 @@ internal sealed class ChatStreamPanel : StackPanel
             foreach (var entry in view.Entries)
             {
                 var names = !unnamed.Contains(entry.Key);
+                var running = live && entry.Key == newestRun;
                 if (slots.TryGetValue(entry.Key, out var slot))
                 {
-                    if (entry.Item is { } item) { if (!Same(slot.Item, item)) Refresh(slot, item); }
+                    if (entry.Item is { } item)
+                    {
+                        if (!Same(slot.Item, item)) Refresh(slot, item, running);
+                        else if (slot.Running != running && slot.Element is ChatStepsView block && item is ChatSteps run)
+                        {
+                            // The run did not change, but its session ended or a newer run came: its unfinished steps change words.
+                            block.Update(run, running);
+                            slot.Running = running;
+                        }
+                    }
                     else slot.Element = commentOf[entry.Key];
                 }
                 else
                 {
-                    slot = entry.Item is { } created ? Create(entry, created) : new Slot(entry.Key, entry.At, commentOf[entry.Key], null);
+                    slot = entry.Item is { } created ? Create(entry, created, running) : new Slot(entry.Key, entry.At, commentOf[entry.Key], null);
                     slots[entry.Key] = slot;
                 }
                 // A message joined by the next one, or no longer joined, is signed again where it is (Unnamed).
@@ -127,9 +148,11 @@ internal sealed class ChatStreamPanel : StackPanel
         var desired = new List<UIElement>();
         if (view.Earlier > 0)
         {
-            earlierLine ??= Dim(EarlierTag);
-            earlierLine.Text = view.Earlier == 1 ? "1 earlier message or step not shown" : $"{view.Earlier} earlier messages and steps not shown";
-            desired.Add(earlierLine);
+            earlierButton ??= EarlierButton();
+            var more = Math.Min(ClaudeChatStream.MaxDrawn, view.Earlier);
+            earlierWords!.Text = (view.Earlier == 1 ? "1 earlier message or step not shown" : $"{view.Earlier} earlier messages and steps not shown")
+                + $" · show {more} more";
+            desired.Add(earlierButton);
         }
         DateTime? day = null;
         using (ChatThread.Using(ChatThread.InboxLook))
@@ -162,6 +185,8 @@ internal sealed class ChatStreamPanel : StackPanel
         public UIElement Element { get; set; } = element;
         public ChatItem? Item { get; set; } = item;
         public TextBlock? DayLine { get; set; }
+        /// <summary>For a run of steps: whether it was drawn as the newest run of a live session (its unfinished steps "running").</summary>
+        public bool Running { get; set; }
         /// <summary>Whether a message's line names its author as drawn (see Unnamed); every message is drawn named.</summary>
         public bool Names { get; set; } = true;
     }
@@ -184,24 +209,28 @@ internal sealed class ChatStreamPanel : StackPanel
             ? a.Steps.Count == b.Steps.Count && a.Steps.Zip(b.Steps).All(p => p.First == p.Second)
             : Equals(drawn, now);
 
-    Slot Create(StreamEntry entry, ChatItem item)
+    Slot Create(StreamEntry entry, ChatItem item, bool running)
     {
         Created++;
         var element = item switch
         {
-            ChatSteps run => new ChatStepsView(run, deps),
+            ChatSteps run => new ChatStepsView(run, deps, running),
             ChatMessage message => MessageOf(message),
             ChatMarker marker => MarkerOf(marker),
             _ => (UIElement)new Border(),
         };
-        return new Slot(entry.Key, entry.At, element, item);
+        return new Slot(entry.Key, entry.At, element, item) { Running = running };
     }
 
     // A run is updated where it is; a message whose text grew is re-created in the same place (the element is swapped in
     // Reconcile's pass, which sees the new instance).
-    void Refresh(Slot slot, ChatItem item)
+    void Refresh(Slot slot, ChatItem item, bool running)
     {
-        if (slot.Element is ChatStepsView view && item is ChatSteps run) view.Update(run);
+        if (slot.Element is ChatStepsView view && item is ChatSteps run)
+        {
+            view.Update(run, running);
+            slot.Running = running;
+        }
         else if (item is ChatMessage message)
         {
             // Drawn named, as every new message is; Apply signs it again if a run holds it.
@@ -237,6 +266,37 @@ internal sealed class ChatStreamPanel : StackPanel
             }
             Children.Insert(i, desired[i]);
         }
+    }
+
+    // "N earlier messages and steps not shown · show 60 more": a button, so no item of the session is out of reach. A press
+    // draws one more page of the older items above the ones shown, and the page keeps what the owner was looking at: the
+    // scroll offset moves by what the stream grew above it.
+    Button EarlierButton()
+    {
+        earlierWords = new TextBlock { FontSize = 10.5, Foreground = InboxLook.Ink2, TextAlignment = TextAlignment.Center, TextWrapping = TextWrapping.Wrap };
+        var button = deps.Button(earlierWords, "Show earlier", ShowMoreEarlier);
+        button.Tag = EarlierTag;
+        button.HorizontalAlignment = HorizontalAlignment.Center;
+        button.Margin = new Thickness(0, 2, 0, 6);
+        return button;
+    }
+
+    void ShowMoreEarlier()
+    {
+        var scroller = FindScroller();
+        var below = scroller is null ? 0 : scroller.ExtentHeight - scroller.VerticalOffset;
+        pages++;
+        Apply(last.Items, last.Note, last.Live);
+        if (scroller is null) return;
+        scroller.UpdateLayout();
+        scroller.ScrollToVerticalOffset(Math.Max(0, scroller.ExtentHeight - below));
+    }
+
+    ScrollViewer? FindScroller()
+    {
+        DependencyObject? at = this;
+        while (at is not null and not ScrollViewer) at = VisualTreeHelper.GetParent(at) ?? LogicalTreeHelper.GetParent(at);
+        return at as ScrollViewer;
     }
 
     TextBlock Dim(string tag) => new()
