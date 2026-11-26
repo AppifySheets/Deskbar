@@ -3956,11 +3956,14 @@ public class TasksBoardTests
         // is running, its thread lists the session and has no start button. Task 5e02e99f: nor once the session has
         // ended, since Open Claude resumes it (One_Claude_button_in_the_thread has the rest). (The line's Open button
         // needs the openSession seam, which this rig leaves out, so the line itself is what is looked for.)
+        // Looked for in the thread and on the task's own line: the note's line has a Start Claude button of its own since
+        // task 59b8f613, which is right for the note.
         t.Controller.ToggleThread(id);
         Assert.Contains(Inside(t.Window).OfType<DockPanel>(), d => "session-line".Equals(d.Tag));
-        Assert.False(HasButton(t.Window, "Start Claude on this"));
+        object ThreadRow() => Inside(t.Window).OfType<WrapPanel>().Single(p => TasksWindow.ThreadActionsTag.Equals(p.Tag));
+        Assert.False(HasButton(ThreadRow(), "Start Claude on this") || HasButton(LineOf(t.Window, id), "Start Claude on this"));
         t.Tasks.SessionEnded("s1");
-        Assert.False(HasButton(t.Window, "Start Claude on this"));
+        Assert.False(HasButton(ThreadRow(), "Start Claude on this") || HasButton(LineOf(t.Window, id), "Start Claude on this"));
     });
 
     // Task 7f61af2e (Petre: "add a button on the task in the tasklist for it too"): a Claude task's line, full and slim,
@@ -4120,6 +4123,112 @@ public class TasksBoardTests
         Assert.Equal(["Open in window", "Start Claude on this"], Words(row));
         var thread = (StackPanel)row.Parent;
         Assert.True(Inside(thread.Children[1]).Contains(t.Window.SubtaskBoxShown));
+    });
+
+    // Task 59b8f613 (Petre, on a line's "⋯" menu: "move those context menu buttons to the task itself if there's space for
+    // them", option A of the mockup): the menu's actions sit on the line as icon buttons, Edit first, as many as the line
+    // has room for, and "⋯" right after the last one shown, inside the line. The narrowest panel fits at least Edit, the
+    // default one more, and a full line all seven. The ones left off are clipped away, not drawn half.
+    [Theory]
+    [InlineData(TasksPanelLayout.MinWidth)]
+    [InlineData(TasksPanelLayout.DefaultWidth)]
+    [InlineData(Wide)]
+    public void A_line_carries_its_menus_actions_as_far_as_they_fit(double width) => StaThread.Run(() =>
+    {
+        using var t = Build(width: width, startClaude: _ => { });
+        var id = t.Tasks.Create("Tasks redesign", t.Gepha, Session("s1")).Value.Id;
+        t.Tasks.Comment(id, "s1", "one");
+        t.Controller.Show();
+        t.Window.UpdateLayout();
+
+        var line = LineOf(t.Window, id);
+        var strip = Inside(line).OfType<FitStrip>().Single(s => Equals(s.Tag, TasksWindow.LineButtonsTag));
+        var shown = t.Window.LineButtonsShown(id)!.Value;
+        var more = ButtonNamed(line, "More");
+        var moreLeft = more.TranslatePoint(new Point(0, 0), strip).X;
+        var moreRight = more.TranslatePoint(new Point(more.ActualWidth, 0), line).X;
+        Console.WriteLine($"MEASURED {width}: {shown} of 7 shown in {strip.ActualWidth:0.##} DIP, More at {moreLeft:0.##}, ends at {moreRight:0.##} of {line.ActualWidth:0.##}");
+        // Measured: 7 at 800, 6 at 460, 1 at 360 (this line has a comment count, which takes a little of the room).
+        Assert.True(shown >= (width >= Wide ? 7 : width >= TasksPanelLayout.DefaultWidth ? 5 : 1), $"{width}: only {shown} shown");
+        Assert.Equal(shown * 22, moreLeft, 0.5);
+        Assert.True(moreRight <= line.ActualWidth + 0.5, $"\"⋯\" ends at {moreRight:0.##}, past the line's {line.ActualWidth:0.##}");
+        // Edit is first; a button left off sits past the strip's edge, clipped.
+        Assert.Equal("Edit", AutomationProperties.GetName(strip.Children[0]));
+        // Numbered by slot, so an empty slot (an action that does not apply) cannot shift the count.
+        strip.Children.OfType<UIElement>().Select((c, i) => (c, i)).Where(s => s.c is Button && !ReferenceEquals(s.c, more)).ToList().ForEach(s =>
+            Assert.Equal(s.i < shown, s.c.TranslatePoint(new Point(0, 0), strip).X < strip.ActualWidth));
+    });
+
+    // The line's buttons do what the menu's items do: Edit opens the editor, Assign to and Delete open their choices under
+    // the button (Delete's is "Delete for good", the menu's second step), Move to the workspace menu. A task no session
+    // has joined gets Start Claude where a Claude task has Open Claude.
+    [Fact]
+    public void A_lines_menu_buttons_act_like_the_menu() => StaThread.Run(() =>
+    {
+        var started = new List<Guid>();
+        using var t = Build(startClaude: started.Add);
+        var id = t.Tasks.AddNote("Dishwasher tablets", t.Gepha).Value.Id;
+        t.Controller.Show();
+        t.Window.UpdateLayout();
+        Button LineButton(string name) => ButtonNamed(LineOf(t.Window, id), name);
+
+        Click(LineButton(TasksWindow.StartClaudeText));
+        Assert.Equal([id], started);
+
+        Click(LineButton("Edit"));
+        Assert.NotNull(t.Window.Editor);
+        // Saved unchanged, which ends the edit, so the line is drawn again for the next button.
+        t.Window.SaveEditor();
+        Assert.Null(t.Window.Editor);
+
+        Click(LineButton(TasksWindow.AssignToText));
+        var assign = Assert.IsAssignableFrom<ContextMenu>(t.Window.OpenedMenu);
+        Assert.Equal(["Me", "Claude"], assign.Items.OfType<MenuItem>().Select(i => ((TextBlock)i.Header).Text));
+        assign.Items.OfType<MenuItem>().Single(i => ((TextBlock)i.Header).Text == "Claude").RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+        assign.IsOpen = false;
+        Assert.Equal(Assignee.Claude, t.Tasks.Board.Tasks.Single(x => x.Id == id).Assignee);
+
+        Click(LineButton(TasksWindow.MoveToText));
+        var move = Assert.IsAssignableFrom<ContextMenu>(t.Window.OpenedMenu);
+        Click(WorkspaceChipMenu.Chips(move).Single(c => AutomationProperties.GetName(c) == "Sparrow"));
+        Assert.Equal(t.Sparrow, t.Tasks.Board.Tasks.Single(x => x.Id == id).WorkspaceId.Value);
+
+        Click(LineButton(TasksWindow.DeleteText));
+        var delete = Assert.IsAssignableFrom<ContextMenu>(t.Window.OpenedMenu);
+        Assert.Contains(t.Tasks.Board.Tasks, x => x.Id == id);
+        delete.Items.OfType<MenuItem>().Single().RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+        delete.IsOpen = false;
+        Assert.DoesNotContain(t.Tasks.Board.Tasks, x => x.Id == id);
+    });
+
+    // The open thread's row of buttons (task 1c17b7d6) leaves out each button its line right above already shows, and the
+    // row goes once none is left. On a full line all are there, so the row goes. At the narrowest panel the line has room
+    // for Edit and Open in window only (measured: 2 shown), so Add subtask stays in the row, Open in window leaves it, and
+    // so does Open Claude, which the line always has.
+    [Theory]
+    [InlineData(Wide)]
+    [InlineData(TasksPanelLayout.MinWidth)]
+    public void The_thread_row_leaves_out_what_its_line_shows(double width) => StaThread.Run(() =>
+    {
+        using var t = Build(width: width, startClaude: _ => { }, openSession: (_, _) => Result.Success());
+        var id = t.Tasks.Create("Tasks redesign", t.Gepha, Session("s1")).Value.Id;
+        t.Controller.Show();
+        t.Controller.ToggleThread(id);
+        t.Window.UpdateLayout();
+
+        var row = Inside(t.Window).OfType<WrapPanel>().Single(p => TasksWindow.ThreadActionsTag.Equals(p.Tag));
+        var visible = row.Children.OfType<Button>().Where(b => b.Visibility == Visibility.Visible).Select(AutomationProperties.GetName).ToList();
+        Console.WriteLine($"MEASURED {width}: line shows {t.Window.LineButtonsShown(id)}, row keeps [{string.Join(", ", visible)}], row {row.Visibility}");
+        if (width >= Wide)
+            Assert.Equal(Visibility.Collapsed, row.Visibility);
+        else
+        {
+            // Exactly the row's buttons whose slot the line does not show: Open in window is slot 1, Add subtask slot 2.
+            var shown = t.Window.LineButtonsShown(id)!.Value;
+            Assert.True(shown < 3, $"the narrowest line shows {shown}, so the row would have nothing left to check");
+            Assert.Equal(Visibility.Visible, row.Visibility);
+            Assert.Equal(new[] { "Open in window", "Add subtask" }.Where((_, i) => shown <= i + 1).ToList(), visible);
+        }
     });
 
     // Task 5e02e99f (Petre, on a done task's thread whose row read Open in window, Open Claude, Start Claude on this, Add
@@ -5871,7 +5980,8 @@ public class TasksBoardTests
         var line = LineOf(t.Window, id);
         var flags = Grid.GetColumn((UIElement)LogicalTreeHelper.GetParent(ButtonNamed(line, "Important")));
         var comments = Grid.GetColumn(ButtonNamed(line, "Comments"));
-        var more = Grid.GetColumn(ButtonNamed(line, "More"));
+        // "⋯" ends the strip of the menu's actions since task 59b8f613: the strip's column is "⋯"'s.
+        var more = Grid.GetColumn((UIElement)LogicalTreeHelper.GetParent(ButtonNamed(line, "More")));
         var chip = Grid.GetColumn(Inside(line).OfType<Border>().First(b => b.Child is TextBlock { Text: "GEPHA" }));
         Assert.True(chip < flags && flags < comments && comments < more, $"chip {chip}, flags {flags}, comments {comments}, more {more}");
         // A note with no comments, on a board with no Claude task and nothing closed: the comments column is the glyph's

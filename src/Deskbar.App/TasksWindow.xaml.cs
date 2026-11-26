@@ -482,6 +482,7 @@ public partial class TasksWindow : Window
         DrawManagerLine(managerShown ? view.ManagerAsks : null);
         Rows.Children.Clear();
         menuButtons.Clear();
+        lineButtons.Clear();
         dragLines.Clear();
         dragEntries.Clear();
         commentBoxes.Clear();
@@ -772,6 +773,8 @@ public partial class TasksWindow : Window
         var full = !compactLines && !slimLines;
         // A full line's grid follows the header's dividers while they are dragged (ApplyColumns).
         if (full) fullGrids.Add(grid);
+        // The title's floor and the menu strip's cap (task 59b8f613, ConstrainFullColumns).
+        if (full) ConstrainFullColumns(grid);
         // WHERE THE CONTROLS GO (tasks 65ab598d and 50667e10): on a full or a Matrix line, the line's own grid, in the
         // columns beside the title; on a slim line, a strip of their own on a row of its own under the title, starting at
         // the title's left edge (SlimControls and ControlsUnderTitle, below). A part's column comes from At either way (the
@@ -828,20 +831,25 @@ public partial class TasksWindow : Window
         var comments = CommentsButton(row);
         Control(At(Part.Comments), comments);
         // The action column: Reopen on a closed task (full line only), else Open Claude on a Claude task (task 7f61af2e,
-        // OpenClaudeButton), on the full and the slim line. The two never meet: a closed task has no Open Claude.
-        var openClaude = compactLines ? null : OpenClaudeButton(row);
+        // OpenClaudeButton), on the full and the slim line. The two never meet: a closed task has no Open Claude. A task no
+        // session has joined has Start Claude there instead (task 59b8f613, StartClaudeButton), the menu's other half.
+        var openClaude = compactLines ? null : OpenClaudeButton(row) ?? StartClaudeButton(row);
         Control(At(Part.Action), (full ? ActionOf(row) : null) ?? openClaude);
         var more = Small(new TextBlock { Text = "", FontFamily = IconFont, FontSize = 12, Foreground = Ink }, "More",
             () => OpenMenuFor(row.Id), "Edit, status, move, delete");
         menuButtons[row.Id] = more;
-        Control(At(Part.More), more);
+        // On a List line, "⋯" ends a strip of the menu's actions as icon buttons, as many as the line has room for (task
+        // 59b8f613, TasksWindow.LineButtons.cs). A Matrix line has no room: "⋯" alone, as before.
+        var lineActions = compactLines ? null : LineButtons(row, more);
+        Control(At(Part.More), (UIElement?)lineActions ?? more);
         if (row.Closing)
             grid.Children.OfType<UIElement>().Where(part => Grid.GetColumn(part) != At(Part.Tick)).ToList().ForEach(part => part.Opacity = 0.45);
-        // The comments and "…" buttons are quiet until the pointer is on their line, like the bar's quiet controls.
-        // A line in its undo window keeps its own dimming (above): its quiet buttons are not brightened by a hover or a
-        // selection (review minor).
+        // The comments and "…" buttons are quiet until the pointer is on their line, like the bar's quiet controls, and so
+        // are the menu's actions beside "⋯". A line in its undo window keeps its own dimming (above): its quiet buttons are
+        // not brightened by a hover or a selection (review minor).
         var quiet = row.Closing ? Array.Empty<UIElement>()
-            : new UIElement?[] { comments, more, openClaude }.OfType<UIElement>().Concat(flags?.Children.OfType<UIElement>() ?? []).ToArray();
+            : new UIElement?[] { comments, more, openClaude }.OfType<UIElement>().Concat(flags?.Children.OfType<UIElement>() ?? [])
+                .Concat(lineActions?.Children.OfType<Button>().Where(button => !ReferenceEquals(button, more)) ?? []).ToArray();
         Quieten(quiet, loud: false);
 
         // EVERY LINE IS A TILE (Petre's pick, option E of the task-separation mockup, 2026-11-25; the task was "better task
@@ -985,10 +993,15 @@ public partial class TasksWindow : Window
     // All fixed, so it cannot shrink: at the narrowest panel, with the scroll bar and a line of five sessions, it is 297
     // DIP in a 303 DIP slot since the button columns grew to their true widths (task 735abbf5, measured by
     // At_the_narrowest_panel_the_controls_strip_fits_its_line, which fails if it outgrows its line).
+    //
+    // The last column, "⋯" with the menu's actions before it (task 59b8f613, FitStrip), takes the rest of the line: the
+    // strip stretches across the line and that column is a star, so the actions get exactly the room left over and show
+    // as many as fit. Every column before it is fixed, so nothing else moves.
     static Grid SlimControls(IReadOnlyList<GridLength> columns)
     {
-        var strip = new Grid { Tag = ControlsTag, HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(2, 2, 0, 0) };
-        columns.Skip(FirstControlColumn).ToList().ForEach(width => strip.ColumnDefinitions.Add(new ColumnDefinition { Width = width }));
+        var strip = new Grid { Tag = ControlsTag, HorizontalAlignment = HorizontalAlignment.Stretch, Margin = new Thickness(2, 2, 0, 0) };
+        columns.Skip(FirstControlColumn).SkipLast(1).Append(new GridLength(1, GridUnitType.Star)).ToList()
+            .ForEach(width => strip.ColumnDefinitions.Add(new ColumnDefinition { Width = width }));
         return strip;
     }
 
@@ -1810,6 +1823,9 @@ public partial class TasksWindow : Window
         var addsSubtask = !inParent && Actions?.SubtaskParent is not null && row.Status != TaskStatus.Closed && !row.Closing;
         var (actions, hasOpenClaude) = ThreadActions(row, addsSubtask);
         if (actions.Children.Count > 0) panel.Children.Add(actions);
+        // The buttons the line right above already shows leave the row (task 59b8f613, FollowLine). Not in a subtask's
+        // thread drawn inside its parent's: the line with its buttons may be far up the list, or not drawn at all.
+        if (!inParent && lineButtons.TryGetValue(row.Id, out var lineStrip)) FollowLine(actions, row, lineStrip);
         if (addsSubtask && subtaskUnder == row.Id) panel.Children.Add(SubtaskBox(row.Id));
         // The session lines stay as the record of who worked on the task. With Open Claude in the row above and the task
         // having ONE session in all, that line's own Open would be the same click twice, so it is left off. With two or
@@ -1896,7 +1912,7 @@ public partial class TasksWindow : Window
             buttons.Add(Small(StartClaudeText, StartClaudeText, () => start(row.Id),
                 "Start a background Claude session on this task, with the task as its first message"));
         if (addsSubtask && subtaskUnder != row.Id)
-            buttons.Add(Small("Add subtask", "Add subtask", () => BeginSubtaskAdd(row.Id), "Add a subtask under this task"));
+            buttons.Add(Small(ThreadAddSubtaskText, ThreadAddSubtaskText, () => BeginSubtaskAdd(row.Id), "Add a subtask under this task"));
         var actions = new WrapPanel { Tag = ThreadActionsTag, Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 4) };
         buttons.ForEach(button =>
         {
@@ -1908,6 +1924,9 @@ public partial class TasksWindow : Window
 
     /// <summary>Tagged for tests: the row of buttons at the top of an open thread (task 1c17b7d6).</summary>
     internal const string ThreadActionsTag = "thread-actions";
+
+    // The thread row's Add subtask, its words and its name (the line's button is the menu's "Add subtask…").
+    const string ThreadAddSubtaskText = "Add subtask";
 
     // "N settled comments" (Ruling 62), dim, a button of its own: unfolds the thread's settled comments, then folds them again.
     UIElement SettledFold(Guid task, int count, bool unfolded)
@@ -2574,15 +2593,10 @@ public partial class TasksWindow : Window
         // opened under the line's "⋯" once this one has closed: the compact chip menu is a context menu of its own, not
         // a submenu.
         // Who the task is on (Ruling 57), here and nowhere on the bar: Me or Claude, the task's own ticked.
-        var assign = Item("Assign to");
-        new[] { Assignee.Me, Assignee.Claude }.ToList().ForEach(who =>
-        {
-            var item = Item(who.Name, () => Actions?.Assign(id, who));
-            item.IsChecked = row.Assignee == who;
-            assign.Items.Add(item);
-        });
+        var assign = Item(AssignToText);
+        AssignItems(id).ForEach(item => assign.Items.Add(item));
         menu.Items.Add(assign);
-        menu.Items.Add(Item("Move to…", () => Dispatcher.BeginInvoke(() => OpenMoveMenu(id, row.Place.Workspace),
+        menu.Items.Add(Item(MoveToText, () => Dispatcher.BeginInvoke(() => OpenMoveMenu(id, row.Place.Workspace),
             System.Windows.Threading.DispatcherPriority.Input)));
         // TASK LINKS (Petre's pick: a menu item with a search picker; TasksWindow.Links.cs). Each opens the picker in the
         // task's thread once this menu has closed, so its box can take the keyboard. "Duplicate of…" on any line not
@@ -2604,18 +2618,18 @@ public partial class TasksWindow : Window
         menu.Items.Add(new Separator());
         // Delete cannot be undone, so it takes a second, deliberate step: a submenu item rather than a dialog, which
         // would be one more window to answer for a menu choice already made.
-        var delete = Item("Delete");
+        var delete = Item(DeleteText);
         delete.Items.Add(Item("Delete for good", () => Actions?.Delete(id)));
         menu.Items.Add(delete);
         OpenMenu(menu);
         return menu;
     }
 
-    // A line's "Move to…": the compact workspace menu under its "⋯", the task's own workspace outlined. Internal, and
-    // answering the menu, for the tests.
-    internal ContextMenu OpenMoveMenu(Guid id, Maybe<Guid> current)
+    // A line's "Move to…": the compact workspace menu under its "⋯" (or under the line's own Move to button, `anchor`,
+    // task 59b8f613), the task's own workspace outlined. Internal, and answering the menu, for the tests.
+    internal ContextMenu OpenMoveMenu(Guid id, Maybe<Guid> current, UIElement? anchor = null)
     {
-        var menu = WorkspaceChipMenu.Build(latest?.Places ?? [], current, workspace => Actions?.MoveTo(id, workspace), menuButtons.GetValueOrDefault(id));
+        var menu = WorkspaceChipMenu.Build(latest?.Places ?? [], current, workspace => Actions?.MoveTo(id, workspace), anchor ?? menuButtons.GetValueOrDefault(id));
         OpenMenu(menu);
         return menu;
     }
