@@ -192,7 +192,9 @@ internal static class InboxLook
     internal static readonly Brush Blue = Frozen(0x8A, 0xB4, 0xFF);
     internal static readonly Brush Violet = Frozen(0xB9, 0xA2, 0xFF);
     internal static readonly Brush AskEdge = Frozen(0xFF, 0xC2, 0x5A);
-    internal static readonly Brush AskFill = Frozen(0x24, 0x20, 0x18);
+    // The question bubble's fill is the plain surface, not a warm tint: in this look amber alone says "needs you" (its
+    // edge and its caption), and a brown fill beside it is the orange-on-brown mix the redesign set out to remove.
+    internal static readonly Brush AskFill = Frozen(0x16, 0x1A, 0x22);
 
     static Brush Frozen(byte r, byte g, byte b)
     {
