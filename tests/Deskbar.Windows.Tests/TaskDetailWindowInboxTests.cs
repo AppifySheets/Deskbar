@@ -393,4 +393,93 @@ public class TaskDetailWindowInboxTests
         window.ShowProblem(null);
         Assert.DoesNotContain(Inside(window).OfType<TextBlock>(), b => b.Text == "That did not work" && b.Visibility == Visibility.Visible);
     });
+
+    // Stats laid over the Inbox does not flip a window: the look follows the chosen view, not what is on top of it.
+    [Fact]
+    public void Stats_over_the_inbox_leaves_the_window_as_it_is() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var id = t.Tasks.AddNote("Errand", Maybe<Guid>.None).Value.Id;
+        t.Board.Show();
+        var (window, _) = Open(t, id);
+
+        t.Panel.Actions!.ShowStats!();
+
+        Assert.True(window.ShowsInboxPage);
+    });
+
+    // The switch flips with a window open: the old window comes back, then the page again, and a comment typed meanwhile
+    // goes with the window both ways.
+    [Fact]
+    public void Flipping_the_switch_swaps_the_look_and_keeps_a_typed_comment() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var id = t.Tasks.AddNote("Errand", Maybe<Guid>.None).Value.Id;
+        Assert.True(t.Tasks.Comment(id, Maybe<string>.None, "First", wakes: false).IsSuccess);
+        t.Board.Show();
+        var (window, page) = Open(t, id);
+        var inboxBackground = window.Background;
+        page.TypeComment(id, "Typed on the page", null);
+
+        t.Panel.Actions!.ShowMatrix(false);
+
+        Assert.False(window.ShowsInboxPage);
+        Assert.Equal(Visibility.Visible, HeaderOf(window));
+        Assert.Equal("Typed on the page", window.CommentDraft);
+        Assert.Equal(1, Inside(window).OfType<FrameworkElement>().Count(e => Equals(e.Tag, TaskDetailWindow.CommentTag)));
+        Assert.NotSame(inboxBackground, window.Background);
+
+        // A change while the old look shows is drawn when the page comes back, and what was typed there goes back too.
+        window.CommentDraft = "Typed in the old window";
+        Assert.True(t.Tasks.Comment(id, Maybe<string>.None, "Second", wakes: false).IsSuccess);
+        Assert.Equal(2, Inside(window).OfType<FrameworkElement>().Count(e => Equals(e.Tag, TaskDetailWindow.CommentTag)));
+        t.Panel.Actions!.ShowInbox!(true);
+
+        Assert.True(window.ShowsInboxPage);
+        Assert.Equal(Visibility.Collapsed, HeaderOf(window));
+        Assert.Equal("Typed in the old window", window.PageRenderer!.CommentDraft(id));
+        Assert.Equal(2, window.PageRenderer!.ShownComments(id).Count);
+        Assert.Same(inboxBackground, window.Background);
+    });
+
+    // The window's page and the panel's page of the same task share nothing: a draft, an editor, a scroll.
+    [Fact]
+    public void The_windows_page_and_the_panels_page_share_nothing() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var id = t.Tasks.AddNote("Errand", Maybe<Guid>.None).Value.Id;
+        t.Board.Show();
+        t.Panel.Actions!.ShowTask!(id);
+        Assert.Equal(id, t.Panel.InboxPageShown);
+        var (_, page) = Open(t, id);
+
+        t.Panel.TypeComment(id, "In the panel", null);
+        page.TypeComment(id, "In the window", null);
+        Assert.Equal("In the panel", t.Panel.CommentDraft(id));
+        Assert.Equal("In the window", page.CommentDraft(id));
+
+        page.BeginRename(id);
+        Assert.Null(t.Panel.Editor);
+        Assert.NotNull(page.Editor);
+        Assert.Equal(id, t.Panel.InboxPageShown);
+    });
+
+    // The other way: the switch turns on while the old window's editor is open. The editor keeps nothing, as Esc would.
+    [Fact]
+    public void Turning_the_inbox_on_closes_the_old_editor_without_saving() => StaThread.Run(() =>
+    {
+        using var t = Build(inbox: false);
+        var id = t.Tasks.AddNote("Errand", Maybe<Guid>.None).Value.Id;
+        t.Board.Show();
+        Assert.True(t.Board.OpenWindow(id).IsSuccess);
+        var window = t.Board.WindowOf(id)!;
+        window.BeginEdit();
+        Assert.True(window.IsEditing);
+
+        t.Panel.Actions!.ShowInbox!(true);
+
+        Assert.True(window.ShowsInboxPage);
+        Assert.False(window.IsEditing);
+        Assert.Equal("Errand", t.Tasks.Board.Find(id.ToString()).Value.Title);
+    });
 }
