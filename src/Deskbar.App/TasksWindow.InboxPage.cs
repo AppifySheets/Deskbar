@@ -199,7 +199,7 @@ public partial class TasksWindow
     // Part of the redraw signature: the page's stack and the task's PR links (which no other signature reads).
     string InboxPageSignature(TasksView view) =>
         inboxPage is not { } id ? ""
-        : $"|page{id}|{string.Join(',', inboxPageStack)}|" + string.Join(',', AllRows(view).Where(r => r.Id == id).SelectMany(r => r.PullRequests).Select(p => p.Key)) + PermissionSignature(id);
+        : $"|page{id}|{string.Join(',', inboxPageStack)}|" + string.Join(',', AllRows(view).Where(r => r.Id == id).SelectMany(r => r.PullRequests).Select(p => p.Key)) + PermissionSignature(id) + PickerSignature(id) + AnswersSignature(view, id);
 
     // The page over the list while one is open, or the list; a page whose task no longer has its thread open (closed,
     // deleted, folded by a filter or from elsewhere) is left, back to the list.
@@ -408,6 +408,7 @@ public partial class TasksWindow
                     Text(row.Claudes ? "CLAUDE ASKS" : "WAITS ON YOU", 11, InboxLook.Amber, FontWeights.SemiBold)));
                 detail.Margin = new Thickness(0, 5, 0, 0);
                 bubble.Children.Add(detail);
+                if (AnswerButtons(row.Id) is { } answers) bubble.Children.Add(answers);
                 body.Children.Add(new Border
                 {
                     Tag = QuestionBubbleTag,
@@ -449,6 +450,7 @@ public partial class TasksWindow
             frame.Margin = new Thickness(0);
         }
         body.Children.Add(thread);
+        if (SessionPickerRow(row) is { } picker) body.Children.Add(picker);
         return body;
     }
 
