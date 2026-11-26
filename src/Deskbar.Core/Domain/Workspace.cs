@@ -1,4 +1,5 @@
 using System.Text.Json.Serialization;
+using Deskbar.Core.Bookmarks;
 using Deskbar.Core.Tiling;
 
 namespace Deskbar.Core.Domain;
@@ -76,6 +77,15 @@ public sealed record Workspace(Guid Id, string Name, Guid? DesktopId, string? Co
     // On the workspace for the reason Folded and Tiled are, and an init property defaulting to false for the
     // same reason: a state.json without the key loads with nothing pinned, with no migration.
     public bool Pinned { get; init; }
+
+    // The bookmarks in this workspace's row: links, programs and Store apps one click opens
+    // (docs/superpowers/specs/2026-11-26-workspace-bookmarks-design.md). A fact about the workspace, so it sits
+    // here for the reason Folded and Pinned do and survives a restart with no second store.
+    //
+    // A ValueList, not an IReadOnlyList, for the reason TileSizes is one: the record compares by contents. Init
+    // property defaulting to empty, so a state.json from before bookmarks loads with none, with no migration. A
+    // bookmark that cannot be read is dropped at load (BookmarkConverter), never the whole file.
+    public ValueList<Bookmark> Bookmarks { get; init; } = [];
 
     // LEGACY: the columns-of-rows sizes older builds stored here, one entry per screen. Only migration reads it:
     // Load turns each entry into a TileLayouts entry (JsonPersistenceStore.MigrateTileSizes) and empties this, so a

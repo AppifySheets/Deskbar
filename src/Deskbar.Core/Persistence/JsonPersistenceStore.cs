@@ -25,7 +25,7 @@ public sealed class JsonPersistenceStore(string baseDirectory, Action<string>? t
     static readonly JsonSerializerOptions Options = new()
     {
         WriteIndented = true,
-        Converters = { new JsonStringEnumConverter(), new ScreenTileLayoutConverter() },
+        Converters = { new JsonStringEnumConverter(), new ScreenTileLayoutConverter(), new BookmarkConverter() },
     };
 
     string StatePath => Path.Combine(baseDirectory, "state.json");
@@ -85,6 +85,9 @@ public sealed class JsonPersistenceStore(string baseDirectory, Action<string>? t
                     .Select(s => new ScreenTileLayout(s.Screen, TileLayout.FromGrid(s.Sizes)))
                     .ToValueList(),
             TileSizes = [],
+            // A bookmark BookmarkConverter could not read arrives as null; drop it (the rest of the list stays).
+            // Cannot throw: `?? []` covers a workspace built in code with a null list.
+            Bookmarks = (w.Bookmarks ?? []).Where(b => b is not null).ToValueList(),
         };
     }
 
