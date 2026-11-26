@@ -20,9 +20,16 @@ public class ClaudeStartTests
     {
         var task = Task(taskId, "Fix the bar", Maybe<Guid>.None);
 
-        Assert.Equal(["--bg", "--model", "sonnet", ClaudeStart.FirstMessage(task)], ClaudeStart.Arguments(task, "sonnet"));
+        Assert.Equal(["--bg", "--model", "sonnet", "--settings", ClaudeStart.RemoteControlOff, ClaudeStart.FirstMessage(task)],
+            ClaudeStart.Arguments(task, "sonnet"));
         Assert.Equal("opus", ClaudeStart.DefaultModel);
     }
+
+    // Task 1c9eefdf: only the manager shows up in the Claude phone app, so a task session starts with a settings layer
+    // that holds Remote Control off. The JSON is exact because claude parses it: one key, a JSON false, no quotes on it.
+    [Fact]
+    public void A_task_session_starts_with_remote_control_held_off() =>
+        Assert.Equal("""{"remoteControlAtStartup":false}""", ClaudeStart.RemoteControlOff);
 
     [Theory]
     [InlineData("opus", "opus")]

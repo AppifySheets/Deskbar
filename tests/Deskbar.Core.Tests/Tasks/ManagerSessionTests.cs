@@ -167,6 +167,9 @@ public class ManagerSessionTests
         Assert.Equal($"Bash({Shim} task:*)", args[args.IndexOf("--allowedTools") + 1]);
         // PowerShell is disallowed too: a Bash rule does not cover it.
         Assert.Contains("PowerShell", args);
+        // Task 1c9eefdf: the manager is the one session with Remote Control, named so the phone app lists it by name.
+        Assert.Equal(ManagerSession.Name, args[args.IndexOf("--remote-control") + 1]);
+        Assert.DoesNotContain("--settings", args);
         Assert.Equal("--", args[^2]);
         Assert.Equal(ManagerSession.FirstMessage, args[^1]);
     }
