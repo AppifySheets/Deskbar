@@ -8,7 +8,7 @@ namespace Deskbar.App;
 
 // A LONG TEXT'S HEIGHT IS PETRE'S TO SET (task 2088e1ed; Petre, of a session's question cut at three lines in its bubble:
 // "i should be able to increase or decrease issue or comment body"). Three things in the tasks panel stop at a few lines:
-// a long comment (about three lines, then "Show more", Ruling 63) and an open line's description and question (four
+// a super long comment (six lines, then "Show more", Ruling 63 as task f0168cdd changed it) and an open line's description and question (four
 // lines, then "Show all in window", task e91f8aa5). Each was all or nothing: the cut, or the whole text. A grip now sits
 // under each of them, a thin band with a short bar in its middle and the up-down cursor, and dragging it shows more or
 // less, from one line down to the whole text, live under the pointer as a text box's corner grip does.
@@ -17,7 +17,7 @@ namespace Deskbar.App;
 // and its question) for as long as the app runs, through every redraw and through the panel closing and opening, since
 // a size dragged on purpose is not undone by folding a line. A drag to the text's foot is "the whole text" (infinity),
 // which keeps showing whole if the text grows; a comment dragged whole reads as one Show more opened ("Show less" under
-// it). "Show more" and "Show less" still do what they did, and either one forgets a dragged size: Show less is three
+// it). "Show more" and "Show less" still do what they did, and either one forgets a dragged size: Show less is six
 // lines again.
 //
 // WHERE IT SHOWS. Only under a text long enough to be cut, or whose size was dragged (so one dragged to its whole height
