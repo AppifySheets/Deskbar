@@ -272,4 +272,44 @@ public class InboxTranscriptTests
         Assert.Equal(2, calls);
         Assert.NotNull(poll.Latest);
     }
-}
+
+    // L4: Pause then Resume while a read is out must not start a second read on the reader (it is not thread safe), and the
+    // result of the first, which ends later, is kept (the reader has moved its position past those lines).
+    [Fact]
+    public void Pause_then_resume_while_a_read_is_out_starts_no_second_read_and_the_first_result_is_kept()
+    {
+        var rig = new Rig { Deferred = true, Answer = new ChatUpdate([new ChatMarker("m", ChatMarkerKind.Compacted, Maybe<DateTimeOffset>.None)], true, 10) };
+        rig.Poll.Follow(Task1);
+        Assert.Equal(1, rig.Poll.Reads);
+
+        rig.Poll.Pause();
+        rig.Poll.Resume();
+        rig.Poll.Tick();
+
+        Assert.Equal(1, rig.Poll.Reads);
+        Assert.Equal(1, rig.Poll.ReadersMade);
+        Assert.Single(rig.Pending);
+
+        rig.Pending.ForEach(p => p());
+
+        Assert.Single(rig.Poll.Latest!.Items);
+        Assert.Equal(1, rig.Timers);
+        rig.Pending.Clear();
+        rig.Fire();
+        Assert.Equal(2, rig.Poll.Reads);
+        rig.Pending.ForEach(p => p());
+        Assert.Equal(2, rig.Read.Count);
+    }
+
+    [Fact]
+    public void A_read_that_ends_while_paused_is_kept_and_schedules_nothing_until_resumed()
+    {
+        var rig = new Rig { Deferred = true };
+        rig.Poll.Follow(Task1);
+        rig.Poll.Pause();
+
+        rig.Pending.ForEach(p => p());
+
+        Assert.NotNull(rig.Poll.Latest);
+        Assert.Equal(0, rig.Timers);
+    }}
