@@ -111,8 +111,50 @@ public static class ClaudeChat
             "Skill" => Str("skill") is { } skill ? "Skill " + skill : null,
             _ => null,
         };
-        return Shorten(label) is { Length: > 0 } text ? text : tool;
+        return Shorten(Redact(label)) is { Length: > 0 } text ? text : tool;
     }
+
+    // WHETHER A TOOL USE IS DESKBAR HOUSEKEEPING: a shell command that is a call of Deskbar's own shim (`deskbar.cmd task
+    // status-line ...`, `task comment`, `task ask`, `task join`, in any path form: `"$APPDATA/Deskbar/deskbar.cmd" task ...`,
+    // `& "C:\x\deskbar.cmd" task ...`, a leading `cd <folder> &&` allowed). A task session makes dozens of them: they
+    // report to the board (whose own lines and comments already show the result), so listing them under "N steps" is noise
+    // (the owner's ruling for the Inbox steps, 2026-11-26). Only the command's own start counts, so `git log` run next to
+    // one is a step as ever. ClaudeChatStream drops them; the reader still reports them, flagged, so nothing is lost here.
+    internal static bool IsHousekeeping(string tool, JsonElement input) =>
+        tool is "Bash" or "PowerShell"
+        && input.ValueKind == JsonValueKind.Object && input.TryGetProperty("command", out var command) && command.ValueKind == JsonValueKind.String
+        && command.GetString() is { } text
+        && LeadingCd.Replace(text.TrimStart(), "") is var start
+        && DeskbarCall.IsMatch(start);
+
+    static readonly Regex DeskbarCall = new(@"^(?:&\s*)?[""']?(?:[^\s""']*[\\/])?deskbar(?:\.cmd)?[""']?\s+task\b", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    // SECRETS NEVER REACH THE PAGE. A step's label is a piece of a command line or a URL, and a command line can hold a
+    // credential (`curl -H "Authorization: Bearer ..."`, `--token=...`, `gh api ... -f password=...`). The label is
+    // redacted BEFORE it is cut to 60 characters, so a secret that straddles the cut is not shown in part. What goes:
+    //   * the value of an Authorization header, to the end of its line or its closing quote;
+    //   * the token after the word Bearer or Basic;
+    //   * whatever follows `token=`, `key=`, `password=`, `secret=` (also in api_key=, access_token=, client_secret=),
+    //     case-insensitive, quoted or not. Only `=` counts, so a word before a colon in ordinary text stays readable;
+    //   * a long run of hex (32 or more) or of base64 characters (32 or more with a digit and a letter in it), which is
+    //     what a pasted key or hash-like token looks like. A path stays readable because `.` and `\` end a run.
+    // The label shows `***` where a value was. This is a filter, not a guarantee: a secret written as a bare word of
+    // fewer than 32 characters, with no keyword before it, cannot be told from any other word.
+    internal static string? Redact(string? label)
+    {
+        if (string.IsNullOrEmpty(label)) return label;
+        var text = Authorization.Replace(label, "$1***");
+        text = BearerToken.Replace(text, "$1***");
+        text = KeywordValue.Replace(text, "$1***");
+        text = HexRun.Replace(text, "***");
+        return Base64Run.Replace(text, match => match.Value.Any(char.IsDigit) && match.Value.Any(char.IsLetter) ? "***" : match.Value);
+    }
+
+    static readonly Regex Authorization = new(@"(?i)(authorization\s*[:=]\s*[""']?)[^\r\n""']+", RegexOptions.Compiled);
+    static readonly Regex BearerToken = new(@"(?i)\b((?:bearer|basic)\s+)[^\s""']+", RegexOptions.Compiled);
+    static readonly Regex KeywordValue = new(@"(?i)(\b[\w-]*(?:token|key|password|secret)=)(?:""[^""]*""|'[^']*'|[^\s&""']+)", RegexOptions.Compiled);
+    static readonly Regex HexRun = new(@"\b[0-9a-fA-F]{32,}\b", RegexOptions.Compiled);
+    static readonly Regex Base64Run = new(@"[A-Za-z0-9+_-]{32,}", RegexOptions.Compiled);
 
     // The file's own name: everything after the last / or \, so the folder (a path on this PC, usually long and
     // private) never reaches the page. Both separators are handled by hand because the path in a transcript is the
@@ -207,7 +249,7 @@ public static class ClaudeChat
                         break;
                     case "tool_use" when Str(block, "name") is { Length: > 0 } name:
                         var input = block.TryGetProperty("input", out var i) ? i : default;
-                        lane.AddStep(Str(block, "id") ?? IdOf(root, lane), KindOf(name), LabelOf(name, input), at);
+                        lane.AddStep(Str(block, "id") ?? IdOf(root, lane), KindOf(name), LabelOf(name, input), at, IsHousekeeping(name, input));
                         break;
                 }
             }
@@ -329,12 +371,12 @@ public static class ClaudeChat
             Append(new Node { MessageId = messageId, Item = new ChatMessage(id, ChatRole.Claude, Cut(text.Trim()), 0, isError, at) });
         }
 
-        public void AddStep(string id, StepKind kind, string label, Maybe<DateTimeOffset> at)
+        public void AddStep(string id, StepKind kind, string label, Maybe<DateTimeOffset> at, bool housekeeping)
         {
             if (steps.ContainsKey(id)) return;
             if (nodes.Count == 0 || nodes[^1].Run is null) Append(new Node { Run = [], Id = id, At = at });
             var run = nodes[^1];
-            var step = new StepState(id, kind, label, at);
+            var step = new StepState(id, kind, label, at) { Housekeeping = housekeeping };
             run.Run!.Add(step);
             steps[id] = step;
         }
@@ -362,7 +404,7 @@ public static class ClaudeChat
 
         public IReadOnlyList<ChatItem> Snapshot() =>
             nodes.Skip(Math.Max(0, nodes.Count - max))
-                .Select(n => n.Item ?? new ChatSteps(n.Id!, n.Run!.Select(s => new ChatStep(s.Id, s.Kind, s.Label, s.Failed, s.Done, s.At)).ToList(), n.At))
+                .Select(n => n.Item ?? new ChatSteps(n.Id!, n.Run!.Select(s => new ChatStep(s.Id, s.Kind, s.Label, s.Failed, s.Done, s.At) { Housekeeping = s.Housekeeping }).ToList(), n.At))
                 .ToList();
 
         static string Cut(string text) => text.Length <= MaxTextLength ? text : text[..(MaxTextLength - 1)] + "…";
@@ -384,6 +426,7 @@ public static class ClaudeChat
             public Maybe<DateTimeOffset> At { get; } = at;
             public bool Done;
             public bool Failed;
+            public bool Housekeeping;
         }
     }
 }
@@ -414,7 +457,11 @@ public enum StepKind { Read, Edit, Write, Run, Search, Web, Subagent, Plan, Othe
 /// <see cref="Done"/> is false while no result has been seen (still running, or the session was cut off) and
 /// <see cref="Failed"/> is true when the result said it failed; a step with no result is never Failed.
 /// </summary>
-public sealed record ChatStep(string Id, StepKind Kind, string Label, bool Failed, bool Done, Maybe<DateTimeOffset> At);
+public sealed record ChatStep(string Id, StepKind Kind, string Label, bool Failed, bool Done, Maybe<DateTimeOffset> At)
+{
+    /// <summary>A call of Deskbar's own shim (`deskbar.cmd task ...`), which the page leaves out (ClaudeChatStream, ClaudeChat.IsHousekeeping).</summary>
+    public bool Housekeeping { get; init; }
+}
 
 /// <summary>What one <see cref="ClaudeChatReader.Read"/> found. <see cref="Items"/> is the chat as it is now (the last
 /// maxItems), <see cref="Changed"/> is false when the file held nothing new and the items are the ones last returned.</summary>
