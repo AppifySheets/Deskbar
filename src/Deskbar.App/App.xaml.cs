@@ -106,6 +106,11 @@ public partial class App : Application
     readonly Core.Tasks.CommentInbox commentInbox = new(Path.Combine(AppPaths.NewStateDir, Core.Tasks.CommentInbox.FolderName), () => DateTimeOffset.UtcNow);
     CommentWaker? commentWaker;
 
+    // Allow / Deny from a task's page: the permission questions on show and the slots their answers go through
+    // (PermissionDesk), which `claude-permission` registers into, and what keeps it honest (PermissionKeeper).
+    internal readonly Core.Tasks.PermissionDesk PermissionDesk = new(Path.Combine(AppPaths.NewStateDir, Core.Tasks.PermissionDesk.FolderName), () => DateTimeOffset.UtcNow);
+    Core.Tasks.PermissionKeeper? permissionKeeper;
+
     // A merged pull request settles the question that asked for the merge (PullRequestWatch, task b7f987b4): it looks at
     // the pull requests linked in waiting questions through `gh` and takes the task off the bar once they are merged or
     // closed, without waiting for the session's `task answered`. Built beside claudeSessions; disposed with it.
@@ -1954,6 +1959,7 @@ public partial class App : Application
             // `claude-wait`, the comment waiter registering, and SessionEnd forgetting a session's inbox (a comment wakes
             // its session).
             inbox: commentInbox,
+            permissions: PermissionDesk,
             // `tasks-window stats` (task 521d2b07), the twin of the panel's Stats switch: the panel opened on its Stats
             // view (TasksBoard.ShowStats). Read when the command arrives, like setTasksWindow.
             showTasksStats: () => tasksBoard is { } statsBoard
@@ -1961,6 +1967,9 @@ public partial class App : Application
                 : Result.Failure("The tasks panel is not available in this mode."),
             // `bookmark open|open-all` and `bookmark list`'s running flag: the opener the chips use (built above).
             bookmarks: bookmarkOpener);
+        // A Deskbar that just started holds no permission question, so no slot left from before can be answered: each is
+        // deleted before the pipe serves, and its hook script, if still waiting, ends printing nothing (PermissionDesk).
+        PermissionDesk.Sweep();
         controlServer = new ControlPipeServer(ControlCommandLine.PipeName,
             args => Dispatcher.InvokeAsync(() =>
             {
@@ -1997,18 +2006,22 @@ public partial class App : Application
         // asyncRewake (ClaudeVersion; a build without it would hold its sessions after every turn), so `claude --version`
         // is read first, off the UI thread, and the skill is synced once it answers (a second or so after the start;
         // no answer, or no Claude Code, means no waiter).
+        // The permission hook's entry (Allow / Deny from a task's page) rides along the same way: only while its setting is
+        // on, and only for a Claude Code at least as new as the one it was measured on (ClaudeVersion.SupportsPermissionHook).
         Observable.FromAsync(() => new Deskbar.Windows.Claude.ClaudeCli().Run(["--version"], null, TimeSpan.FromSeconds(15)))
-            .Select(read => read.Map(Core.Tasks.ClaudeVersion.SupportsAsyncRewake).GetValueOrDefault(false))
-            .Catch((Exception _) => Observable.Return(false))
+            .Select(read => (Waiter: read.Map(Core.Tasks.ClaudeVersion.SupportsAsyncRewake).GetValueOrDefault(false),
+                PermissionHook: read.Map(Core.Tasks.ClaudeVersion.SupportsPermissionHook).GetValueOrDefault(false)))
+            .Catch((Exception _) => Observable.Return((Waiter: false, PermissionHook: false)))
             .ObserveOn(new System.Reactive.Concurrency.SynchronizationContextScheduler(new System.Windows.Threading.DispatcherSynchronizationContext(Dispatcher)))
-            .Subscribe(waiter =>
+            .Subscribe(claude =>
             {
+                var waiter = claude.Waiter;
                 ClickTrace.Write($"claude skill: the comment waiter is {(waiter ? "on" : "off (Claude Code too old, or not found)")}");
-                ClaudeSkill.Sync(manager.State.ClaudeSkill, manager.State.ClaudeTasks, waiter);
+                ClaudeSkill.Sync(manager.State.ClaudeSkill, manager.State.ClaudeTasks, waiter, manager.State.ClaudePermissions && claude.PermissionHook);
                 manager.StateChanged
-                    .Select(_ => (manager.State.ClaudeSkill, manager.State.ClaudeTasks))
+                    .Select(_ => (manager.State.ClaudeSkill, manager.State.ClaudeTasks, manager.State.ClaudePermissions))
                     .DistinctUntilChanged()
-                    .Subscribe(settings => ClaudeSkill.Sync(settings.ClaudeSkill, settings.ClaudeTasks, waiter));
+                    .Subscribe(settings => ClaudeSkill.Sync(settings.ClaudeSkill, settings.ClaudeTasks, waiter, settings.ClaudePermissions && claude.PermissionHook));
             });
 
         // ...and the Windows Terminal profile "Deskbar Claude" (TerminalFragment), which the windows on background sessions
@@ -2111,6 +2124,10 @@ public partial class App : Application
             // sessions works, is delivered with the request to run it (task 29bdd158). Asked through the catalog, so it is
             // the comment box's own list (repo skills only, not the user's or the plugins') and probes a folder not asked yet.
             knowsSkill: async (task, skill) => (await skillCatalog.For(SessionRepos(task))).Any(choice => choice.Name == skill));
+        permissionKeeper = new Core.Tasks.PermissionKeeper(PermissionDesk,
+            manager.StateChanged.Select(_ => manager.State is { ClaudePermissionsInEffect: true, TasksPanel.Inbox: true }),
+            claudeSessions.Live, new System.Reactive.Concurrency.SynchronizationContextScheduler(new System.Windows.Threading.DispatcherSynchronizationContext(Dispatcher)),
+            () => DateTimeOffset.UtcNow);
 
         // ...and what a click on a task does with those sessions (ClaudeTaskActions, Task 9): the double-click's session
         // window, "Start Claude on this", the thread's list and Open, the pipe's three verbs. Its answers land on this
@@ -3057,6 +3074,8 @@ public partial class App : Application
             managerActions?.Dispose();
             claudeActions?.Dispose();
             commentWaker?.Dispose();
+            // Every permission question released: its hook script ends printing nothing, and the terminal asks.
+            permissionKeeper?.Dispose();
             pullRequestWatch?.Dispose();
             runningChangeWatch?.Dispose();
             repoWatchPoll?.Dispose();
@@ -3516,6 +3535,8 @@ public partial class App : Application
         managerActions?.Dispose();
         claudeActions?.Dispose();
         commentWaker?.Dispose();
+        // Every permission question released: its hook script ends printing nothing, and the terminal asks.
+        permissionKeeper?.Dispose();
         pullRequestWatch?.Dispose();
         runningChangeWatch?.Dispose();
         repoWatchPoll?.Dispose();

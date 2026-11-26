@@ -55,6 +55,16 @@ public sealed partial class RemoteControl
                 : Quiet;
     }
 
+    // A SESSION THAT MOVED ON SETTLED ITS QUESTIONS. Its turn ended (Stop, and a background session's SessionEnd at the end
+    // of every turn), a new prompt started one (UserPromptSubmit), or it ended: no permission prompt of it can still be
+    // waiting, so a question still on its page was answered in the terminal. It is taken off and its slot deleted, which
+    // ends the hook script without a word (PermissionDesk). Notification is NOT one of these: Claude Code sends the
+    // permission prompt's own Notification about six seconds into the wait (the hooks reference).
+    void QuestionsSettledBy(ClaudeHookEvent hook)
+    {
+        if (hook.Event is "Stop" or "UserPromptSubmit" or "SessionEnd") permissions?.Forget(hook.SessionId);
+    }
+
     // The setting (AppState.ClaudePermissions), the remote twin of Manage's box. Like claude-tasks, the reply says
     // whether it is in effect, since it is off while sessions do not keep tasks, and whether the Inbox look is on, since
     // only that look draws the card.
