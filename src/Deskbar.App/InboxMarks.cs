@@ -78,6 +78,13 @@ internal static class InboxMarks
         ["inbox"] = [S("M1.75 9.5h3.5l1 2h3.5l1-2h3.5"), S("M3.5 3h9l1.75 6.5v3a1.25 1.25 0 0 1-1.25 1.25H3A1.25 1.25 0 0 1 1.75 12.5v-3z")],
     };
 
+    /// <summary>
+    /// Stopped on the usage limit: the status line Deskbar writes for such a stop, and clears once the limit has reset
+    /// (ClaudeSessions.NoteLimits). Only Deskbar's own line, never a session's. The panel's Inbox and the bar's lines both
+    /// read it here (slice 2), so the two marks agree.
+    /// </summary>
+    internal static bool StoppedOnLimit(TaskItem task) => task.StatusLine.StartsWith(ClaudeSessions.LimitLine, StringComparison.Ordinal);
+
     /// <summary>The mockup's icon for a state mark (its glyph(), r2-data.js).</summary>
     internal static string IconOf(InboxMark mark) => mark switch
     {
