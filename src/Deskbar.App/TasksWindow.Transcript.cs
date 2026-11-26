@@ -126,7 +126,8 @@ public partial class TasksWindow
     {
         if (inboxPage != row.Id || transcript is not { Task: { } followed } poll || followed != row.Id || poll.Source.Kind == ChatSourceKind.None)
             return ChatThread.WithDays(shown, comment => CommentOf(comment, row.Id));
-        var comments = shown.Select(c => ("comment:" + c.Id, c.At, CommentOf(c, row.Id))).ToList();
+        var comments = GroupedInStream(shown, poll.Latest?.Items ?? [], earlierFolded)
+            .Select(c => ("comment:" + c.Id, c.At, CommentOf(c, row.Id))).ToList();
         if (stream is null || streamTask != row.Id)
         {
             stream = new ChatStreamPanel(new ChatStreamDeps((ControlTemplate)FindResource("BareRichTextBox"), LinkOpener(row.Id),
@@ -147,5 +148,32 @@ public partial class TasksWindow
         }
         stream.Apply(poll.Latest?.Items ?? [], NoteOf(poll));
         return [stream];
+    }
+
+    // A RUN OF ONE AUTHOR'S BUBBLES NAMES THE AUTHOR ONCE (task 85218923, ChatThread.Grouped), in the stream as in the plain
+    // thread. In the stream two comments are one run only when nothing of the session's sits between them, so the comments
+    // are grouped stretch by stretch, in the order the stream shows them (ClaudeChatStream.Build, as Apply places them). A
+    // comment and a session message never share a run; the session's messages are grouped by the stream itself
+    // (ChatStreamPanel.Unnamed). Decided when the page is drawn: a session item that a later poll slips between two
+    // comments leaves the upper one without its name until the page is drawn again.
+    internal static IReadOnlyList<TaskCommentView> GroupedInStream(IReadOnlyList<TaskCommentView> shown, IReadOnlyList<ChatItem> items,
+        bool earlierFolded)
+    {
+        var byKey = shown.GroupBy(c => "comment:" + c.Id).ToDictionary(g => g.Key, g => g.First(), StringComparer.Ordinal);
+        var entries = ClaudeChatStream.Build(items, byKey.Select(p => new StreamComment(p.Key, p.Value.At)).ToList(), earlierFolded).Entries;
+        var grouped = new Dictionary<Guid, TaskCommentView>();
+        var stretch = new List<TaskCommentView>();
+        void Close()
+        {
+            foreach (var comment in ChatThread.Grouped(stretch)) grouped[comment.Id] = comment;
+            stretch.Clear();
+        }
+        foreach (var entry in entries)
+        {
+            if (entry.IsComment && byKey.TryGetValue(entry.Key, out var comment)) stretch.Add(comment);
+            else Close();
+        }
+        Close();
+        return shown.Select(c => grouped.GetValueOrDefault(c.Id, c)).ToList();
     }
 }
