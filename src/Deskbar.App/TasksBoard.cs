@@ -859,11 +859,28 @@ public sealed class TasksBoard : IDisposable
             return;
         }
 
-        var target = tasks.Board.Tasks.TryFirst(t => t.Id == id).Bind(t => t.WorkspaceId);
-        var elsewhere = target.HasValue && manager.CurrentWorkspaceId.Map(current => current != target.Value).GetValueOrDefault(true);
-        if (elsewhere) Report(manager.Switch(target.Value), id);
+        var task = tasks.Board.Tasks.TryFirst(t => t.Id == id);
+        var target = task.Bind(t => t.WorkspaceId);
+        var standing = manager.CurrentWorkspaceId;
+        var elsewhere = target.HasValue && standing.Map(current => current != target.Value).GetValueOrDefault(true);
+        var switched = elsewhere ? Report(manager.Switch(target.Value), id) : Result.Success();
+        // MEASURED, NOT GUESSED (task 26f15d70, second report): a link on a Deskbar task, clicked while Petre stood in GPH,
+        // opened in Personal, and the trace could only show "arrived Personal (was GPH)" with nothing naming the click.
+        // So every task link says here which task it was on, that task's workspace, where Petre stood, whether a switch
+        // was asked for and how it went. With the "arrived" lines around it (WorkspaceManager.OnDesktopChanged) a wrong landing
+        // names its cause: the wrong task, the wrong workspace, a refused switch, or something after the switch moving the desktop.
+        ClickTrace.Write($"task link {uri.Host}{uri.AbsolutePath}: task {id.ToString()[..8]} " +
+                         $"\"{task.Map(t => t.Title).GetValueOrDefault("(not on the board)")}\" on {NameOf(target)}, " +
+                         $"standing in {NameOf(standing)}, " +
+                         (elsewhere ? $"switch {(switched.IsSuccess ? "ok" : "refused: " + switched.Error)}" : "no switch"));
         OpenUri(uri);
     }
+
+    // A workspace's name for the link trace, "none" for no workspace and the id for one that is gone.
+    string NameOf(Maybe<Guid> workspace) =>
+        workspace.Match(
+            id => manager.State.Workspaces.TryFirst(w => w.Id == id).Map(w => w.Name).GetValueOrDefault(id.ToString()[..8]),
+            () => "none");
 
     // OpenFromStats's and OpenParent's shared half: a filter that would hide the task is let through first (see
     // OpenFromStats for which and how), then the task is shown (ShowTask).
