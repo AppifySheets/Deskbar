@@ -1210,6 +1210,9 @@ MG6. Ask the manager to close a task: it says it cannot, and the task stays open
 MG7. With nothing stored, have a manager session already running in the manager folder (for example a start that was
      listed late). The next click attaches to it and never starts a second one.
 MG8. From any terminal, `$ts task overview` prints one line per open task.
+MG9. (Task 1c9eefdf.) After a new day's manager has started, open the Claude app on the phone: "Deskbar manager" is in
+     its list of sessions and a message sent from there reaches it. Start Claude on a task: that session is NOT in the
+     phone's list, also with `"remoteControlAtStartup": true` in `~/.claude/settings.json`.
 
 Manager event wakes (docs/superpowers/specs/2026-11-25-manager-event-wakes-design.md):
 
