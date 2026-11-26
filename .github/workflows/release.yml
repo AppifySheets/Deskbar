@@ -355,6 +355,10 @@ jobs:
         run: |
           # A download called "Deskbar.exe" tells nobody which build they have; one
           # called "Deskbar-2.0.0-win-x64.exe" survives being sitting in a Downloads folder.
+          #
+          # The app PREDICTS this name when GitHub's API is rate-limited and it asks github.com
+          # instead (WebFallback.PortableAssetName in src/Deskbar.Core/Updates/WebFallback.cs).
+          # Rename it here and change it there too, or that fallback never finds the exe.
           $name = "Deskbar-${{ steps.version.outputs.version }}-win-x64.exe"
           Move-Item artifacts/publish/Deskbar.exe "artifacts/publish/$name"
           "name=$name" >> $env:GITHUB_OUTPUT

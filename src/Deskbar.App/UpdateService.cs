@@ -31,6 +31,11 @@ public static class UpdateService
     // api.github.com.
     public const string ReleasesPage = "https://github.com/AppifySheets/Deskbar/releases/latest";
 
+    // The repository's web address, which the github.com fallback (WebFallback, Deskbar task 49b68e43)
+    // asks when the API refuses: its releases/latest redirect names the tag, and its releases/download
+    // URLs say whether the exe is attached. The same repo as the two constants above.
+    const string Repository = "https://github.com/AppifySheets/Deskbar";
+
     // The Microsoft Store listing's product id, from Partner Center. It stayed EMPTY until the listing
     // went live (2026-11-03): the update notice shows its "Also on the Microsoft Store" line and button
     // only when this is filled in, and a button to a listing that is not public yet opens a Store page
@@ -59,6 +64,18 @@ public static class UpdateService
         return client;
     }
 
+    // The github.com fallback's client: redirects NOT followed, because for those two requests the
+    // redirect is the answer (see LatestFromWebAsync). Same User-Agent and timeout as the API client, and
+    // no API Accept header, since these are web pages rather than the API.
+    static readonly HttpClient Web = BuildWeb();
+
+    static HttpClient BuildWeb()
+    {
+        var client = new HttpClient(new HttpClientHandler { AllowAutoRedirect = false }) { Timeout = TimeSpan.FromSeconds(10) };
+        client.DefaultRequestHeaders.Add("User-Agent", $"Deskbar/{RunningVersion}");
+        return client;
+    }
+
     // What this build calls itself. InformationalVersion rather than AssemblyVersion, because
     // AssemblyVersion is deliberately pinned at the major version, x.0.0.0 (2.0.0.0 now), so
     // servicing releases never break a reference (see Directory.Build.props) -- reading it would
@@ -80,33 +97,91 @@ public static class UpdateService
     // Result<Maybe<T>> rather than Result<T?> or an exception: "the check failed" and "the check
     // succeeded and you are up to date" are genuinely different outcomes, and only the second one
     // should stop anything retrying tomorrow. Both are silent to the user either way.
+    //
+    // Asks the API first and github.com's own pages second (Deskbar task 49b68e43). The API's limit is
+    // sixty unauthenticated requests an hour per IP address, and on a corporate network a whole office
+    // shares one, so there the API answers 403 for most of every hour: the background check still found
+    // updates on a lucky tick while "Check for updates" asked by hand got "release check returned 403".
+    // The github.com route (WebFallback's header has the two requests) does not count against that limit.
+    // Only when both fail is the check a failure, and then the message names both reasons.
     public static async Task<Result<Maybe<ReleaseInfo>>> NewerThanRunningAsync(CancellationToken cancel = default)
     {
-        try
+        var latest = await LatestFromApiAsync(cancel).ConfigureAwait(false);
+
+        // Not retried a second way when the CALLER gave up (the app shutting down): that is not a
+        // refusal by GitHub, and a second request would only delay the shutdown.
+        if (latest.IsFailure && !cancel.IsCancellationRequested)
         {
-            var response = await Client.GetAsync(LatestRelease, cancel).ConfigureAwait(false);
+            ClickTrace.Write($"update check: the API failed ({latest.Error}), asking github.com instead");
+            var fromWeb = await LatestFromWebAsync(cancel).ConfigureAwait(false);
+            latest = fromWeb.IsSuccess
+                ? fromWeb
+                : Result.Failure<ReleaseInfo>($"{latest.Error}, and github.com: {fromWeb.Error}");
+        }
+
+        return latest.Map(release => UpdateCheck.IsNewer(RunningVersion, release.Version)
+            ? Maybe<ReleaseInfo>.From(release)
+            : Maybe<ReleaseInfo>.None);
+    }
+
+    // The API's answer: the latest release with its real asset list.
+    internal static Task<Result<ReleaseInfo>> LatestFromApiAsync(CancellationToken cancel) =>
+        Guarded(async () =>
+        {
+            using var response = await Client.GetAsync(LatestRelease, cancel).ConfigureAwait(false);
             if (!response.IsSuccessStatusCode)
-                return Result.Failure<Maybe<ReleaseInfo>>($"release check returned {(int)response.StatusCode}");
+                return Result.Failure<ReleaseInfo>($"release check returned {(int)response.StatusCode}");
 
             var payload = await response.Content.ReadAsStringAsync(cancel).ConfigureAwait(false);
 
             // false: this build is the portable exe, so it must never be offered the installer. An
             // installed build will pass true.
-            return UpdateCheck.ReadRelease(payload, preferSetup: false)
-                .Map(release => UpdateCheck.IsNewer(RunningVersion, release.Version)
-                    ? Maybe<ReleaseInfo>.From(release)
-                    : Maybe<ReleaseInfo>.None);
-        }
-        // Every one of these is "no answer today", which is not a problem worth telling anyone
-        // about: no network, a proxy in the way, DNS down, the machine asleep mid-request, or the
-        // app shutting down while the call was in flight. Petre: "fail silently offline."
-        catch (HttpRequestException e)
+            return UpdateCheck.ReadRelease(payload, preferSetup: false);
+        });
+
+    // github.com's answer, for when the API refused (WebFallback has the reasoning and the two requests).
+    // Both are HEADs on a client that does NOT follow redirects, because the redirect itself is the answer:
+    // where releases/latest points names the tag, and whether the download URL redirects says the exe is on
+    // the release. Following them would fetch a release page and then 75 MB of exe to learn the same two
+    // facts.
+    internal static Task<Result<ReleaseInfo>> LatestFromWebAsync(CancellationToken cancel) =>
+        Guarded(async () =>
         {
-            return Result.Failure<Maybe<ReleaseInfo>>(e.Message);
-        }
-        catch (TaskCanceledException e)
+            var latestUrl = new Uri($"{Repository}/releases/latest");
+            using var latest = await Web.SendAsync(new HttpRequestMessage(HttpMethod.Head, latestUrl), cancel)
+                .ConfigureAwait(false);
+
+            var tag = WebFallback.TagFrom(Repository, RedirectTarget(latest, latestUrl));
+            if (tag.IsFailure) return Result.Failure<ReleaseInfo>(tag.Error);
+
+            var assetUrl = new Uri(WebFallback.DownloadUrl(Repository, tag.Value));
+            using var asset = await Web.SendAsync(new HttpRequestMessage(HttpMethod.Head, assetUrl), cancel)
+                .ConfigureAwait(false);
+
+            return WebFallback.AssetPublished((int)asset.StatusCode, RedirectTarget(asset, assetUrl))
+                .Map(published => WebFallback.Release(Repository, tag.Value, published));
+        });
+
+    // Where a response redirects to, as an absolute URL, or null when it does not redirect. A Location can in
+    // principle be relative, so it is resolved against the URL that was asked for (as a browser would) before
+    // WebFallback compares it with an absolute one.
+    static string? RedirectTarget(HttpResponseMessage response, Uri requested) =>
+        response.Headers.Location is { } to
+            ? (to.IsAbsoluteUri ? to : new Uri(requested, to)).AbsoluteUri
+            : null;
+
+    // Every one of these is "no answer today", which is not a problem worth telling anyone
+    // about: no network, a proxy in the way, DNS down, the machine asleep mid-request, or the
+    // app shutting down while the call was in flight. Petre: "fail silently offline."
+    static async Task<Result<ReleaseInfo>> Guarded(Func<Task<Result<ReleaseInfo>>> check)
+    {
+        try
         {
-            return Result.Failure<Maybe<ReleaseInfo>>(e.Message);
+            return await check().ConfigureAwait(false);
+        }
+        catch (Exception e) when (e is HttpRequestException or TaskCanceledException)
+        {
+            return Result.Failure<ReleaseInfo>(e.Message);
         }
     }
 

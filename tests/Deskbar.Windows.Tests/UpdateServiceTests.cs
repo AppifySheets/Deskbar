@@ -41,4 +41,18 @@ public class UpdateServiceTests
         // reached GitHub and the payload was understood, which is exactly what silence hides.
         Assert.True(latest.IsSuccess, $"release check failed: {(latest.IsFailure ? latest.Error : "")}");
     }
+
+    // The github.com fallback (Deskbar task 49b68e43) against the real site: releases/latest still
+    // redirects to a tag, and the latest release's exe is where WebFallback predicts it, under the name
+    // release.yml gives it. If either drifts, the fallback goes quiet on a rate-limited network, and
+    // this is the test that says so.
+    [Fact]
+    [Trait("Category", "Integration")]
+    public async Task The_github_com_fallback_finds_the_latest_exe()
+    {
+        var latest = await UpdateService.LatestFromWebAsync(CancellationToken.None);
+
+        Assert.True(latest.IsSuccess, $"github.com fallback failed: {(latest.IsFailure ? latest.Error : "")}");
+        Assert.True(UpdateCheck.CanDownload(latest.Value), $"no exe found for {latest.Value.Version}");
+    }
 }

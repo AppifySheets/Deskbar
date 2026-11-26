@@ -201,8 +201,11 @@ public partial class App : Application
             //
             // The cost is twelve requests an hour to GitHub's unauthenticated releases endpoint, whose
             // limit is sixty an hour PER IP. Fine for one machine, and worth knowing for a shared
-            // office address: five colleagues running this would sit exactly on the limit, and a
-            // rate-limited check is already handled as today's answer rather than as an error. The Store
+            // office address: five colleagues running this would sit exactly on the limit. On such a
+            // network the API answers 403 for most of the hour, so when it refuses, the check asks
+            // github.com's own release pages instead, which do not count against that limit
+            // (UpdateService.NewerThanRunningAsync, WebFallback; Deskbar task 49b68e43, where "Check for
+            // updates" on a corporate computer said "release check returned 403"). The Store
             // copy asks the Microsoft Store on the same beat instead (see CheckForUpdate), so none of
             // those requests go to GitHub there.
             //
@@ -393,8 +396,10 @@ public partial class App : Application
         if (latest.IsSuccess && latest.Value.HasNoValue && manager is { State.LastUpdateOffer: null } current)
             current.StampUpdateOffer(DateTimeOffset.Now, null);
 
-        // A failure is today's answer, not a problem: no network, a proxy, GitHub rate-limiting a
-        // shared IP. Tomorrow's tick asks again, and the user is never told any of it.
+        // A failure is today's answer, not a problem: no network, a proxy, or GitHub's API rate-limiting
+        // a shared IP while github.com itself is also unreachable (a rate-limited API alone is covered by
+        // the github.com fallback inside NewerThanRunningAsync). The next tick asks again, and the user is
+        // never told any of it.
         if (latest.IsFailure || latest.Value.HasNoValue) return;
 
         var release = latest.Value.Value;
@@ -415,7 +420,16 @@ public partial class App : Application
 
         // Already announced this exact version. The daily tick would otherwise re-balloon the same
         // release every day for as long as the user chooses not to update, which is nagging.
-        if (availableUpdate?.Version == release.Version)
+        //
+        // Unless THIS answer knows the release is critical and the earlier one did not. The github.com
+        // fallback (UpdateService.NewerThanRunningAsync, used while the API is rate-limited, Deskbar task
+        // 49b68e43) never reads the release notes, so its answer carries no CriticalSince. On an office
+        // network the first tick to see a release is usually a fallback one, which moves the menu item to
+        // it quietly; without this condition the API's later answer, the one that says "critical", would
+        // stop here and the critical offer would never be made. UpdateCadence still offers a critical
+        // release only once (CriticalNotYetOffered), so letting it through here cannot nag.
+        if (availableUpdate?.Version == release.Version
+            && (release.CriticalSince is null || availableUpdate.CriticalSince == release.CriticalSince))
         {
             ClickTrace.Write($"update {release.Version} already announced, staying quiet");
             return;

@@ -33,6 +33,10 @@ public static class UpdateCheck
     public static bool IsNewer(string? running, string? latest) =>
         Parse(running) is { } current && Parse(latest) is { } candidate && candidate > current;
 
+    // Whether this text reads as a version at all, by the same tolerant rules IsNewer compares with.
+    // WebFallback uses it to refuse a releases/latest redirect that names something else.
+    public static bool IsVersion(string? text) => Parse(text) is not null;
+
     // A version as it should be shown to a person (#82: the app's version in the Manage window).
     //
     // Only the BUILD METADATA is dropped, the "+commit" the SDK appends to InformationalVersion when
@@ -205,8 +209,9 @@ public static class UpdateCheck
         release.AssetName is not null && IsDownloadable(release.AssetUrl);
 
     // A name and nothing else: no directory part, no drive, no traversal. The download lands
-    // BESIDE the running exe, so a name carrying "..\..\" would choose where.
-    static bool IsBareFileName(string name) =>
+    // BESIDE the running exe, so a name carrying "..\..\" would choose where. Internal because
+    // WebFallback holds a tag to the same rule before building a file name out of it.
+    internal static bool IsBareFileName(string name) =>
         !string.IsNullOrWhiteSpace(name)
         && name == Path.GetFileName(name)
         && name.IndexOfAny(Path.GetInvalidFileNameChars()) < 0
