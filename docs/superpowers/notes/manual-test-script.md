@@ -1049,6 +1049,11 @@ AT3. Switch to a browser or VS Code: the highlight stays on the second task.
 AT4. Click a different task's line on the bar, then the first terminal again: the highlight follows the terminal.
 AT5. With the tasks panel open and scrolled to the top, bring forward the terminal of a task further down: the
      panel scrolls just far enough to show its line. Bring the same terminal forward again: nothing moves.
+AT6. (Task 6bb3dac6.) Select some other task. Close a Claude task's terminal, then Open Claude on that task (bar menu
+     or the panel line's button): as soon as the new terminal opens, the task's line is highlighted on the bar and in
+     the panel, without clicking away and back. Same with Start Claude on this for a task with no session.
+AT7. With a task's terminal in front and its line highlighted, click another task's line on the bar and keep typing in
+     the terminal: the highlight stays on the task you clicked.
 
 ## A new task is highlighted
 
