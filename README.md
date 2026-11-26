@@ -478,9 +478,13 @@ multiple-choice dialog waits on you the same way, until you answer it in the ter
 finished: a done task gets a green tick (a hollow green ring while a change it merged into Deskbar is not in the copy you are running yet, filling in once it is), and every line in the tasks panel shows its status (a slim line in its tooltip). Only you close a task. Double-click a Claude task to go to its session, and pick "Start Claude
 on this" on a note's menu to hand it to a new Claude session.
 
-A task can have subtasks, one level deep. Pick "Add subtask…" on a task's menu, or "Add subtask" in the row of
-buttons at the top of its open thread in the tasks panel (next to "Open in window"), and type a
-title in the box that opens right under it: that is all the brief it needs.
+In the tasks panel the menu's actions are also small buttons on the line itself, before its "⋯": Edit, Open in
+window, Add subtask, Assign to, Related to, Move to and Delete, as many as the panel's width has room for, and a
+note's line has a play button that starts Claude on it. "⋯" still has them all.
+
+A task can have subtasks, one level deep. Pick "Add subtask…" on a task's menu or its "+" button on the line, or
+"Add subtask" in the row of buttons at the top of its open thread in the tasks panel when the line has no room for
+it, and type a title in the box that opens right under it: that is all the brief it needs.
 Enter opens the new subtask in the same place. A Claude session that takes up a subtask is told about its parent and the other subtasks,
 with their status lines, your descriptions and comments, and every Claude session on them with the file its
 conversation is kept in, so it reads what the earlier work found instead of you explaining it again. A subtask is

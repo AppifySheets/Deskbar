@@ -90,15 +90,33 @@ public partial class TasksWindow
     {
         commentsWidth = new(CommentsColumnFor(shownRows));
         var full = !view.Slim && !view.Matrix;
+        // Start Claude, on a task no session has joined, takes the same column as Open Claude (task 59b8f613).
         actionWidth = new(full && shownRows.Any(r => r.Status == TaskStatus.Closed && !r.Closing) ? ReopenColumn
-            : shownRows.Any(OpensClaude) ? OpenClaudeColumn
+            : shownRows.Any(r => OpensClaude(r) || StartsClaude(r)) ? OpenClaudeColumn
             : 0);
         if (columnDrag is null) columnWidths = view.Columns;
     }
 
     // A full line's columns, in ListOrder: the tick, the title (the star, which wraps), the five text columns, the buttons.
+    // The last holds the menu's actions as icon buttons and "⋯" after them (task 59b8f613, TasksWindow.LineButtons.cs). It
+    // is a star too, with a weight that gives it all the room first, but capped at what the seven and "⋯" need, and the
+    // title keeps FullTitleFloor before it gets any (ConstrainFullColumns). So a wide full line has all seven, and at the
+    // narrowest full line (710 DIP, with the scroll bar) the strip gives up its last buttons rather than the title its
+    // floor: measured 95 DIP of title there with a fixed 176 DIP column, against the 100 it is promised.
     IReadOnlyList<GridLength> FullColumns() =>
-        [new(22), new(1, GridUnitType.Star), .. columnWidths.InOrder.Select(w => new GridLength(w)), new(FlagsColumn), commentsWidth, actionWidth, new(ButtonColumn)];
+        [new(22), new(1, GridUnitType.Star), .. columnWidths.InOrder.Select(w => new GridLength(w)), new(FlagsColumn), commentsWidth, actionWidth,
+            new(1000, GridUnitType.Star)];
+
+    // The title's floor on a full line, and the strip's cap: the two limits FullColumns' two stars are drawn within. Set on
+    // every full line's grid and on the header's, so the header's columns stay over the lines'. 100 DIP for the title's
+    // text, plus the 10 DIP of margin its block has inside the column (TextOf: 2 left, 8 right), plus 2 to spare.
+    const double FullTitleFloor = 112;
+
+    void ConstrainFullColumns(Grid grid)
+    {
+        grid.ColumnDefinitions[At(Part.Title)].MinWidth = FullTitleFloor;
+        grid.ColumnDefinitions[At(Part.More)].MaxWidth = ButtonColumn * (LineButtonSlots + 1);
+    }
 
     // A slim line's columns, in ListOrder: no status, no assignee; the squares, the age and the workspace chip; the buttons.
     IReadOnlyList<GridLength> SlimColumns() =>
@@ -221,6 +239,7 @@ public partial class TasksWindow
     {
         ColumnHeader.Visibility = shown ? Visibility.Visible : Visibility.Collapsed;
         FullColumns().Select((width, i) => (width, i)).ToList().ForEach(c => ColumnHeader.ColumnDefinitions[c.i].Width = c.width);
+        ConstrainFullColumns(ColumnHeader);
     }
 
     // For the tests: the width a column has on the lines, and whether the header shows.

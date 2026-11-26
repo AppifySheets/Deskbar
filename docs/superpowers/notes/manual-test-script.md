@@ -1270,6 +1270,28 @@ TB2. Open the thread of a note: the row reads **Open in window**, **Start Claude
 TB3. Open the thread of a task with two sessions: each session line that can be opened has its Open again. Narrow
      the panel to its narrowest: the row wraps onto a second line instead of being cut off.
 
+Since task 59b8f613 the row leaves out each button its line already shows (see the next section), so run TB1 to TB3
+with the panel at its narrowest, where the line has room for Edit only: there the row keeps **Open in window** and
+**Add subtask**, and the Claude button is on the line, not in the row.
+
+## The line's buttons
+
+(Task 59b8f613.) The tasks panel open, a Claude task and a note in the list.
+
+LB1. At the default width (460 DIP) a slim line's strip reads, after the comments: Open Claude (or, on the note, a play
+     button, Start Claude on this), then Edit, Open in window, Add subtask, Assign to, Related to, Move to (measured: six
+     on a line with a comment count), then ⋯. Each sits at the same x on every line; a closed task leaves the Edit, Open
+     in window and Add subtask slots empty.
+LB2. Narrow the panel to its narrowest: only Edit (and Open in window on a line with no comments) is left before ⋯, and
+     ⋯ sits right after it, inside the line. Widen it a little: Delete joins. Widen past 710 DIP: the full line has all
+     seven at its right end, and at exactly 710 the title keeps at least 100 DIP and the strip gives up its last ones.
+LB3. Press each: Edit opens the title in the line, Open in window the task's window, Add subtask the box in its thread,
+     Assign to a Me / Claude menu under the button, Related to the link picker, Move to the workspace menu. Delete opens
+     "Delete for good" under it and deletes only on that second click. ⋯ still lists every item.
+LB4. Open a task's thread at the default width: its row of buttons is gone, since the line above has all of them. At
+     the narrowest panel the row is back with Open in window and Add subtask.
+LB5. The buttons are quiet like ⋯ until the pointer is on the line, and a press on one does not open the task.
+
 ## Done when running
 
 Task 8470d176. A Done task whose pull request is in this repository shows a hollow green ring until the Deskbar you
