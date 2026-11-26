@@ -515,6 +515,9 @@ public partial class TasksWindow : Window
         DrawManagerLine(managerShown ? view.ManagerAsks : null);
         // The List's rows are not cleared here: DrawList keeps the lines that did not change (TasksWindow.LineReuse.cs).
         // The registries below are, and a kept line writes its entries back.
+        // Where each open thread is scrolled to, read before any line is rebuilt, and which threads open now (task
+        // ee9bd3fc). It empties the capped threads' registry too, which a kept line writes back like the others.
+        BeforeThreadsRedraw(shownRows);
         menuButtons.Clear();
         lineButtons.Clear();
         dragLines.Clear();
@@ -575,6 +578,7 @@ public partial class TasksWindow : Window
             DrawMatrix(view);
         }
         else DrawList(view);
+        AfterThreadsRedraw(shownRows);
         Headers = view.Matrix ? view.Cells.Select(c => c.Header).ToArray() : view.Groups.Select(g => g.Header).ToArray();
         Keys = shownRows.Select(r => r.Id).ToArray();
         EmptyText.Text = view.EmptyText;
@@ -1503,6 +1507,10 @@ public partial class TasksWindow : Window
         var top = parts.Frame.TransformToAncestor(panel).Transform(new Point(0, 0)).Y;
         scroller.ScrollToVerticalOffset(Math.Max(0, top - scroller.ViewportHeight / 3));
         UpdateLayout();
+        // A line inside a capped thread comes out of the thread's own scroll, and an open thread shows whole with its
+        // line (task ee9bd3fc, TasksWindow.ThreadCap.cs).
+        ShowSelectedThread(selectedId.Value, parts.Frame);
+        UpdateLayout();
     }
 
     /// <summary>
@@ -2147,15 +2155,22 @@ public partial class TasksWindow : Window
     // its parent's open thread opens there, its own thread drawn right under its entry (`inParent`), indented in a frame
     // of its own. That thread leaves out "Subtask of" (the parent is the thread around it). Since task 249a1e8a the entry
     // is a full line and its thread keeps the whole row of buttons, Add subtask included, which adds a sibling.
-    UIElement Thread(TaskRowView row, bool inParent = false)
+    //
+    // CAPPED UNDER ITS LINE (task ee9bd3fc, TasksWindow.ThreadCap.cs): a top-level thread is given the line it is drawn
+    // under (`under`), and is then no taller than the list's view less that line, its head and comment box fixed and
+    // the rest scrolling between them. A subtask's thread in place has no `under` and stays one plain stack.
+    UIElement Thread(TaskRowView row, bool inParent = false, FrameworkElement? under = null)
     {
+        // The head: what stays at the top of a capped thread (the parent entry, the row of buttons, the subtask box).
+        var head = new StackPanel();
+        // The body: what scrolls in a capped thread (the session lines, subtasks, links, the folds and the comments).
         var panel = new StackPanel();
         // A SUBTASK'S PARENT FIRST (task 54b39c4c; Petre: "subtask should show its parent and have a way to open the parent
         // easily"). A nested line shows only "↳", trusting the parent to be right above, but with a few siblings and an
         // open thread the parent is off the top of the list. So an open subtask names its parent at the head of its
         // thread, and the name is a button that opens the parent (TasksBoard.OpenParent).
         if (!inParent && row.ParentId is { } parentId && row.ParentTitle is { } parentTitle && Actions?.OpenParent is { } openParent)
-            panel.Children.Add(ParentEntry(parentId, parentTitle, openParent));
+            head.Children.Add(ParentEntry(parentId, parentTitle, openParent));
         // A SUBTASK OPENED IN PLACE SHOWS ITS DESCRIPTION (task b2ff3fb7; Petre, of a subtask whose two screenshots were
         // nowhere to be seen once it sat under another task: "subtask may have lost its image after being moved into
         // another task"). A task's description and its pictures are drawn by its LINE (TextOf), under the title. This
@@ -2170,11 +2185,11 @@ public partial class TasksWindow : Window
         // its Add subtask adds a sibling, as its line's menu always has, since subtasks are one level deep.
         var addsSubtask = Actions?.SubtaskParent is not null && row.Status != TaskStatus.Closed && !row.Closing;
         var (actions, hasOpenClaude) = ThreadActions(row, addsSubtask);
-        if (actions.Children.Count > 0) panel.Children.Add(actions);
+        if (actions.Children.Count > 0) head.Children.Add(actions);
         // The buttons the line right above already shows leave the row (task 59b8f613, FollowLine). A subtask's thread in
         // its parent's has its own line right above it as well now (task 249a1e8a), so it follows that line too.
         if (lineButtons.TryGetValue(row.Id, out var lineStrip)) FollowLine(actions, row, lineStrip);
-        if (addsSubtask && subtaskUnder == row.Id) panel.Children.Add(SubtaskBox(row.Id));
+        if (addsSubtask && subtaskUnder == row.Id) head.Children.Add(SubtaskBox(row.Id));
         // The session lines stay as the record of who worked on the task. With Open Claude in the row above and the task
         // having ONE session in all, that line's own Open would be the same click twice, so it is left off. With two or
         // more, each line keeps its Open, since Open Claude goes to one of them only (TaskViews.SessionToGoTo: live first,
@@ -2215,11 +2230,13 @@ public partial class TasksWindow : Window
         // The comments as a chat (task 39bc9c4d, ChatThread): bubbles on two sides, Deskbar's lines as events, a day line
         // above each day's first comment. It replaced the hairline between comments (task aa42794f).
         ChatThread.WithDays(shown, comment => CommentOf(comment, row.Id)).ToList().ForEach(comment => panel.Children.Add(comment));
-        panel.Children.Add(CommentBox(row.Id));
+        var box = CommentBox(row.Id);
         authors[row.Id] = shown.Select(c => c.Author).ToArray();
         shownComments[row.Id] = shown.Select(c => c.Id).ToArray();
-        return new Border
+        var frame = new Border
         {
+            // So a test can tell a thread's frame from the other Borders around it (task ee9bd3fc).
+            Tag = ThreadTag,
             Background = ThreadFill,
             BorderBrush = ThreadEdge,
             BorderThickness = new Thickness(1),
@@ -2234,8 +2251,13 @@ public partial class TasksWindow : Window
             // session line ran off the right edge. The frame and its fill already say which task it belongs to, so it now
             // takes the tile's own inset (TileInset) on both sides and lines up with the tile above it.
             Margin = inParent ? new Thickness(12, 0, 0, 8) : new Thickness(TileInset, TileGap, TileInset, 6),
-            Child = panel,
         };
+        // Capped under its line (TasksWindow.ThreadCap.cs), or the head, the body and the box in one plain stack, as a
+        // thread always was before the cap.
+        frame.Child = under is not null
+            ? CappedThread(row.Id, frame, under, head, panel, box, shown.Select(c => (Guid?)c.Id).LastOrDefault())
+            : new StackPanel { Children = { head, panel, box } };
+        return frame;
     }
 
     // The row of buttons at the top of an open thread (task 1c17b7d6), left to right, each only where it applies:

@@ -146,8 +146,10 @@ public partial class TasksWindow
         cell.Rows.ToList().ForEach(row =>
         {
             closing[row.Id] = row.Closing;
-            lines.Children.Add(Line(row));
-            if (row.Expanded) lines.Children.Add(Thread(row));
+            var line = Line(row);
+            lines.Children.Add(line);
+            // Capped under its line against the cell's own view (task ee9bd3fc, TasksWindow.ThreadCap.cs).
+            if (row.Expanded) lines.Children.Add(Thread(row, under: line));
         });
         var body = new DockPanel();
         var caption = new TextBlock
