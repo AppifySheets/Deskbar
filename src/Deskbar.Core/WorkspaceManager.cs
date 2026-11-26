@@ -514,7 +514,18 @@ public sealed class WorkspaceManager(
                 .Or(() => LaunchedByWorkspace(window))
                 .Or(() => Remembered(window).Map(placement => new Decision(placement, Roster: true)))
                 .Or(() => RulesEngine.MatchWorkspace(window, State.WorkspaceRules).Map(id => new Decision(Placement.In(id), Roster: true)))
-                .Tap(decided => ApplyPlacement(window, decided.Placement, decided.Roster));
+                .Tap(decided =>
+                {
+                    ApplyPlacement(window, decided.Placement, decided.Roster);
+                    // A start that named a screen (a bookmark that remembers one, StartedFor) puts its window there too,
+                    // through the same move a window dragged to a screen half makes, held and retried if the window is
+                    // not ready yet. A screen no longer connected fails inside the move, and the window stays where it
+                    // opened, which is the brief's "opens without placement". Traced, never reported: nobody clicked
+                    // anything at this moment.
+                    if (decided.Screen is { } screen)
+                        MoveWindowToMonitor(window.Handle, screen)
+                            .TapError(error => trace?.Invoke($"start: screen {screen} for {window.ProcessName} 0x{window.Handle.Value:X}: {error}"));
+                });
 
         // Fire-and-forget for the same reason as above. WantedName rather than the rules directly, so an
         // app named by its folder (#136) gets that name here too -- which for a window that opens with a
@@ -1867,6 +1878,36 @@ public sealed class WorkspaceManager(
     public Result RemoveBookmark(Guid workspaceId, Guid bookmarkId) =>
         BookmarkInList(workspaceId, bookmarkId)
             .Tap(_ => ReplaceBookmarks(workspaceId, list => list.Where(b => b.Id != bookmarkId).ToList()));
+
+    // MOVING A BOOKMARK (the second bookmarks PR): a chip dragged to a screen half of a row, or to another workspace's
+    // row, and the pipe's `bookmark move`. `to` is the workspace it goes to (null or its own: it stays), `screen` what
+    // happens to its remembered screen (ScreenChange). ONE persist for the whole move, so a bookmark is never in both
+    // workspaces or in neither, and its id is kept, so an opened link's note (OpenedLinks) follows it.
+    //
+    // Refused, with nothing changed:
+    //   * a screen for a link: the link goes into a browser window Deskbar does not move (Petre's brief left the choice
+    //     to the builder; refusing says so instead of storing a screen that would do nothing);
+    //   * a move to a workspace that already has a bookmark opening the same thing, named in the message, as an add is;
+    //   * a stale id (the workspace or the bookmark is gone).
+    // A move to another workspace goes to the END of its chips, as an add does.
+    public Result<Bookmark> MoveBookmark(Guid workspaceId, Guid bookmarkId, Guid? to, ScreenChange screen) =>
+        BookmarkInList(workspaceId, bookmarkId)
+            .Ensure(b => !(screen.Changes && screen.Screen is not null && b.Kind == BookmarkKind.Link),
+                "A link opens in its browser's window, which Deskbar does not move, so it has no screen.")
+            .Bind(b => BookmarkRules.Check(b with { Screen = screen.Changes ? screen.Screen : b.Screen }))
+            .Bind(moved => (to ?? workspaceId) == workspaceId
+                ? Result.Success(moved).Tap(m => ReplaceBookmarks(workspaceId, list => list.Select(b => b.Id == bookmarkId ? m : b).ToList()))
+                : Workspace(to!.Value)
+                    .Ensure(target => !target.Bookmarks.Any(e => BookmarkRules.SameTarget(e, moved)),
+                        target => $"{target.Name} already has this bookmark ('{target.Bookmarks.First(e => BookmarkRules.SameTarget(e, moved)).Name}').")
+                    .Map(_ => moved)
+                    .Tap(m => Persist(State with
+                    {
+                        Workspaces = State.Workspaces.Select(w =>
+                            w.Id == workspaceId ? w with { Bookmarks = w.Bookmarks.Where(b => b.Id != bookmarkId).ToValueList() }
+                            : w.Id == to ? w with { Bookmarks = w.Bookmarks.Append(m).ToValueList() }
+                            : w).ToList(),
+                    })));
 
     // Rewrites every bookmark `heal` changes, in every workspace, in ONE persist, and only when something changed, so
     // a start with nothing to heal writes nothing. Used once at start to turn a packaged program's old Program bookmark
@@ -3721,7 +3762,16 @@ public sealed class WorkspaceManager(
     // Registered by NAME before the launch and given its process id after (NoteExpectedProcess): starting a
     // program through the shell can pump messages, so a quick window could otherwise appear before the
     // expectation exists.
-    sealed record Expectation(Guid Id, string ProcessName, Guid WorkspaceId, DateTimeOffset Until, int? ProcessId = null, bool NameSpent = false);
+    //
+    // Two additions from the second bookmarks PR:
+    //
+    //   Screen   the display a bookmark remembers. The window that answers is put on that screen as well as in the
+    //            workspace (see the new-window chain).
+    //   Matches  a third way to answer, for an installed app, whose window is not a process Deskbar started and whose
+    //            exe name says nothing (ApplicationFrameHost, or msedge.exe for a PWA): the first new window the test
+    //            accepts (its AppUserModelID, or a packaged exe in the app's package). Like "by name", only the first.
+    sealed record Expectation(Guid Id, string ProcessName, Guid WorkspaceId, DateTimeOffset Until, int? ProcessId = null, bool NameSpent = false,
+        int? Screen = null, Func<WindowInfo, bool>? Matches = null);
 
     readonly List<Expectation> expectations = [];
 
@@ -3729,11 +3779,22 @@ public sealed class WorkspaceManager(
     // expectation is gone before anything unrelated could match it by name.
     internal static readonly TimeSpan ExpectationLifetime = TimeSpan.FromSeconds(30);
 
-    public Guid ExpectWindow(string program, Guid workspaceId)
+    public Guid ExpectWindow(string program, Guid workspaceId, int? screen = null)
     {
-        var expectation = new Expectation(Guid.NewGuid(), Path.GetFileNameWithoutExtension(program.Trim()), workspaceId, now() + ExpectationLifetime);
+        var expectation = new Expectation(Guid.NewGuid(), Path.GetFileNameWithoutExtension(program.Trim()), workspaceId, now() + ExpectationLifetime, Screen: screen);
         expectations.Add(expectation);
-        trace?.Invoke($"start: expecting {expectation.ProcessName} for {NameOf(workspaceId)}");
+        trace?.Invoke($"start: expecting {expectation.ProcessName} for {NameOf(workspaceId)}{(screen is { } s ? $", screen {s}" : "")}");
+        return expectation.Id;
+    }
+
+    // An installed app's window, recognised by `matches` rather than by its exe name (see Matches above). `label` names
+    // it in the trace. An empty ProcessName, so AwaitsAny and AwaitedProcesses (quick find's "already on its way")
+    // never take it for a program's.
+    public Guid ExpectAppWindow(string label, Func<WindowInfo, bool> matches, Guid workspaceId, int? screen = null)
+    {
+        var expectation = new Expectation(Guid.NewGuid(), "", workspaceId, now() + ExpectationLifetime, Screen: screen, Matches: matches);
+        expectations.Add(expectation);
+        trace?.Invoke($"start: expecting app {label} for {NameOf(workspaceId)}{(screen is { } s ? $", screen {s}" : "")}");
         return expectation.Id;
     }
 
@@ -3766,14 +3827,16 @@ public sealed class WorkspaceManager(
     // (docs/superpowers/notes/2026-11-04-quick-find-probes.md, decision c).
     //
     // Answers the new process's id, or null when the shell handed the start to a copy already running.
-    public Result<int?> StartIn(Guid workspaceId, QuickFind.LaunchTarget target, Func<Control.ProgramLaunch, Result<int?>> starter)
+    //
+    // `screen`: a bookmark that remembers a screen (Bookmark.Screen) puts the window there too (Expectation.Screen).
+    public Result<int?> StartIn(Guid workspaceId, QuickFind.LaunchTarget target, Func<Control.ProgramLaunch, Result<int?>> starter, int? screen = null)
     {
         // The user named this workspace, so a vanished desktop is bound again before the window is expected.
         // A workspace that does not exist is left to the code below, as before.
         var ready = Workspace(workspaceId).Bind(WithLiveDesktop);
         if (ready.IsFailure && Workspace(workspaceId).IsSuccess) return Result.Failure<int?>(ready.Error);
 
-        var expectation = target.ExpectedProcess is { } name ? ExpectWindow(name, workspaceId) : (Guid?)null;
+        var expectation = target.ExpectedProcess is { } name ? ExpectWindow(name, workspaceId, screen) : (Guid?)null;
         return starter(target.Launch)
             .Tap(processId =>
             {
@@ -3819,14 +3882,18 @@ public sealed class WorkspaceManager(
     // The exe names starts are still waiting for, so quick find does not offer a program again while its first
     // start is on its way (final review, I5).
     public IReadOnlySet<string> AwaitedProcesses =>
-        expectations.Where(e => !e.NameSpent && e.Until >= now()).Select(e => e.ProcessName).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        expectations.Where(e => e.Matches is null && !e.NameSpent && e.Until >= now()).Select(e => e.ProcessName).ToHashSet(StringComparer.OrdinalIgnoreCase);
 
     Maybe<Decision> StartedFor(WindowInfo window)
     {
         expectations.RemoveAll(e => e.Until < now());
         var byProcess = expectations.FirstOrDefault(e => e.ProcessId is { } started && Descends(window.ProcessId, started, hops: 16));
         var byName = byProcess is null
-            ? expectations.FirstOrDefault(e => !e.NameSpent && e.ProcessName.Equals(window.ProcessName, StringComparison.OrdinalIgnoreCase))
+            // An app expectation answers by its own test instead of the exe name (Expectation.Matches). A test that
+            // throws (a shell lookup on a window already gone) is a window that does not answer.
+            ? expectations.FirstOrDefault(e => !e.NameSpent && (e.Matches is { } matches
+                ? Answers(matches, window)
+                : e.ProcessName.Equals(window.ProcessName, StringComparison.OrdinalIgnoreCase)))
             : null;
         if ((byProcess ?? byName) is not { } match) return Maybe<Decision>.None;
 
@@ -3842,7 +3909,19 @@ public sealed class WorkspaceManager(
 
         trace?.Invoke($"start: {window.ProcessName}({window.ProcessId}) 0x{window.Handle.Value:X} -> {NameOf(match.WorkspaceId)} " +
                       $"by {(byProcess is not null ? "process" : "name")}{(unseen ? ", marked for attention" : "")}");
-        return new Decision(Placement.In(match.WorkspaceId), Roster: false);
+        return new Decision(Placement.In(match.WorkspaceId), Roster: false, match.Screen);
+    }
+
+    static bool Answers(Func<WindowInfo, bool> matches, WindowInfo window)
+    {
+        try
+        {
+            return matches(window);
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     // Whether `processId` is `ancestor` or below it, walking up the parent chain at most `hops` times. Without a
@@ -3945,7 +4024,8 @@ public sealed class WorkspaceManager(
 
     // What OnAppeared decided to do with a new window: where it goes, and whether that also says the
     // APP belongs there. Only the launched-by tier answers false. See above.
-    sealed record Decision(Placement Placement, bool Roster);
+    // Screen: only a start that asked for one sets it (StartedFor, from a bookmark that remembers a screen).
+    sealed record Decision(Placement Placement, bool Roster, int? Screen = null);
 
     // Windows OURS are not launchers: the bar starts nothing, and counting the Manage window as the app
     // that started something would place windows by whichever workspace our own window happens to be

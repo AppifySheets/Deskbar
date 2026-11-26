@@ -16,9 +16,14 @@ public static class BookmarkRules
             .Ensure(b => Enum.IsDefined(b.Kind), "A bookmark needs a known kind.")
             .Ensure(b => !string.IsNullOrWhiteSpace(b.Name), "A bookmark needs a name.")
             .Ensure(b => b.Target is not null, "A bookmark needs a target.")
+            // Screens are numbered from 1, as Windows numbers them and the readout says them.
+            .Ensure(b => b.Screen is null or > 0, "A screen is numbered from 1.")
             .Bind(b => b.Kind switch
             {
-                BookmarkKind.Link => CheckLink(b.Target.Trim()).Map(t => b with { Target = t }),
+                // A link's screen is cleared, not refused: the browser window it opens in is not Deskbar's to move, so a
+                // screen on a link (a hand-edited file, say) means nothing, and dropping the whole bookmark for it would
+                // cost more than it saves. The manager refuses an explicit request for one (MoveBookmark).
+                BookmarkKind.Link => CheckLink(b.Target.Trim()).Map(t => b with { Target = t, Screen = null }),
                 BookmarkKind.Program => CheckProgram(b),
                 _ => CheckApp(b),
             })

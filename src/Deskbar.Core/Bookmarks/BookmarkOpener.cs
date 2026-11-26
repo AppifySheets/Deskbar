@@ -38,14 +38,18 @@ public sealed class BookmarkOpener
     readonly BookmarkStarts starts;
     readonly Func<IReadOnlySet<string>> openAppIds;
     readonly LinkWindows? linkWindows;
+    readonly Func<WindowHandle, string?> windowAppId;
 
+    // `windowAppId` is the shell's AppUserModelID of one window (null when it has none), asked only to recognise the
+    // window of an App bookmark that remembers a screen (Start). Without it (tests) only a packaged exe is recognised.
     public BookmarkOpener(WorkspaceManager manager, BookmarkStarts starts, Func<IReadOnlySet<string>> openAppIds,
-        LinkWindows? linkWindows = null)
+        LinkWindows? linkWindows = null, Func<WindowHandle, string?>? windowAppId = null)
     {
         this.manager = manager;
         this.starts = starts;
         this.openAppIds = openAppIds;
         this.linkWindows = linkWindows;
+        this.windowAppId = windowAppId ?? (_ => null);
 
         // Both subscriptions live as long as the opener, which the app makes once and keeps for its whole run.
         // A window gone for real takes its notes with it.
@@ -123,19 +127,38 @@ public sealed class BookmarkOpener
         IsCurrent(workspaceId) ? Result.Success() : manager.Switch(workspaceId).MapError(e => Named(bookmark, e));
 
     // A program goes through StartIn, so its window is expected for the workspace and placed there even when the
-    // start is handed to a copy already running; an app or a link has no window of its own to expect (an app's
+    // start is handed to a copy already running; an app or a link has no window of its own to expect by name (an app's
     // belongs to ApplicationFrameHost, a link's to the browser), so it relies on the switch just made.
+    //
+    // A bookmark that REMEMBERS A SCREEN (Bookmark.Screen, the second bookmarks PR) puts its window there: a program's
+    // through the same expectation, which carries the screen; an app's through an expectation of its own that knows the
+    // window by its app id or package (BookmarkRunning.IsAppWindow), registered before the start and withdrawn if the
+    // start fails, as StartIn does. A link never has a screen (BookmarkRules.Check). Only a start asked for here is
+    // placed: nothing moves a window that was already open.
     Result Start(Guid workspaceId, Bookmark bookmark) =>
         (bookmark.Kind switch
         {
             BookmarkKind.Program => manager
                 .StartIn(workspaceId,
                     new LaunchTarget(new ProgramLaunch(bookmark.Target, [], bookmark.WorkingDirectory), bookmark.Target),
-                    _ => starts.Program(bookmark.Target, bookmark.Arguments ?? "", bookmark.WorkingDirectory))
+                    _ => starts.Program(bookmark.Target, bookmark.Arguments ?? "", bookmark.WorkingDirectory),
+                    bookmark.Screen)
                 .Bind(_ => Result.Success()),
-            BookmarkKind.App => starts.App(bookmark.Target),
+            BookmarkKind.App => StartApp(workspaceId, bookmark),
             _ => StartLink(workspaceId, bookmark),
         }).MapError(e => Named(bookmark, e));
+
+    Result StartApp(Guid workspaceId, Bookmark bookmark)
+    {
+        var expectation = bookmark.Screen is { } screen
+            ? manager.ExpectAppWindow(bookmark.Name, window => BookmarkRunning.IsAppWindow(bookmark.Target, window, windowAppId(window.Handle)),
+                workspaceId, screen)
+            : (Guid?)null;
+        return starts.App(bookmark.Target).TapError(_ =>
+        {
+            if (expectation is { } id) manager.CancelExpectation(id);
+        });
+    }
 
     // The watch begins BEFORE the link is handed to the browser, not after: the start goes through the shell, which can
     // pump this thread's messages, and the browser's foreground change could otherwise be delivered before anyone

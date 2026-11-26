@@ -23,6 +23,10 @@ public abstract record BookmarkRequest
     public sealed record Open(string Workspace, string Bookmark) : BookmarkRequest;
 
     public sealed record OpenAll(string Workspace) : BookmarkRequest;
+
+    // `bookmark move`: the twin of dragging a chip (the second bookmarks PR). To is the workspace it goes to, null to
+    // stay; Screen what happens to the screen it remembers.
+    public sealed record Move(string Workspace, string Bookmark, string? To, ScreenChange Screen) : BookmarkRequest;
 }
 
 public static class BookmarkArguments
@@ -43,8 +47,32 @@ public static class BookmarkArguments
         ["remove", var workspace, var bookmark] => new BookmarkRequest.Remove(workspace, bookmark),
         ["open", var workspace, var bookmark] => new BookmarkRequest.Open(workspace, bookmark),
         ["open-all", var workspace] => new BookmarkRequest.OpenAll(workspace),
+        ["move", var workspace, var bookmark, ..] => ParseMove(workspace, bookmark, args.Skip(3).ToList()),
         _ => Usage(),
     };
+
+    // `move <workspace> <name|id> [--to <workspace>] [--screen <n> | --any-screen]`. At least one of them, each once;
+    // --screen and --any-screen exclude each other; a screen is a whole number from 1.
+    static Result<BookmarkRequest> ParseMove(string workspace, string bookmark, IReadOnlyList<string> rest)
+    {
+        var anyScreen = rest.Count(a => a == "--any-screen");
+        var pairs = rest.Where(a => a != "--any-screen").Chunk(2).ToList();
+        var wellFormed = anyScreen <= 1
+                         && pairs.All(p => p.Length == 2 && p[0] is "--to" or "--screen" && !p[1].StartsWith("--", StringComparison.Ordinal))
+                         && pairs.Select(p => p[0]).Distinct().Count() == pairs.Count
+                         && (pairs.Count > 0 || anyScreen == 1);
+        if (!wellFormed) return Usage();
+
+        var values = pairs.ToDictionary(p => p[0], p => p[1]);
+        if (anyScreen == 1 && values.ContainsKey("--screen")) return Usage("--screen and --any-screen cannot both be given.");
+
+        var screen = values.TryGetValue("--screen", out var number)
+            ? int.TryParse(number, out var n) && n > 0 ? ScreenChange.On(n) : (ScreenChange?)null
+            : anyScreen == 1 ? ScreenChange.Any : ScreenChange.Keep;
+        return screen is { } change
+            ? new BookmarkRequest.Move(workspace, bookmark, values.GetValueOrDefault("--to"), change)
+            : Usage($"'{number}' is not a screen number; screens are numbered from 1.");
+    }
 
     // `add <workspace> --url <url> | --program <path> [--cwd <folder>] [-- <args>] | --app <id> [--name <name>]`.
     // Exactly one of the three kinds. Everything after a `--` is the program's own arguments, taken verbatim so none

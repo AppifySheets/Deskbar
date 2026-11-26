@@ -1771,7 +1771,10 @@ public partial class App : Application
                 App: appId => Deskbar.Windows.Shell.ShellTaskbarPins.LaunchApp(appId, appId),
                 Link: url => ProgramStarter.Start(new ProgramLaunch(url, [], null))),
             () => floatingBar?.OpenAppIds ?? new HashSet<string>(),
-            LinkWindowSource.For(monitor, desktops, Dispatcher, ClickTrace.On ? ClickTrace.Write : null));
+            LinkWindowSource.For(monitor, desktops, Dispatcher, ClickTrace.On ? ClickTrace.Write : null),
+            // A new window's AppUserModelID, so an App bookmark that remembers a screen knows its window when it appears
+            // (BookmarkOpener.StartApp). Asked only of new windows while such a start is expected, at most 30 s.
+            window => IconCache.Shell.AppIdOf(window));
         HealPackagedBookmarks(manager);
 
         // The remote control: other processes (an agent setting up a worktree, a script) asking this
