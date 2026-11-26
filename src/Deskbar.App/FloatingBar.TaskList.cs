@@ -419,7 +419,7 @@ public partial class FloatingBar
     // What a line's height follows: everything it shows, and the text size.
     // Since Ruling 41 a line's text can wrap to two lines, so the width it is laid out at is part of the key as well:
     // the same line is one line on a wide list and two on a narrow one.
-    string HeightKeyOf(TaskLine line) => $"{TextOffset}|{Math.Round(taskLinesPanel?.ActualWidth ?? 0)}|{ShapeOf(line)}";
+    string HeightKeyOf(TaskLine line) => $"{TextOffset}|{Math.Round(taskLinesPanel?.ActualWidth ?? 0)}|{ShapeOf(line)}{InboxBarHeightKey(line)}";
 
     // Expanded in place, at most this many lines show and the rest scroll (PR A review, Important 3): dozens of
     // migrated notes must not push the workspace rows off a docked bar.
@@ -1179,7 +1179,7 @@ public partial class FloatingBar
         // The group line is part of the shape too: where it sits, whether a selected line holds the fold open, and each
         // folded line's status (the ink, the tooltip's "Done: ") and title (the tooltip).
         var shape = string.Join("\n", all.Select(ShapeOf).Prepend(
-            $"{taskListExpanded}|{ToggleTasksPanel is null}|{TextOffset}|{problem.GetValueOrDefault("")}|{slots}|{editingTask}|{managerAsk}|" +
+            $"{InboxBarOn}|{taskListExpanded}|{ToggleTasksPanel is null}|{TextOffset}|{problem.GetValueOrDefault("")}|{slots}|{editingTask}|{managerAsk}|" +
             $"{fold.At}|{fold.KeptSelected}|{string.Join(',', fold.Folded.Select(l => $"{l.Id}:{l.Status}:{l.Title}"))}"));
         if (shape == lastTaskListShape) return;
         lastTaskListShape = shape;
@@ -1537,7 +1537,7 @@ public partial class FloatingBar
         var button = new Button
         {
             Tag = line,
-            Content = frame,
+            Content = InboxBarOn ? InboxLineFrame(line) : frame, // the Inbox look (FloatingBar.InboxLine.cs, task 740a2231)
             Padding = new Thickness(0),
             // A group's first line has a little space above it (see the header: the groups are not named on the bar).
             // Otherwise one DIP between lines, below each (was 1 above and 1 below), so two tinted lines still part.
@@ -1638,7 +1638,7 @@ public partial class FloatingBar
         var button = new Button
         {
             Tag = WaitingGroupTag,
-            Content = frame,
+            Content = InboxBarOn ? InboxGroupFrame(fold) : frame, // the Inbox look (FloatingBar.InboxLine.cs)
             Padding = new Thickness(0),
             Margin = new Thickness(0, 0, 0, 1),
             Background = Brushes.Transparent,
