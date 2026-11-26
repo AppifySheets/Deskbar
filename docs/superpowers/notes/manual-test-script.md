@@ -1204,7 +1204,7 @@ NT2. Widen it to the default 460 (task 50667e10): on both tasks, the one-word on
 NT3. (Tasks f564a7cd, ec731be5.) Without the pointer on a line, its flag toggles and the moon show between the
      workspace chip and the comments, about as light as the comment button: clearly readable, no empty hole there.
      Hover the line: they go full strength, never over the title's text. A lit toggle still stands out in its colour. Widen the
-     panel past 710 DIP: on the full lines the off toggles are out of sight again until hover.
+     panel past 850 DIP: on the full lines the off toggles are out of sight again until hover.
 NT3b. (Task 735abbf5.) Look closely at the three toggles on a narrow line, and on a full line under the pointer: the
      "!", the clock and the moon are each whole. The moon is a full crescent, its outer arc on the right included, not a
      thin hook. The comment bubble and "⋯" beside them are whole too.
@@ -1226,7 +1226,7 @@ TC3. Drag the hairline before Sessions to the left: the Sessions column widens o
      few letters and an ellipsis, never to nothing.
 TC4. Close and reopen the panel, then restart Deskbar: the width is kept.
 TC5. Double-click the hairline before Sessions: the column goes back to its usual width.
-TC6. Narrow the panel under 710 DIP: the lines go slim and the header goes. Switch to the Matrix (780 DIP or more):
+TC6. Narrow the panel under 850 DIP: the lines go slim and the header goes. Switch to the Matrix (780 DIP or more):
      no header there either.
 
 ## The manager session
@@ -1327,8 +1327,9 @@ LB1. At the default width (460 DIP) a slim line's strip reads, after the comment
      on a line with a comment count), then ⋯. Each sits at the same x on every line; a closed task leaves the Edit, Open
      in window and Add subtask slots empty.
 LB2. Narrow the panel to its narrowest: only Edit (and Open in window on a line with no comments) is left before ⋯, and
-     ⋯ sits right after it, inside the line. Widen it a little: Delete joins. Widen past 710 DIP: the full line has all
-     seven at its right end, and at exactly 710 the title keeps at least 100 DIP and the strip gives up its last ones.
+     ⋯ sits right after it, inside the line. Widen it a little: Delete joins. Widen past 850 DIP: the full line has all
+     seven at its right end from about 940 DIP. At exactly 850 the title keeps at least 320 DIP and the strip gives up
+     its buttons first, down to ⋯ alone.
 LB3. Press each: Edit opens the title in the line, Open in window the task's window, Add subtask the box in its thread,
      Assign to a Me / Claude menu under the button, Related to the link picker, Move to the workspace menu. Delete opens
      "Delete for good" under it and deletes only on that second click. ⋯ still lists every item.
@@ -1472,7 +1473,7 @@ settled (it asks you to merge a pull request that is merged), a Claude task in p
 RE1. Open the waiting task: the row of buttons at the top of its thread reads Open in window, Open Claude, Reevaluate,
      Add subtask, and Reevaluate's tooltip starts "Ask Claude to check where this task really stands". The task in
      progress has it too; the note has none. No line has a Reevaluate button, and no "⋯" menu has the item.
-RE2. Widen the panel past 710 DIP and narrow it to the least: Reevaluate stays in the row at every width.
+RE2. Widen the panel past 850 DIP and narrow it to the least: Reevaluate stays in the row at every width.
 RE3. Press it. The thread gets Deskbar's line "Asked Claude to reevaluate the task.", and within a minute the session
      runs `task answered` (the merged pull request settled the question): the task leaves Waiting on you, and its
      status line says where it stands. Its session's prompt starts "Deskbar: the user asked you to reevaluate".
@@ -1576,3 +1577,13 @@ WC3. Close the note with its tick: during the six seconds of Undo the chip is a 
      opens nothing.
 WC4. Open the note in its own window (Open in window): the workspace chip in the header does the same, the menu under
      the chip, and a pick moves the task.
+
+## Wide panel title room (task 39d58e5b)
+
+WT1. Set the tasks panel to about 720 DIP wide (the width of the "wider renders worse" screenshot): the lines are
+     slim, each title across the whole line and its controls on the row under it, as on a narrow panel.
+WT2. Widen it to the most it goes (on a 2560 pixel screen at 150%, 853 DIP): the full lines and the header come back.
+     A title of about 80 characters takes two lines, no more; the buttons at each line's end are down to ⋯ and
+     perhaps one more. Narrow it back under 850: slim again at the grip's drag end.
+WT3. On a full line, drag a column's left divider far to the left: the column grows until the line's end is down to ⋯
+     and the title is at about 320 DIP, then stops. It never squeezes the title further.

@@ -35,9 +35,6 @@ public sealed record TaskColumnWidths(double Status, double Sessions, double Ass
     /// <summary>The narrowest a column can be dragged to: room for a few letters and the ellipsis, so it never vanishes.</summary>
     public const double MinWidth = 24;
 
-    /// <summary>The narrowest a drag may leave the title, so widening a column never squeezes the title out of the line.</summary>
-    public const double MinTitle = 80;
-
     public double this[TaskColumn column] => column switch
     {
         TaskColumn.Status => Status,
@@ -65,14 +62,19 @@ public sealed record TaskColumnWidths(double Status, double Sessions, double Ass
     /// its right (the icon buttons stay flush with the right edge), so a column grows to its left: dragging its left
     /// divider left by d widens it by d and the title, to its left, gives up d. Every other column keeps its width, so
     /// the divider follows the pointer. <paramref name="moved"/> is the pointer's move since the press, in DIPs, and
-    /// <paramref name="startWidths"/> the widths then; <paramref name="titleAtStart"/> is the title's width then, which
-    /// caps the growth at what keeps it MinTitle wide (a title already narrower than that cannot be squeezed further,
-    /// but a column can still shrink). The column never goes under MinWidth.
+    /// <paramref name="startWidths"/> the widths then; <paramref name="room"/> is what the line could give up then
+    /// without the title going under its readable floor or "⋯" leaving the line (the window works it out: the title's
+    /// width over its floor plus the menu strip's over "⋯" alone), which caps the growth. With no room a column cannot
+    /// grow, but it can still shrink. The column never goes under MinWidth.
+    ///
+    /// The cap was the title's width less 80 DIP until task 39d58e5b, so a drag could squeeze the title to 80 DIP. Now
+    /// the title outranks the columns and the menu strip (Petre's pick, option B on that task): a column grows into the
+    /// strip's spare buttons and the title's room over its floor, and no further.
     /// </summary>
-    public static TaskColumnWidths Dragged(TaskColumnWidths startWidths, TaskColumn column, double moved, double titleAtStart)
+    public static TaskColumnWidths Dragged(TaskColumnWidths startWidths, TaskColumn column, double moved, double room)
     {
         var start = startWidths[column];
-        var most = start + Math.Max(0, titleAtStart - MinTitle);
+        var most = start + Math.Max(0, room);
         return startWidths.With(column, Math.Round(Math.Clamp(start - moved, MinWidth, Math.Max(MinWidth, most))));
     }
 }
