@@ -1247,6 +1247,14 @@ MP4. Click into the manager's window: its ring is violet, not white. Click into 
      its workspace colour again.
 MP5. Have the manager ask you something (as MQ1): its window's icon on the bar glows orange until you answer in it,
      and clicking into the window alone does not stop the glow.
+MP6. With the tasks panel open, click Manager: the manager's window fills a column just inside the panel, top to bottom
+     of the work area, and a maximized window on that screen shrinks to stop at its edge.
+MP7. Close the tasks panel: the manager's column moves out to sit just inside the bar. Open the panel again: the panel
+     comes back between the bar and the manager, never inside the manager.
+MP8. Drag the manager's window by its title bar and let go: it goes straight back. Drag its inner edge 100 DIP wider:
+     the column takes the new width, and after a Deskbar restart it is still that wide.
+MP9. Close the manager's window: the column is given back and the maximized window grows to the panel's edge again.
+MP10. Minimize the bar (or restart Explorer): the manager's column comes back inside the panel once the bar docks again.
 
 ## The thread's buttons
 

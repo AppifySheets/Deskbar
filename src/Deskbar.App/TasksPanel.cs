@@ -119,6 +119,33 @@ internal sealed class TasksPanel : IDisposable
     internal Func<bool> Tracing { get; init; } = () => ClickTrace.On;
     internal Action<string> Trace { get; init; } = ClickTrace.Write;
 
+    // THE SAME MACHINE FOR A SECOND STRIP (task f171bca6, the manager's window docked "next to the tasks or next to the bar
+    // if tasks are not available"). ManagerDock runs a second TasksPanel on a placeholder window just inside this one: the
+    // order rules, the guard, the scale and the clearing of windows under a new strip are all this class's, so the dock
+    // gets them by being one. These four settings are where the two differ; each defaults to the tasks panel's own.
+    //
+    //   Name        what the trace calls it.
+    //   ClampWidth  the width rule, DIPs (the width asked for, the screen's width): the panel's minimum and half the screen.
+    //   OnTop       whether the window sits in the topmost band behind the bar. The dock's placeholder does not: it is
+    //               click-through and the manager's terminal sits over it, so it never needs to climb over anything.
+    internal string Name { get; init; } = "tasks panel";
+    internal Func<double, double, double> ClampWidth { get; init; } = TasksPanelLayout.Clamp;
+    internal bool OnTop { get; init; } = true;
+
+    // Every registration made afresh, with the bar's notice it was placed by: what a strip inside this one answers, so it
+    // registers again AFTER this one and stays inside it (ManagerDock, which merges this with the bar's own notices). Said
+    // after the window is placed, on the dispatcher; never for an in-place re-ask, which keeps the order.
+    readonly Subject<BarStrip> registered = new();
+    internal IObservable<BarStrip> Registered => registered.AsObservable();
+
+    // The strip the shell granted, physical pixels, while one is held; None once it is given back, refused or shut down.
+    // A late subscriber gets the current value at once. ManagerDock puts the manager's terminal on it.
+    readonly BehaviorSubject<Maybe<WindowRect>> grantedStrip = new(Maybe<WindowRect>.None);
+    internal IObservable<Maybe<WindowRect>> Granted => grantedStrip.AsObservable();
+
+    // The bar's notice the last answer placed the panel by, for Registered.
+    BarStrip? lastNotice;
+
     // Created on the first real dock and kept, like the bar's: its hook on the window's message loop goes in once.
     AppBar? appBar;
 
@@ -281,7 +308,7 @@ internal sealed class TasksPanel : IDisposable
         {
             if (now - awaitingSince < FloatingBar.RetryEvery) return;
             awaitingBar = false;
-            Say(() => "tasks panel: no word from the bar since Explorer restarted, the guard takes over");
+            Say(() => $"{Name}: no word from the bar since Explorer restarted, the guard takes over");
         }
 
         if (now - lastDocked < FloatingBar.SettleFor || now - lastRepair < FloatingBar.RetryEvery) return;
@@ -290,7 +317,7 @@ internal sealed class TasksPanel : IDisposable
         lastRepair = now;
         if (Dock(fresh: true, "guard").IsFailure) return;
         repairs++;
-        Say(() => $"tasks panel: taken back by the guard ({repairs} so far)");
+        Say(() => $"{Name}: taken back by the guard ({repairs} so far)");
     }
 
     // Topmost is a shared band (CLAUDE.md): the taskbar and the Start menu climb over anything in it when activated, so
@@ -309,7 +336,7 @@ internal sealed class TasksPanel : IDisposable
     // notice or not.
     internal void ReclaimTopmost()
     {
-        if (!window.IsVisible) return;
+        if (!OnTop || !window.IsVisible) return;
         // Not over one of Deskbar's own menus: an open menu has no owner window, so this would cover it (OwnMenus).
         if (OwnMenus.AnyOpen) return;
         var hwnd = new WindowInteropHelper(window).Handle;
@@ -323,7 +350,7 @@ internal sealed class TasksPanel : IDisposable
         {
             fullScreenFound = false;
             fullScreenOpen = false;
-            Say(() => "tasks panel: the full-screen window it found has gone, back on top");
+            Say(() => $"{Name}: the full-screen window it found has gone, back on top");
         }
         if (fullScreenOpen) return;
         var overflow = OverflowInFront();
@@ -331,7 +358,7 @@ internal sealed class TasksPanel : IDisposable
         if (behind != belowOverflow)
         {
             belowOverflow = behind;
-            Say(() => behind ? $"tasks panel: steps below the tray overflow {overflow:X}" : "tasks panel: back on top of the tray overflow");
+            Say(() => behind ? $"{Name}: steps below the tray overflow {overflow:X}" : $"{Name}: back on top of the tray overflow");
         }
         if (behind) return;
         NativeMethods.SetWindowPos(hwnd, BehindTheBar(), 0, 0, 0, 0,
@@ -374,10 +401,13 @@ internal sealed class TasksPanel : IDisposable
         clearedFor = null;
         awaitingBar = false;
         if (!windowClosed && window.IsVisible) window.Hide();
-        if (held) Say(() => "tasks panel: strip given back (shutdown)");
+        if (held) Say(() => $"{Name}: strip given back (shutdown)");
+        grantedStrip.OnNext(Maybe<WindowRect>.None);
         shown.OnCompleted();
         edge.OnCompleted();
         dockedWidth.OnCompleted();
+        registered.OnCompleted();
+        grantedStrip.OnCompleted();
     }
 
     public void Dispose() => Shutdown();
@@ -399,7 +429,7 @@ internal sealed class TasksPanel : IDisposable
         if (!docked || shutDown) return;
         awaitingBar = true;
         awaitingSince = Clock();
-        Say(() => "tasks panel: Explorer restarted, waiting for the bar to register first");
+        Say(() => $"{Name}: Explorer restarted, waiting for the bar to register first");
     }
 
     // The shell's full-screen notice (AppBar's onFullScreen): out of the topmost band while a full-screen window is up,
@@ -407,6 +437,7 @@ internal sealed class TasksPanel : IDisposable
     // undock, so the work area stays put. Internal so a test can send it.
     internal void StepAside(bool fullScreen)
     {
+        if (!OnTop) return;
         fullScreenOpen = fullScreen;
         // The shell's word replaces whatever the panel found by looking (see fullScreenFound).
         fullScreenFound = false;
@@ -449,6 +480,7 @@ internal sealed class TasksPanel : IDisposable
         }
 
         placement = placementOf(notice);
+        lastNotice = notice;
         edge.OnNext(placement.Edge);
         awaitingBar = false;
         if (wanted) _ = Dock(fresh: true, notice.Edge is null ? "bar floats" : "bar registered");
@@ -474,7 +506,7 @@ internal sealed class TasksPanel : IDisposable
                 return Refuse($"the screen {Format(at.Screen)} cannot be read right now");
 
             // The width clamped to the panel's minimum and half of THIS screen, in this screen's DIPs, then its pixels.
-            var dips = TasksPanelLayout.Clamp(width, at.Screen.Width / scale);
+            var dips = ClampWidth(width, at.Screen.Width / scale);
             var thickness = (int)Math.Round(dips * scale);
             var got = DockWith(at.Edge, at.Screen, thickness);
             if (got.Width <= 0 || got.Height <= 0)
@@ -486,8 +518,10 @@ internal sealed class TasksPanel : IDisposable
             dockedWidth.OnNext(Maybe.From(dips));
             PlaceAt(got, at.Screen, scale);
             if (!window.IsVisible) ShowOnTop();
+            grantedStrip.OnNext(Maybe.From(got));
+            if (fresh && lastNotice is { } placedBy) registered.OnNext(placedBy);
 
-            Say(() => $"tasks panel: docked ({reason}), {at.Edge} edge, {thickness} px{(fresh ? ", registered afresh" : "")}");
+            Say(() => $"{Name}: docked ({reason}), {at.Edge} edge, {thickness} px{(fresh ? ", registered afresh" : "")}");
             TraceGeometry();
             ClearUnder(at, got, scale);
             return Result.Success();
@@ -504,6 +538,13 @@ internal sealed class TasksPanel : IDisposable
     // screen asked about is the one it docks on.
     void ShowOnTop()
     {
+        // A window kept out of the topmost band (OnTop false, the manager dock's placeholder) is only shown.
+        if (!OnTop)
+        {
+            window.Topmost = false;
+            window.Show();
+            return;
+        }
         var hwnd = new WindowInteropHelper(window).Handle;
         var covered = CoveringWindow(hwnd);
         window.Topmost = covered == 0;
@@ -516,7 +557,7 @@ internal sealed class TasksPanel : IDisposable
         if (!StepBehindCovering(hwnd, covered)) return;
         fullScreenOpen = true;
         fullScreenFound = true;
-        Say(() => $"tasks panel: shown behind the full-screen window {covered:X} already up");
+        Say(() => $"{Name}: shown behind the full-screen window {covered:X} already up");
     }
 
     // Out of the topmost band and just behind `covered`, as the floating bar's StepAsideIfCovered does and for its
@@ -539,9 +580,10 @@ internal sealed class TasksPanel : IDisposable
     Result Refuse(string why)
     {
         granted = null;
+        grantedStrip.OnNext(Maybe<WindowRect>.None);
         clearedFor = null;
         if (window.IsVisible) window.Hide();
-        Say(() => $"tasks panel: dock refused: {why}");
+        Say(() => $"{Name}: dock refused: {why}");
         TraceGeometry();
         return Result.Failure(why);
     }
@@ -553,13 +595,14 @@ internal sealed class TasksPanel : IDisposable
         Undock();
         docked = false;
         granted = null;
+        grantedStrip.OnNext(Maybe<WindowRect>.None);
         clearedFor = null;
         awaitingBar = false;
         // Forgotten with the registration the shell said it to; the next show looks again (ShowOnTop).
         fullScreenOpen = false;
         fullScreenFound = false;
         if (window.IsVisible) window.Hide();
-        Say(() => $"tasks panel: strip given back ({why})");
+        Say(() => $"{Name}: strip given back ({why})");
         TraceGeometry();
     }
 
@@ -589,8 +632,8 @@ internal sealed class TasksPanel : IDisposable
                 : Array.Empty<(WindowHandle Window, WindowRect From, WindowRect To)>())
             .ToList()
             .ForEach(move => Nudge(move.Window, move.To)
-                .Tap(() => Say(() => $"tasks panel: moved {move.Window.Value:X} from {Format(move.From)} to {Format(move.To)}, off the strip"))
-                .TapError(error => Say(() => $"tasks panel: could not move {move.Window.Value:X} off the strip: {error}")));
+                .Tap(() => Say(() => $"{Name}: moved {move.Window.Value:X} from {Format(move.From)} to {Format(move.To)}, off the strip"))
+                .TapError(error => Say(() => $"{Name}: could not move {move.Window.Value:X} off the strip: {error}")));
     }
 
     static bool Contains(WindowRect outer, WindowRect inner) =>
@@ -642,7 +685,7 @@ internal sealed class TasksPanel : IDisposable
     void TraceGeometry()
     {
         if (!Tracing()) return;
-        var line = $"tasks panel geometry: granted {(granted is { } g ? Format(g) : "nothing")}"
+        var line = $"{Name} geometry: granted {(granted is { } g ? Format(g) : "nothing")}"
                    + $"{(placement is { } at ? $" on the {at.Edge} edge of {Format(at.Screen)}" : "")}, bar {barEdge ?? "gone"}";
         if (line == lastGeometry) return;
         lastGeometry = line;

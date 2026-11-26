@@ -1,3 +1,4 @@
+using System.Reactive.Linq;
 using System.Reactive.Subjects;
 using System.Windows;
 using System.Windows.Interop;
@@ -61,7 +62,7 @@ public class TasksPanelTests
     sealed class Rig
     {
         public readonly Subject<BarStrip> Bar = new();
-        public readonly List<Call> Calls = [];
+        public readonly List<Call> Calls;
         public readonly List<string> Lines = [];
         public DateTime Now = new(2026, 11, 23, 12, 0, 0, DateTimeKind.Utc);
         public WindowRect Work = Held;
@@ -85,17 +86,23 @@ public class TasksPanelTests
         };
         public readonly TasksPanel Panel;
 
-        public Rig(IObservable<BarStrip>? bar = null) =>
+        // `calls` shares one record between two rigs and `who` tells their calls apart in it (the manager dock's order
+        // test, task f171bca6); `onTop` is TasksPanel.OnTop.
+        public Rig(IObservable<BarStrip>? bar = null, List<Call>? calls = null, string who = "", bool onTop = true)
+        {
+            Calls = calls ?? [];
+            var suffix = who == "" ? "" : $" {who}";
             Panel = new TasksPanel(Window, bar ?? Bar)
             {
+                OnTop = onTop,
                 DockWith = (edge, screen, px) =>
                 {
-                    Calls.Add(new Call("DockWith", edge, screen, px));
+                    Calls.Add(new Call("DockWith" + suffix, edge, screen, px));
                     return edge == PanelEdge.Left
                         ? new WindowRect(screen.Left, screen.Top, screen.Left + px, screen.Bottom)
                         : new WindowRect(screen.Right - px, screen.Top, screen.Right, screen.Bottom);
                 },
-                Undock = () => Calls.Add(Call.Undock),
+                Undock = () => Calls.Add(suffix == "" ? Call.Undock : new Call("Undock" + suffix)),
                 ScaleOf = _ => At150,
                 WorkAreaOf = _ => Work,
                 Clock = () => Now,
@@ -112,6 +119,7 @@ public class TasksPanelTests
                     return Result.Success();
                 },
             };
+        }
 
         // Runs whatever the panel queued on its dispatcher (see the top of this file).
         public void Pump() => Window.Dispatcher.Invoke(() => { }, DispatcherPriority.Background);
@@ -940,5 +948,66 @@ public class TasksPanelTests
         quiet.Panel.Hide();
         Assert.Empty(quiet.Lines);
         quiet.Close();
+    });
+
+    // THE MANAGER DOCK'S OUTPUTS (task f171bca6). Registered says each fresh registration with the bar's notice that placed
+    // it, and never an in-place re-dock (a width change), since that keeps the order; Granted says the strip the shell
+    // granted while one is held and None once it is given back.
+    [Fact]
+    public void A_fresh_registration_is_said_and_the_granted_strip_follows_the_dock() => StaThread.Run(() =>
+    {
+        var rig = new Rig();
+        var registered = new List<BarStrip>();
+        var granted = new List<Maybe<WindowRect>>();
+        using var r = rig.Panel.Registered.Subscribe(registered.Add);
+        using var g = rig.Panel.Granted.Subscribe(granted.Add);
+
+        rig.Open();
+        rig.Panel.SetWidth(500);
+        rig.Panel.Hide();
+
+        Assert.Equal([Docked()], registered);
+        Assert.Equal([Maybe<WindowRect>.None, new WindowRect(Screen.Right - 690, Screen.Top, Screen.Right, Screen.Bottom),
+            new WindowRect(Screen.Right - 750, Screen.Top, Screen.Right, Screen.Bottom), Maybe<WindowRect>.None], granted);
+        rig.Close();
+    });
+
+    // The dock's placeholder stays out of the topmost band (OnTop false): it is click-through and the terminal sits on it.
+    [Fact]
+    public void A_panel_kept_off_the_top_is_shown_but_not_topmost() => StaThread.Run(() =>
+    {
+        var rig = new Rig(onTop: false).Open();
+
+        Assert.True(rig.Window.IsVisible);
+        Assert.False(IsTopmost(rig.Window));
+        rig.Panel.ReclaimTopmost();
+        Assert.False(IsTopmost(rig.Window));
+        rig.Close();
+    });
+
+    // THE ORDER, bar, then panel, then dock. A second TasksPanel fed by the bar's notices AND the panel's fresh
+    // registrations registers after the panel every time: when the bar registers (both answer it, the dock last), and
+    // when the panel registers again on its own (closed and opened), which would otherwise put the panel inside the dock.
+    [Fact]
+    public void A_dock_chained_to_the_panel_always_registers_after_it() => StaThread.Run(() =>
+    {
+        var panel = new Rig();
+        var dock = new Rig(panel.Bar.Merge(panel.Panel.Registered), panel.Calls, who: "dock", onTop: false);
+        panel.Panel.Show(TasksPanelLayout.DefaultWidth);
+        dock.Panel.Show(640);
+
+        panel.Bar.OnNext(Docked());
+        panel.Pump();
+        Assert.Equal("DockWith dock", panel.Calls.Last().Name);
+        Assert.True(panel.Calls.FindLastIndex(c => c.Name == "DockWith") < panel.Calls.FindLastIndex(c => c.Name == "DockWith dock"));
+
+        panel.Calls.Clear();
+        panel.Panel.Hide();
+        panel.Panel.Show(TasksPanelLayout.DefaultWidth);
+        panel.Pump();
+        Assert.Equal(["Undock", "Undock", "DockWith", "Undock dock", "DockWith dock"], panel.Calls.Select(c => c.Name));
+
+        dock.Close();
+        panel.Close();
     });
 }

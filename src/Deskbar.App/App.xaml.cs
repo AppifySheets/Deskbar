@@ -51,6 +51,7 @@ public partial class App : Application
     // The tasks panel's app bar beside the bar's (TasksPanel; spec 2026-11-23-tasks-panel-design.md), built with the
     // board; the 1 s timer keeps it (Keep, ReclaimTopmost). Null in compatibility mode, like the bar.
     TasksPanel? tasksPanel;
+    ManagerDock? managerDock;         // the manager's terminal docked inside the tasks panel (task f171bca6)
     bool tasksPanelPinned;            // its hwnd is pinned to every desktop once, after its first show (see the board's construction)
     // Whether the tasks panel is shown, for the bar's "All tasks" look. The bar is built before the panel (the panel needs
     // the bar's strip notices), so the bar gets this relay at its construction and the panel's Shown is fed into it once
@@ -1049,6 +1050,18 @@ public partial class App : Application
             .Where(e => e.Kind is WindowEventKind.Appeared or WindowEventKind.TitleChanged or WindowEventKind.Activated
                         && Core.Tasks.ManagerSession.IsWindow(e.Window.ProcessPath, e.Window.Title))
             .Subscribe(e => Later(e.Window.Handle));
+
+        // The manager's DOCK (task f171bca6, ManagerDock) follows the same window: it docks it once pinned (PinManagerWindow
+        // calls Follow), gives the strip back when the window closes or is retitled away from the manager's title (a
+        // second tab), and reads the user's drags of it: a move snaps back, a resize takes the new width. Disappeared and
+        // never Hidden: a hidden window is not a gone one (CLAUDE.md, Traps). The dock is built further down, with the
+        // tasks panel, so it is read through the field.
+        monitor.Events
+            .Where(e => e.Kind is WindowEventKind.Disappeared
+                        || (e.Kind is WindowEventKind.TitleChanged && !Core.Tasks.ManagerSession.IsWindow(e.Window.ProcessPath, e.Window.Title)))
+            .Subscribe(e => managerDock?.Lost(e.Window.Handle));
+        monitor.Events.Where(e => e.Kind is WindowEventKind.MoveStarted).Subscribe(e => managerDock?.DragStarted(e.Window.Handle));
+        monitor.Events.Where(e => e.Kind is WindowEventKind.Moved).Subscribe(e => managerDock?.DragEnded(e.Window.Handle));
         manager!.KnownWindows
             .Where(w => Core.Tasks.ManagerSession.IsWindow(w.ProcessPath, w.Title))
             .Select(w => w.Handle).ToList()
@@ -1066,6 +1079,8 @@ public partial class App : Application
         var done = desktops!.IsPinned(window).Bind(pinned => pinned
             ? Result.Success()
             : manager!.PinWithoutMemory(window).Tap(() => ClickTrace.Write($"manager window 0x{window.Value:X}: pinned to every desktop")));
+        // Pinned (now or before): the dock takes it (ManagerDock.Follow), and puts it back on its strip on each later event.
+        if (done.IsSuccess) managerDock?.Follow(window);
         if (done.IsSuccess || triesLeft <= 1) return;
         ClickTrace.Write($"manager window 0x{window.Value:X}: not pinned yet ({done.Error}), trying again");
         var again = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(2) };
@@ -2307,6 +2322,8 @@ public partial class App : Application
                 // Read through the field: the panel is built further down, with quick find.
                 tasksPanel?.Keep();
                 tasksPanel?.ReclaimTopmost();
+                // The manager's dock after the panel's, for the same reason, and its terminal put back if moved (ManagerDock.Keep).
+                managerDock?.Keep();
                 // Petre: "i want to always refresh what's the active window, i can't afford to
                 // think that one window is active and another being highlighted."
                 //
@@ -2463,22 +2480,26 @@ public partial class App : Application
             // lists: not minimized, not maximized or snapped (the shell sizes those, ScreenLayout.IsShellArranged), and not
             // in a tile on the desktop in view (the Tiler re-lays its grid itself when the work area changes, and a move of
             // ours would read to it as a drag). Nudge keeps each one's z-order and focus.
+            //
+            // The manager's terminal is never one of them (task f171bca6): it is docked inside the panel on purpose, and the
+            // manager dock below takes the same list for its own strip, where the terminal is exactly what belongs there.
             var panelLayout = new ScreenLayout();
+            IReadOnlyList<(WindowHandle Window, WindowRect Rect)> RestoredUnderStrips()
+            {
+                var facts = panelLayout.Snapshot();
+                return manager.KnownWindows
+                    .Where(w => w.ProcessId != Environment.ProcessId && !Core.Tasks.ManagerSession.IsWindow(w.ProcessPath, w.Title))
+                    .Select(w => w.Handle)
+                    .Where(w => facts.ZOrder.ContainsKey(w) && !facts.Minimized.Contains(w) && !ScreenLayout.IsShellArranged(w)
+                                && !(tiler?.Board.ScreenOf(w).HasValue ?? false))
+                    .SelectMany(w => panelLayout.RectOf(w).Map(rect => (Window: w, Rect: rect)).ToList())
+                    .ToList();
+            }
             tasksPanel = new TasksPanel(tasksWindow, bar.Strip)
             {
                 OverflowInFront = () => bar.OverflowInFront,
                 BarWindow = () => bar.Hwnd,
-                RestoredWindows = () =>
-                {
-                    var facts = panelLayout.Snapshot();
-                    return manager.KnownWindows
-                        .Where(w => w.ProcessId != Environment.ProcessId)
-                        .Select(w => w.Handle)
-                        .Where(w => facts.ZOrder.ContainsKey(w) && !facts.Minimized.Contains(w) && !ScreenLayout.IsShellArranged(w)
-                                    && !(tiler?.Board.ScreenOf(w).HasValue ?? false))
-                        .SelectMany(w => panelLayout.RectOf(w).Map(rect => (Window: w, Rect: rect)).ToList())
-                        .ToList();
-                },
+                RestoredWindows = RestoredUnderStrips,
                 Nudge = panelLayout.Nudge,
             };
             tasksPanel.Shown.Subscribe(tasksPanelShown);
@@ -2496,6 +2517,25 @@ public partial class App : Application
                 {
                     tasksPanelPinned = false;
                     ClickTrace.Write($"tasks panel pin failed: {err}");
+                }));
+            };
+            // THE MANAGER'S DOCK (task f171bca6, ManagerDock): a strip just inside the tasks panel, or just inside the bar
+            // while the panel is closed, holding the manager's terminal; reserved only while that window is open. Its app
+            // bar sits on a transparent, click-through placeholder of Deskbar's own, kept off the bar's window list and
+            // pinned to every desktop after its first show, as the panel's window is.
+            var dockWindow = ManagerDock.Placeholder();
+            var dockHwnd = new WindowInteropHelper(dockWindow).EnsureHandle();
+            monitor.Ignore(dockHwnd);
+            managerDock = new ManagerDock(dockWindow, bar.Strip, tasksPanel, manager, RestoredUnderStrips, panelLayout.Nudge);
+            var dockPinned = false;
+            dockWindow.IsVisibleChanged += (_, _) =>
+            {
+                if (!dockWindow.IsVisible || dockPinned) return;
+                dockPinned = true;
+                _ = Dispatcher.InvokeAsync(() => desktops!.Pin(new WindowHandle(dockHwnd)).TapError(err =>
+                {
+                    dockPinned = false;
+                    ClickTrace.Write($"manager dock pin failed: {err}");
                 }));
             };
             var tasksActivator = new WindowActivator();
@@ -2708,6 +2748,7 @@ public partial class App : Application
             // it): saved open if it was, so it opens again at the next sign-in, and its strip given back. Without
             // this, that close reads as the user's Alt+F4 and saves it closed (TasksBoard.Shutdown).
             tasksBoard?.Shutdown();
+            managerDock?.Shutdown();
         };
 
         // WINDOW CLASS NAMES STAY AVAILABLE ON EVERY PROCESSOR (task c5e9b17f; ClassNameSlots has what was measured).
@@ -3134,6 +3175,7 @@ public partial class App : Application
         // The tasks panel: whether it is open is saved first, as it is, so an open panel opens again after the restart;
         // then its strip goes back to the shell and its window closes for good (TasksBoard.Shutdown).
         tasksBoard?.Shutdown();
+        managerDock?.Shutdown();
         detachedStats?.CloseForGood();
         switcher?.Dispose(); // stops the release poll and closes the picker window
         trayIcon?.Dispose();
