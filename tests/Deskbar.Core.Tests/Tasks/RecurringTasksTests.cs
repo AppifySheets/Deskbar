@@ -190,12 +190,13 @@ public sealed class RecurringTasksTests : IDisposable
     public void ClearRepeat_ends_the_repeat_and_the_snooze_it_made_but_not_a_later_snooze_of_petres()
     {
         var (board, id) = Fresh();
-        var set = board.SetRepeat(id, Repeat(), Now, Plus4).Value;
+        // In progress, so clearing only drops the schedule (a task between runs ends as Done, which clears any snooze).
+        var set = board.Join(id, Session(), Now).Value.SetRepeat(id, Repeat(), Now, Plus4).Value;
 
-        var cleared = Of(set.ClearRepeat(id, Now).Value, id);
-        Assert.False(cleared.Repeat.HasValue);
-        Assert.False(cleared.NextRun.HasValue);
-        Assert.False(cleared.IsSnoozed);
+        var same = Of(set.Snooze(id, Now + Hour, Now).Value.ClearRepeat(id, Now).Value, id);
+        Assert.False(same.Repeat.HasValue);
+        Assert.False(same.NextRun.HasValue);
+        Assert.False(same.IsSnoozed);
 
         var later = Now + TimeSpan.FromDays(2);
         var petres = Of(set.Snooze(id, later, Now).Value.ClearRepeat(id, Now).Value, id);
@@ -396,14 +397,35 @@ public sealed class RecurringTasksTests : IDisposable
     }
 
     [Fact]
-    public void ClearRepeat_on_a_task_between_runs_hands_it_back_to_petre()
+    public void ClearRepeat_between_runs_ends_the_job_as_done()
     {
         var (board, id) = Fresh();
         board = board.SetRepeat(id, Repeat(), Now, Plus4).Value;
-        Assert.Equal(Assignee.Claude, Of(board, id).Assignee);
+        var later = Now + TimeSpan.FromMinutes(5);
+
+        var task = Of(board.ClearRepeat(id, later).Value, id);
+
+        Assert.Equal(TaskStatus.Done, task.Status);
+        Assert.Equal(Assignee.Me, task.Assignee);
+        Assert.Equal(later, task.Raised);
+        Assert.False(task.IsSnoozed);
+        Assert.False(task.Question.HasValue);
+        Assert.False(task.Repeat.HasValue);
+        Assert.False(task.NextRun.HasValue);
+    }
+
+    [Fact]
+    public void ClearRepeat_in_progress_only_drops_the_schedule()
+    {
+        var (board, id) = Fresh();
+        board = board.SetRepeat(id, Repeat(), Now, Plus4).Value.Join(id, Session(), Now).Value;
+        var before = Of(board, id);
 
         var task = Of(board.ClearRepeat(id, Now).Value, id);
 
-        Assert.NotEqual(Assignee.Claude, task.Assignee);
+        Assert.Equal(TaskStatus.InProgress, task.Status);
+        Assert.Equal(before.Assignee, task.Assignee);
+        Assert.False(task.Repeat.HasValue);
+        Assert.False(task.NextRun.HasValue);
     }
 }

@@ -780,6 +780,22 @@ public sealed record TaskBoard(IReadOnlyList<TaskItem> Tasks)
     /// </summary>
     public Result<TaskBoard> ClearRepeat(Guid id, DateTimeOffset now) =>
         Lookup(id).Map(task => !task.Repeat.HasValue && !task.NextRun.HasValue ? this
+            // REMOVING THE REPEAT FROM A TASK BETWEEN RUNS ENDS THE JOB (Task 3 review, round 2): the task is Done exactly as
+            // a plain MarkDone makes it (Raised stamped, pinned, question cleared, Petre's), so SessionKeeper, which never
+            // resumes a Done task, leaves the finished run's session down, and Petre closes it when he wants. Becoming Done
+            // stamps Raised and Woken ends a snooze when Raised changes: that is fine here, because no snooze should
+            // survive (the one the repeat made is going, and a sleeping Done task would hide its finish from him).
+            : task.IsBetweenRuns
+                ? Replaced(BecameDone(task, now) with
+                {
+                    Repeat = Maybe<TaskRepeat>.None,
+                    NextRun = Maybe<DateTimeOffset>.None,
+                    SnoozedUntil = Maybe<DateTimeOffset>.None,
+                    Question = Maybe<string>.None,
+                    Assignee = Assignee.Me,
+                    UpdatedAt = now,
+                })
+            // In progress or waiting: only the schedule (and the snooze the repeat made) goes; status and assignee stay.
             : Replaced(task with
             {
                 Repeat = Maybe<TaskRepeat>.None,
@@ -787,11 +803,6 @@ public sealed record TaskBoard(IReadOnlyList<TaskItem> Tasks)
                 SnoozedUntil = task.SnoozedUntil.HasValue && task.NextRun.HasValue && task.SnoozedUntil.Value == task.NextRun.Value
                     ? Maybe<DateTimeOffset>.None
                     : task.SnoozedUntil,
-                // A task between runs was Claude's only to run the repeat; without it nothing is running and nothing is
-                // asked of Claude, so it goes back to Petre (the board hands a finished piece of work to him: Done and
-                // waiting are his). A task in progress or waiting keeps its assignee. Note SessionKeeper keys on the
-                // task having sessions, not on the assignee, so this does not by itself stop a resume (see the report).
-                Assignee = task.IsBetweenRuns ? Assignee.Me : task.Assignee,
                 UpdatedAt = now,
             }));
 
