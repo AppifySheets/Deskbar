@@ -141,7 +141,7 @@ public static class ClaudeTranscript
 
     // The openings a local slash command's own entries start with (see WasCutOff). The caveat is normally isMeta, and
     // is listed in case a version writes it without the flag.
-    static readonly IReadOnlyList<string> LocalCommandPrefixes =
+    internal static readonly IReadOnlyList<string> LocalCommandPrefixes =
         ["<command-name>", "<command-message>", "<local-command-stdout>", "<local-command-stderr>", "<local-command-caveat>"];
 
     // A usage limit's reset moment, from apiErrorParams.rate_limit_info.resetsAt or else quotaLimits.resetsAt (unix
@@ -153,7 +153,7 @@ public static class ClaudeTranscript
             .FirstOrDefault(at => at is not null) is { } found ? found : Maybe<DateTimeOffset>.None;
 
     // The entry's "timestamp", when it is a moment.
-    static Maybe<DateTimeOffset> TimestampOf(JsonElement root) =>
+    internal static Maybe<DateTimeOffset> TimestampOf(JsonElement root) =>
         root.TryGetProperty("timestamp", out var value) && value.ValueKind == JsonValueKind.String
             && DateTimeOffset.TryParse(value.GetString(), System.Globalization.CultureInfo.InvariantCulture,
                 System.Globalization.DateTimeStyles.AssumeUniversal, out var at)
@@ -161,11 +161,11 @@ public static class ClaudeTranscript
             : Maybe<DateTimeOffset>.None;
 
     // The element at the end of a chain of object properties, or null when any step is missing or not an object.
-    static JsonElement? At(JsonElement root, params string[] names) =>
+    internal static JsonElement? At(JsonElement root, params string[] names) =>
         names.Aggregate((JsonElement?)root, (at, name) =>
             at is { ValueKind: JsonValueKind.Object } o && o.TryGetProperty(name, out var next) ? next : null);
 
-    static bool IsTrue(JsonElement root, string name) =>
+    internal static bool IsTrue(JsonElement root, string name) =>
         root.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.True;
 
     // A user entry's text: the content itself when it is a string, else the first text block of the list. A list
