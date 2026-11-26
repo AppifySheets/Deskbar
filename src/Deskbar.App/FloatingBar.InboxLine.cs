@@ -17,6 +17,10 @@ namespace Deskbar.App;
 // (TaskLineButton's one-line hook), and it keeps the content's role: the Border the selection and the glow paint.
 //
 // A line, top to bottom in its text column, with the state mark at its left:
+//   the caption   on the first line of the Waiting on you block only: "NEEDS YOU" and how many lines the block holds,
+//                 folded ones included. Inside that line rather than a line of its own, because the lines' panel holds
+//                 only line buttons and the slot count, the fold's place and "+N more" all read it. A press on the
+//                 caption is not a click on the task;
 //   the title     up to two rows, ending in "…"; semibold on a Claude task, normal on a plain note; bold when important,
 //                 italic when urgent (Ruling 59); "↳" before a subtask and "· N subtasks" after a parent;
 //   the text      only on a line that needs the user (asks, went quiet, finished): its question or status line, one row,
@@ -42,10 +46,11 @@ public partial class FloatingBar
 
     internal const string InboxBarLineTag = "inbox-bar-line";
     internal const string InboxBarTextTag = "inbox-bar-text";
+    internal const string InboxBarCaptionTag = "inbox-bar-caption";
     internal const string InboxBarMarkTag = "inbox-bar-mark";
 
-    // What a line's height follows in the Inbox look, beyond today's key (HeightKeyOf): the look itself.
-    string InboxBarHeightKey(TaskLine line) => InboxBarOn ? "|inbox" : "";
+    // What a line's height follows in the Inbox look, beyond today's key (HeightKeyOf): the look itself, and the caption.
+    string InboxBarHeightKey(TaskLine line) => InboxBarOn ? $"|inbox|{CaptionCount(line)}" : "";
 
     // The line's state mark, from its task as the panel reads it (InboxTabs.MarkOf).
     InboxMark BarMarkOf(TaskLine line) =>
@@ -54,6 +59,14 @@ public partial class FloatingBar
             : line.Claudes ? InboxMark.Idle : InboxMark.Note;
 
     static bool MarkNeedsYou(InboxMark mark) => mark is InboxMark.Asks or InboxMark.WentQuiet or InboxMark.Finished or InboxMark.FinishedNotRunning;
+
+    // The caption's count on the Waiting on you block's first line, or null on every other line. The block is the bar's
+    // own (the questions and the Done tasks, TaskBoard.Pinned); its size is taken before the fold, so the lines folded
+    // into "+N more waiting on you" count too.
+    int? CaptionCount(TaskLine line) =>
+        line.GroupKey == "waiting" && shownTaskLines.FirstOrDefault(l => l.GroupKey == "waiting")?.Id == line.Id
+            ? unfoldedTaskLines.Count(l => l.GroupKey == "waiting")
+            : null;
 
     double InboxBarMarkSize => Math.Round(Text(9.5) * 1.5);
 
@@ -66,6 +79,13 @@ public partial class FloatingBar
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+
+        if (CaptionCount(line) is { } count)
+        {
+            var caption = InboxBarCaption(count);
+            Grid.SetColumnSpan(caption, 2);
+            grid.Children.Add(caption);
+        }
 
         // The mark at the first title row's height; Undo in its place while the line is closing.
         UIElement lead = line.Closing ? UndoButton(line) : InboxMarks.Icon(InboxMarks.IconOf(mark), InboxBarMarkSize, InboxMarks.InkOf(mark), BarSurface.Solid,
@@ -175,6 +195,26 @@ public partial class FloatingBar
         button.HorizontalAlignment = HorizontalAlignment.Left;
         button.Margin = new Thickness(0, 3, 0, 0);
         return button;
+    }
+
+    // "NEEDS YOU" and the count, as the panel's section captions read. A press on it is the caption's own: it is inside
+    // the first task's line, and must not open that task or start its drag.
+    FrameworkElement InboxBarCaption(int count)
+    {
+        var caption = new StackPanel
+        {
+            Tag = InboxBarCaptionTag,
+            Orientation = Orientation.Horizontal,
+            Background = Brushes.Transparent,
+            Margin = new Thickness(0, 0, 0, 4),
+            ToolTip = count == 1 ? "1 task needs you" : $"{count} tasks need you",
+        };
+        caption.Children.Add(new TextBlock { Text = "NEEDS YOU", FontSize = Text(7.5), FontWeight = FontWeights.SemiBold, Foreground = InboxLook.Ink2 });
+        caption.Children.Add(new TextBlock { Text = $"{count}", FontSize = Text(7.5), FontWeight = FontWeights.SemiBold, Foreground = InboxLook.Ink, Margin = new Thickness(6, 0, 0, 0) });
+        AutomationProperties.SetName(caption, $"Needs you {count}");
+        caption.MouseLeftButtonDown += (_, e) => e.Handled = true;
+        caption.MouseLeftButtonUp += (_, e) => e.Handled = true;
+        return caption;
     }
 
     // "+N more waiting on you" in the Inbox look: the words in the second ink, never amber; the question mark in amber in

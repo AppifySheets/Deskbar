@@ -260,4 +260,81 @@ public partial class FloatingBarTaskListTests
         Assert.All(backs.SelectMany(b => inks.Select(i => (i.Name, b.Name, Ratio: Contrast(((SolidColorBrush)i.Ink).Color, b.Colour)))),
             p => Assert.True(p.Ratio >= 4.5, $"{p.Item1} on {p.Item2}: {p.Ratio:0.00}"));
     }
+
+    // --- the "Needs you" caption --------------------------------------------------------------------------------------
+
+    static IReadOnlyList<FrameworkElement> Captions(ListBar t) =>
+        Inside(t.List).OfType<FrameworkElement>().Where(e => Equals(e.Tag, FloatingBar.InboxBarCaptionTag)).ToArray();
+
+    // Five tasks wait on the user; the block folds after three. The caption sits inside the block's first line and counts
+    // all five, the folded ones too.
+    static ListBar WaitingBar()
+    {
+        var t = Build();
+        Enumerable.Range(1, 5).ToList().ForEach(i =>
+        {
+            var id = t.Tasks.AddNote($"w{i}", t.Gepha).Value.Id;
+            t.Tasks.SetStatus(id, TaskStatus.WaitingOnYou);
+        });
+        t.Tasks.AddNote("Plain note", t.Gepha);
+        t.Bar.UpdateLayout();
+        return t;
+    }
+
+    [Fact]
+    public void The_needs_you_caption_sits_in_the_blocks_first_line_and_counts_the_folded_ones_too() => StaThread.Run(() =>
+    {
+        using var t = WaitingBar();
+        InboxLook(t);
+
+        var caption = Assert.Single(Captions(t));
+        Assert.Equal("Needs you 5", AutomationProperties.GetName(caption));
+        var first = t.Drawn.First();
+        Assert.Equal(TaskStatus.WaitingOnYou, ((TaskLine)first.Tag).Status);
+        Assert.True(caption.IsDescendantOf(first));
+    });
+
+    [Fact]
+    public void No_caption_without_a_waiting_block_and_none_in_the_old_look() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        t.Tasks.AddNote("Plain note", t.Gepha);
+        InboxLook(t);
+        Assert.Empty(Captions(t));
+
+        using var w = WaitingBar();
+        Assert.Empty(Captions(w));
+    });
+
+    // A press on the caption is the caption's: it does not press the first task's line.
+    [Fact]
+    public void A_press_on_the_caption_does_not_press_the_line() => StaThread.Run(() =>
+    {
+        using var t = WaitingBar();
+        InboxLook(t);
+        var caption = Captions(t).Single();
+        var press = new MouseButtonEventArgs(Mouse.PrimaryDevice, 0, MouseButton.Left) { RoutedEvent = UIElement.MouseLeftButtonDownEvent };
+
+        caption.RaiseEvent(press);
+
+        Assert.True(press.Handled);
+        Assert.False(t.Drawn.First().IsPressed);
+    });
+
+    // The caption changes no slot and no fold: the same lines in the same places, the fold line at the same index.
+    [Fact]
+    public void The_slots_and_the_fold_are_unchanged_by_the_caption() => StaThread.Run(() =>
+    {
+        using var t = WaitingBar();
+        IReadOnlyList<string> Places() => LinesPanel(t).Children.OfType<Button>()
+            .Select(b => b.Tag is TaskLine line ? line.Title : $"{b.Tag}").ToArray();
+        var before = Places();
+        var inSight = t.Bar.TaskLinesInSight.Select(l => l.Id).ToArray();
+
+        InboxLook(t);
+
+        Assert.Equal(before, Places());
+        Assert.Contains(FloatingBar.WaitingGroupTag, Places());
+        Assert.Equal(inSight, t.Bar.TaskLinesInSight.Select(l => l.Id));
+    });
 }
