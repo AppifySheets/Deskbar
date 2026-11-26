@@ -265,6 +265,20 @@ public sealed partial class RemoteControl
 
     static ControlReply Said(string text) => new(ControlReply.Ok, text);
 
+    // THE ASK'S REPLY TEACHES THE OPTIONS (the briefing has no room for them: SessionBriefingTests holds it under 10,000
+    // characters). A session meets the feature at the moment it asks: an ask that gave no options answers with the task
+    // as every form does plus one `hint` field, and an ask that gave some answers with the plain task, since it has
+    // learned. Only the session form: the manager's own ask answers through ManagerAsked and carries none.
+    public const string OptionsHint = "A short question can offer up to 4 one-click answers: end the text with a line --options, then one answer per line (40 characters each).";
+
+    ControlReply AskedReply(TaskItem task, bool gaveOptions)
+    {
+        if (gaveOptions) return Success(Describe(task));
+        var json = System.Text.Json.JsonSerializer.SerializeToNode(Describe(task), Json)!.AsObject();
+        json["hint"] = OptionsHint;
+        return Success(json);
+    }
+
     // Whatever the ask answered, the session hears nothing. A refusal from RequestAttention is the app's concern (it
     // means a COM call failed), not the session's, and the hook would print it into the conversation for nothing.
     // The exit code is kept (review of Task 7, M-4), so the app's trace line (`ctl ... -> <code>`) still says an ask
@@ -445,8 +459,11 @@ public sealed partial class RemoteControl
             ["status-line", var text] => Changed(Own().Bind(t => service.SetStatusLine(t.Id, text).Map(() => t))),
             // The text may end in a `--options` line and the options, one per line (AnswerOptions): split here, checked before
             // the task is looked up, so a bad list refuses the whole ask and stores nothing.
-            ["ask", var text] => Changed(AnswerOptions.Split(text).Bind(asked => Own().Bind(t => service.Ask(t.Id, asked.Question, session, asked.Options).Map(() => t)))
-                .Tap(_ => Attention(folder))),
+            // The reply is the task as every form answers, plus a `hint` field when the ask gave no options (AskedReply).
+            ["ask", var text] => AnswerOptions.Split(text)
+                .Bind(asked => Own().Bind(t => service.Ask(t.Id, asked.Question, session, asked.Options).Map(() => (t.Id, Gave: asked.Options.Count > 0))))
+                .Tap(_ => Attention(folder))
+                .Match(asked => AskedReply(service.Board.Tasks.First(x => x.Id == asked.Id), asked.Gave), ControlReply.Fail),
             ["done"] => Changed(Own().Bind(t => service.MarkDone(t.Id).Map(() => t))),
             // Ruling 49: the session says its question is settled (the user's reply answered it, or the session settled it
             // itself). Waiting on you goes back to In progress, the question goes and the workspace's blink and glow stop.
