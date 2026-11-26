@@ -308,6 +308,28 @@ public sealed record TaskItem(
     public bool IsSnoozed => SnoozedUntil.HasValue;
 
     /// <summary>
+    /// The schedule this task comes round on, with the model and folder its runs use, or none (task 0b78269e, recurring
+    /// tasks; spec docs/superpowers/specs/2026-11-26-recurring-tasks-design.md, plan task 2). While set, Deskbar starts
+    /// a Claude session on the task each time <see cref="NextRun"/> passes. An init property like the flags, stored as
+    /// an optional `repeat`; absent in a file, or unreadable there, means the task does not repeat.
+    /// </summary>
+    public Maybe<TaskRepeat> Repeat { get; init; }
+
+    /// <summary>
+    /// When the next run is due, a UTC instant, or none (task 0b78269e). Always computed from a clock reading by the
+    /// schedule (RepeatSchedule.Next), never caught up: it is kept on the task, not worked out on the fly, so a
+    /// restart keeps the time the last start promised. Stored as an optional `nextRun`; a task with no repeat has none.
+    /// </summary>
+    public Maybe<DateTimeOffset> NextRun { get; init; }
+
+    /// <summary>
+    /// Whether the task is waiting for its next run (task 0b78269e): it repeats, is open, and sits in Backlog or Done,
+    /// the two statuses a finished or not yet started run leaves it in. A run in progress (InProgress, WaitingOnYou) is
+    /// not between runs, so the schedule skips an occurrence that falls while one is going rather than queueing it.
+    /// </summary>
+    public bool IsBetweenRuns => Repeat.HasValue && IsOpen && Status is TaskStatus.Backlog or TaskStatus.Done;
+
+    /// <summary>
     /// Every status change the task has been through since status logging began, oldest first (task 521d2b07, the task
     /// stats; spec docs/superpowers/specs/2026-11-25-task-stats-design.md, "Where the history comes from"). Written in
     /// one place only, TaskService.Commit through TaskStatusLog.Logged, which compares the board before and after each

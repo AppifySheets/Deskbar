@@ -52,6 +52,13 @@ namespace Deskbar.Core.Tasks;
 // title; missing or null reads as none, and none is written as null, so a file without descriptions is unchanged. An
 // older build ignores it and drops it on its next save, which costs the text and never a task.
 //
+// RECURRING TASKS (task 0b78269e, docs/superpowers/specs/2026-11-26-recurring-tasks-design.md). `repeat`, an object
+// `{"schedule":"<canonical text>","model":"...","folder":"..."}`, and `nextRun`, a UTC time, are optional fields of version 2
+// as well, both left out of the file for a task that does not repeat. Read tolerantly: anything but an object of strings
+// reads as no repeat, and so does a schedule that does not parse, a model `claude` would not take or a blank folder, so one
+// hand edit never fails the file or invents a schedule; an unreadable `nextRun` reads as none. Still version 2; an older
+// build drops them on its next save, which costs the schedule and never a task.
+//
 // The model uses Maybe, which serialises badly, so the file is written from private DTO records: a Maybe becomes a
 // nullable field (null means none). Every time is converted to UTC before writing AND after reading, so the file
 // means the same on a machine in another time zone, a hand-edited time in local time is still the same instant,
@@ -155,7 +162,17 @@ public sealed class JsonTaskStore(string baseDirectory, Action<string>? trace = 
         // (TolerantDeployedListConverter). Still version 2; an older build ignores the field and drops it on its next
         // save, which costs the reports (those tasks go back to the hollow ring) and never a task.
         [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull), JsonConverter(typeof(TolerantDeployedListConverter))]
-        IReadOnlyList<DeployedDto>? Deployed = null);
+        IReadOnlyList<DeployedDto>? Deployed = null,
+        // TaskItem.Repeat and TaskItem.NextRun (task 0b78269e, recurring tasks): the schedule with its model and folder, and
+        // when the next run is due. Both left out while none, both read tolerantly (see the header). Still version 2.
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull), JsonConverter(typeof(TolerantRepeatConverter))]
+        RepeatDto? Repeat = null,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull), JsonConverter(typeof(TolerantTimeConverter))]
+        DateTimeOffset? NextRun = null);
+
+    // TaskItem.Repeat as stored: the schedule's canonical text (RepeatSchedule.Text), the model and the folder. Every part
+    // is nullable because the reader fills what it finds and FromDto decides whether that is a repeat.
+    sealed record RepeatDto(string? Schedule, string? Model, string? Folder);
 
     // One reported deploy (TaskItem.Deployed): the pull request's key (PullRequestLink.Key), when, and the evidence.
     sealed record DeployedDto(string Key, DateTimeOffset At, string Note);
@@ -265,7 +282,10 @@ public sealed class JsonTaskStore(string baseDirectory, Action<string>? trace = 
             t.PullRequests.Count > 0 ? t.PullRequests.Select(p => p.Url).ToArray() : null,
             t.DuplicateOf.HasValue ? t.DuplicateOf.Value : null,
             t.Related.Count > 0 ? t.Related : null,
-            t.Deployed.Count > 0 ? t.Deployed.Select(d => new DeployedDto(d.Key, d.At.ToUniversalTime(), d.Note)).ToArray() : null);
+            t.Deployed.Count > 0 ? t.Deployed.Select(d => new DeployedDto(d.Key, d.At.ToUniversalTime(), d.Note)).ToArray() : null,
+            // The schedule is stored as its canonical text, which TaskRepeats.Parse reads back to the same schedule.
+            t.Repeat.HasValue ? new RepeatDto(t.Repeat.Value.Schedule.Text, t.Repeat.Value.Model, t.Repeat.Value.Folder) : null,
+            t.NextRun.HasValue ? t.NextRun.Value.ToUniversalTime() : null);
 
     static TaskItem FromDto(TaskDto d) =>
         new(d.Id, d.Title ?? "",
@@ -306,7 +326,20 @@ public sealed class JsonTaskStore(string baseDirectory, Action<string>? trace = 
             // Each pull request once, its first report kept (MarkDeployed never records one twice; a hand edit might).
             Deployed = (d.Deployed ?? []).Select(p => new DeployedPullRequest(p.Key, p.At.ToUniversalTime(), p.Note))
                 .DistinctBy(p => p.Key).ToArray(),
+            Repeat = RepeatOf(d.Repeat),
+            NextRun = d.NextRun is { } due ? due.ToUniversalTime() : Maybe<DateTimeOffset>.None,
         };
+
+    // A stored repeat as a TaskRepeat, or none (task 0b78269e). It needs a schedule that parses (so a minute-level hand edit
+    // under the 15 minute floor is refused here too), a model ClaudeStart.Model accepts (it ends up on a command line)
+    // and a folder that is not blank. The model is stored trimmed by ClaudeStart.Model, so a padded one reads cleanly.
+    static Maybe<TaskRepeat> RepeatOf(RepeatDto? stored) =>
+        stored is { Schedule: { } schedule, Model: { } model, Folder: { } folder }
+        && !string.IsNullOrWhiteSpace(folder)
+        && TaskRepeats.Parse(schedule) is { IsSuccess: true } parsed
+        && ClaudeStart.Model(model) is { IsSuccess: true } accepted
+            ? new TaskRepeat(parsed.Value, accepted.Value, folder)
+            : Maybe<TaskRepeat>.None;
 
     // A pin for a task saved before pins existed: the later raised, the higher (smaller is higher), so the pinned block
     // keeps the latest-first order it had and the first save writes it down. A task joining the block goes one above the
@@ -453,6 +486,42 @@ public sealed class JsonTaskStore(string baseDirectory, Action<string>? trace = 
                 writer.WriteEndObject();
             });
             writer.WriteEndArray();
+        }
+    }
+
+    // The `repeat` object (task 0b78269e, TaskItem.Repeat): anything that is not an object reads as absent, and a part that
+    // is not a string reads as missing (property names in any case, as the Web defaults read), so FromDto, which judges
+    // the parts, sees null for it. One wrong-typed value never fails the whole file.
+    sealed class TolerantRepeatConverter : JsonConverter<RepeatDto?>
+    {
+        public override RepeatDto? Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+        {
+            using var document = JsonDocument.ParseValue(ref reader);
+            var root = document.RootElement;
+            return root.ValueKind != JsonValueKind.Object
+                ? null
+                : new RepeatDto(Text(root, "schedule"), Text(root, "model"), Text(root, "folder"));
+        }
+
+        // A string property's value by its name in any case, or null when it is missing or not a string.
+        static string? Text(JsonElement entry, string name) =>
+            entry.EnumerateObject().FirstOrDefault(p => p.Name.Equals(name, StringComparison.OrdinalIgnoreCase)) is
+                { Value.ValueKind: JsonValueKind.String } property
+                ? property.Value.GetString()
+                : null;
+
+        public override void Write(Utf8JsonWriter writer, RepeatDto? value, JsonSerializerOptions options)
+        {
+            if (value is null)
+            {
+                writer.WriteNullValue();
+                return;
+            }
+            writer.WriteStartObject();
+            writer.WriteString("schedule", value.Schedule);
+            writer.WriteString("model", value.Model);
+            writer.WriteString("folder", value.Folder);
+            writer.WriteEndObject();
         }
     }
 
