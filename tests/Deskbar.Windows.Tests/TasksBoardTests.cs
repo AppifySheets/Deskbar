@@ -3622,6 +3622,36 @@ public class TasksBoardTests
         Check("open");
     });
 
+    // Task 968c2216 (Petre: "when asking a question, let that also be present in the chat. when i open chat, hide the
+    // question from the main bar, show it when i collapse it"): a session's ask puts the question in the thread too; the
+    // folded line shows it, the open line leaves it to the thread (drawn in the question's orange), and folding the line
+    // again brings it back.
+    [Fact]
+    public void An_open_line_leaves_its_question_to_the_chat() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        const string question = "Merge the pull request?";
+        var id = t.Tasks.Create("Snooze", t.Gepha, Session("s1")).Value.Id;
+        t.Tasks.Ask(id, question, "s1");
+        t.Controller.Show();
+
+        TextBlock? Detail()
+        {
+            t.Window.UpdateLayout();
+            return Inside(LineOf(t.Window, id)).OfType<TextBlock>().SingleOrDefault(b => Equals(b.Tag, TasksWindow.DetailTag));
+        }
+
+        Assert.Equal(question, Detail()?.Text);
+        t.Controller.ToggleThread(id);
+        // The live session leaves the line nothing else to say, so no detail at all, and the question is a comment shown.
+        Assert.Null(Detail());
+        var asked = t.Tasks.Board.Tasks.Single(task => task.Id == id).Comments.Single(c => c.Asks);
+        Assert.Contains(asked.Id, t.Window.ShownComments(id));
+        Assert.Contains(question, RunTexts(t.Window));
+        t.Controller.ToggleThread(id);
+        Assert.Equal(question, Detail()?.Text);
+    });
+
     // Task 08cdb052 ("when asking for action, prs should have links, or artifacts; make that clickable"): a question's
     // markdown link and a bare address are links in the line's detail, on a closed line and an open one, and the text
     // reads as the words, never the markdown written out. A file on a share is not a link (FileLink).

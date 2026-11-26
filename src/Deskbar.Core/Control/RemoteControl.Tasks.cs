@@ -391,6 +391,7 @@ public sealed partial class RemoteControl
                 by = c.BySession ? "claude" : c.ByDeskbar ? "deskbar" : c.ByManager ? "manager" : "you",
                 at = c.At,
                 settled = c.Settled.HasValue ? (DateTimeOffset?)c.Settled.Value : null,
+                asks = c.Asks ? true : (bool?)null,
                 markdown = Expanded(c.Markdown),
             }
             : new
@@ -399,6 +400,7 @@ public sealed partial class RemoteControl
                 by = c.BySession ? "claude" : c.ByDeskbar ? "deskbar" : c.ByManager ? "manager" : "you",
                 at = c.At,
                 settled = c.Settled.HasValue ? (DateTimeOffset?)c.Settled.Value : null,
+                asks = c.Asks ? true : (bool?)null,
             }).ToArray(),
         quadrant = task.Quadrant.Numeral(),
         order = tasks is { } service && task.IsOpen ? service.Board.PositionOf(task.Id).Map(n => (int?)n).GetValueOrDefault() : null,

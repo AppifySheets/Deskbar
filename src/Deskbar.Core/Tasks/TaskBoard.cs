@@ -202,14 +202,43 @@ public sealed record TaskBoard(IReadOnlyList<TaskItem> Tasks)
                     })
                     : Result.Success(this)));
 
-    /// <summary>A session needs a decision: the task waits on Petre, shows the question and moves to the top.</summary>
-    public Result<TaskBoard> Ask(Guid id, string question, DateTimeOffset now) =>
+    /// <summary>
+    /// A session needs a decision: the task waits on Petre, shows the question and moves to the top.
+    /// <para>
+    /// THE QUESTION IS IN THE CHAT TOO (task 968c2216, Petre: "when asking a question, let that also be present in the
+    /// chat"). When the caller says who asked and gives the comment's id (<paramref name="written"/>: a session's id, or
+    /// TaskComment.DeskbarAuthor for Deskbar's own asks), the question is also written into the thread as a comment
+    /// marked <see cref="TaskComment.Asks"/>, so his reply sits under the question it answers. Once per question: the
+    /// question the task already holds (waiting on it, or set aside), asked again by a session refreshing it, adds nothing
+    /// while the thread's latest question comment still says it unsettled. Any other ask writes a new comment and settles
+    /// the earlier unsettled question comments, which it replaces (review of the change: a question cleared by done, a
+    /// status set by hand or a close and later asked again word for word must not reuse a bubble far up the thread).
+    /// Without <paramref name="written"/> nothing is written, which is what the board's older callers (and their tests) expect.
+    /// </para>
+    /// </summary>
+    public Result<TaskBoard> Ask(Guid id, string question, DateTimeOffset now, Maybe<(string By, Guid CommentId)> written = default) =>
         CleanText(question, "An ask needs a question").Bind(q =>
-            ChangeOpen(id, t => IsSetAside(t, q.Trim())
+            ChangeOpen(id, t => WithQuestionComment(t, IsSetAside(t, q.Trim())
                 // The session asks again the very question Deskbar set aside (task 8bd18246): the question never stopped
                 // holding, so it comes back as it was (Restored) rather than as a new one on top of the block.
                 ? Restored(t, now)
-                : t with { Status = TaskStatus.WaitingOnYou, Question = q.Trim(), Raised = now, UpdatedAt = now, Assignee = Assignee.Me, WaitingSince = now, Pin = TopPin(TaskStatus.WaitingOnYou, id) }));
+                : t with { Status = TaskStatus.WaitingOnYou, Question = q.Trim(), Raised = now, UpdatedAt = now, Assignee = Assignee.Me, WaitingSince = now, Pin = TopPin(TaskStatus.WaitingOnYou, id) },
+                q.Trim(), written, now)));
+
+    // The asked task (`asked`, made from `before`) with its question written into the thread (see Ask).
+    static TaskItem WithQuestionComment(TaskItem before, TaskItem asked, string question, Maybe<(string By, Guid CommentId)> written, DateTimeOffset now) =>
+        written.HasNoValue || (StillHolds(before, question) && asked.Comments.LastOrDefault(c => c.Asks) is { Settled.HasValue: false } last && last.Markdown == question)
+            ? asked
+            : asked with
+            {
+                Comments = [.. asked.Comments.Select(c => c.Asks && c.Settled.HasNoValue ? c with { Settled = now } : c),
+                    new TaskComment(written.Value.CommentId, written.Value.By, now, question) { Asks = true }],
+            };
+
+    // Whether the task held this question before the ask: waiting on it, or Deskbar set it aside.
+    static bool StillHolds(TaskItem task, string question) =>
+        (task.Status == TaskStatus.WaitingOnYou && task.Question.HasValue && task.Question.Value == question)
+        || (task.QuestionSetAside.HasValue && task.QuestionSetAside.Value == question);
 
     static bool IsSetAside(TaskItem task, string question) =>
         task is { Status: TaskStatus.InProgress, QuestionSetAside.HasValue: true } && task.QuestionSetAside.Value == question;
@@ -299,7 +328,9 @@ public sealed record TaskBoard(IReadOnlyList<TaskItem> Tasks)
             {
                 Status = TaskStatus.InProgress, Question = Maybe<string>.None, UpdatedAt = now, Assignee = Assignee.Claude,
                 Comments = task.Comments
-                    .Select(c => c.BySession && c.At >= task.WaitingSince.GetValueOrDefault(task.Raised) && c.Settled.HasNoValue ? c with { Settled = now } : c)
+                    // Every unsettled question comment too, whoever wrote it and whenever (task 968c2216): a question asked
+                    // again keeps its first comment, older than WaitingSince, and Deskbar's own asks are included.
+                    .Select(c => (c.Asks || (c.BySession && c.At >= task.WaitingSince.GetValueOrDefault(task.Raised))) && c.Settled.HasNoValue ? c with { Settled = now } : c)
                     .Append(new TaskComment(noteId, TaskComment.DeskbarAuthor, now, note))
                     .ToArray(),
             })
@@ -777,7 +808,10 @@ public sealed record TaskBoard(IReadOnlyList<TaskItem> Tasks)
     // The session's own unsettled comments written at or after the question was asked (WaitingSince, falling back to Raised for a
     // file saved before it existed): the ask's detail and the follow-ups while it was open.
     static IReadOnlyList<TaskComment> SettledSinceAsk(TaskItem task, string sessionId, DateTimeOffset now) =>
-        task.Comments.Select(c => c.SessionId.HasValue && c.SessionId.Value == sessionId && c.At >= task.WaitingSince.GetValueOrDefault(task.Raised) && c.Settled.HasNoValue
+        // Every unsettled question comment goes too, whoever asked and whenever (task 968c2216): a question Deskbar asked,
+        // or another session of the task, is answered all the same, and a question asked again keeps its first comment,
+        // which is older than WaitingSince. An answered question folds away with the rest (Ruling 62).
+        task.Comments.Select(c => (c.Asks || (c.SessionId.HasValue && c.SessionId.Value == sessionId && c.At >= task.WaitingSince.GetValueOrDefault(task.Raised))) && c.Settled.HasNoValue
             ? c with { Settled = now }
             : c).ToArray();
 

@@ -549,8 +549,10 @@ public class ClaudeSessionsTests
         var task = rig.Task(dead.TaskId);
         Assert.Equal(TaskStatus.WaitingOnYou, task.Status);
         Assert.Equal(SessionKeeper.ResumeFailed, task.Question.GetValueOrDefault(""));
-        var comment = Assert.Single(task.Comments);
+        // Claude's own message, then Deskbar's question, which the ask writes into the thread too (task 968c2216).
+        var comment = Assert.Single(task.Comments, c => !c.Asks);
         Assert.Contains("Workspace not trusted", comment.Markdown);
+        Assert.Equal(SessionKeeper.ResumeFailed, Assert.Single(task.Comments, c => c.Asks).Markdown);
 
         // Petre trusts the folder and puts the task back in progress: the next poll tries again.
         rig.Cli.Resume = null;

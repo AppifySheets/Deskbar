@@ -421,15 +421,21 @@ public partial class TaskDetailWindow : Window
 
     // The question while the task waits on Petre (orange, on the waiting tint), else its status line: in full, with its
     // links clickable (MarkdownBlocks.InlinesOf, as the panel's open line draws it).
+    //
+    // THE QUESTION IS IN THE CHAT (task 968c2216, Petre: "when i open chat, hide the question from the main bar"): this
+    // window's thread is always open and shows every unsettled comment, so once the ask wrote the question into it
+    // (TaskCommentView.AsksNow) the box leaves the question to the chat and keeps only the rest of the detail, plain.
     void DrawDetail(TaskRowView row)
     {
-        DetailBox.Visibility = row.Detail.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
-        var waits = row.Status == TaskStatus.WaitingOnYou && !row.Closing;
+        var inChat = row.DetailInThread is not null && row.Comments.Any(c => c.AsksNow);
+        var detail = inChat ? row.DetailInThread! : row.Detail;
+        DetailBox.Visibility = detail.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
+        var waits = row.Status == TaskStatus.WaitingOnYou && !row.Closing && !inChat;
         DetailBox.Background = waits ? AskTint : DetailFill;
         DetailText.Foreground = waits ? Orange : DimInk;
         DetailText.FontWeight = waits ? FontWeights.SemiBold : FontWeights.Normal;
         DetailText.Inlines.Clear();
-        MarkdownBlocks.InlinesOf(row.Detail, OpenLink).ToList().ForEach(DetailText.Inlines.Add);
+        MarkdownBlocks.InlinesOf(detail, OpenLink).ToList().ForEach(DetailText.Inlines.Add);
     }
 
     // The description: its text rendered, links clickable, then its pictures; a dim line when there is none.
@@ -532,7 +538,8 @@ public partial class TaskDetailWindow : Window
             () => Actions?.SettleComment(comment.Id, !comment.Settled), new Thickness(5, 0, 5, 1),
             tip: comment.Settled ? "Show it with the thread again" : "Fold this comment away, keeping it"));
         actions.ForEach(button => button.Background = Brushes.Transparent);
-        var isEvent = comment.Who == CommentAuthor.Deskbar;
+        // A question Deskbar asked is a bubble like a session's, not an event line (task 968c2216).
+        var isEvent = comment.Who == CommentAuthor.Deskbar && !comment.Asks;
         // A one-line Deskbar event carries its time at its end ("Resumed. · 09:08"); a longer one has it on a line below.
         var timeInBody = isEvent && split.Images.Count == 0 && ChatThread.TimeFitsInline(split.Text);
         var parts = new StackPanel();
@@ -543,6 +550,12 @@ public partial class TaskDetailWindow : Window
             {
                 body.Document.Foreground = HeaderInk;
                 body.Document.TextAlignment = TextAlignment.Center;
+            }
+            // The question waiting on Petre reads as it did on the line: orange, semibold (task 968c2216).
+            if (comment.AsksNow)
+            {
+                body.Document.Foreground = Orange;
+                body.Document.FontWeight = FontWeights.SemiBold;
             }
             // As wide as its text, so a short comment gets a short bubble; an event is centred.
             ChatThread.FitWidth(body);

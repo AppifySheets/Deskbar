@@ -653,7 +653,7 @@ public sealed class ClaudeSessions : IDisposable
                     .TapError(e => trace?.Invoke($"claude sessions: {adopt.Agent.SessionId} not adopted: {e}"));
                 break;
             case KeeperStep.GiveUp giveUp when resuming:
-                tasks.Ask(giveUp.TaskId, giveUp.Reason)
+                tasks.Ask(giveUp.TaskId, giveUp.Reason, TaskComment.DeskbarAuthor)
                     .Tap(() => LatestSessionOf(giveUp.TaskId).Tap(id => givenUp = givenUp.Add(id)))
                     .TapError(e => trace?.Invoke($"claude sessions: give-up not asked on {giveUp.TaskId}: {e}"));
                 break;
@@ -912,7 +912,7 @@ public sealed class ClaudeSessions : IDisposable
         // the task waits on Petre with the sticky ResumeFailed question, so the keeper tries nothing more until he acts;
         // remembered as given up, so the ledger forgets the session once he has (ForgetAnswered).
         Say(taskId, $"Could not resume this session:\n\n{result.Error}");
-        tasks.Ask(taskId, SessionKeeper.ResumeFailed)
+        tasks.Ask(taskId, SessionKeeper.ResumeFailed, TaskComment.DeskbarAuthor)
             .Tap(() => givenUp = givenUp.Add(sessionId))
             .TapError(e => trace?.Invoke($"claude sessions: failed resume not asked on {taskId}: {e}"));
     }
