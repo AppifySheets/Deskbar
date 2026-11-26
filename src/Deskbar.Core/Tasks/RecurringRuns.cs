@@ -12,7 +12,9 @@ public static class RecurringRuns
     public const string FolderGoneQuestion = "This task repeats, but the folder its runs start in is gone. Set the repeat again with a folder (Repeat in its menu, or task repeat <id> <schedule> --folder <path>).";
 
     /// <summary>Asked when a run could not be started; the thread carries what Claude Code said.</summary>
-    public const string StartFailedQuestion = "This task repeats, but its last run could not start; what Claude Code said is in the thread. Set the repeat again, or wake it, once it can run.";
+    // Only setting the repeat again answers it (final review, item 3): "Wake now" does nothing on a task that is waiting
+    // on Petre, so the question no longer offers it.
+    public const string StartFailedQuestion = "This task repeats, but its last run could not start; what Claude Code said is in the thread. Set the repeat again once it can run.";
 
     /// <summary>
     /// Whether a question is one of the two above. SetRepeat uses it: setting the repeat again is the answer to either, so

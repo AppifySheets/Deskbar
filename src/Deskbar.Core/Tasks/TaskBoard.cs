@@ -775,7 +775,8 @@ public sealed record TaskBoard(IReadOnlyList<TaskItem> Tasks)
             .Map(board => board.SleepUntilNextRun(id, now));
 
     /// <summary>
-    /// The repeat ends. A snooze equal to the old NextRun was the repeat's own and ends with it; a later snooze of
+    /// The repeat ends. Between runs, or waiting on one of the repeat's own questions, the job is over and the task is
+    /// Done. Otherwise a snooze equal to the old NextRun was the repeat's own and ends with it; a later snooze of
     /// Petre's is his and stays. A task without a repeat returns this same board.
     /// </summary>
     public Result<TaskBoard> ClearRepeat(Guid id, DateTimeOffset now) =>
@@ -785,7 +786,10 @@ public sealed record TaskBoard(IReadOnlyList<TaskItem> Tasks)
             // resumes a Done task, leaves the finished run's session down, and Petre closes it when he wants. Becoming Done
             // stamps Raised and Woken ends a snooze when Raised changes: that is fine here, because no snooze should
             // survive (the one the repeat made is going, and a sleeping Done task would hide its finish from him).
-            : task.IsBetweenRuns
+            // A TASK WAITING ON ONE OF ITS OWN REPEAT QUESTIONS ends the same way (task 0b78269e, final review, item 3).
+            // The run that question is about never started, so no run is in flight, and the question asks Petre to set
+            // the repeat again: with the repeat gone nothing can answer it any more, so it goes too and the job is Done.
+            : task.IsBetweenRuns || (task.Status == TaskStatus.WaitingOnYou && RecurringRuns.IsRepeatQuestion(task.Question))
                 ? Replaced(BecameDone(task, now) with
                 {
                     Repeat = Maybe<TaskRepeat>.None,
@@ -795,7 +799,8 @@ public sealed record TaskBoard(IReadOnlyList<TaskItem> Tasks)
                     Assignee = Assignee.Me,
                     UpdatedAt = now,
                 })
-            // In progress or waiting: only the schedule (and the snooze the repeat made) goes; status and assignee stay.
+            // In progress, or waiting on any other question: only the schedule (and the snooze the repeat made) goes;
+            // status, question and assignee stay.
             : Replaced(task with
             {
                 Repeat = Maybe<TaskRepeat>.None,

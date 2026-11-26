@@ -57,6 +57,13 @@ namespace Deskbar.Core.Tasks;
 // The next run is a FRESH session that the schedule starts. A run that died without marking done is InProgress (or
 // waits on Petre), so it is not between runs and is resumed like any open task's session.
 //
+// NOR IS ONE WAITING ON ITS OWN REPEAT QUESTION (task 0b78269e, final review, item 1). When a run cannot start, the task
+// waits on Petre with RecurringRuns.FolderGoneQuestion or StartFailedQuestion. That waiting is about the run that never
+// began, not about the last run's session, which had finished; resuming (or restarting) that session would revive an
+// old run behind his back. So such a task is treated like a give-up (RepeatAsked below): no resume, no restart, no
+// give-up, until setting the repeat again (or turning it off) answers the question. A recurring run waiting on a question
+// of its OWN session is still resumed like any open task's.
+//
 // A session id on two tasks is resumed once, for the task that comes first in the ordering. Listed sessions that no
 // task knows (open or closed, any entry) are adopted: one step each.
 //
@@ -145,8 +152,9 @@ public static class SessionKeeper
 
         var resumes = board.Tasks
             .Where(task => task.IsClaudes && task.Status is TaskStatus.Backlog or TaskStatus.InProgress or TaskStatus.WaitingOnYou)
-            // A recurring task between runs is never woken (task 0b78269e, see the header): its last run is over.
-            .Where(task => !task.IsBetweenRuns)
+            // A recurring task between runs is never woken (task 0b78269e, see the header): its last run is over. Nor is one
+            // waiting on its own repeat question: the run it asks about never started (final review, item 1).
+            .Where(task => !task.IsBetweenRuns && !RepeatAsked(task))
             // A task with ANY of its sessions listed is running (final review, item 9). The latest by Joined is not
             // always the one alive: a resumed or rejoined older entry, or a second session started on the task, can be
             // listed while the latest has ended, and waking the ended one would put two sessions on one task.
@@ -171,7 +179,7 @@ public static class SessionKeeper
         var restarts = board.Tasks
             .Where(task => task.IsClaudes && task.Status is TaskStatus.Backlog or TaskStatus.InProgress or TaskStatus.WaitingOnYou)
             // Nor restarted: a restart is a resume with a stop before it (task 0b78269e).
-            .Where(task => !task.IsBetweenRuns)
+            .Where(task => !task.IsBetweenRuns && !RepeatAsked(task))
             .Where(task => task.Sessions.Count > 0)
             .OrderBy(task => StatusRank(task.Status))
             .ThenByDescending(task => task.UpdatedAt)
@@ -280,6 +288,12 @@ public static class SessionKeeper
     static bool Stoppable(TaskItem task) => Finished(task) || task.IsBetweenRuns;
 
     static bool Finished(TaskItem task) => task.Status is TaskStatus.Done or TaskStatus.Closed;
+
+    // A recurring task waiting on one of the two questions a run that cannot start asks (RecurringRuns.IsRepeatQuestion;
+    // task 0b78269e, final review, item 1). It waits for Petre to set the repeat again, like a give-up waits for him, so
+    // the keeper leaves its last run's session down. Only with a repeat: a question is the repeat's only while it repeats.
+    static bool RepeatAsked(TaskItem task) =>
+        task.Repeat.HasValue && task.Status == TaskStatus.WaitingOnYou && RecurringRuns.IsRepeatQuestion(task.Question);
 
     static int StatusRank(TaskStatus status) => status switch
     {

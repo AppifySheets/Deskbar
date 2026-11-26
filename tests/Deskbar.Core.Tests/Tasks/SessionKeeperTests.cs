@@ -577,6 +577,35 @@ public class SessionKeeperTests
         Assert.Equal("s1", step.Session.Id);
     }
 
+    // A recurring task waiting on one of its OWN repeat questions (the folder is gone, or a run could not start) asks
+    // Petre to set the repeat again; the run the question is about never began, so the last run's session is over and
+    // waking it would revive an old run behind his back (final review, item 1). No resume, no restart, no give-up, as
+    // for a give-up. The same task without its repeat, or with a question that is not about the repeat, is resumed:
+    // that is what makes these tests able to fail.
+    [Theory]
+    [InlineData(RecurringRuns.FolderGoneQuestion)]
+    [InlineData(RecurringRuns.StartFailedQuestion)]
+    public void A_recurring_task_waiting_on_a_repeat_question_is_never_resumed(string question)
+    {
+        var task = Recurring(TaskStatus.WaitingOnYou, Session("s1")) with { Question = question };
+
+        Assert.Empty(Plan([task]));
+        Assert.Empty(Plan([task], transcriptExists: _ => false));
+        Assert.Empty(Plan([task with { Sessions = [Session("s1", folder: "")] }]));
+        Assert.IsType<KeeperStep.Resume>(Assert.Single(Plan([task with { Question = "which branch?" }])));
+    }
+
+    [Theory]
+    [InlineData(RecurringRuns.FolderGoneQuestion)]
+    [InlineData(RecurringRuns.StartFailedQuestion)]
+    public void A_recurring_task_waiting_on_a_repeat_question_is_never_restarted(string question)
+    {
+        var task = Recurring(TaskStatus.WaitingOnYou, Session("s1")) with { Question = question };
+
+        Assert.Empty(PlanLimited([task], Now.AddHours(-1), [BackgroundAgent("s1")]));
+        Assert.IsType<KeeperStep.Resume>(Assert.Single(PlanLimited([task with { Question = "which branch?" }], Now.AddHours(-1), [BackgroundAgent("s1")])));
+    }
+
     // The restart of a session stopped on a usage limit is a resume too, so a finished run is not restarted either. The
     // same task without its repeat is, which is what makes this test able to fail.
     [Fact]

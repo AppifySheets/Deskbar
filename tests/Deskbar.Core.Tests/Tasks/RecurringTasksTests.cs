@@ -414,6 +414,51 @@ public sealed class RecurringTasksTests : IDisposable
         Assert.False(task.NextRun.HasValue);
     }
 
+    // A task waiting on one of its own repeat questions has no run in flight: the run the question is about never started.
+    // Turning the repeat off is then the end of the job, exactly as between runs (final review, item 3), and the question
+    // goes with the repeat it asked about, or it would wait on Petre for an answer nothing can give any more.
+    [Theory]
+    [InlineData(RecurringRuns.FolderGoneQuestion)]
+    [InlineData(RecurringRuns.StartFailedQuestion)]
+    public void ClearRepeat_on_a_repeat_question_ends_the_job_as_done(string question)
+    {
+        var (board, id) = Fresh();
+        board = board.SetRepeat(id, Repeat(), Now, Plus4).Value.Wake(id, Now).Value.Ask(id, question, Now).Value;
+        var later = Now + TimeSpan.FromMinutes(5);
+
+        var task = Of(board.ClearRepeat(id, later).Value, id);
+
+        Assert.Equal(TaskStatus.Done, task.Status);
+        Assert.Equal(Assignee.Me, task.Assignee);
+        Assert.Equal(later, task.Raised);
+        Assert.False(task.Question.HasValue);
+        Assert.False(task.Repeat.HasValue);
+        Assert.False(task.NextRun.HasValue);
+    }
+
+    // Any other question is Petre's to answer and stays, with the task still waiting on him.
+    [Fact]
+    public void ClearRepeat_on_another_question_keeps_it_waiting()
+    {
+        var (board, id) = Fresh();
+        board = board.SetRepeat(id, Repeat(), Now, Plus4).Value.Wake(id, Now).Value.Ask(id, "which branch?", Now).Value;
+
+        var task = Of(board.ClearRepeat(id, Now).Value, id);
+
+        Assert.Equal(TaskStatus.WaitingOnYou, task.Status);
+        Assert.Equal("which branch?", task.Question.Value);
+        Assert.False(task.Repeat.HasValue);
+    }
+
+    // Waking it does nothing on a task that is waiting, so the question no longer offers it (final review, item 3).
+    [Fact]
+    public void The_start_failed_question_names_only_setting_the_repeat_again()
+    {
+        Assert.DoesNotContain("wake it", RecurringRuns.StartFailedQuestion);
+        Assert.Contains("Set the repeat again", RecurringRuns.StartFailedQuestion);
+        Assert.Contains("once it can run", RecurringRuns.StartFailedQuestion);
+    }
+
     [Fact]
     public void ClearRepeat_in_progress_only_drops_the_schedule()
     {
