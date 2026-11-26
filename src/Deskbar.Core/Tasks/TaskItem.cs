@@ -57,6 +57,26 @@ public sealed record TaskSession(string Id, string Folder, DateTimeOffset Joined
 
     /// <summary>Whether /clear replaced this session (<see cref="ReplacedAt"/>).</summary>
     public bool Replaced => ReplacedAt.HasValue;
+
+    /// <summary>
+    /// The session whose copy took this one's place on the task, when the copy was made to change the model, effort or
+    /// permission mode (TaskBoard.SessionSwitched, SettingsSwitch). Set together with <see cref="ReplacedAt"/>, so
+    /// everything that leaves a /clear-replaced session alone leaves this one alone too (the keeper, a comment's wake, a
+    /// closed task's reopening), and the copy's id is kept so the two can be told apart: only a /clear hands its task
+    /// to the next fresh session in its folder (TaskBoard.ClearedTaskIn), and only a switched-away session is never
+    /// brought back to life by Claude Code's list (TaskBoard.Reconcile) while it is still running in the moments before
+    /// its stop. An init property like ReplacedAt; absent in a file means none.
+    /// </summary>
+    public Maybe<string> ReplacedBy { get; init; }
+
+    /// <summary>
+    /// What Deskbar passed when it started this session, or the copy a switch made (ClaudeStart.LaunchSettings,
+    /// SettingsSwitch): the model, effort and permission mode, each None when not passed. All None for a session Deskbar
+    /// did not start (VS Code, a terminal) and for one started before the picker existed; what such a session runs on
+    /// can only be observed (SessionSettings from its hooks, ClaudeTranscript.LastModel). An init property; absent in a
+    /// file means none.
+    /// </summary>
+    public SessionSettings LaunchedWith { get; init; } = SessionSettings.None;
 }
 
 /// <summary>
@@ -388,6 +408,25 @@ public sealed record TaskItem(
     /// disagree. An init property, stored as an optional `related` array; absent in a file means none.
     /// </summary>
     public IReadOnlyList<Guid> Related { get; init; } = [];
+
+    /// <summary>
+    /// The user's pick of model, effort and permission mode for this task's Claude session (the picker under the Inbox
+    /// page's comment box; TaskBoard.Want), or none when he never picked. It applies to the task's current session by a
+    /// switch (SettingsSwitch.Plan decides when), and to every session Deskbar starts on the task later
+    /// (ClaudeStart.LaunchSettings). Within it, a value left None is "not passed": Claude Code's own setting decides
+    /// ("Model default" in the effort menu is that). An init property, stored as an optional `wanted` object; absent
+    /// in a file means never picked.
+    /// </summary>
+    public Maybe<SessionSettings> Wanted { get; init; }
+
+    /// <summary>
+    /// A switch to <see cref="Wanted"/> under way (SettingsSwitch): which session it copies, to what, since when, and the
+    /// copy's short id once Claude named it. Stored, not kept in memory, so a Deskbar that closes in the middle of one
+    /// can finish it when it starts again (SettingsSwitch.Recover) instead of leaving the copy to be adopted as a task
+    /// of its own. Cleared when the copy joins the task (TaskBoard.SessionSwitched) or the switch is given up
+    /// (TaskBoard.SwitchAbandoned). An init property, stored as an optional `switching` object; absent means none.
+    /// </summary>
+    public Maybe<PendingSwitch> Switching { get; init; }
 
     /// <summary>A closed task that duplicates another: the views call it "Duplicate", not "Closed".</summary>
     public bool IsDuplicate => Status == TaskStatus.Closed && DuplicateOf.HasValue;
