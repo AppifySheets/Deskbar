@@ -166,6 +166,13 @@ public sealed class ClaudeTaskActions : IDisposable
             .ToResult($"The task has no session {sessionId}")
             .Bind(session => SwitchTo(task).Tap(() => Open(task, session)));
 
+    /// <summary>
+    /// A window on the task's session again, where its old one was, WITHOUT going to the task's workspace: a settings
+    /// switch's stop closed the window Petre had (ClaudeSessions.ReopenWindow), maybe minutes after his pick, while he works
+    /// elsewhere. Opened as Open opens one (the window attached to a background session).
+    /// </summary>
+    public void Reattach(TaskItem task) => TaskViews.SessionToGoTo(task).Tap(session => Open(task, session));
+
     Result SwitchTo(TaskItem task) => task.WorkspaceId.HasValue ? manager.Switch(task.WorkspaceId.Value) : Result.Success();
 
     void Open(TaskItem task, TaskSession session)

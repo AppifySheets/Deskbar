@@ -2682,6 +2682,7 @@ public partial class TasksWindow : Window
                 if (grip.Visibility != wanted && !grip.IsMouseCaptured) grip.Visibility = wanted;
             };
         if (isEvent) more.HorizontalAlignment = HorizontalAlignment.Center;
+        if (comment.AsksNow && AnswerButtons(taskId) is { } answers) parts.Children.Add(answers);
         var placed = isEvent ? ChatThread.Event(comment, parts, timeInBody, actions) : ChatThread.Message(comment, parts, actions);
         // A settled comment, when unfolded, is dim: it is history.
         placed.Opacity = comment.Settled ? 0.55 : 1;
