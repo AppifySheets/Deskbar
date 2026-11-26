@@ -345,6 +345,13 @@ switch turned it on. An empty log, or one with no `--- trace on` line, was not r
 The last three write only when their output CHANGES (the strips' event lines are one per
 event), so the log stays readable with tracing on all day. Leave them in; this is the third visit to two of these bugs.
 
+- **A task's Inbox page reads the session's transcript, and only reads it** (2026-11-26). The page shows Claude's messages and
+  steps among the comments (`ClaudeChat`, `ChatStreamPanel`), read from the `.jsonl` Claude Code writes, for the one
+  session `ClaudeChatSource` picks, only while that page is open, off the UI thread about every 2 seconds
+  (`InboxTranscript`). Deskbar never starts, stops or writes to a session for it, and nothing from a transcript is ever
+  written anywhere (no cache, no trace line). Step labels are redacted before they are cut (`ClaudeChat.Redact`: Authorization
+  and Bearer values, `token=`, `key=`, `password=`, `secret=`, long hex or base64 runs), and Deskbar's own `deskbar.cmd task ...`
+  calls are left out of the steps. The stream is updated in place and moved into a rebuilt page: a poll must never call `Draw`.
 ## Traps that have already cost time
 
 - **The window list only ever loses windows.** `HIDE` does not mean gone, and
