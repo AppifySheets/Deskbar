@@ -272,10 +272,13 @@ public sealed partial class RemoteControl
     // `tasks-window list|matrix`: the window's view switch (Task 12, Ruling 28), a remembered setting
     // (AppState.TasksMatrix), so it needs no window to set. Only the four literal words; anything else is the usage
     // line and asks the app nothing.
+    // `tasks-window inbox` (task 740a2231): the Inbox view, remembered in the panel's state (TasksPanelState.Inbox), the
+    // switch's Inbox button's twin; list and matrix leave it, as their buttons do.
     ControlReply TasksWindow(string state) => state.ToLowerInvariant() switch
     {
-        "list" => Reply(manager.SetTasksMatrix(false), () => new { matrix = false }),
-        "matrix" => Reply(manager.SetTasksMatrix(true), () => new { matrix = true }),
+        "list" => Reply(manager.SetTasksMatrix(false).Bind(() => SetInbox(false)), () => new { matrix = false, inbox = false }),
+        "matrix" => Reply(manager.SetTasksMatrix(true).Bind(() => SetInbox(false)), () => new { matrix = true, inbox = false }),
+        "inbox" => Reply(SetInbox(true), () => new { inbox = true }),
         "show" or "hide" when setTasksWindow is null => ControlReply.Fail("This copy of Deskbar has no tasks panel."),
         "show" => Reply(setTasksWindow!(true), () => new { shown = true }),
         "hide" => Reply(setTasksWindow!(false), () => new { shown = false }),
@@ -285,6 +288,10 @@ public sealed partial class RemoteControl
             : Reply(showTasksStats(), () => new { shown = true, stats = true }),
         _ => ControlReply.Fail(ControlUsage.LineFor("tasks-window")),
     };
+
+    // The Inbox view on or off, kept with the rest of the panel's state; a no-op when it already is.
+    Result SetInbox(bool on) =>
+        manager.SaveTasksPanel((manager.State.TasksPanel ?? Persistence.TasksPanelState.Default) with { Inbox = on });
 
     // The client's `--from <folder>` is always last (WithCallerFolder appends it to every `task` call, even one that
     // already has a --from), so the LAST pair is the caller and is taken off the end. Any earlier `--from <folder>` pair

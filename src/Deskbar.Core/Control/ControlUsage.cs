@@ -165,10 +165,11 @@ public static class ControlUsage
             new("task", "comment-settle <comment-id> --session <session>",
                 "settle one of the session's own comments: it stays but folds away in the tasks window. task answered\n"
                 + "      settles the session's comments written since its question was asked; another session's is refused"),
-            new("tasks-window", "show|hide|list|matrix|stats",
+            new("tasks-window", "show|hide|inbox|list|matrix|stats",
                 "open the tasks panel beside the bar, as the bar's \"All tasks\" does (every task grouped as on the bar,\n"
-                + "      the closed ones under their filter, each with its comments), or close it; list or matrix switches its view\n"
-                + "      (Covey's 2 by 2: urgent and not urgent across, important and not important down), remembered;\n"
+                + "      the closed ones under their filter, each with its comments), or close it; inbox, list or matrix switches its\n"
+                + "      view (the Inbox's three tabs, Needs you, Claude and Notes; or Covey's 2 by 2: urgent and not urgent across,\n"
+                + "      important and not important down), remembered;\n"
                 + "      stats opens it on its Stats view (added, finished and open tasks per day, each task a link), not remembered"),
             new("task", "assign <id> me|claude",
                 "hand a task to yourself or to Claude, as the tasks window's \"Assign to\" menu does. The bar lists only the tasks\n"
