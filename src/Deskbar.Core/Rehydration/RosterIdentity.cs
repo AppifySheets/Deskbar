@@ -21,6 +21,12 @@ public static class RosterIdentity
     static readonly IReadOnlySet<string> Browsers =
         new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "chrome", "msedge", "brave", "vivaldi", "opera" };
 
+    // Whether this exe is a Chromium browser, the family whose identity is profile plus app id rather than
+    // the raw arguments. Exposed for bookmarks (BookmarkRunning), which must compare a bookmark's browser
+    // target the same way a window's identity is compared.
+    public static bool IsChromium(string processPath) =>
+        Browsers.Contains(Path.GetFileNameWithoutExtension(processPath));
+
     public static string Of(string processPath, string? commandLine)
     {
         var exe = Path.GetFileNameWithoutExtension(processPath);
