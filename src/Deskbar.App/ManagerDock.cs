@@ -133,6 +133,25 @@ internal sealed class ManagerDock : IDisposable
     /// <summary>The manager's terminal, pinned: dock it (the first time) and put it on the strip.</summary>
     public void Follow(WindowHandle window)
     {
+        // A window already closed is never docked (task af62edda). App.PinManagerWindow runs at background priority, so a
+        // pin queued by the terminal's last events (its activation as it closed) can run after the window is destroyed and
+        // after Gone gave the strip back; measured 2026-11-26: destroyed at 10:27:15.902, strip given back, then "following"
+        // the dead handle at 10:27:17.176, which took the strip again and left an empty 1042 px column beside the tasks
+        // panel that nothing gave back.
+        if (!NativeMethods.IsWindow(window.Value))
+        {
+            ClickTrace.Write($"manager dock: 0x{window.Value:X} is already closed, not followed");
+            return;
+        }
+        // Nor a window whose title is no longer the manager's (review finding). The title was checked when the event that
+        // queued the pin was raised, which can be over a second earlier: a second tab shown meanwhile has started the
+        // retitle grace (Retitled), and the stale pin would otherwise stop it below and hold the strip for a window that is
+        // not the manager's. Refused here, the running grace gives the strip back as it should. The live title, read now.
+        if (Deskbar.Windows.Monitoring.WindowInfoFactory.TitleOf(window.Value) != ManagerSession.WindowTitle)
+        {
+            ClickTrace.Write($"manager dock: 0x{window.Value:X} is no longer titled as the manager's, not followed");
+            return;
+        }
         if (Follows(window))
         {
             // Its manager title is back (a tab switched back) before the grace ran out: nothing is given back.
@@ -140,6 +159,9 @@ internal sealed class ManagerDock : IDisposable
             Place();
             return;
         }
+        // A grace still running for the window followed before belongs to that window (review finding): left running, it
+        // would give back the strip this new terminal is about to take.
+        retitled.Stop();
         terminal = window;
         ClickTrace.Write($"manager dock: following 0x{window.Value:X}");
         if (strip.IsShown) Place();
@@ -210,6 +232,15 @@ internal sealed class ManagerDock : IDisposable
     /// <summary>The 1 s tick: the strip's guard, and the terminal put back where something else moved it.</summary>
     public void Keep()
     {
+        // The terminal gone without Gone hearing of it (task af62edda): a destroy event dropped under load (out-of-context
+        // WinEvents, CLAUDE.md's Traps), or a close that raced Follow past its own check. Keyed off IsWindow, the one sure
+        // sign a window is gone for good, so the strip is given back within a second instead of being held for nothing.
+        if (terminal is { HasValue: true } held && !NativeMethods.IsWindow(held.Value.Value))
+        {
+            retitled.Stop();
+            GiveBack(held.Value);
+            return;
+        }
         strip.Keep();
         // A drag's end event can be lost under load (out-of-context WinEvents, CLAUDE.md's Traps; review finding), which
         // would leave `dragging` set and the terminal never put back. No mouse button held means no drag is under way.
