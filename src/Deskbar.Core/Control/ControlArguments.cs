@@ -211,13 +211,23 @@ public static class ControlArguments
         args[0].Equals(noun, StringComparison.OrdinalIgnoreCase) && verbs.Contains(args[1], StringComparer.OrdinalIgnoreCase);
 
     public static IReadOnlyList<string> WithTextInput(IReadOnlyList<string> args, Func<string> readInput) =>
-        IsTextForm(args) && Enumerable.Range(2, args.Count - 2).Where(i => args[i] == "-" && !IsOption(args[i - 1])).ToList() is [var at, ..]
+        IsTextForm(args) && Enumerable.Range(2, args.Count - 2).Where(i => args[i] == "-" && !TakesValue(args[i - 1])).ToList() is [var at, ..]
             ? [.. args.Take(at), readInput().TrimEnd(LineBreaks), .. args.Skip(at + 1)]
             : args;
 
     static readonly char[] LineBreaks = ['\r', '\n'];
 
     static bool IsOption(string word) => word.StartsWith("--", StringComparison.Ordinal);
+
+    // THE TEXT FORMS' FLAGS THAT TAKE NO VALUE (task a5e77647). The word after any other option is that option's value
+    // (--session <id>, --workspace <name>, --parent <id>, --from <folder>, goal add's --week <date>), so a `-` there is
+    // a value and not the text's place. These three stand alone: `task add --important -` puts the title's `-` straight
+    // after one, and while every option was taken to have a value that `-` was skipped, stdin was never read and the
+    // note was titled "-". --from-claude is the one WithCaller appends. A text form that gains a flag with no value adds
+    // it here, or a `-` after it is passed on as a literal title and its text is traced in full (TextForTrace).
+    static readonly string[] ValuelessFlags = ["--important", "--urgent", FromClaude];
+
+    static bool TakesValue(string word) => IsOption(word) && !ValuelessFlags.Contains(word, StringComparer.Ordinal);
 
     // What a hook's reply becomes before it is printed. A Deskbar that is not running is not the session's business: the
     // hook prints nothing and exits 0, so a Stop hook never tells Claude to keep going (exit 2 would) and a prompt goes
@@ -249,7 +259,8 @@ public static class ControlArguments
 
     static IEnumerable<string> TextForTrace(IReadOnlyList<string> args)
     {
-        var positional = Enumerable.Range(2, args.Count - 2).Where(i => !IsOption(args[i]) && !IsOption(args[i - 1])).ToList();
+        // A word after a valueless flag (`task add --important <title>`) is positional too, so it is traced as its length.
+        var positional = Enumerable.Range(2, args.Count - 2).Where(i => !IsOption(args[i]) && !TakesValue(args[i - 1])).ToList();
         // `comment`, `describe` and `comment-edit` name an id first (Ruling 58 added the last two), and so does `rename`,
         // a task's or a goal's.
         var text = IdFirst.Contains(args[1], StringComparer.OrdinalIgnoreCase) && positional.Count > 1 ? positional.Skip(1) : positional;
