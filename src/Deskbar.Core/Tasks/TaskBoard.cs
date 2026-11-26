@@ -520,7 +520,8 @@ public sealed record TaskBoard(IReadOnlyList<TaskItem> Tasks)
             ? Change(id, t => t with
             {
                 Sessions = t.Sessions.Select(s =>
-                    s.Id == pending.Value.FromSession ? s with { ReplacedAt = Maybe<DateTimeOffset>.None, ReplacedBy = Maybe<string>.None }
+                    // Live again at once: it never stopped (the list ends it again if it has gone meanwhile).
+                    s.Id == pending.Value.FromSession ? s with { ReplacedAt = Maybe<DateTimeOffset>.None, ReplacedBy = Maybe<string>.None, Ended = Maybe<DateTimeOffset>.None }
                     : s.Id == copyId.Value ? s with { Ended = s.Ended.HasValue ? s.Ended : now, ReplacedAt = now, ReplacedBy = pending.Value.FromSession }
                     : s).ToArray(),
                 Switching = Maybe<PendingSwitch>.None,
@@ -571,15 +572,16 @@ public sealed record TaskBoard(IReadOnlyList<TaskItem> Tasks)
     /// The open task whose ISSUED switch a session that just started is the copy of: the copy's own SessionStart hook
     /// (source "fork", measured 2026-11-26) finds its task through this, so it is briefed on its task from its first
     /// moment rather than offered a choice. The copy is a session no task holds, in the folder of the switch's original
-    /// (<paramref name="inFolder"/> compares, as for ClearedTaskIn), whose id starts with the copy's short id once Claude
-    /// named it, within SettingsSwitch.RecoverWithin of the resume. Two such tasks name nothing.
+    /// (<paramref name="inFolder"/> compares, as for ClearedTaskIn), whose id starts with the short id Claude printed for
+    /// our resume, within SettingsSwitch.RecoverWithin of it. Never by the folder alone (review M3): before Claude has
+    /// printed the id, nothing is claimed, and the poll joins the copy once the id is known. Two such tasks name nothing.
     /// </summary>
     public Maybe<TaskItem> SwitchingTaskFor(string sessionId, Func<string, bool> inFolder, DateTimeOffset now) =>
         Tasks.Any(t => t.Sessions.Any(s => s.Id == sessionId))
             ? Maybe<TaskItem>.None
             : Tasks.Where(t => t.IsOpen && t.Switching is { HasValue: true } p && p.Value.CopyId.HasNoValue
                     && p.Value.Issued is { HasValue: true } issued && now - issued.Value <= SettingsSwitch.RecoverWithin
-                    && p.Value.CopyShortId.Map(id => sessionId.StartsWith(id, StringComparison.OrdinalIgnoreCase)).GetValueOrDefault(true)
+                    && p.Value.CopyShortId.Map(id => sessionId.StartsWith(id, StringComparison.OrdinalIgnoreCase)).GetValueOrDefault(false)
                     && t.Sessions.Any(s => s.Id == p.Value.FromSession && inFolder(s.Folder)))
                 .ToList() is [var only] ? only : Maybe<TaskItem>.None;
 

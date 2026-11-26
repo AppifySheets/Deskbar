@@ -13,27 +13,33 @@ namespace Deskbar.App;
 // of the list), TaskBoard stores each step, ClaudeStart writes the command line. This file runs the steps, on the same
 // threads as the rest of ClaudeSessions: decisions and board changes on `scheduler`, `claude` on `background`.
 //
-// HOW ONE STARTS. Only Pick, the user's pick: it stores the pick (TaskBoard.Want), and when the task's session can take it
-// (an idle or busy background session, or one that is not running but can be resumed) it begins the switch
-// (TaskBoard.SwitchStarted) and takes its first step at once. Nothing else begins one: the poll (AdvanceSwitches, a
-// single line in Heard) only carries on with switches already begun, so no session is ever copied, stopped or resumed
-// because of a pick nobody just made, a session that happened to join, or a timer.
+// HOW ONE STARTS. Only Pick, the user's pick: it stores the pick (TaskBoard.Want), and when the task's session (one rule,
+// SettingsSwitch.SessionOf: live on this task, not one that moved to another task) can take it, it begins the switch
+// (TaskBoard.SwitchStarted) and takes its first step at once. Nothing else begins one: the poll (AdvanceSwitches, a single
+// line in Heard) only carries on with switches already begun, so no session is ever copied, stopped or resumed because of
+// a pick nobody just made, a session that happened to join, or a timer.
 //
 // THE STEPS (SettingsSwitch's header has why, and the measurements):
 //   1. ISSUE: `claude --bg --resume <id> --model .. [--effort ..] [--permission-mode ..] --settings ..` in the session's
 //      folder, stored as issued BEFORE it runs. Claude prints the copy's short id on the usual "backgrounded" line; it
-//      is stored, and the list is read until it shows the copy (Found, about ten seconds).
+//      is stored, and the list is read until it shows the copy (Found, about ten seconds). No short id printed: the switch
+//      is given up at once, the original untouched and nothing stopped (review M3: a copy is never claimed by folder).
 //   2. JOIN: the copy joins the task in the original's place (TaskBoard.SessionSwitched), or the copy's own SessionStart
 //      hook got there first (TaskService.JoinAfterSwitch). A session that came back under its OWN id (no saved options to
 //      keep, so no copy) is the same session on the new settings (SessionRelaunched).
-//   3. CONFIRM: once the copy has answered (its transcript has a reply written after it joined), the original is stopped
-//      (`claude stop`), and the switch is done. Until then the original runs on, idle: the owner's rule is that no
-//      conversation sits stopped waiting for Deskbar, and if the copy cannot run its model it is the way back.
-//   REVERT: the list shows the copy "failed" (a model this account cannot use fails its first turn, measured): the task
-//      goes back to the original, which never stopped, and the copy is stopped.
-//   ABANDON: Claude refused the resume (its words go into the thread), no copy appeared within a minute, or the session
-//      moved on before the switch could be made. The original was never touched.
-// A Deskbar that closes at any point leaves a stored phase, and the first good read after it starts again carries on.
+//   3. CONFIRM: once the copy has answered (its transcript has a reply written after it joined), the switch is final, and
+//      the original is stopped at a read of the list that shows it at a pause (review H1: never while busy or asking).
+//   REVERT: the copy failed before answering (a model this account cannot use fails its first turn, measured), or the user
+//      cancelled before it answered, or the task was closed before it answered: the task keeps the original, which never
+//      stopped, and the copy is stopped.
+//   ABANDON: Claude refused the resume (its words go into the thread), printed no short id, no copy appeared within a
+//      minute, or the session moved on before the switch could be made. The original was never touched.
+// A Deskbar that closes at any point leaves a stored phase, and the first good read after it starts again carries on. A task
+// DELETED during a switch takes its stored phase with it, so the last state seen of it is kept here (switchesSeen) and seen
+// through as a closed task's (review L3), as long as this Deskbar runs.
+//
+// EVERY `claude stop` of a switch goes through StopForSwitch, which runs it only on an id SettingsSwitch.MayStop allows: the
+// copy's short id as Claude printed it for our resume, or the original's when Deskbar itself started it.
 //
 // A WINDOW of Deskbar's attached to the original is closed by its stop (measured 2026-11-25). When one was open, a window
 // is opened on the task's session, the copy, a moment after the stop (ReopenWindow, which the app hands to
@@ -44,15 +50,19 @@ public sealed partial class ClaudeSessions
     ImmutableHashSet<Guid> switchingNow = ImmutableHashSet<Guid>.Empty;
 
     // When a stop of a switch's original was last tried, by session id, so one that fails is tried again after
-    // StopRetry rather than on every poll.
+    // StopRetry rather than on every poll; and the originals whose stop is out right now, which Cancel must not undo.
     ImmutableDictionary<string, DateTimeOffset> switchStopTried = ImmutableDictionary<string, DateTimeOffset>.Empty;
+    ImmutableHashSet<string> originalStopping = ImmutableHashSet<string>.Empty;
+
+    // The last state seen of each task with a switch under way, for a task deleted meanwhile (see the header).
+    ImmutableDictionary<Guid, TaskItem> switchesSeen = ImmutableDictionary<Guid, TaskItem>.Empty;
 
     /// <summary>
     /// The user picked the model, effort and permission mode for the task's session: stored as the task's pick, and when
     /// its session can take it, the switch begins and its first step is taken now. Answers what the pick meets
-    /// (SettingsSwitch.Plan), for the picker to say: copied now, waiting for a pause, read-only (VS Code, a terminal),
-    /// or kept for the next start. A list that cannot be read switches nothing (the pick is still stored). Called on the
-    /// UI thread; the returned task completes there.
+    /// (SettingsSwitch.Plan), for the picker to say: copied now, waiting for a pause, read-only, or kept for the next
+    /// start. A list that cannot be read switches nothing (the pick is still stored). Called on the UI thread; the
+    /// returned task completes there.
     /// </summary>
     public Task<Result<SwitchStep>> Pick(Guid taskId, SessionSettings settings)
     {
@@ -71,7 +81,7 @@ public sealed partial class ClaudeSessions
     SwitchStep Picked(Guid taskId, IReadOnlyCollection<ClaudeAgent> list)
     {
         if (tasks.Board.Tasks.FirstOrDefault(t => t.Id == taskId) is not { } task) return new SwitchStep.Nothing();
-        var step = SettingsSwitch.Plan(task, list, Resumable, RecentlyWoken);
+        var step = SettingsSwitch.Plan(tasks.Board, task, list, Resumable, RecentlyWoken);
         // The switch begins only where there is a session to switch and the pick differs from what it runs on; an
         // issued switch keeps going, and the pick made meanwhile follows it (FollowLaterPick).
         var begins = step switch
@@ -79,11 +89,12 @@ public sealed partial class ClaudeSessions
             SwitchStep.CopyNow copy => Maybe.From(new PendingSwitch(copy.Session.Id, copy.To, scheduler.Now)),
             SwitchStep.AtNextWake wake => Maybe.From(new PendingSwitch(wake.Session.Id, wake.To, scheduler.Now)),
             SwitchStep.Wait wait when wait.Why != SettingsSwitch.UnderWay =>
-                SettingsSwitch.Current(task).Map(s => new PendingSwitch(s.Id, SettingsSwitch.Target(task.Wanted.Value, s), scheduler.Now)),
+                SettingsSwitch.SessionOf(tasks.Board, task).Map(s => new PendingSwitch(s.Id, SettingsSwitch.Target(task.Wanted.Value, s), scheduler.Now)),
             _ => Maybe<PendingSwitch>.None,
         };
-        // Nothing to switch (the session already runs on the pick): a request still waiting for a pause is dropped.
-        if (step is SwitchStep.Nothing && task.Switching is { HasValue: true } waiting && waiting.Value.Issued.HasNoValue)
+        // Nothing to switch (no session of this task runs, or it already runs on the pick): a request still waiting for
+        // a pause is dropped.
+        if (begins.HasNoValue && step is not SwitchStep.Wait && task.Switching is { HasValue: true } waiting && waiting.Value.Issued.HasNoValue)
             tasks.SwitchAbandoned(taskId, keepWanted: true);
         begins.Tap(pending => tasks.SwitchStarted(taskId, pending)
             .Tap(() => Act(taskId, list))
@@ -91,19 +102,22 @@ public sealed partial class ClaudeSessions
         return step;
     }
 
-    // The poll's part (Heard): every switch already begun takes its next step on this list.
-    void AdvanceSwitches(IReadOnlyCollection<ClaudeAgent> listed) =>
-        tasks.Board.Tasks
-            .Where(t => t.Switching.HasValue && !switchingNow.Contains(t.Id))
-            .Select(t => t.Id)
-            .ToList()
-            .ForEach(id => Act(id, listed));
+    // The poll's part (Heard): every switch already begun takes its next step on this list, a deleted task's included.
+    void AdvanceSwitches(IReadOnlyCollection<ClaudeAgent> listed)
+    {
+        var board = tasks.Board.Tasks;
+        var gone = switchesSeen.Where(seen => board.All(t => t.Id != seen.Key)).ToList();
+        switchesSeen = board.Where(t => t.Switching.HasValue).ToImmutableDictionary(t => t.Id, t => t)
+            .SetItems(gone);
+        board.Where(t => t.Switching.HasValue && !switchingNow.Contains(t.Id)).Select(t => t.Id).ToList().ForEach(id => Act(id, listed));
+        gone.Where(seen => !switchingNow.Contains(seen.Key)).ToList().ForEach(seen => ActOnDeleted(seen.Value, listed));
+    }
 
     void Act(Guid taskId, IReadOnlyCollection<ClaudeAgent> listed)
     {
         if (switchingNow.Contains(taskId) || tasks.Board.Tasks.FirstOrDefault(t => t.Id == taskId) is not { Switching.HasValue: true } task) return;
         var pending = task.Switching.Value;
-        switch (SettingsSwitch.Next(task, listed, scheduler.Now, Resumable, RecentlyWoken, Known, CopyReplied))
+        switch (SettingsSwitch.Next(tasks.Board, task, listed, scheduler.Now, Resumable, RecentlyWoken, CopyReplied))
         {
             case SwitchAction.Issue issue:
                 Issue(taskId, issue);
@@ -124,18 +138,48 @@ public sealed partial class ClaudeSessions
                     .TapError(e => trace?.Invoke($"claude sessions: relaunch of {relaunched.Session.SessionId} not stored: {e}"));
                 break;
             case SwitchAction.Confirm confirm:
-                Confirm(taskId, pending, confirm.StopOriginal);
+                Confirm(task, pending, confirm.StopOriginal);
                 break;
             case SwitchAction.Revert revert:
                 tasks.SwitchReverted(taskId)
-                    .Tap(() => Say(taskId, revert.Why))
+                    .Tap(() => { if (revert.Why.Length > 0) Say(taskId, revert.Why); })
                     .TapError(e => trace?.Invoke($"claude sessions: switch on {taskId} not reverted: {e}"));
                 pending.CopyId.Tap(retireWaiter);
-                revert.StopCopy.Tap(shortId => StopForSwitch(taskId, shortId, _ => { }));
+                StopForSwitch(task, pending, revert.StopCopy, _ => { });
+                break;
+            case SwitchAction.Discard discard:
+                tasks.SwitchAbandoned(taskId, keepWanted: true);
+                StopForSwitch(task, pending, discard.StopCopy, _ => { });
                 break;
             case SwitchAction.Abandon abandon:
                 tasks.SwitchAbandoned(taskId, abandon.KeepWanted);
                 if (abandon.Why.Length > 0) Say(taskId, abandon.Why);
+                break;
+        }
+    }
+
+    // A task deleted during its switch: its last state, as closed, seen through until nothing of the switch runs. There is
+    // no board to tell, so only the stops are made; the record goes once there is nothing left to stop.
+    void ActOnDeleted(TaskItem seen, IReadOnlyCollection<ClaudeAgent> listed)
+    {
+        var closed = seen with { Status = TaskStatus.Closed };
+        var pending = seen.Switching.Value;
+        void Done() => switchesSeen = switchesSeen.Remove(seen.Id);
+        switch (SettingsSwitch.Next(tasks.Board, closed, listed, scheduler.Now, _ => false, _ => false, CopyReplied))
+        {
+            case SwitchAction.Confirm { StopOriginal: { HasValue: true } original }:
+                StopForSwitch(closed, pending, original.Value, stopped => { if (stopped) Done(); });
+                break;
+            case SwitchAction.Revert { StopCopy: var copy }:
+                StopForSwitch(closed, pending, copy, stopped => { if (stopped) Done(); });
+                break;
+            case SwitchAction.Discard { StopCopy: var copy }:
+                StopForSwitch(closed, pending, copy, stopped => { if (stopped) Done(); });
+                break;
+            case SwitchAction.Wait:
+                break;
+            default:
+                Done();
                 break;
         }
     }
@@ -147,9 +191,11 @@ public sealed partial class ClaudeSessions
     void Issue(Guid taskId, SwitchAction.Issue issue)
     {
         // The model is always named (ClaudeStart.SwitchArguments). A pick that named none keeps the model the session was
-        // started on (SettingsSwitch.Target); for a session Deskbar did not start, the model its last reply came from,
-        // else the setting a start would use.
-        var to = issue.To.Model.HasValue ? issue.To : issue.To with { Model = LastModelOf(issue.From).GetValueOrDefault(manager.State.ClaudeTaskModelInEffect) };
+        // started on (SettingsSwitch.Target); else the model its last reply came from, passed through ClaudeStart.Model
+        // like every other model value (review L4); else the setting a start would use.
+        var to = issue.To.Model.HasValue ? issue.To
+            : issue.To with { Model = LastModelOf(issue.From).Bind(m => ClaudeStart.Model(m) is { IsSuccess: true } ok ? Maybe.From(ok.Value) : Maybe<string>.None)
+                .GetValueOrDefault(manager.State.ClaudeTaskModelInEffect) };
         if (tasks.SwitchIssued(taskId, to) is { IsFailure: true } notIssued)
         {
             trace?.Invoke($"claude sessions: switch on {taskId} not issued: {notIssued.Error}");
@@ -161,13 +207,11 @@ public sealed partial class ClaudeSessions
             .Catch((Exception e) => Observable.Return(Result.Failure<string>(e.Message)))
             .SelectMany(ran =>
             {
-                if (ran.IsFailure) return Observable.Return((Ran: ran, Found: Maybe<Result<ClaudeAgent>>.None));
-                var shortId = ClaudeAgents.ShortIdFromStart(ran.Value);
-                // No short id printed: the poll still finds the copy by its folder and start time (SettingsSwitch.Next).
-                if (shortId.HasNoValue) return Observable.Return((Ran: ran, Found: Maybe<Result<ClaudeAgent>>.None));
+                var shortId = ran.IsSuccess ? ClaudeAgents.ShortIdFromStart(ran.Value) : Maybe<string>.None;
+                if (shortId.HasNoValue) return Observable.Return((Ran: ran, Named: false, Found: Maybe<Result<ClaudeAgent>>.None));
                 tasks.SwitchCopyNamed(taskId, shortId.Value).TapError(e => trace?.Invoke($"claude sessions: copy of {from.Id} not named: {e}"));
                 return Found(shortId.Value, FindAttempts, $"Claude did not list {shortId.Value} yet.")
-                    .Select(found => (Ran: ran, Found: Maybe.From(found)));
+                    .Select(found => (Ran: ran, Named: true, Found: Maybe.From(found)));
             })
             .TakeUntil(stopping)
             .Subscribe(answer =>
@@ -178,6 +222,14 @@ public sealed partial class ClaudeSessions
                     // Claude refused the resume: nothing was started, and the original goes on as it was.
                     tasks.SwitchAbandoned(taskId);
                     Say(taskId, $"Could not change the session to {SessionChoices.Describe(to)}. It goes on as it was. Claude Code said:\n\n{answer.Ran.Error}");
+                    return;
+                }
+                if (!answer.Named)
+                {
+                    // No short id printed: nothing can be claimed as the copy (review M3), so the switch is given up at
+                    // once, the original untouched and nothing stopped.
+                    tasks.SwitchAbandoned(taskId);
+                    Say(taskId, SettingsSwitch.NoShortId);
                     return;
                 }
                 // Found in time: the next step (the join) is taken now, on the list as it is plus what was found;
@@ -192,8 +244,9 @@ public sealed partial class ClaudeSessions
             });
     }
 
-    void Confirm(Guid taskId, PendingSwitch pending, Maybe<string> stopOriginal)
+    void Confirm(TaskItem task, PendingSwitch pending, Maybe<string> stopOriginal)
     {
+        var taskId = task.Id;
         if (stopOriginal.HasNoValue)
         {
             Confirmed(taskId);
@@ -203,11 +256,13 @@ public sealed partial class ClaudeSessions
         if (switchStopTried.TryGetValue(pending.FromSession, out var tried) && now - tried < StopRetry) return;
         switchStopTried = switchStopTried.SetItem(pending.FromSession, now);
         // A window of Deskbar's attached to the original closes with its stop (measured 2026-11-25); asked before the stop.
-        var hadWindow = tasks.Board.Tasks.TryFirst(t => t.Id == taskId).Map(windowOpen).GetValueOrDefault(false);
+        var hadWindow = windowOpen(task);
         // Its comment waiter goes before its process does, as before every stop and resume (task daeaa26c).
         retireWaiter(pending.FromSession);
-        StopForSwitch(taskId, stopOriginal.Value, stopped =>
+        originalStopping = originalStopping.Add(pending.FromSession);
+        StopForSwitch(task, pending, stopOriginal.Value, stopped =>
         {
+            originalStopping = originalStopping.Remove(pending.FromSession);
             if (!stopped) return;
             switchStopTried = switchStopTried.Remove(pending.FromSession);
             Confirmed(taskId);
@@ -231,10 +286,13 @@ public sealed partial class ClaudeSessions
             if (tasks.Board.Tasks.Any(t => t.Id == taskId && t.IsOpen)) ReopenWindow?.Invoke(taskId);
         });
 
+    public const string SwitchIsFinal = "The new session has answered already, so the switch is final. Pick the earlier settings again to switch back.";
+
     /// <summary>
-    /// The picker's Cancel. A pick still waiting for a pause is dropped (TaskBoard.Unwant); a joined switch goes back to the
-    /// original, which still runs, and the copy is stopped. While the copy is being made there is nothing to cancel yet.
-    /// Called on the UI thread.
+    /// The picker's Cancel. A pick still waiting for a pause is dropped (TaskBoard.Unwant); a joined switch whose copy has
+    /// not answered yet goes back to the original, which still runs, and the copy is stopped. Refused once the copy has
+    /// answered, or while the original's stop is out (review M2: the switch is final then, whatever the row showed), and
+    /// while the copy is being made. Called on the UI thread.
     /// </summary>
     public Result CancelPick(Guid taskId)
     {
@@ -243,23 +301,24 @@ public sealed partial class ClaudeSessions
         var pending = switching.Value;
         if (pending.Issued.HasNoValue) return tasks.Unwant(taskId);
         if (pending.CopyId is not { HasValue: true } copyId) return Result.Failure("The copy is being made right now. Cancel once it shows.");
-        // The list's short id, else the one Claude printed, else the id's first eight characters (a background session's
-        // short id is those, measured): the copy may have joined after the last poll, so the list may not show it yet.
-        var listedShortId = lastLive.TryFirst(a => a.SessionId == copyId.Value).Bind(a => a.ShortId);
-        var copyShortId = listedShortId.HasValue ? listedShortId.Value
-            : pending.CopyShortId.GetValueOrDefault(copyId.Value[..Math.Min(8, copyId.Value.Length)]);
+        if (originalStopping.Contains(pending.FromSession)
+            || task.Sessions.TryFirst(s => s.Id == copyId.Value).Map(CopyReplied).GetValueOrDefault(false))
+            return Result.Failure(SwitchIsFinal);
+        var copyShortId = pending.CopyShortId.GetValueOrDefault(copyId.Value[..Math.Min(8, copyId.Value.Length)]);
         return tasks.SwitchReverted(taskId)
             .Tap(() =>
             {
                 Say(taskId, "Cancelled. The task is back on its earlier session, which never stopped.");
                 retireWaiter(copyId.Value);
-                StopForSwitch(taskId, copyShortId, _ => { });
+                StopForSwitch(task, pending, copyShortId, _ => { });
             });
     }
 
     /// <summary>What the task's picker row shows (SessionPicker.RowOf) on the latest list. Called on the UI thread.</summary>
     public SessionPickRow? PickRow(Guid taskId) =>
-        tasks.Board.Tasks.FirstOrDefault(t => t.Id == taskId) is { } task ? SessionPicker.RowOf(task, lastLive, CachedLastModel) : null;
+        tasks.Board.Tasks.FirstOrDefault(t => t.Id == taskId) is { } task
+            ? SessionPicker.RowOf(tasks.Board, task, lastLive, CachedLastModel, CopyReplied)
+            : null;
 
     // The page asks on every redraw, so the model of a session's last reply is read from its transcript once per change of
     // the file (its length and write time), as LastTurnError is.
@@ -294,31 +353,37 @@ public sealed partial class ClaudeSessions
     void FollowLaterPick(Guid taskId)
     {
         if (tasks.Board.Tasks.FirstOrDefault(t => t.Id == taskId) is not { Wanted.HasValue: true } task) return;
-        if (SettingsSwitch.Current(task) is not { HasValue: true } current) return;
+        if (SettingsSwitch.SessionOf(tasks.Board, task) is not { HasValue: true } current) return;
         var to = SettingsSwitch.Target(task.Wanted.Value, current.Value);
         if (to == current.Value.LaunchedWith) return;
         tasks.SwitchStarted(taskId, new PendingSwitch(current.Value.Id, to, scheduler.Now))
             .TapError(e => trace?.Invoke($"claude sessions: later pick on {taskId} not begun: {e}"));
     }
 
-    // `claude stop <short id>` for a switch, off the UI thread; `done` hears whether it worked, on `scheduler`.
-    void StopForSwitch(Guid taskId, string shortId, Action<bool> done)
+    // EVERY `claude stop` OF A SWITCH, off the UI thread; `done` hears whether it worked, on `scheduler`. Run only on an id
+    // SettingsSwitch.MayStop allows (review M3): the copy's short id Claude printed for our resume, or the original's when
+    // Deskbar started it. Anything else is refused here and traced, never run.
+    void StopForSwitch(TaskItem task, PendingSwitch pending, string shortId, Action<bool> done)
     {
-        switchingNow = switchingNow.Add(taskId);
+        if (!SettingsSwitch.MayStop(task, pending, shortId))
+        {
+            trace?.Invoke($"claude sessions: stop of {shortId} refused, it is not a session this switch may stop");
+            done(false);
+            return;
+        }
+        switchingNow = switchingNow.Add(task.Id);
         OffThread(() => cli.Run(["stop", shortId], null, LaunchTimeout))
             .Catch((Exception e) => Observable.Return(Result.Failure<string>(e.Message)))
             .TakeUntil(stopping)
             .Subscribe(stopped =>
             {
-                switchingNow = switchingNow.Remove(taskId);
+                switchingNow = switchingNow.Remove(task.Id);
                 if (stopped.IsFailure) trace?.Invoke($"claude sessions: stop of {shortId} for a switch failed: {stopped.Error}");
                 done(stopped.IsSuccess);
             });
     }
 
     bool RecentlyWoken(string sessionId) => Queued(sessionId) || AnsweredWithinGrace(sessionId);
-
-    bool Known(string sessionId) => tasks.Board.Tasks.Any(t => t.Sessions.Any(s => s.Id == sessionId));
 
     // Whether a joined copy has answered since it joined (ClaudeTranscript.RepliedSince), from its transcript's tail.
     // Unreadable or not there yet is "not yet".
