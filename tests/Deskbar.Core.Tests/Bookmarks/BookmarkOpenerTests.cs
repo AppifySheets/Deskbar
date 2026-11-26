@@ -1,0 +1,153 @@
+using CSharpFunctionalExtensions;
+using Deskbar.Core.Abstractions;
+using Deskbar.Core.Bookmarks;
+using Deskbar.Core.Domain;
+using Deskbar.Core.Persistence;
+
+namespace Deskbar.Core.Tests.Bookmarks;
+
+// Opening a bookmark and "Open all". The starts are fakes that record what they were asked, in order; the
+// program's window "appears" through the fake monitor as the real one would.
+public sealed class BookmarkOpenerTests
+{
+    readonly FakeDesktops desktops = new();
+    readonly FakeMonitor monitor = new();
+    readonly FakeStore store = new();
+    readonly List<string> calls = [];
+    readonly List<(string Exe, string Arguments, string? Folder)> programs = [];
+    // Names whose start is refused, so a failure can be made to happen on demand.
+    readonly HashSet<string> refused = [];
+    IReadOnlySet<string> appIds = new HashSet<string>();
+
+    Workspace home = null!;
+    Workspace work = null!;
+    WorkspaceManager manager = null!;
+    BookmarkOpener opener = null!;
+
+    public BookmarkOpenerTests()
+    {
+        var homeDesktop = new DesktopInfo(Guid.NewGuid(), "Home");
+        var workDesktop = new DesktopInfo(Guid.NewGuid(), "Work");
+        desktops.Desktops.AddRange([homeDesktop, workDesktop]);
+        desktops.CurrentDesktopId = homeDesktop.Id;
+        home = new Workspace(Guid.NewGuid(), "Home", homeDesktop.Id);
+        work = new Workspace(Guid.NewGuid(), "Work", workDesktop.Id);
+        store.Stored = AppState.Empty with { Workspaces = [home, work] };
+        manager = new WorkspaceManager(desktops, monitor, new FakeTitles(), store);
+        Assert.True(manager.Start().IsSuccess);
+
+        var starts = new BookmarkStarts(
+            Program: (exe, args, folder) =>
+            {
+                calls.Add($"program {exe}");
+                programs.Add((exe, args, folder));
+                return refused.Contains(exe) ? Result.Failure<int?>("no such file") : Result.Success<int?>(5000);
+            },
+            App: id => { calls.Add($"app {id}"); return refused.Contains(id) ? Result.Failure("not installed") : Result.Success(); },
+            Link: url => { calls.Add($"link {url}"); return refused.Contains(url) ? Result.Failure("no browser") : Result.Success(); });
+        opener = new BookmarkOpener(manager, starts, () => appIds);
+    }
+
+    static Bookmark Link(string url) => BookmarkRules.Link(url).Value;
+
+    static Bookmark Program(string name, string exe, string? args = null) =>
+        new(Guid.NewGuid(), name, BookmarkKind.Program, exe, args);
+
+    Bookmark Added(Workspace workspace, Bookmark bookmark)
+    {
+        Assert.True(manager.AddBookmark(workspace.Id, bookmark).IsSuccess);
+        return bookmark;
+    }
+
+    [Fact]
+    public void A_click_from_another_workspace_switches_then_starts()
+    {
+        var link = Added(work, Link("https://portainer.local/"));
+
+        Assert.True(opener.Open(work.Id, link.Id).IsSuccess);
+
+        Assert.Equal([work.DesktopId!.Value], desktops.Switches);
+        Assert.Equal(["link https://portainer.local/"], calls);
+    }
+
+    [Fact]
+    public void A_click_on_the_current_workspace_does_not_switch()
+    {
+        var link = Added(home, Link("https://portainer.local/"));
+
+        Assert.True(opener.Open(home.Id, link.Id).IsSuccess);
+
+        Assert.Empty(desktops.Switches);
+        Assert.Single(calls);
+    }
+
+    [Fact]
+    public void A_program_is_expected_in_its_workspace()
+    {
+        var program = Added(work, Program("Tool", @"C:\apps\tool.exe"));
+
+        Assert.True(opener.Open(work.Id, program.Id).IsSuccess);
+        monitor.Subject.OnNext(new WindowEvent(WindowEventKind.Appeared,
+            new WindowInfo(new WindowHandle(0x10), 5000, "tool", @"C:\apps\tool.exe", "tool window", null)));
+
+        Assert.Equal(work.DesktopId, desktops.WindowPlacements[new WindowHandle(0x10)]);
+    }
+
+    [Fact]
+    public void Program_arguments_reach_the_start_verbatim()
+    {
+        var program = Added(work, Program("Tool", @"C:\apps\tool.exe", "--x \"a b\""));
+
+        opener.Open(work.Id, program.Id);
+
+        Assert.Equal("--x \"a b\"", programs.Single().Arguments);
+    }
+
+    [Fact]
+    public void A_failed_start_names_the_bookmark_and_withdraws_the_expectation()
+    {
+        var program = Added(work, Program("Tool", @"C:\apps\tool.exe"));
+        refused.Add(program.Target);
+
+        var result = opener.Open(work.Id, program.Id);
+        monitor.Subject.OnNext(new WindowEvent(WindowEventKind.Appeared,
+            new WindowInfo(new WindowHandle(0x11), 7000, "tool", @"C:\apps\tool.exe", "tool window", null)));
+
+        Assert.Equal("Tool: no such file", result.Error);
+        Assert.False(manager.AwaitsAny("tool"));
+        Assert.DoesNotContain(new WindowHandle(0x11), desktops.WindowPlacements.Keys);
+    }
+
+    [Fact]
+    public void Open_all_switches_once_skips_running_programs_and_opens_every_link()
+    {
+        Added(work, Link("https://a.local/"));
+        Added(work, Program("Running", @"C:\apps\running.exe"));
+        Added(work, Link("https://b.local/"));
+        monitor.Subject.OnNext(new WindowEvent(WindowEventKind.Appeared,
+            new WindowInfo(new WindowHandle(0x20), 1, "running", @"C:\apps\running.exe", "r", null)));
+
+        var opened = opener.OpenAll(work.Id);
+
+        Assert.True(opened.IsSuccess);
+        Assert.Equal(["https://a.local/", "https://b.local/"], opened.Value.Select(b => b.Target));
+        Assert.Equal(["link https://a.local/", "link https://b.local/"], calls);
+        Assert.Single(desktops.Switches);
+    }
+
+    // Ruling P9: one bad bookmark must not keep the rest of the row from opening.
+    [Fact]
+    public void Open_all_carries_on_past_a_failure_and_reports_it_by_name()
+    {
+        Added(work, Link("https://a.local/"));
+        var bad = Added(work, Program("Broken", @"C:\apps\broken.exe"));
+        Added(work, Link("https://b.local/"));
+        refused.Add(bad.Target);
+
+        var opened = opener.OpenAll(work.Id);
+
+        Assert.True(opened.IsFailure);
+        Assert.Contains("Broken: no such file", opened.Error);
+        Assert.Equal(["link https://a.local/", @"program C:\apps\broken.exe", "link https://b.local/"], calls);
+    }
+}
