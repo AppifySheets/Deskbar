@@ -122,6 +122,10 @@ public sealed class ClaudeSessions : IDisposable
     readonly IScheduler background;
     readonly Func<string, Maybe<Guid>> workspaceOfFolder;
     readonly Func<TaskItem, bool> windowOpen;
+
+    // CommentInbox.Retire in the app: called right before every resume, so a comment waiter orphaned by the session's
+    // ended process exits instead of claiming the next comment meant for the woken session (task daeaa26c).
+    readonly Action<string> retireWaiter;
     readonly string claudeHome;
     readonly Action<string>? trace;
 
@@ -242,8 +246,9 @@ public sealed class ClaudeSessions : IDisposable
     public ClaudeSessions(TaskService tasks, WorkspaceManager manager, IClaudeCli cli, IScheduler scheduler,
         Func<string, Maybe<Guid>> workspaceOfFolder, string claudeHome, IScheduler? background = null, Action<string>? trace = null,
         Func<TaskItem, bool>? windowOpen = null, string? managerFolder = null, Func<string, string>? longPath = null,
-        Func<string, bool>? folderExists = null)
+        Func<string, bool>? folderExists = null, Action<string>? retireWaiter = null)
     {
+        this.retireWaiter = retireWaiter ?? (_ => { });
         this.folderExists = folderExists ?? Directory.Exists;
         this.managerFolder = managerFolder;
         this.longPath = longPath ?? Deskbar.Windows.Control.LongPath.Of;
@@ -365,7 +370,13 @@ public sealed class ClaudeSessions : IDisposable
     /// the stop returns once the process is gone (measured 2026-11-23), so a resume right after it does not start a copy.
     /// </summary>
     public Task<Result> StopNow(string shortId) =>
-        OffThread(() => cli.Run(["stop", shortId], null, LaunchTimeout))
+        // Not while Deskbar is waking that session itself or has just woken it (task daeaa26c review, item 1): a keeper
+        // restart at a limit's reset is when the manager tends to comment, and the comment's stop would kill the session
+        // the restart has just started. Refused, the caller's resume is refused too (Waking) and the comment goes to the
+        // inbox, which the restarted session's first Stop hook reads.
+        BeingWoken(shortId)
+            ? Task.FromResult(Result.Failure("Deskbar is waking this session already."))
+            : OffThread(() => cli.Run(["stop", shortId], null, LaunchTimeout))
             .Select(stopped => stopped.IsSuccess ? Result.Success() : Result.Failure(stopped.Error))
             .TakeUntil(stopping)
             .DefaultIfEmpty(Result.Failure("Deskbar closed before the session was stopped."))
@@ -400,6 +411,7 @@ public sealed class ClaudeSessions : IDisposable
             {
                 // Read here, on `background`, for the reason given in Heard.
                 var cutOff = CutOff(session);
+                retireWaiter(session.Id);
                 return (CutOff: cutOff, Result: await cli.Run(message is null ? ResumeArguments(session.Id, cutOff) : ["--bg", "--resume", session.Id, message], session.Folder, LaunchTimeout));
             })
             // A fault the CLI did not turn into a Result is a failure like any other (Ruling 13), not a dispatcher crash.
@@ -585,7 +597,7 @@ public sealed class ClaudeSessions : IDisposable
                 AbsentSince,
                 // Task daeaa26c: a session stopped on a usage limit waits for the reset, then is woken (a listed one is
                 // stopped first). Read from the transcript's tail, cached until the file changes (LastTurnError).
-                resuming ? LimitedUntil : null)
+                resuming ? LimitError : null)
             .ToList()
             .ForEach(step => Take(step, resuming));
         NoteLimits(listed, now, resuming);
@@ -653,6 +665,10 @@ public sealed class ClaudeSessions : IDisposable
         }
     }
 
+    bool BeingWoken(string shortId) =>
+        queue.Select(r => r.Session.Id).Concat(inFlight.ToList()).Concat(wakingNow).Concat(answered.Keys)
+            .Any(id => id.StartsWith(shortId, StringComparison.OrdinalIgnoreCase) && (Queued(id) || AnsweredWithinGrace(id)));
+
     bool WindowOpenOn(Guid taskId) =>
         tasks.Board.Tasks.TryFirst(t => t.Id == taskId).Map(windowOpen).GetValueOrDefault(false);
 
@@ -662,7 +678,13 @@ public sealed class ClaudeSessions : IDisposable
     // when the limit resets, and its status line, which the bar shows, says the same until the session writes its own
     // again after it wakes. A status line already saying exactly that is the same stop said before a Deskbar restart,
     // so nothing is repeated.
-    void NoteLimits(IReadOnlyCollection<ClaudeAgent> listed, DateTimeOffset now, bool resuming) =>
+    //
+    // The line is Deskbar's, so Deskbar takes it back (review, item 4): once the session is no longer stopped on the
+    // limit (it was woken, or Petre typed in it) or the reset has passed, a status line still saying exactly this is
+    // cleared, and the session writes its own again.
+    void NoteLimits(IReadOnlyCollection<ClaudeAgent> listed, DateTimeOffset now, bool resuming)
+    {
+        ClearLimitLines(now);
         tasks.Board.Tasks
             .Where(task => task.IsClaudes && task.Status is TaskStatus.Backlog or TaskStatus.InProgress or TaskStatus.WaitingOnYou)
             .Where(task => !SessionKeeper.GivenUp(task))
@@ -675,25 +697,49 @@ public sealed class ClaudeSessions : IDisposable
             .ForEach(item =>
             {
                 limitNoted = limitNoted.Add((item.Session.Id, item.ResetsAt.Value));
-                var when = Clock(item.ResetsAt.Value, now);
-                var status = $"Stopped on the usage limit until {when}";
+                var when = Clock(item.ResetsAt.Value);
+                var status = LimitLine + when;
                 if (item.Task.StatusLine == status) return;
                 // An interactive session (a VS Code panel, a terminal) cannot be restarted from outside (SessionKeeper's
-                // header), so its line says what Petre can do instead of promising a wake.
+                // header), and a background one with a Deskbar window open on it is not (Take), so their line says what
+                // Petre can do instead of promising a wake.
                 var interactive = listed.Any(agent => agent.SessionId == item.Session.Id && !agent.Background);
                 Say(item.Task.Id,
                     interactive ? $"Stopped on the usage limit, which resets at {when}. It runs in a window Deskbar cannot restart, so type in it once the limit has reset."
+                    : windowOpen(item.Task) ? $"Stopped on the usage limit, which resets at {when}. Its window is open, so type in it then, or close it and Deskbar resumes it."
                     : resuming ? $"Stopped on the usage limit. Deskbar resumes it once the limit resets at {when}."
                     : $"Stopped on the usage limit, which resets at {when}.");
                 tasks.SetStatusLine(item.Task.Id, status)
                     .TapError(e => trace?.Invoke($"claude sessions: no status line on {item.Task.Id}: {e}"));
             });
+    }
 
-    // A reset moment as the bar says a time: "06:00" today, "Thu 06:00" on another day, in this machine's time zone.
-    static string Clock(DateTimeOffset at, DateTimeOffset now) =>
-        at.ToLocalTime() is var local && local.Date == now.ToLocalTime().Date
-            ? local.ToString("HH:mm", System.Globalization.CultureInfo.InvariantCulture)
-            : local.ToString("ddd HH:mm", System.Globalization.CultureInfo.InvariantCulture);
+    // The status line NoteLimits writes, before the time.
+    const string LimitLine = "Stopped on the usage limit until ";
+
+    // Clears the line NoteLimits wrote once it no longer holds: the open task's latest session is not stopped on a limit
+    // any more, or the reset has passed. Only a status line still exactly Deskbar's is touched, never the session's own.
+    void ClearLimitLines(DateTimeOffset now) =>
+        tasks.Board.Tasks
+            .Where(task => task.StatusLine.StartsWith(LimitLine, StringComparison.Ordinal))
+            .Where(task => LatestSession(task)
+                .Map(session => LimitedUntil(session).Map(resetsAt => now >= SessionKeeper.WakeAfterLimit(resetsAt)).GetValueOrDefault(true))
+                .GetValueOrDefault(true))
+            .ToList()
+            .ForEach(ClearLimitLine);
+
+    void ClearLimitLine(TaskItem task)
+    {
+        if (!task.StatusLine.StartsWith(LimitLine, StringComparison.Ordinal)) return;
+        tasks.SetStatusLine(task.Id, "")
+            .TapError(e => trace?.Invoke($"claude sessions: status line not cleared on {task.Id}: {e}"));
+    }
+
+    // A reset moment as "Thu 06:00", in this machine's time zone. Always with the day, so the same reset reads the same
+    // whatever the time now is: NoteLimits compares the status line with it to tell a stop it has already said (review,
+    // item 4: "06:00" before midnight and "Thu 06:00" after it made a restarted Deskbar say it twice).
+    static string Clock(DateTimeOffset at) =>
+        at.ToLocalTime().ToString("ddd HH:mm", System.Globalization.CultureInfo.InvariantCulture);
 
     TimeSpan ListedFor(string sessionId) =>
         firstSeen.TryGetValue(sessionId, out var seen) ? scheduler.Now - seen : TimeSpan.Zero;
@@ -783,6 +829,7 @@ public sealed class ClaudeSessions : IDisposable
                 // grace and the loop guard space out the next try.
                 if (resume.StopFirst.HasValue && await cli.Run(["stop", resume.StopFirst.Value], null, LaunchTimeout) is { IsFailure: true } stop)
                     return (CutOff: cutOff, Result: Result.Failure<string>(stop.Error), Stopped: false);
+                retireWaiter(session.Id);
                 return (CutOff: cutOff, Result: await cli.Run(ResumeArguments(session.Id, cutOff), session.Folder, LaunchTimeout), Stopped: true);
             })
             .Subscribe(
@@ -857,6 +904,7 @@ public sealed class ClaudeSessions : IDisposable
             // says only what happened.
             Say(taskId, afterLimit ? "Resumed, since the usage limit it stopped on has reset. It was told to continue."
                 : cutOff ? "Resumed. Its last turn was cut off, so it was told to continue." : "Resumed.");
+            if (afterLimit) tasks.Board.Tasks.TryFirst(t => t.Id == taskId).Tap(ClearLimitLine);
             return;
         }
 
@@ -947,10 +995,14 @@ public sealed class ClaudeSessions : IDisposable
         try
         {
             if (TranscriptOf(session).GetValueOrDefault() is not { } path) return Maybe<TurnError>.None;
+            // Length and write time are taken BEFORE the content (review, item 3): taken after, an entry appended between
+            // the two reads would be cached as "no error" under the new length, and never read again while the session
+            // sits there.
             var file = new FileInfo(path);
-            if (turnErrors.TryGetValue(path, out var known) && known.Length == file.Length && known.Written == file.LastWriteTimeUtc) return known.Error;
+            var (length, written) = (file.Length, file.LastWriteTimeUtc);
+            if (turnErrors.TryGetValue(path, out var known) && known.Length == length && known.Written == written) return known.Error;
             var error = ClaudeTranscript.LastTurnError(Tail(path));
-            turnErrors[path] = (file.Length, file.LastWriteTimeUtc, error);
+            turnErrors[path] = (length, written, error);
             return error;
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException)
@@ -961,6 +1013,9 @@ public sealed class ClaudeSessions : IDisposable
 
     /// <summary>The moment the usage limit the session's last turn died on resets; None when it did not die on one.</summary>
     public Maybe<DateTimeOffset> LimitedUntil(TaskSession session) => LastTurnError(session).Bind(error => error.ResetsAt);
+
+    // The error itself, for the keeper, only when it is a usage limit (it names a reset).
+    Maybe<TurnError> LimitError(TaskSession session) => LastTurnError(session).Where(error => error.ResetsAt.HasValue);
 
     /// <summary>
     /// The session's last turn ended on an API error, so no Stop hook ran and no comment waiter can be alive for it

@@ -78,4 +78,18 @@ public sealed class CommentInboxTests : IDisposable
         Assert.True(Inbox().Register(@"..\x").IsFailure);
         Assert.True(Inbox().Deliver("a/b", "x").IsFailure);
     }
+
+    // Task daeaa26c: right before a resume the waiter is retired, so an orphan exits; a comment already waiting stays.
+    [Fact]
+    public void Retiring_ends_the_waiter_and_keeps_the_inbox()
+    {
+        Inbox().Register("s1");
+        Inbox().Deliver("s1", "waiting comment");
+
+        Inbox().Retire("s1");
+
+        Assert.True(Inbox().Lapsed("s1"));
+        Assert.False(File.Exists(Path.Combine(folder, "s1.gen")));
+        Assert.Contains("waiting comment", File.ReadAllText(Path.Combine(folder, "s1.md")));
+    }
 }

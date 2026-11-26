@@ -502,6 +502,10 @@ Manage ticked. Use a throwaway folder Claude Code already trusts, not a real rep
     copy); it hits the limit again, and the thread gets no second "Stopped on the usage limit" line. A few minutes after the reset, with no window
     open on it: the thread says "Resumed, since the usage limit it stopped on has reset", and the session carries on
     and writes its own status line. With its window open, nothing is restarted: type in the window.
+86b. A listed session without a process (task daeaa26c). In `claude agents --json`, find a task session listed with no
+    `pid` and no `status` (a background session whose process Claude Code ended). Comment on its task: within a few
+    seconds the thread says "Resumed." and the session answers the comment. The trace shows "resumed with the
+    comment", never "a comment is in ...'s inbox".
 87. Untick the resume box and stop a task's session: the task shows the session ended and nothing resumes it; start a
     new `claude --bg` in another folder and it still gets a task. Tick the box again: the ended session is resumed at
     the next poll (once it has been gone two minutes).

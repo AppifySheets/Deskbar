@@ -445,7 +445,7 @@ public class SessionKeeperTests
     static IReadOnlyList<KeeperStep> PlanLimited(
         IEnumerable<TaskItem> tasks, DateTimeOffset resetsAt, IReadOnlyCollection<ClaudeAgent>? live = null, ResumeLedger? ledger = null) =>
         SessionKeeper.Plan(new TaskBoard(tasks.ToList()), live ?? Array.Empty<ClaudeAgent>(), ledger ?? ResumeLedger.Empty,
-            _ => true, _ => true, Now, limitedUntil: _ => resetsAt);
+            _ => true, _ => true, Now, limitedUntil: _ => new TurnError(resetsAt));
 
     static ClaudeAgent BackgroundAgent(string sessionId, bool busy = false) =>
         new(sessionId, sessionId[..2], @"E:\repos\X", true, busy, "");
@@ -489,7 +489,7 @@ public class SessionKeeperTests
     [Fact]
     public void A_listed_session_not_stopped_on_a_limit_is_still_left_alone() =>
         Assert.Empty(SessionKeeper.Plan(new TaskBoard([Task(TaskStatus.InProgress, 5, Session("s1"))]), [BackgroundAgent("s1")],
-            ResumeLedger.Empty, _ => true, _ => true, Now, limitedUntil: _ => Maybe<DateTimeOffset>.None));
+            ResumeLedger.Empty, _ => true, _ => true, Now, limitedUntil: _ => Maybe<TurnError>.None));
 
     [Fact]
     public void A_busy_or_interactive_listed_session_is_never_restarted()
@@ -520,5 +520,24 @@ public class SessionKeeperTests
 
         Assert.Empty(PlanLimited([task], Now.AddHours(-1), [BackgroundAgent("s1")], justNow));
         Assert.IsType<KeeperStep.GiveUp>(Assert.Single(PlanLimited([task], Now.AddHours(-1), [BackgroundAgent("s1")], three)));
+    }
+
+    // A wake that worked writes to the transcript. The same error still last after a wake means it has not taken effect
+    // yet, and a second restart would stop a session that is only starting (found by the ClaudeSessions test: two stops
+    // 45 seconds apart).
+    [Fact]
+    public void A_session_woken_since_its_error_is_not_woken_again_until_its_transcript_moves()
+    {
+        var task = Task(TaskStatus.InProgress, 5, Session("s1"));
+        var error = new TurnError(Now.AddHours(-1)) { At = Now.AddHours(-9) };
+        var wokenAfter = ResumeLedger.Empty.Record("s1", Now.AddMinutes(-1));
+        var wokenBefore = ResumeLedger.Empty.Record("s1", Now.AddHours(-10));
+
+        IReadOnlyList<KeeperStep> PlanWith(ResumeLedger ledger, IReadOnlyCollection<ClaudeAgent> live) =>
+            SessionKeeper.Plan(new TaskBoard([task]), live, ledger, _ => true, _ => true, Now, limitedUntil: _ => error);
+
+        Assert.Empty(PlanWith(wokenAfter, [BackgroundAgent("s1")]));
+        Assert.Empty(PlanWith(wokenAfter, []));
+        Assert.Single(PlanWith(wokenBefore, [BackgroundAgent("s1")]));
     }
 }

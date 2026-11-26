@@ -127,4 +127,18 @@ public sealed class CommentWakeTests
         Assert.Contains("task join d4ea6cbe --session", text);
         Assert.Contains("leave it done", text);
     }
+
+    // Task daeaa26c, measured 2026-11-26: Claude Code lists a session whose process has ended, without a pid, and its
+    // orphaned waiter empties the inbox to nobody. Such a session is never handed the inbox, whatever its waiter says.
+    [Fact]
+    public void A_listed_session_without_a_process_is_stopped_and_resumed_never_given_the_inbox()
+    {
+        var task = Task(TaskStatus.InProgress, Session("aaaaaaaa-1", 0));
+
+        var background = CommentWake.Plan(task, [Listed("aaaaaaaa-1") with { HasProcess = false }], Everyone, NeverLapsed);
+        var interactive = CommentWake.Plan(task, [Listed("aaaaaaaa-1", background: false) with { HasProcess = false }], Everyone, NeverLapsed);
+
+        Assert.Equal("aaaaaaaa", Assert.IsType<WakePlan.StopThenResume>(background).ShortId);
+        Assert.IsType<WakePlan.Resume>(interactive);
+    }
 }

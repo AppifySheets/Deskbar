@@ -1890,7 +1890,10 @@ public partial class App : Application
             // Closed task's is stopped regardless, and the stop closes its window (task 8556944b, SessionKeeper.Stops).
             windowOpen: task => ClaudeTaskActions.HasWindow(manager, task),
             // The manager session is Petre's to start, resume and stop: the keeper leaves it alone.
-            managerFolder: Core.Tasks.ManagerSession.FolderIn(AppPaths.NewStateDir));
+            managerFolder: Core.Tasks.ManagerSession.FolderIn(AppPaths.NewStateDir),
+            // Every resume first retires the session's comment waiter, which can outlive the session's process and
+            // swallow the next comment (task daeaa26c, CommentInbox.Retire).
+            retireWaiter: commentInbox.Retire);
 
         // Petre's comment on a task reaches its Claude session, waking it if idle (CommentWaker; plan
         // docs/superpowers/plans/2026-11-24-comment-wakes-session.md). It reads the sessions' list ClaudeSessions keeps,

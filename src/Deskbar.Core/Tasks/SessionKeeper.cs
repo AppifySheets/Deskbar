@@ -118,8 +118,8 @@ public static class SessionKeeper
     /// long gone, which is what the tests of the other rules want.
     /// </param>
     /// <param name="limitedUntil">
-    /// When the session's last turn died on a usage limit, the moment that limit resets (ClaudeTranscript.LastTurnError);
-    /// None otherwise. Left out, no session is limited.
+    /// When the session's last turn died on a usage limit, that error (ClaudeTranscript.LastTurnError, with its reset
+    /// moment); None otherwise, and None for an error that names no reset. Left out, no session is limited.
     /// </param>
     public static IReadOnlyList<KeeperStep> Plan(
         TaskBoard board,
@@ -129,11 +129,11 @@ public static class SessionKeeper
         Func<TaskSession, bool> cutOff,
         DateTimeOffset now,
         Func<string, DateTimeOffset>? absentSince = null,
-        Func<TaskSession, Maybe<DateTimeOffset>>? limitedUntil = null)
+        Func<TaskSession, Maybe<TurnError>>? limitedUntil = null)
     {
         var listed = live.Select(agent => agent.SessionId).ToHashSet();
         var missingSince = absentSince ?? (_ => DateTimeOffset.MinValue);
-        var limited = limitedUntil ?? (_ => Maybe<DateTimeOffset>.None);
+        var limited = limitedUntil ?? (_ => Maybe<TurnError>.None);
 
         var resumes = board.Tasks
             .Where(task => task.IsClaudes && task.Status is TaskStatus.Backlog or TaskStatus.InProgress or TaskStatus.WaitingOnYou)
@@ -263,7 +263,7 @@ public static class SessionKeeper
     static Maybe<KeeperStep> StepFor(
         TaskItem task, TaskSession session, ResumeLedger ledger,
         Func<TaskSession, bool> transcriptExists, Func<TaskSession, bool> cutOff,
-        Func<TaskSession, Maybe<DateTimeOffset>> limited, DateTimeOffset now)
+        Func<TaskSession, Maybe<TurnError>> limited, DateTimeOffset now)
     {
         // Sticky: a task the keeper has given up on gets no step at all, not even a resume once the loop window has
         // passed and the ledger's count has fallen. It waits for Petre; see the comment on Forget.
@@ -272,7 +272,7 @@ public static class SessionKeeper
         var limit = limited(session);
         // Woken before its usage limit resets, it only hits the limit again (and three of those in ten minutes would end
         // in a loop give-up). It waits, and the first poll after the reset wakes it.
-        if (limit.Map(resetsAt => now < WakeAfterLimit(resetsAt)).GetValueOrDefault(false)) return Maybe<KeeperStep>.None;
+        if (limit.Map(error => !MayWake(error, session, ledger, now)).GetValueOrDefault(false)) return Maybe<KeeperStep>.None;
         return string.IsNullOrEmpty(session.Folder) ? GiveUp(task, NoFolder)
             : !transcriptExists(session) ? GiveUp(task, TranscriptGone)
             : ledger.Within(session.Id, now, LoopWindow) >= MaxResumesInWindow ? GiveUp(task, LoopGaveUp)
@@ -283,14 +283,23 @@ public static class SessionKeeper
     // until later; the same grace and loop guard as a resume, since a restart is a resume with a stop before it.
     static Maybe<KeeperStep> RestartFor(
         TaskItem task, TaskSession session, ClaudeAgent agent, ResumeLedger ledger,
-        Func<TaskSession, Maybe<DateTimeOffset>> limited, DateTimeOffset now)
+        Func<TaskSession, Maybe<TurnError>> limited, DateTimeOffset now)
     {
         if (GivenUp(task) || ledger.Within(session.Id, now, Grace) > 0) return Maybe<KeeperStep>.None;
-        if (!limited(session).Map(resetsAt => now >= WakeAfterLimit(resetsAt)).GetValueOrDefault(false)) return Maybe<KeeperStep>.None;
+        if (!limited(session).Map(error => MayWake(error, session, ledger, now)).GetValueOrDefault(false)) return Maybe<KeeperStep>.None;
         return string.IsNullOrEmpty(session.Folder) ? GiveUp(task, NoFolder)
             : ledger.Within(session.Id, now, LoopWindow) >= MaxResumesInWindow ? GiveUp(task, LoopGaveUp)
             : new KeeperStep.Resume(task.Id, session, SendContinue: true) { StopFirst = agent.ShortId, AfterLimit = true };
     }
+
+    // A session stopped on a usage limit may be woken once the limit has reset (plus LimitMargin), and only if it has not
+    // been woken since the error was written: a wake that worked writes to the transcript, so the same error still last
+    // means the wake has not taken effect yet, and a second one would stop a session that is only starting up (the
+    // restart's `claude stop` on a resume in progress). The ledger keeps resumes for LoopWindow, so a wake that truly
+    // wrote nothing is tried again ten minutes later, not every Grace.
+    static bool MayWake(TurnError error, TaskSession session, ResumeLedger ledger, DateTimeOffset now) =>
+        error.ResetsAt.Map(resetsAt => now >= WakeAfterLimit(resetsAt)).GetValueOrDefault(false)
+        && error.At.Map(at => ledger.Within(session.Id, now, now - at) == 0).GetValueOrDefault(true);
 
     static Maybe<KeeperStep> GiveUp(TaskItem task, string reason) => new KeeperStep.GiveUp(task.Id, reason);
 

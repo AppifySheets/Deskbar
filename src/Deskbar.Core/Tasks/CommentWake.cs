@@ -31,6 +31,9 @@ public abstract record WakePlan
 //     the comment, because resuming one that runs starts a copy (measured 2026-11-23); a terminal or VS Code session
 //     cannot be restarted from outside, so its comment waits in the inbox for its next turn.
 //   * not running (closed, rebooted, stopped because its task was Done): resumed with the comment.
+//   * listed WITHOUT A PROCESS (ClaudeAgent.HasProcess, task daeaa26c): it is not running, whatever the list says, and
+//     its inbox may be read by an orphaned waiter that hands the comment to nobody. A background one is stopped (which
+//     takes it off the list; harmless on a session with no process) and resumed with the comment; any other is resumed.
 //   * no session with a transcript left: nothing to wake, said in the thread.
 //
 // ONE comment goes to ONE session: the one a double-click goes to (TaskViews.SessionToGoTo: live first, then the newest
@@ -52,6 +55,10 @@ public static class CommentWake
             ? new WakePlan.Nothing("No session of this task can be resumed, so the comment was not sent to Claude.")
             : listed.TryFirst(agent => agent.SessionId == chosen.Value.Id) is not { HasValue: true } running
                 ? new WakePlan.Resume(chosen.Value)
+                : !running.Value.HasProcess
+                    ? running.Value is { Background: true, ShortId: { HasValue: true } noProcessId }
+                        ? new WakePlan.StopThenResume(chosen.Value, noProcessId.Value)
+                        : new WakePlan.Resume(chosen.Value)
                 // Never a busy one (final review, I3): stopping it would kill the turn it is in; the waiter its turn's Stop starts
                 // finds the inbox at once.
                 : waiterLapsed(chosen.Value.Id) && running.Value is { Background: true, Busy: false, ShortId: { HasValue: true } shortId }

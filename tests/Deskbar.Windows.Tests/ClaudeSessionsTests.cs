@@ -1130,7 +1130,7 @@ public class ClaudeSessionsTests
         File.WriteAllLines(path,
         [
             """{"type":"user","message":{"role":"user","content":"start"}}""",
-            "{\"type\":\"assistant\",\"isApiErrorMessage\":true,\"apiError\":\"usage_limit_reached\",\"apiErrorParams\":{\"rate_limit_info\":{\"resetsAt\":"
+            "{\"type\":\"assistant\",\"timestamp\":\"" + (Origin - TimeSpan.FromMinutes(10)).ToString("O") + "\",\"isApiErrorMessage\":true,\"apiError\":\"usage_limit_reached\",\"apiErrorParams\":{\"rate_limit_info\":{\"resetsAt\":"
                 + resetsAt.ToUnixTimeSeconds() + "}},\"message\":{\"role\":\"assistant\",\"stop_reason\":\"stop_sequence\",\"content\":[{\"type\":\"text\",\"text\":\"You've hit your weekly limit\"}]}}",
         ]);
         rig.Begin();

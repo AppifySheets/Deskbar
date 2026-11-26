@@ -63,6 +63,17 @@ public sealed class CommentInbox(string folder, Func<DateTimeOffset> now)
             File.AppendAllText(path, (File.Exists(path) && new FileInfo(path).Length > 0 ? "\n" : "") + message.Trim() + "\n");
         }, e => $"The comment could not be put in the session's inbox: {e.Message}"));
 
+    /// <summary>
+    /// The session's waiter is retired, its inbox kept: only the gen file goes, so every waiter still running for it exits
+    /// at its next look (task daeaa26c). Deskbar calls this right before it resumes a session. A waiter outlives the Claude
+    /// process that started it (measured 2026-11-26: two waiters were still polling a day after their sessions' processes
+    /// had gone, and six more had emptied their inboxes to nobody that morning), so without this an orphan could claim a
+    /// comment meant for the resumed session during its first turn, before that turn's Stop starts a waiter of its own.
+    /// Until then the session counts as having no waiter (Lapsed), which is true.
+    /// </summary>
+    public void Retire(string sessionId) =>
+        Named(sessionId).Tap(name => Result.Try(() => File.Delete(GenPath(name))));
+
     /// <summary>A session that ended: its inbox and gen file go. A file that will not go (held open) is left.</summary>
     public void Forget(string sessionId) =>
         Named(sessionId).Tap(name =>

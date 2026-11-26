@@ -124,7 +124,7 @@ public static class ClaudeTranscript
                     { } text when LocalCommandPrefixes.Any(p => text.StartsWith(p, StringComparison.Ordinal)) => null,
                     _ => new Turn(false),
                 },
-                "assistant" when IsTrue(root, "isApiErrorMessage") => new Turn(false, new TurnError(ResetsAtOf(root))),
+                "assistant" when IsTrue(root, "isApiErrorMessage") => new Turn(false, new TurnError(ResetsAtOf(root)) { At = TimestampOf(root) }),
                 "assistant" => new Turn(root.TryGetProperty("message", out var message)
                     && message.ValueKind == JsonValueKind.Object
                     && message.TryGetProperty("stop_reason", out var reason)
@@ -151,6 +151,14 @@ public static class ClaudeTranscript
             .Where(value => value is { ValueKind: JsonValueKind.Number })
             .Select(value => value!.Value.TryGetInt64(out var seconds) ? DateTimeOffset.FromUnixTimeSeconds(seconds) : (DateTimeOffset?)null)
             .FirstOrDefault(at => at is not null) is { } found ? found : Maybe<DateTimeOffset>.None;
+
+    // The entry's "timestamp", when it is a moment.
+    static Maybe<DateTimeOffset> TimestampOf(JsonElement root) =>
+        root.TryGetProperty("timestamp", out var value) && value.ValueKind == JsonValueKind.String
+            && DateTimeOffset.TryParse(value.GetString(), System.Globalization.CultureInfo.InvariantCulture,
+                System.Globalization.DateTimeStyles.AssumeUniversal, out var at)
+            ? at
+            : Maybe<DateTimeOffset>.None;
 
     // The element at the end of a chain of object properties, or null when any step is missing or not an object.
     static JsonElement? At(JsonElement root, params string[] names) =>
@@ -183,4 +191,8 @@ public static class ClaudeTranscript
 /// The last turn of a session ended on an API error (ClaudeTranscript.LastTurnError). <paramref name="ResetsAt"/> is set
 /// when the error was a usage limit: the moment the limit lifts.
 /// </summary>
-public sealed record TurnError(Maybe<DateTimeOffset> ResetsAt);
+public sealed record TurnError(Maybe<DateTimeOffset> ResetsAt)
+{
+    /// <summary>When Claude Code wrote the error (the entry's timestamp), or none when the entry has none.</summary>
+    public Maybe<DateTimeOffset> At { get; init; } = Maybe<DateTimeOffset>.None;
+}
