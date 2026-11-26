@@ -13,7 +13,8 @@ namespace Deskbar.App;
 //     for Claude and violet for the manager;
 //   - every bubble's author is named on the small line under it, beside its time ("you · 14:28", "Claude · 16:50").
 //     Petre, on the first build: "doesn't say it's me; it's too much vertical separation". His bubbles carried no name
-//     and Claude's had it on a line of its own inside the bubble; on the line under it the name costs no height;
+//     and Claude's had it on a line of its own inside the bubble; on the line under it the name costs no height.
+//     A run of one author's bubbles names the author once, under the last (task 85218923); the others show their time alone;
 //   - Deskbar's own lines ("Resumed.", "Stopped, ...") are events, not messages: a small dim line centred in the thread;
 //   - a day line ("Today", "25 Nov") stands above the first comment of each day, so the line under a bubble carries only the time of day, not the date;
 //   - Edit and Settle sit beside the time under the bubble and show only while the mouse (or the keyboard) is on that
@@ -38,13 +39,40 @@ static class ChatThread
     // the two sides read as two people. Five sixths, set as a 5:1 star split.
     const double BubbleShare = 5;
 
-    /// <summary>The comments in order, each drawn by <paramref name="draw"/>, with a day line before the first comment of each day.</summary>
+    /// <summary>
+    /// The comments in order, each drawn by <paramref name="draw"/>, with a day line before the first comment of each day.
+    /// A run of bubbles by one author names that author once, under its last bubble (see <see cref="Grouped"/>).
+    /// </summary>
     public static IReadOnlyList<UIElement> WithDays(IReadOnlyList<TaskCommentView> comments, Func<TaskCommentView, UIElement> draw) =>
-        comments.Select((comment, index) => (comment, before: index == 0 ? null : comments[index - 1]))
+        Grouped(comments).Select((comment, index) => (comment, before: index == 0 ? null : comments[index - 1]))
             .SelectMany(x => x.comment.Day.Length > 0 && (x.before is null || x.before.Day != x.comment.Day)
                 ? new[] { DayLine(x.comment.Day), draw(x.comment) }
                 : new[] { draw(x.comment) })
             .ToArray();
+
+    /// <summary>
+    /// The comments with <see cref="TaskCommentView.NamesAuthor"/> set: false on a bubble whose next comment is a bubble
+    /// by the same author on the same day, so a run of one author's messages says "you" once, under its last bubble, and
+    /// the bubbles above it carry their time alone. Petre (task 85218923): "if both are mine, write 'you' once".
+    /// An event line, a day line or another author ends a run.
+    /// </summary>
+    internal static IReadOnlyList<TaskCommentView> Grouped(IReadOnlyList<TaskCommentView> comments) =>
+        comments.Select((comment, index) => comment with
+            {
+                NamesAuthor = index == comments.Count - 1 || !SameRun(comment, comments[index + 1]),
+            })
+            .ToArray();
+
+    // Two neighbouring comments are one run when both are bubbles by the same author on the same day. A settled bubble
+    // (drawn dim once the settled fold is open) and an unsettled one do not share a run, so the name never sits only
+    // under a dim bubble for a run of bright ones (review of this change).
+    static bool SameRun(TaskCommentView comment, TaskCommentView next) =>
+        IsBubble(comment) && IsBubble(next) && comment.Who == next.Who && comment.Author == next.Author
+        && comment.Day == next.Day && comment.Settled == next.Settled;
+
+    // A bubble, not an event line: everything but Deskbar's own lines, and a question Deskbar asked is a bubble too
+    // (task 968c2216), as both thread hosts decide it.
+    static bool IsBubble(TaskCommentView comment) => comment.Who != CommentAuthor.Deskbar || comment.Asks;
 
     /// <summary>The Tag of a day line, for the tests.</summary>
     internal const string DayTag = "chat-day";
@@ -85,7 +113,8 @@ static class ChatThread
             HorizontalAlignment = mine ? HorizontalAlignment.Right : HorizontalAlignment.Left,
             Children = { bubble, meta },
         };
-        var row = new Grid { Margin = new Thickness(0, 0, 0, 4) };
+        // A bubble inside a run (its author named further down) sits a little closer to the next one, so the run reads as one.
+        var row = new Grid { Margin = new Thickness(0, 0, 0, comment.NamesAuthor ? 4 : 2) };
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(mine ? 1 : BubbleShare, GridUnitType.Star) });
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(mine ? BubbleShare : 1, GridUnitType.Star) });
         Grid.SetColumn(column, mine ? 1 : 0);
@@ -127,12 +156,14 @@ static class ChatThread
     {
         var buttons = new StackPanel { Orientation = Orientation.Horizontal, Visibility = Visibility.Hidden };
         actions.ToList().ForEach(button => buttons.Children.Add(button));
+        // "you · 21:21" under the last bubble of a run, "21:15" alone under the ones above it (task 85218923).
         var signed = new StackPanel
         {
             Orientation = Orientation.Horizontal,
             VerticalAlignment = VerticalAlignment.Center,
-            Children = { AuthorName(comment), Time(comment, HorizontalAlignment.Left, signed: true) },
         };
+        if (comment.NamesAuthor) signed.Children.Add(AuthorName(comment));
+        signed.Children.Add(Time(comment, HorizontalAlignment.Left, signed: comment.NamesAuthor));
         var meta = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = mine ? HorizontalAlignment.Right : HorizontalAlignment.Left, Margin = new Thickness(4, 0, 4, 0) };
         (mine ? new UIElement[] { buttons, signed } : [signed, buttons]).ToList().ForEach(part => meta.Children.Add(part));
         return (meta, buttons);

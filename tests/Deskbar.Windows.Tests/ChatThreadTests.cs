@@ -49,6 +49,34 @@ public class ChatThreadTests
         Assert.Equal(name, author.Text);
     });
 
+    // Petre (task 85218923): "if both are mine, write 'you' once". A run of one author's bubbles names the author only
+    // under its last bubble; another author, an event line or a new day ends the run.
+    [Fact]
+    public void A_run_of_one_authors_bubbles_names_the_author_once_under_the_last()
+    {
+        var comments = new[]
+        {
+            Comment(CommentAuthor.You, "Today"),
+            Comment(CommentAuthor.You, "Today"),
+            Comment(CommentAuthor.Claude, "Today"),
+            Comment(CommentAuthor.Deskbar, "Today"),
+            Comment(CommentAuthor.Claude, "Today"),
+            Comment(CommentAuthor.You, "Yesterday"),
+            Comment(CommentAuthor.You, "Today"),
+        };
+        var named = ChatThread.Grouped(comments).Select(c => c.NamesAuthor).ToArray();
+        Assert.Equal([false, true, true, true, true, true, true], named);
+    }
+
+    [Fact]
+    public void A_bubble_inside_a_run_shows_its_time_without_the_authors_name() => StaThread.Run(() =>
+    {
+        var comment = Comment(CommentAuthor.You, "Today") with { NamesAuthor = false };
+        var texts = Inside(ChatThread.Message(comment, new Border(), [])).OfType<TextBlock>().ToArray();
+        Assert.DoesNotContain(texts, t => Equals(t.Tag, ChatThread.AuthorTag));
+        Assert.Contains(texts, t => t.Text == "10:00");
+    });
+
     static IEnumerable<object> Inside(object node) =>
         new[] { node }.Concat(node is DependencyObject d ? LogicalTreeHelper.GetChildren(d).Cast<object>().SelectMany(Inside) : []);
 
