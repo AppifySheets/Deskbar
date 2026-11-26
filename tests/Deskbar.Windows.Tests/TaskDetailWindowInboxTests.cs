@@ -276,6 +276,27 @@ public partial class TaskDetailWindowInboxTests
         var again = Inside(window).OfType<RichTextBox>().First(b => TextOf(b).Contains("Monster 80 of"));
         Assert.True(double.IsPositiveInfinity(again.MaxHeight));
     });
+    // The comment box stays put in the window's page too (the owner, 2026-11-27): docked at the bottom, outside the scroller.
+    [Fact]
+    public void The_comment_box_is_docked_below_the_scroller_in_the_window_too() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var id = t.Tasks.AddNote("Long brief", Maybe<Guid>.None).Value.Id;
+        Enumerable.Range(1, 40).ToList().ForEach(i => Assert.True(t.Tasks.Comment(id, Maybe<string>.None, $"Comment number {i} of a made-up long chat").IsSuccess));
+        var (window, page) = Open(t, id);
+        window.UpdateLayout();
+
+        var box = page.CommentBoxOf(id)!;
+        Assert.NotNull(page.InboxPageScroller);
+        Assert.DoesNotContain(box, Inside(page.InboxPageScroller!));
+        Assert.Contains(box, Inside(window));
+        Assert.Contains(Inside(window).OfType<Border>(), b => Equals(b.Tag, TasksWindow.DockedBoxTag));
+        var at = box.TranslatePoint(new Point(0, 0), window).Y;
+        page.InboxPageScroller!.ScrollToVerticalOffset(0);
+        window.UpdateLayout();
+        Assert.Equal(at, box.TranslatePoint(new Point(0, 0), window).Y, 1);
+        Assert.Equal(page.InboxPageScroller.ScrollableHeight > 0, true);
+    });
     // The old header's Undo: a close can be undone for its six seconds, from the window's page, which stays up meanwhile.
     [Fact]
     public void A_close_can_be_undone_from_the_page() => StaThread.Run(() =>
