@@ -1150,7 +1150,12 @@ RA2. Comment on the task with an instruction that takes the session a minute ("c
      working". Its thread ends with "Deskbar set the question aside at <time>: ...", quoting the question.
 RA3. At the end of that turn the session reads "Stop hook feedback" naming the question, and either asks again (the task
      is back in "Waiting on you" where it was) or runs `task answered` (it stays in progress). Interrupt a session (Esc)
-     while its question is set aside: within about 15 seconds the task waits on you again with the question.
+     while its question is set aside: within about 15 seconds Deskbar asks the session to write its question afresh
+     (task 0cac3082; the session starts a turn reading "Deskbar: your task ... is about to wait on the user again").
+RA3a. That turn ends with a new `task ask` (the task waits on you with the new text) or `task answered`. If the session is
+     interrupted again or says nothing, about two minutes later the old question comes back as it was. With the
+     session's terminal closed and no way to resume it, the old question comes back at once and the thread says no
+     session could be asked.
 RA4. Ask again, then type a reply in the session's terminal instead of commenting: the same as RA2 and RA3.
 RA5. Ask again and reply nothing. A session woken by its own pull request watch (a rebase) leaves the task waiting.
 

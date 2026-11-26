@@ -67,7 +67,19 @@ sealed class CommentWaker : IDisposable
             Unsent = "No session of this task could be reached to ask whether it waits on you, so it came to you.",
             Undelivered = () => tasks.NudgeUndelivered(taskId),
         });
-        subscription = comments.Merge(reevaluations).Merge(stalled)
+        // A SET-ASIDE QUESTION WRITTEN AFRESH (task 0cac3082) rides them too: a session whose turn ended with its question
+        // still set aside is asked to look at the facts and ask again (SessionBriefing.Regenerate) instead of having the old
+        // text put back. When no session can be reached, the old question comes back to Petre at once
+        // (TaskService.RegenerateUndelivered), so it is never left hidden.
+        var regenerations = tasks.Regenerations.Select(taskId => new Delivery(taskId, "a request to write the question afresh", SessionBriefing.Regenerate)
+        {
+            Unsent = "No session of this task could be asked to write its question afresh, so the question came back as it was.",
+            Undelivered = () => tasks.RegenerateUndelivered(taskId),
+            // Dropped when it is no longer due (TaskService.IsRegenerating): the grace already put the old question back,
+            // or the session asked or answered meanwhile, while this waited behind another delivery.
+            StillDue = () => tasks.IsRegenerating(taskId),
+        });
+        subscription = comments.Merge(reevaluations).Merge(stalled).Merge(regenerations)
             .Where(_ => enabled())
             .Select(delivery => live.Take(1).SelectMany(listed => Observable.FromAsync(() => Deliver(delivery, listed)))
                 // One delivery that throws must not end the waker for the rest of the run (final review, I5): it is traced,
@@ -85,16 +97,24 @@ sealed class CommentWaker : IDisposable
     // when it is delivered.
     // Unsent, when set, is the thread's line in place of CommentWake's when no session can take it.
     // Undelivered, when set, runs when no session can take it, before the thread's line.
+    // StillDue, when set, is asked just before delivery; false drops the delivery without a word.
     sealed record Delivery(Guid TaskId, string What, Func<TaskItem, string> Message)
     {
         public string? Unsent { get; init; }
         public Action? Undelivered { get; init; }
+        public Func<bool>? StillDue { get; init; }
     }
 
     async Task<System.Reactive.Unit> Deliver(Delivery delivery, IReadOnlyCollection<ClaudeAgent> listed)
     {
         var taskId = delivery.TaskId;
         if (tasks.Board.Tasks.FirstOrDefault(t => t.Id == taskId) is not { Sessions.Count: > 0 } task) return System.Reactive.Unit.Default;
+        // A delivery that waited in the queue can be moot by now (StillDue, set by the regenerate request only).
+        if (delivery.StillDue is { } due && !due())
+        {
+            trace?.Invoke($"comment waker: {delivery.What} on {taskId} dropped, no longer due");
+            return System.Reactive.Unit.Default;
+        }
         var message = delivery.Message(task);
         // A WAITER CAN BE GONE WHILE ITS GEN FILE SAYS IT IS ALIVE (task daeaa26c). A turn that ends on an API error, the
         // usage limit above all, runs no Stop hook, so no waiter is started after it, and the one before it may be the

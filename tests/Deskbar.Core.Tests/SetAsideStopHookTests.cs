@@ -101,7 +101,11 @@ public class SetAsideStopHookTests
         Assert.True(SessionBriefing.DeliveredByDeskbar(SessionBriefing.Reevaluate(task)));
         // A stalled task's ask (task 8710ac09) is Deskbar's too.
         Assert.True(SessionBriefing.DeliveredByDeskbar(SessionBriefing.StalledNudge(task)));
+        // So is the request to write a set-aside question afresh (task 0cac3082).
+        Assert.True(SessionBriefing.DeliveredByDeskbar(SessionBriefing.Regenerate(task with { QuestionSetAside = "Merge PR 629" })));
         Assert.False(SessionBriefing.DeliveredByDeskbar("remove the footnote"));
+        // Petre typing words that happen to start like it is still Petre.
+        Assert.False(SessionBriefing.DeliveredByDeskbar("Deskbar: your task panel looks off"));
     }
 
     // Task 3dd07539: the Reevaluate message shows the session what Deskbar shows (status, question, status line, pull

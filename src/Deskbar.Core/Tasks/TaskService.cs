@@ -417,6 +417,57 @@ public sealed class TaskService(ITaskStore store, Func<DateTimeOffset> now, Func
     /// </summary>
     public IObservable<Guid> StalledNudges => stalledNudges;
 
+    // A SET-ASIDE QUESTION IS WRITTEN AFRESH, NOT PUT BACK AS IT WAS (task 0cac3082). Petre, 2026-11-26: "claude should
+    // regenerate the message if it needs my attention when the task gets to waiting on me", and "previous messages are
+    // not good enough". Seen on task f7ac687c: its question "merge 629 and deskbar-site 16" was set aside while the session
+    // worked on his comment, the session stopped without asking again, and the quiet poll put the old text back twenty
+    // minutes after deskbar-site 16 had merged, so the bar asked him to merge a pull request that was already in.
+    //
+    // So when RepliedTasks.Restore finds a set-aside question whose sessions are all quiet, Deskbar first asks the session
+    // to look at the facts and ask again with what the user must do NOW (Regenerations, delivered by the app's
+    // CommentWaker with SessionBriefing.Regenerate), and leaves the task In progress meanwhile. The old text comes back
+    // only as a fallback: at once when no session can be reached (RegenerateUndelivered), or once RegenerateGrace has
+    // passed with every session quiet again and still no `task ask` or `task answered`. A question is never lost, it is
+    // only no longer put back without a look. In memory only: after a restart the session is simply asked once more.
+    ImmutableDictionary<Guid, DateTimeOffset> regenerating = ImmutableDictionary<Guid, DateTimeOffset>.Empty;
+    readonly Subject<Guid> regenerations = new();
+
+    /// <summary>
+    /// How long a session asked to write its set-aside question afresh has before the old text comes back anyway. Long
+    /// enough for a resume to start and the session to show busy (a few seconds, measured for comments), short enough that
+    /// a question nobody rewrites is not hidden for long.
+    /// </summary>
+    public static readonly TimeSpan RegenerateGrace = TimeSpan.FromMinutes(2);
+
+    /// <summary>
+    /// The tasks whose session is to write its set-aside question afresh now (see the comment on `regenerating`), for the
+    /// app's CommentWaker to deliver on a comment's roads with SessionBriefing.Regenerate. Announced after the board is saved.
+    /// </summary>
+    public IObservable<Guid> Regenerations => regenerations;
+
+    /// <summary>
+    /// The request to write the question afresh could not reach any session of the task (CommentWake found none): nobody
+    /// can rewrite it, so the question comes back to Petre now, as it stood, instead of after RegenerateGrace.
+    /// </summary>
+    /// <summary>
+    /// Whether the task's session is still to write its set-aside question afresh: asked (Regenerations) and the question
+    /// still set aside. A request that waited in the waker's queue past RegenerateGrace, or behind the session's own
+    /// `task ask`, is no longer due, and the waker drops it rather than tell the session something no longer true.
+    /// </summary>
+    public bool IsRegenerating(Guid id) =>
+        regenerating.ContainsKey(id)
+        && Board.Tasks.Any(t => t.Id == id && t is { IsOpen: true, Status: TaskStatus.InProgress, QuestionSetAside.HasValue: true });
+
+    public void RegenerateUndelivered(Guid id)
+    {
+        if (!regenerating.ContainsKey(id)) return;
+        regenerating = regenerating.Remove(id);
+        var next = Board.RestoreQuestion(id, now());
+        if (ReferenceEquals(next, Board)) return;
+        trace?.Invoke($"tasks: restored the set-aside question of {Line(next, id)}, no session could be asked to write it afresh");
+        Commit(next);
+    }
+
     /// <summary>
     /// The ask could not reach any session of the task (CommentWake found none to wake): nobody can answer, so the task
     /// comes to Petre now instead of after StalledTasks.Answer. Only a task still Claude's and still asked is moved.
@@ -439,13 +490,22 @@ public sealed class TaskService(ITaskStore store, Func<DateTimeOffset> now, Func
     /// </summary>
     public void Stalled(IReadOnlySet<string> busy, IReadOnlySet<string> working)
     {
-        // First the questions Deskbar set aside whose sessions are quiet again without having asked or settled them: they
-        // wait on Petre again, as they stood (RepliedTasks.Restore, task 8bd18246).
-        RepliedTasks.Restore(Board, busy).ToList().ForEach(id =>
+        // First the questions Deskbar set aside whose sessions are quiet again without having asked or settled them
+        // (RepliedTasks.Restore, task 8bd18246). The session is asked once to write the question afresh (task 0cac3082, see
+        // `regenerating`); only when that ask has had RegenerateGrace and the sessions are quiet again does the question
+        // wait on Petre as it stood. A task that is no longer set aside (asked again, answered, done) is forgotten here.
+        var quiet = RepliedTasks.Restore(Board, busy);
+        regenerating = regenerating.RemoveRange(regenerating.Keys.Where(id =>
+            !Board.Tasks.Any(t => t.Id == id && t is { IsOpen: true, Status: TaskStatus.InProgress, QuestionSetAside.HasValue: true })).ToArray());
+        var toRegenerate = quiet.Where(id => !regenerating.ContainsKey(id)).ToArray();
+        regenerating = regenerating.SetItems(toRegenerate.Select(id => KeyValuePair.Create(id, now())));
+        toRegenerate.ToList().ForEach(id => trace?.Invoke($"tasks: asked the session of {Line(Board, id)} to write its set-aside question afresh"));
+        quiet.Where(id => !toRegenerate.Contains(id) && now() - regenerating[id] >= RegenerateGrace).ToList().ForEach(id =>
         {
+            regenerating = regenerating.Remove(id);
             var next = Board.RestoreQuestion(id, now());
             if (ReferenceEquals(next, Board)) return;
-            trace?.Invoke($"tasks: restored the set-aside question of {Line(next, id)}, no session of it is busy");
+            trace?.Invoke($"tasks: restored the set-aside question of {Line(next, id)}, its session was asked to write it afresh and did not");
             Commit(next);
         });
         // Then the waiting tasks Claude works on again after Petre's reply (RepliedTasks.SetAside): set aside, they are In
@@ -460,7 +520,12 @@ public sealed class TaskService(ITaskStore store, Func<DateTimeOffset> now, Func
         });
         var step = StalledTasks.Step(Board, busy, working, lastBusy, now(), nudged, statusLinesHeard);
         lastBusy = step.LastBusy;
-        nudged = step.Nudged;
+        // A task whose session is asked to write its set-aside question afresh is not ALSO asked whether it is stalled
+        // (review of task 0cac3082): after a Deskbar restart the quiet clock starts from UpdatedAt, so a task set aside long
+        // ago would get both requests in one poll. The regenerate request has its own fallback (RegenerateGrace).
+        var asking = regenerating.Keys.ToHashSet();
+        nudged = step.Nudged.RemoveRange(asking);
+        step = step with { Nudge = step.Nudge.Where(id => !asking.Contains(id)).ToArray() };
         // Only the tasks still watched keep their heard time; the rest would only grow the map.
         statusLinesHeard = statusLinesHeard.RemoveRange(statusLinesHeard.Keys.Where(id => !step.Board.Tasks.Any(t => t.Id == id && t.IsOpen)).ToArray());
         step.Nudge.Select(id => $"tasks: asked the session of {Line(step.Board, id)} whether it waits on you, no session worked on it for {StalledTasks.After.TotalMinutes:0} minutes")
@@ -470,6 +535,7 @@ public sealed class TaskService(ITaskStore store, Func<DateTimeOffset> now, Func
         CommitIfChanged(step.Board);
         // Announced after the board is saved, so the waker reads the task as it stands.
         step.Nudge.ToList().ForEach(stalledNudges.OnNext);
+        toRegenerate.ToList().ForEach(regenerations.OnNext);
     }
 
     static string Line(TaskBoard board, Guid id) =>

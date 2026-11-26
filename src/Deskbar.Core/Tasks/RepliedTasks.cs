@@ -24,8 +24,10 @@ namespace Deskbar.Core.Tasks;
 // leaves the waiting block, and keeps the question in TaskItem.QuestionSetAside. The session decides at the end of its
 // turn (Ruling 49 stands): the Stop hook asks it once (SessionBriefing.SetAsideNudge) to run `task ask` if the question
 // still holds or `task answered` if the reply settled it. Asking the same question again restores it as it was (its place
-// in the block, WaitingSince). If the session does neither, the first poll that finds none of its sessions busy restores
-// the question (Restore; TaskBoard.HandBack does the same as a fallback). So a reply that did not settle the question costs
+// in the block, WaitingSince). If the session does neither, the first poll that finds none of its sessions busy asks it
+// to write the question afresh from the facts (task 0cac3082, TaskService's `regenerating`, SessionBriefing.Regenerate),
+// and only if that brings nothing either is the old question restored (Restore; TaskBoard.HandBack does the same as a
+// fallback). So a reply that did not settle the question costs
 // it nothing but a stretch in "Claude working".
 //
 // KNOWN LIMITATION (Ruling 33's): a /loop or scheduled check-in arrives as a prompt that cannot be told from Petre's. In a
