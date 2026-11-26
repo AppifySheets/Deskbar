@@ -86,6 +86,13 @@ public sealed class PermissionDesk(string folder, Func<DateTimeOffset> now)
     public bool Asks(string sessionId) => held.Any(h => h.Pending.Request.SessionId == sessionId);
 
     /// <summary>
+    /// A task's questions: those of every session the board has open on it (TaskBoard.TaskOf), the oldest first. What the
+    /// task's page draws as cards and what its line's mark reads.
+    /// </summary>
+    public IReadOnlyList<Pending> OfTask(TaskBoard board, Guid taskId) =>
+        held.Select(h => h.Pending).Where(p => board.TaskOf(p.Request.SessionId).Map(t => t.Id == taskId).GetValueOrDefault(false)).ToList();
+
+    /// <summary>
     /// A question registered under the script's slot, and the code the script must see in its answer. Refused for a
     /// slot name the script would not make, a slot that is not a folder in the desk's folder, one already registered, or
     /// one holding anything but the reply file (an answer planted before the question was asked).

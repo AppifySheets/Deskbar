@@ -2298,6 +2298,8 @@ public partial class App : Application
                     ignore: hwnd => monitor!.Ignore(hwnd),
                     switchTo: id => manager.Switch(id)),
                 Rings = windowRings,
+                // Allow / Deny from a task's page: a line whose session waits on a permission question says so.
+                Permissions = PermissionDesk,
                 // How long ago the last input was, for the asking border (FloatingBar.FocusRing.cs): whether someone is
                 // here to see a blink, and whether they clicked or typed in the blinking window.
                 SinceLastInput = new InputActivity().SinceLastInput,
@@ -2849,6 +2851,8 @@ public partial class App : Application
                 // The manager line's click (task 61e4d143): the Manager button's own ManagerActions.Open; a refusal shows
                 // on the panel's problem line.
                 OpenManager = () => managerActions?.Open() ?? Result.Failure(ClaudeActionsNotReady),
+                // Allow / Deny from a task's page: the questions on show, as cards on the page and the Inbox's mark.
+                Permissions = PermissionDesk,
             };
 
             // A panel left open at the last exit (AppState.TasksPanel, saved open by TasksBoard.Shutdown) opens again,

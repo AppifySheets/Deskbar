@@ -15,7 +15,8 @@ namespace Deskbar.App;
 // ONE SHAPE PER STATE, colour second (spec, "A line"; the user is colourblind): a bubble with "?" asks you, a triangle
 // with "!" went quiet, a filled disc with a tick is finished, a ring with a tick is finished but not running here yet, an
 // arc turns while Claude works, a pause sign in a circle is idle, a clock is the usage limit, an empty rounded box is a
-// note, a ticked box is closed, a moon is snoozed. A test checks no two marks share their shapes.
+// note, a ticked box is closed, a moon is snoozed, a shield with a keyhole asks permission. A test checks no two marks
+// share their shapes.
 //
 // The geometries are parsed once and frozen; the shapes made from them are new for every use, since an element can only
 // have one parent. Brushes are frozen, as every static WPF brush must be (CLAUDE.md, Traps).
@@ -92,6 +93,9 @@ internal static class InboxMarks
         ["chevR"] = [S("M6 3.5L10.5 8 6 12.5")],
         ["chevD"] = [S("M3.5 6L8 10.5 12.5 6")],
         ["image"] = [Box(2, 3, 12, 10, 2), Disc(5.5, 6.5, 1), S("M2.5 12l3.5-3.5 2.5 2.5 2-2 3 3")],
+        // A permission question (Allow / Deny from a task's page): a shield with a keyhole, the mockup's "shield" kind. New
+        // here, since the mockup names it but draws none; no other mark has a shield's outline or a keyhole.
+        ["shield"] = [S("M8 1.75l5.25 2v4.1c0 3.2-2.2 5.45-5.25 6.4-3.05-.95-5.25-3.2-5.25-6.4v-4.1z"), Disc(8, 6.9, 1.3), S("M8 8v2.8")],
     };
 
     /// <summary>
@@ -113,6 +117,7 @@ internal static class InboxMarks
         InboxMark.UsageLimit => "clock",
         InboxMark.Closed => "checked",
         InboxMark.Snoozed => "snooze",
+        InboxMark.AsksPermission => "shield",
         _ => "note",
     };
 
@@ -128,13 +133,14 @@ internal static class InboxMarks
         InboxMark.UsageLimit => "Stopped: usage limit",
         InboxMark.Closed => "Closed",
         InboxMark.Snoozed => "Snoozed",
+        InboxMark.AsksPermission => "Asks permission",
         _ => "A note",
     };
 
     /// <summary>The mark's colour: amber needs you, blue is Claude at work, a light grey is finished, the rest quiet.</summary>
     internal static Brush InkOf(InboxMark mark) => mark switch
     {
-        InboxMark.Asks or InboxMark.WentQuiet => InboxLook.Amber,
+        InboxMark.Asks or InboxMark.WentQuiet or InboxMark.AsksPermission => InboxLook.Amber,
         InboxMark.Finished or InboxMark.FinishedNotRunning => InboxLook.DoneInk,
         InboxMark.Working => InboxLook.Blue,
         _ => InboxLook.Ink3,
