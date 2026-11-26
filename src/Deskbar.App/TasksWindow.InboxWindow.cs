@@ -92,6 +92,9 @@ public partial class TasksWindow
     internal const string UrgentText = "Urgent";
     internal const string ShowInPanelText = "Show in the tasks panel";
 
+    /// <summary>The window menu's "Go to its workspace" for a task without a session (the old task window had it).</summary>
+    internal const string GoToWorkspaceText = "Go to its workspace";
+
     // WHAT THE OLD TASK WINDOW'S HEADER DID AND THE PAGE DOES NOT: Undo while a close can still be undone (the page is not
     // left when its task closes, as the panel's is: the window shows the task until it is gone), and the Important and Urgent
     // toggles. After the state's words and the pull requests, in the page's second row (PageTop). Each calls what the old
@@ -127,6 +130,12 @@ public partial class TasksWindow
         if (!pageInWindow) return;
         menu.Items.OfType<MenuItem>().Where(item => item.Header is TextBlock { Text: OpenInWindowText }).ToList()
             .ForEach(item => menu.Items.Remove(item));
+        // "Go to its workspace" (tester finding L1): the old window's menu had it for an open task. A task with a session has
+        // Open Claude, which goes to the workspace first and then to the session; a note has no such button, so this is the
+        // only way from its window to its workspace. Run once the menu has closed, as Open Claude is.
+        if (row.Status != TaskStatus.Closed && !row.Closing && !OpensClaude(row) && Actions?.Go is { } go)
+            menu.Items.Insert(Math.Max(0, menu.Items.Count - 2), Item(GoToWorkspaceText,
+                () => Dispatcher.BeginInvoke(() => go(row.Id), System.Windows.Threading.DispatcherPriority.Input)));
         if (ShowInPanel is { } show)
             menu.Items.Insert(Math.Max(0, menu.Items.Count - 2), Item(ShowInPanelText, () => show(row.Id)));
     }
