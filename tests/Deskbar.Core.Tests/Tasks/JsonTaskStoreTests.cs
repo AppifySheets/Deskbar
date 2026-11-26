@@ -434,6 +434,115 @@ public sealed class JsonTaskStoreTests : IDisposable
         Assert.All(new JsonTaskStore(dir).Load().Value.Tasks.SelectMany(t => t.Sessions), s => Assert.False(s.Replaced));
     }
 
+    // --- the session picker's fields (TaskItem.Wanted and Switching, TaskSession.LaunchedWith and ReplacedBy) ---------
+
+    static TaskBoard WithPicks(TaskBoard board) =>
+        new(board.Tasks.Select((t, i) => i != 1 ? t : t with
+        {
+            Wanted = new SessionSettings("sonnet", "low", Maybe<string>.None),
+            Switching = new PendingSwitch("s2", new SessionSettings("sonnet", "low", Maybe<string>.None), T0.AddMinutes(6)) { CopyShortId = "8c42135c" },
+            Sessions = t.Sessions.Select(s => s.Id == "s1"
+                ? s with { ReplacedAt = T0.AddMinutes(3), ReplacedBy = "s2" }
+                : s with { LaunchedWith = new SessionSettings("opus", Maybe<string>.None, "acceptEdits") }).ToArray(),
+        }).ToArray());
+
+    [Fact]
+    public void The_picker_fields_round_trip_and_tasks_without_them_write_nothing_new()
+    {
+        var store = new JsonTaskStore(dir);
+        var board = WithPicks(Sample());
+
+        Assert.True(store.Save(board).IsSuccess);
+        var loaded = store.Load().Value;
+
+        AssertSame(board.Tasks[1], loaded.Tasks[1]);
+        Assert.Equal(board.Tasks[1].Wanted, loaded.Tasks[1].Wanted);
+        Assert.Equal(board.Tasks[1].Switching, loaded.Tasks[1].Switching);
+        var text = File.ReadAllText(TasksPath);
+        foreach (var key in new[] { "\"wanted\"", "\"switching\"", "\"replacedBy\"", "\"launchedWith\"" })
+            Assert.Single(System.Text.RegularExpressions.Regex.Matches(text, key));
+        // A setting not passed is left out, not written as null.
+        Assert.DoesNotContain("\"mode\": null", text);
+    }
+
+    // "Picked: leave everything to Claude Code" is a pick, and must not read back as "never picked".
+    [Fact]
+    public void An_empty_pick_stays_a_pick()
+    {
+        var store = new JsonTaskStore(dir);
+        var board = new TaskBoard(Sample().Tasks.Select((t, i) => i == 0 ? t with { Wanted = SessionSettings.None } : t).ToArray());
+
+        Assert.True(store.Save(board).IsSuccess);
+
+        Assert.Equal(SessionSettings.None, store.Load().Value.Tasks[0].Wanted.Value);
+        Assert.Contains("\"wanted\": {}", File.ReadAllText(TasksPath));
+    }
+
+    // A file from before the picker loads with no picks, and saving it again adds none of the new keys.
+    [Fact]
+    public void An_old_file_loads_unchanged_with_no_picks()
+    {
+        Directory.CreateDirectory(dir);
+        File.WriteAllText(TasksPath, Version2(status: "\"InProgress\""));
+
+        var board = new JsonTaskStore(dir).Load().Value;
+        var task = board.Tasks.Single();
+        Assert.True(task.Wanted.HasNoValue);
+        Assert.True(task.Switching.HasNoValue);
+        Assert.All(task.Sessions, s => Assert.Equal(SessionSettings.None, s.LaunchedWith));
+        Assert.All(task.Sessions, s => Assert.True(s.ReplacedBy.HasNoValue));
+
+        Assert.True(new JsonTaskStore(dir).Save(board).IsSuccess);
+        var text = File.ReadAllText(TasksPath);
+        foreach (var key in new[] { "wanted", "switching", "replacedBy", "launchedWith" }) Assert.DoesNotContain($"\"{key}\"", text);
+    }
+
+    // FORWARD: a build from before the picker reads a file this build wrote. The DTOs are this build's, so the older
+    // build is played by renaming the picker's keys to names this build does not know either: that is exactly what the
+    // older reader meets. System.Text.Json skips unknown properties by default (JsonTaskStore's options do not change
+    // that), so every task and session loads, and the next save DROPS the unknown keys: the picks are lost, never a task.
+    [Fact]
+    public void An_older_build_reads_a_file_with_the_picker_fields()
+    {
+        var store = new JsonTaskStore(dir);
+        var board = WithPicks(Sample());
+        Assert.True(store.Save(board).IsSuccess);
+        var renamed = File.ReadAllText(TasksPath);
+        foreach (var key in new[] { "wanted", "switching", "replacedBy", "launchedWith" })
+            renamed = renamed.Replace($"\"{key}\"", $"\"{key}FromALaterBuild\"");
+        File.WriteAllText(TasksPath, renamed);
+
+        var loaded = new JsonTaskStore(dir).Load().Value;
+
+        Assert.Equal(board.Tasks.Select(t => t.Id), loaded.Tasks.Select(t => t.Id));
+        Assert.Equal(board.Tasks[1].Sessions.Select(s => (s.Id, s.Folder, s.Joined, s.Ended, s.ReplacedAt)),
+            loaded.Tasks[1].Sessions.Select(s => (s.Id, s.Folder, s.Joined, s.Ended, s.ReplacedAt)));
+        Assert.True(loaded.Tasks[1].Wanted.HasNoValue);
+        Assert.True(new JsonTaskStore(dir).Save(loaded).IsSuccess);
+        Assert.DoesNotContain("FromALaterBuild", File.ReadAllText(TasksPath));
+    }
+
+    // A hand edit cannot make the file unreadable, nor put a bad value on a command line later.
+    [Fact]
+    public void Odd_picker_values_read_as_none_and_a_bad_choice_is_dropped()
+    {
+        Directory.CreateDirectory(dir);
+        File.WriteAllText(TasksPath, Version2(status: "\"InProgress\"")
+            .Replace("\"ended\": null }", "\"ended\": null, \"launchedWith\": \"opus\", \"replacedBy\": 5 }")
+            .Replace("\"raised\": \"2026-11-22T09:00:00+04:00\",", """
+                "raised": "2026-11-22T09:00:00+04:00",
+                "wanted": { "model": "--dangerously-skip-permissions", "effort": "LOW", "mode": "bypassPermissions" },
+                "switching": { "from": "s1", "to": "sonnet" },
+                """));
+
+        var task = new JsonTaskStore(dir).Load().Value.Tasks.Single();
+
+        Assert.Equal(new SessionSettings(Maybe<string>.None, "low", Maybe<string>.None), task.Wanted.Value);
+        Assert.True(task.Switching.HasNoValue);
+        Assert.Equal(SessionSettings.None, task.Sessions.Single().LaunchedWith);
+        Assert.True(task.Sessions.Single().ReplacedBy.HasNoValue);
+    }
+
     // A version 2 file written before the order existed has no rank: the tasks come back in the order the bar showed
     // them then (Waiting on you, then Done, then the rest, each latest raised first), so the first start of this build
     // moves no line. No flags means quadrant IV for every task.
