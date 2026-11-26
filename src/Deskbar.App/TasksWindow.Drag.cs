@@ -23,7 +23,9 @@ namespace Deskbar.App;
 //   * A capture lost to another window, or a move with the button already up, calls it off; nothing moves.
 public partial class TasksWindow
 {
-    sealed record DragState(Guid Id, Point PressedAt, bool Started);
+    // Entry: the subtask's entry in its parent's thread when the drag started there (see dragEntries), else null for a
+    // drag of a line.
+    sealed record DragState(Guid Id, Point PressedAt, bool Started, Button? Entry = null);
 
     // Every line drawn: its quadrant, whether it is pinned (waiting on Petre or Done), and whether it cannot move at all (closed, or
     // in its undo window). Filled as the lines are drawn (Line), cleared with them.
@@ -32,6 +34,19 @@ public partial class TasksWindow
     // Part: which part of the pinned block a pinned line is in, the questions or the Done tasks, since a pinned line is
     // dragged within its own part (task f41d7857, TaskDropTarget).
     readonly Dictionary<Guid, (Quadrant Quadrant, bool Waiting, bool Fixed, bool Nested, TaskDropTarget.Part Part)> dragLines = [];
+
+    // A SUBTASK IS DRAGGED OUT OF ITS PARENT'S THREAD TOO (task f64d06ae, Petre: "subtask can't be dragged out of a
+    // parent, should be able to"). With "Subtasks" unticked a subtask has no line: it is only an entry in its parent's
+    // open thread (SubtaskEntry), and an entry armed no drag, so nothing he could see of the subtask could be dragged.
+    // Every entry of an open subtask is kept here as it is drawn (cleared with dragLines): its button, the parent whose
+    // thread it is in, and the quadrant and pinned part the drop rule needs. A drag that starts on one drops by the
+    // same rule as a line's (TaskDropTarget): released over another line's middle the subtask goes under that task,
+    // anywhere else outside its parent's line and thread it is freed and placed there, and released inside them it
+    // stays where it is (InOwnThread), so a wiggle never frees it.
+    readonly Dictionary<Guid, (Button Entry, Guid Parent, Quadrant Quadrant, TaskDropTarget.Part Part)> dragEntries = [];
+
+    /// <summary>For the tests: the entry of a subtask in its parent's thread that a drag can start on, or null.</summary>
+    internal Button? DragEntryOf(Guid id) => dragEntries.TryGetValue(id, out var entry) ? entry.Entry : null;
 
     // For the tests: whether a drawn line is pinned (waiting on Petre or Done), so it moves only within its part of the
     // pinned block and no other line drops among it. A line in the Claude working block (task 93fa0b9b) is not.
@@ -88,11 +103,24 @@ public partial class TasksWindow
         };
     });
 
-    /// <summary>A press on a line: arms a drag, unless the line is fixed (closed). A waiting line arms one too.</summary>
-    internal void DragPress(Guid id, Point at)
+    /// <summary>
+    /// A press on a line: arms a drag, unless the line is fixed (closed). A waiting line arms one too. With
+    /// <paramref name="fromThread"/>, a press on the subtask's entry in its parent's thread instead (see dragEntries);
+    /// a subtask can have both a line and an entry, so the caller says which was pressed.
+    /// </summary>
+    internal void DragPress(Guid id, Point at, bool fromThread = false)
     {
         drag = null;
-        if (renaming is not null || !dragLines.TryGetValue(id, out var line) || line.Fixed) return;
+        if (renaming is not null) return;
+        if (fromThread)
+        {
+            // Only an entry inside the drag surface: the surface is what sees the release and lets the press go, and a
+            // press left armed would hold every redraw back (MustWait).
+            if (dragEntries.TryGetValue(id, out var entry) && entry.Entry.IsDescendantOf(DragSurface))
+                drag = new DragState(id, at, Started: false, entry.Entry);
+            return;
+        }
+        if (!dragLines.TryGetValue(id, out var line) || line.Fixed) return;
         drag = new DragState(id, at, Started: false);
     }
 
@@ -106,7 +134,7 @@ public partial class TasksWindow
                 && Math.Abs(at.Y - current.PressedAt.Y) < SystemParameters.MinimumVerticalDragDistance) return;
             drag = current = current with { Started = true };
             DragMouse.Capture(DragSurface);
-            if (LineButton(current.Id) is { } dragged) dragged.Opacity = DragDimming;
+            if (DraggedButton(current) is { } dragged) dragged.Opacity = DragDimming;
             Cursor = Cursors.SizeNS;
             if (AdornerLayer.GetAdornerLayer(DragSurface) is { } layer)
             {
@@ -133,7 +161,7 @@ public partial class TasksWindow
         {
             try
             {
-                if (drop is not null) Dropped(current.Id, drop);
+                if (drop is not null) Dropped(current.Id, drop, fromThread: current.Entry is not null);
             }
             finally
             {
@@ -145,7 +173,8 @@ public partial class TasksWindow
 
     // What a drop does (drag to nest, TaskDropTarget's header), as on the bar: on a line's middle the task becomes its
     // subtask; a nested subtask dropped anywhere else is freed first, then placed; everything else is placed as before.
-    void Dropped(Guid id, TaskDropTarget.Drop drop)
+    // A subtask dragged by its entry in its parent's thread (`fromThread`, task f64d06ae) is freed the same way.
+    void Dropped(Guid id, TaskDropTarget.Drop drop, bool fromThread = false)
     {
         if (drop.Into is { } parent)
         {
@@ -154,7 +183,7 @@ public partial class TasksWindow
         }
         // Freed first; a freeing that failed places nothing (it would only rewrite the flags of a task drawn back under
         // its parent; review of the drag-to-nest branch, minor 3).
-        if (dragLines.TryGetValue(id, out var line) && line.Nested
+        if ((fromThread || (dragLines.TryGetValue(id, out var line) && line.Nested))
             && Actions?.SetParent?.Invoke(id, CSharpFunctionalExtensions.Maybe<Guid>.None) != true) return;
         Actions?.Place(id, drop.Quadrant, drop.Place);
     }
@@ -171,7 +200,7 @@ public partial class TasksWindow
         var current = drag;
         drag = null;
         dropShown = null;
-        if (current is not null && LineButton(current.Id) is { } dragged) dragged.Opacity = 1;
+        if (current is not null && DraggedButton(current) is { } dragged) dragged.Opacity = 1;
         if (dropAdorner is not null) AdornerLayer.GetAdornerLayer(DragSurface)?.Remove(dropAdorner);
         dropAdorner = null;
         ClearValue(CursorProperty);
@@ -183,7 +212,15 @@ public partial class TasksWindow
     // moves (empty, or only waiting lines), so every quadrant can be dropped into.
     TaskDropTarget.Drop? DropAt(Guid dragged, Point at)
     {
-        var own = dragLines.TryGetValue(dragged, out var mine) ? mine.Quadrant : Quadrant.IV;
+        // A drag from a parent's thread (task f64d06ae) reads the subtask's entry, since it may have no line at all;
+        // said as a line would be: pinned when it is a question or Done, and nested, which it is.
+        var entry = drag is { Entry: not null } && dragEntries.TryGetValue(dragged, out var found) ? found : default;
+        var mine = entry.Entry is not null
+            ? (entry.Quadrant, Waiting: entry.Part != TaskDropTarget.Part.None, Fixed: false, Nested: true, entry.Part)
+            : dragLines.GetValueOrDefault(dragged);
+        var own = entry.Entry is not null || dragLines.ContainsKey(dragged) ? mine.Quadrant : Quadrant.IV;
+        // Released inside its parent's line and thread, the subtask stays where it is.
+        if (entry.Entry is not null && InOwnThread(entry.Entry, entry.Parent, at)) return null;
         if (!matrixShown)
         {
             dropSpan = new Rect(0, 0, Rows.ActualWidth, Rows.ActualHeight);
@@ -197,8 +234,11 @@ public partial class TasksWindow
                     { TakesChild = parents.Contains(x.Id), Pinned = x.Line.Part }, x.Line.Nested))
                 .ToList();
             // A nested subtask released inside its own parent's block stays where it is (as on the bar).
-            return TaskDropTarget.InOwnBlock(drawn, dragged, at) ? null
-                : TaskDropTarget.At(TaskDropTarget.Anchors(drawn), [], own, at, mine.Part);
+            // An entry's subtask may also have a line nested under the parent; its drag did not start there, so that
+            // line's block is not asked. A drop back onto its own parent's middle changes nothing either.
+            if (entry.Entry is null && TaskDropTarget.InOwnBlock(drawn, dragged, at)) return null;
+            return TaskDropTarget.At(TaskDropTarget.Anchors(drawn), [], own, at, mine.Part) is { } drop
+                && !(entry.Entry is not null && drop.Into == entry.Parent) ? drop : null;
         }
         if (cells.Count == 0) return null;
         var (quadrant, box) = cells
@@ -238,6 +278,31 @@ public partial class TasksWindow
 
     IEnumerable<Button> LineButtons() =>
         (matrixShown ? cells.Values.SelectMany(c => c.Lines.Children.OfType<Button>()) : Rows.Children.OfType<Button>()).Where(b => b.Tag is Guid);
+
+    // What a drag dims: the entry it started on in a thread, else the task's line.
+    Button? DraggedButton(DragState state) => state.Entry ?? LineButton(state.Id);
+
+    // Whether `at` is inside the block a subtask's entry belongs to: its parent's line and the parent's whole thread
+    // under it (the thread's frame is the child of the lines panel the entry sits in). In the List only the height
+    // counts, as for a nested line (TaskDropTarget.InOwnBlock): the pointer may leave the panel sideways. In the Matrix
+    // the cells stand side by side, so the box itself is asked, and only the part of it inside its own cell: a cell
+    // scrolls, so a thread taller than the cell reaches, unclipped, over the cell below, where a release must still
+    // drop (review of this branch).
+    bool InOwnThread(Button entry, Guid parent, Point at)
+    {
+        IReadOnlyList<Panel> panels = matrixShown ? [.. cells.Values.Select(c => (Panel)c.Lines)] : [Rows];
+        var frame = Ancestors(entry).OfType<FrameworkElement>().FirstOrDefault(a => a.Parent is Panel p && panels.Contains(p));
+        if (frame is null) return false;
+        var block = new Rect(frame.TranslatePoint(new Point(0, 0), DragSurface), frame.RenderSize);
+        if (LineButton(parent) is { } line) block.Union(new Rect(line.TranslatePoint(new Point(0, 0), DragSurface), line.RenderSize));
+        if (!matrixShown) return at.Y >= block.Top && at.Y <= block.Bottom;
+        var cell = cells.Values.First(c => ReferenceEquals(c.Lines, frame.Parent)).Box;
+        block.Intersect(new Rect(cell.TranslatePoint(new Point(0, 0), DragSurface), cell.RenderSize));
+        return block.Contains(at);
+    }
+
+    static IEnumerable<DependencyObject> Ancestors(DependencyObject from) =>
+        VisualTreeHelper.GetParent(from) is { } parent ? Ancestors(parent).Prepend(parent) : [];
 
     Button? LineButton(Guid id) => LineButtons().FirstOrDefault(b => (Guid)b.Tag == id);
 

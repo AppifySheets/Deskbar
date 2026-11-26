@@ -483,6 +483,7 @@ public partial class TasksWindow : Window
         Rows.Children.Clear();
         menuButtons.Clear();
         dragLines.Clear();
+        dragEntries.Clear();
         commentBoxes.Clear();
         ages.Clear();
         slimTips.Clear();
@@ -604,7 +605,7 @@ public partial class TasksWindow : Window
     // a subtask folded there is in no cell, so opening it in its parent's thread changed nothing the cells' signature
     // read, and the draw never came (review).
     static string SubtasksSignature(TaskRowView r) =>
-        string.Join('\u0004', r.Subtasks.Select(c => $"{c.Id}{c.Title}{c.Status}{c.StatusLine}{c.HasLine}{c.Closing}{c.TickTip}" + (c.Row is { } open ? "{" + ListRowSignature(open) + "}" : "")));
+        string.Join('\u0004', r.Subtasks.Select(c => $"{c.Id}{c.Title}{c.Status}{c.StatusLine}{c.HasLine}{c.Closing}{c.TickTip}{c.Quadrant}" + (c.Row is { } open ? "{" + ListRowSignature(open) + "}" : "")));
 
     static string PlaceSignature(TaskPlaceChoice place) => $"{place.Workspace}{place.Name}{(place.Colour as SolidColorBrush)?.Color}";
 
@@ -1795,7 +1796,7 @@ public partial class TasksWindow : Window
         // Each is a button that opens or folds that subtask's own thread right under it, in place (task 0eb943d8).
         row.Subtasks.ToList().ForEach(sub =>
         {
-            panel.Children.Add(SubtaskEntry(sub));
+            panel.Children.Add(SubtaskEntry(sub, row.Id));
             if (sub.Row is { } open) panel.Children.Add(Thread(open, inParent: true));
         });
         // TASK LINKS (docs/superpowers/specs/2026-11-25-task-links-design.md): what the task duplicates, its duplicates and
@@ -1963,7 +1964,7 @@ public partial class TasksWindow : Window
     // Petre: "let subtasks stay where they are, expand their current place"). It used to pick the subtask and show it
     // (TasksBoard.ShowTaskPastFilters), which unfolded it onto a line of its own below the parent's whole thread, two
     // threads open one above the other. The selection is left alone, since picking the subtask is what unfolds it.
-    UIElement SubtaskEntry(SubtaskView sub)
+    UIElement SubtaskEntry(SubtaskView sub, Guid parent)
     {
         var text = new TextBlock { FontSize = 11, TextTrimming = TextTrimming.CharacterEllipsis, VerticalAlignment = VerticalAlignment.Center };
         var finished = sub.Status is TaskStatus.Done or TaskStatus.Closed;
@@ -1982,6 +1983,14 @@ public partial class TasksWindow : Window
         entry.Background = Brushes.Transparent;
         entry.HorizontalAlignment = HorizontalAlignment.Left;
         entry.ToolTip = sub.HasLine ? "Show this subtask" : sub.Row is null ? "Open this subtask here" : "Fold this subtask";
+        // DRAGGED OUT OF THE THREAD (task f64d06ae, TasksWindow.Drag.cs's dragEntries): a press on the entry arms a drag as
+        // a press on a line does, so an open subtask can be dragged out of its parent, or onto another task. A press
+        // that stays a click is still the entry's Click above. A closed one, or one in its undo window, arms nothing.
+        if (sub.Status != TaskStatus.Closed && !sub.Closing)
+        {
+            dragEntries[sub.Id] = (entry, parent, sub.Quadrant, TaskDropTarget.PartOf(sub.Status));
+            entry.PreviewMouseLeftButtonDown += (_, e) => DragPress(sub.Id, DragMouse.Position(e, DragSurface), fromThread: true);
+        }
         // ITS TICK IN FRONT (task 0eb943d8, Petre: "how do i close subtasks?"): a subtask folded into its parent's thread
         // has no line, so no tick and no menu, and opened in place it still had none. The entry now starts with the same
         // tick a line has (TickOf): it closes the subtask with Undo in its place for the undo window, by the board's own

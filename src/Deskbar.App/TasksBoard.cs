@@ -1347,6 +1347,8 @@ public sealed class TasksBoard : IDisposable
                         // Its tick in the thread (task 0eb943d8, "how do i close subtasks?"): Undo while its close can be
                         // undone, and the tip a line's tick would have.
                         Closing = pendingCloses.ContainsKey(c.Id),
+                        // For a drag of its entry out of the thread (task f64d06ae): the drop rule asks for it.
+                        Quadrant = c.Quadrant,
                         TickTip = TaskViews.TickTip(c.IsClaudes, tasks.Board.OpenSubtaskCount(c.Id), TaskBoard.ClaudeStillWorking(c)),
                     }).ToArray())
                 .GetValueOrDefault([])
@@ -1822,6 +1824,9 @@ internal sealed record SubtaskView(Guid Id, string Title, TaskStatus Status, str
 
     /// <summary>Whether the subtask was just closed and can still be undone: its tick in the thread shows Undo.</summary>
     public bool Closing { get; init; }
+
+    /// <summary>The subtask's own quadrant, which a drag of its entry out of the thread drops by (task f64d06ae).</summary>
+    public Quadrant Quadrant { get; init; } = Quadrant.IV;
 
     /// <summary>What its tick in the thread says on hover, as a line's tick would (TaskViews.TickTip).</summary>
     public string TickTip { get; init; } = "";

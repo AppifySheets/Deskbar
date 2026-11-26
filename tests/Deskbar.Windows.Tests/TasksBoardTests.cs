@@ -5259,6 +5259,126 @@ public class TasksBoardTests
         Assert.False(HasButtonNamed(t.Window, "Subtask Write the notes"));
     });
 
+    // Task f64d06ae (Petre: "subtask can't be dragged out of a parent, should be able to"). With "Subtasks" unticked a
+    // subtask is only an entry in its parent's open thread, and an entry armed no drag. Now a drag that starts on the
+    // entry drops by the lines' rule: beside another line it is a plain task again, placed there.
+    [Fact]
+    public void A_folded_subtask_is_dragged_out_of_its_parents_thread() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var (parent, child, other) = FoldedSubtaskInOpenThread(t);
+
+        ThreadDrag(t, child, InLine(t, other, 0.9));
+
+        Assert.True(t.Tasks.Board.Tasks.Single(x => x.Id == child).ParentId.HasNoValue);
+        var pile = t.Tasks.Board.Pile().Select(x => x.Id).ToList();
+        Assert.Equal(pile.IndexOf(other) + 1, pile.IndexOf(child));
+        Assert.Contains(child, t.Window.Keys);
+        Assert.False(t.Window.Dragging);
+    });
+
+    // Released inside its parent's line and thread the subtask stays where it is, so a wiggle never frees it.
+    [Fact]
+    public void A_folded_subtask_released_inside_its_parents_thread_stays_a_subtask() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var (parent, child, _) = FoldedSubtaskInOpenThread(t);
+        var before = t.Tasks.Board;
+
+        ThreadDrag(t, child, InLine(t, parent, 0.5));
+        Assert.Same(before, t.Tasks.Board);
+
+        var entry = t.Window.DragEntryOf(child)!;
+        var at = entry.TranslatePoint(new Point(5, entry.ActualHeight / 2), t.Window.DragSurface);
+        ThreadDrag(t, child, new Point(at.X, at.Y + 30));
+        Assert.Same(before, t.Tasks.Board);
+    });
+
+    // The press itself, routed: a press on the entry arms the drag (the wiring in SubtaskEntry), and one that never
+    // moves is still the entry's click, which opens the subtask in place.
+    [Fact]
+    public void A_press_on_a_thread_entry_arms_its_drag_and_a_press_in_place_still_clicks() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var (_, child, other) = FoldedSubtaskInOpenThread(t);
+        var entry = t.Window.DragEntryOf(child)!;
+
+        RealPress(entry);
+        Assert.True(RealRelease(t, entry));
+        Assert.True(t.Window.ThreadShown(child));
+        Assert.False(t.Tasks.Board.Tasks.Single(x => x.Id == child).ParentId.HasNoValue);
+
+        t.Window.UpdateLayout();
+        RealPress(t.Window.DragEntryOf(child)!);
+        t.Window.DragMove(InLine(t, other, 0.9));
+        Assert.True(t.Window.Dragging);
+        t.Window.DragRelease();
+        t.Window.Dispatcher.Invoke(() => { }, System.Windows.Threading.DispatcherPriority.Background);
+        Assert.True(t.Tasks.Board.Tasks.Single(x => x.Id == child).ParentId.HasNoValue);
+    });
+
+    // In the Matrix: dropped beside a line of another cell it is freed and takes that cell's flags.
+    [Fact]
+    public void A_subtask_dragged_from_the_thread_to_another_matrix_cell_is_freed_into_it() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var other = t.Tasks.AddNote("Book the venue", t.Gepha, Quadrant.I).Value.Id;
+        var parent = t.Tasks.AddNote("Ship the release", t.Gepha).Value.Id;
+        var child = t.Tasks.AddNote("Write the notes", t.Gepha, Quadrant.IV, parent).Value.Id;
+        t.Controller.Show();
+        Click(ButtonNamed(t.Window, "Matrix"));
+        t.Controller.ToggleThread(parent);
+        t.Window.UpdateLayout();
+        Assert.NotNull(t.Window.DragEntryOf(child));
+
+        ThreadDrag(t, child, InLine(t, other, 0.9));
+
+        var freed = t.Tasks.Board.Tasks.Single(x => x.Id == child);
+        Assert.True(freed.ParentId.HasNoValue);
+        Assert.Equal(Quadrant.I, freed.Quadrant);
+    });
+
+    // Dropped on the middle of another task's line it goes under that task instead.
+    [Fact]
+    public void A_folded_subtask_dragged_from_the_thread_onto_another_task_goes_under_it() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var (_, child, other) = FoldedSubtaskInOpenThread(t);
+
+        ThreadDrag(t, child, InLine(t, other, 0.5));
+
+        Assert.Equal(other, t.Tasks.Board.Tasks.Single(x => x.Id == child).ParentId.Value);
+    });
+
+    // A parent with one subtask folded into its open thread ("Subtasks" unticked), and another task to drop beside.
+    static (Guid Parent, Guid Child, Guid Other) FoldedSubtaskInOpenThread(Board t)
+    {
+        var other = t.Tasks.AddNote("Book the venue", t.Gepha).Value.Id;
+        var parent = t.Tasks.AddNote("Ship the release", t.Gepha).Value.Id;
+        var child = t.Tasks.AddNote("Write the notes", t.Gepha, Quadrant.IV, parent).Value.Id;
+        t.Controller.Show();
+        Click(ButtonNamed(t.Window, "Subtasks"));
+        t.Controller.ToggleThread(parent);
+        t.Window.UpdateLayout();
+        Assert.DoesNotContain(child, t.Window.Keys);
+        Assert.NotNull(t.Window.DragEntryOf(child));
+        return (parent, child, other);
+    }
+
+    // A drag that starts on a subtask's entry in its parent's thread and is released at `to`.
+    static void ThreadDrag(Board t, Guid subtask, Point to)
+    {
+        var entry = t.Window.DragEntryOf(subtask)!;
+        var start = entry.TranslatePoint(new Point(5, entry.ActualHeight / 2), t.Window.DragSurface);
+        t.Window.DragPress(subtask, start, fromThread: true);
+        t.Window.DragMove(new Point(start.X, start.Y + (to.Y > start.Y ? 8 : -8)));
+        Assert.True(t.Window.Dragging); // the press armed: a test of "nothing moved" must not pass on a dead press
+        t.Window.DragMove(to);
+        t.Window.DragRelease();
+        t.Window.Dispatcher.Invoke(() => { }, System.Windows.Threading.DispatcherPriority.Background);
+        t.Window.UpdateLayout();
+    }
+
     // Task b0526e18 (Petre: "i can't interact with the subtask. i should be able to"): with "Subtasks" unticked the
     // subtask is folded into its parent, so the thread's subtask link used to pick a line that was not drawn and nothing
     // happened. Task 0eb943d8 then found the fix's answer, a line of its own under the parent's whole thread, wrong

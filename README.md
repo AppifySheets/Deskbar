@@ -490,7 +490,7 @@ open it right there, inside the parent's thread. Going the other way, an open su
 parent's title, which you can click to show the parent, and "Open parent" on a subtask's menu (in the panel or on the
 bar) does the same; a subtask's own window has a Parent button that opens the parent's window. Untick "Subtasks" at the top of the tasks panel to fold them into their parent's
 line, in the panel and on the bar, which keeps the count; a subtask waiting on you stays in view. Drag a task onto the middle of another to put it
-under that task; drag a subtask out of its parent's block to make it a plain task again. A parent closes last: while
+under that task; drag a subtask out of its parent's block to make it a plain task again. In the tasks panel that works from the parent's open thread too: with Subtasks unticked a subtask is only listed there, and its entry drags out the same way. A parent closes last: while
 any of its subtasks is open its tick will not close it, and its tooltip says how many are left.
 
 A long task reads better in a window of its own. Pick "Open in window" on a task's menu (in the tasks panel or on
