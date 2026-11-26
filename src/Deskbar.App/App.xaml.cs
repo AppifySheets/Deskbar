@@ -1896,6 +1896,8 @@ public partial class App : Application
                 // Subtasks: the family text a session reads names each session's transcript file, found the way the
                 // keeper finds it (worktree project folders included). Read when a command arrives, like the actions.
                 Transcript = session => claudeSessions?.TranscriptOf(session) ?? Maybe<string>.None,
+                // `task repeat` refuses a folder that is not there (recurring tasks spec, task 0b78269e).
+                FolderExists = Directory.Exists,
             },
             // `claude-wait`, the comment waiter registering, and SessionEnd forgetting a session's inbox (a comment wakes
             // its session).

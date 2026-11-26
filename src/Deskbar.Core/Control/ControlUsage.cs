@@ -197,6 +197,15 @@ public static class ControlUsage
                 + "      itself, or sooner when a session asks or finishes or its status changes; task list shows snoozedUntil"),
             new("task", "wake <id>",
                 "bring a snoozed task back now, as \"Wake now\" does"),
+            // Recurring tasks (docs/superpowers/specs/2026-11-26-recurring-tasks-design.md, task 0b78269e).
+            new("task", "repeat <id> <schedule>|off [--model <model>] [--folder <path>]",
+                "make a task recurring: a background Claude session starts on it at each time, in a folder (the task's\n"
+                + "      only known one, or --folder; a worktree is kept as its repo) on a model (Sonnet unless --model). A\n"
+                + "      schedule is every <n>m or every <n>h (15 minutes to 24 hours, optionally then a window such as\n"
+                + "      09:00-19:00), daily HH:MM, weekdays HH:MM or weekly <day> HH:MM, in this machine's time. A time\n"
+                + "      that comes while a session of the task is still on it is skipped, not queued. off ends it. A session\n"
+                + "      sets its own with task repeat <schedule>|off [--model <model>] [--folder <path>] --session <id>\n"
+                + "      (the folder defaults to its repo); task list shows repeat and nextRun"),
             // Task 3dd07539: the twin of a line's Reevaluate button and menu item (TaskService.Reevaluate).
             new("task", "reevaluate <id>",
                 "ask the task's Claude session to check where the task really stands and fix what is stale: settle a\n"

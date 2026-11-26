@@ -37,6 +37,7 @@ namespace Deskbar.Core.Control;
 //   task link <id>                    (task 5016d533: a markdown link that opens the task in Deskbar, "Copy link")
 //   task start <id> [--folder <path>] [--model <model>]
 //   task open-session <id> <session>
+//   task repeat <id> <schedule>|off [--model <model>] [--folder <path>]   (recurring tasks, task 0b78269e; TaskRepeatReply)
 //
 // `go`, `start` and `open-session` (Task 9 of docs/superpowers/specs/2026-11-23-tasks-open-claude-sessions-design.md,
 // "Where the clicks are") are the twins of a line's double-click, "Start Claude on this" and the thread's Open. They
@@ -214,6 +215,11 @@ public sealed partial class RemoteControl
             ["start", var id, "--folder", var folder, "--model", var model] => WithSessions(c => TaskStart(service, c, id, Folder(folder) ?? folder, model)),
             ["start", var id, "--model", var model, "--folder", var folder] => WithSessions(c => TaskStart(service, c, id, Folder(folder) ?? folder, model)),
             ["open-session", var id, var sessionId] => WithSessions(c => TaskOpenSession(service, c, id, sessionId)),
+            // Recurring tasks (docs/superpowers/specs/2026-11-26-recurring-tasks-design.md, task 0b78269e): the id form, for
+            // Petre and the manager (which may set a repeat but still not finish anything). The session's own form is in
+            // SessionTask. Goes through WithSessions because the folder candidates and FolderExists are the app's.
+            ["repeat", var id, .. var more] => WithSessions(c => TaskRepeatReply(service, service.Board.Find(id), more,
+                t => c.Folders(t) is [var only] ? Result.Success(only) : Result.Failure<string>(FolderRefusal(c.Folders(t))), c.FolderExists)),
             // The bar's Manager button's twin (manager session design, "The button"): the App's one Manager command,
             // which answers at once; the window comes once today's manager is attached, started or resumed.
             ["manager"] => WithSessions(c => Reply(c.Manager(), () => new { opening = true })),
@@ -425,6 +431,11 @@ public sealed partial class RemoteControl
         duplicateOf = tasks?.Board.DuplicateTarget(task).Map(o => (object?)new { id = o.Id, title = o.Title }).GetValueOrDefault(),
         duplicates = tasks?.Board.DuplicatesOf(task.Id).Select(t => t.Id).ToArray() ?? [],
         related = tasks?.Board.RelatedOf(task.Id).Select(t => t.Id).ToArray() ?? [],
+        // Recurring tasks (2026-11-26-recurring-tasks-design.md, task 0b78269e): the repeat as {schedule, label, model,
+        // folder} (schedule is the text `task repeat` takes back, label the words the panel shows) or null, and when the
+        // next run is due or null; neither is there for a task that does not repeat.
+        repeat = task.Repeat.Match(r => (object?)new { schedule = r.Schedule.Text, label = r.Schedule.Label, model = r.Model, folder = r.Folder }, () => null),
+        nextRun = task.NextRun.Match(n => (DateTimeOffset?)n, () => null),
     };
 
     // Markdown as a session reads it: image paths absolute, through the task service (as stored without one).
@@ -597,6 +608,29 @@ public sealed partial class RemoteControl
                 .Map(() => service.Board.Tasks.First(t => t.Id == task.Id)))
             .Match(task => Success(Describe(task)), ControlReply.Fail);
 
+    // `task repeat` in both forms (recurring tasks spec, task 0b78269e): the id form above and the session's own form in
+    // RemoteControl.ClaudeHook.cs. The words are `<schedule>|off [--model <m>] [--folder <p>]` (TaskRepeats.ParseRequest),
+    // and EVERYTHING is parsed and looked up before the service is called, so a refusal changes nothing: the schedule,
+    // the model's name, the task, the folder and that it exists. The folder is stored as its repo (ClaudeStart.RepoOf),
+    // because a worktree is deleted after its merge and the repeat outlives it; the model defaults to
+    // TaskRepeat.DefaultModel. `defaultFolder` answers when --folder is not given (the id form: the task's one
+    // candidate; the session form: the repo it was started in). `off` clears the repeat (TaskService.ClearRepeat decides
+    // what that means between runs). The reply is the task as `list` prints it, with `repeat` and `nextRun`.
+    ControlReply TaskRepeatReply(TaskService service, Result<TaskItem> found, string[] words,
+        Func<TaskItem, Result<string>> defaultFolder, Func<string, bool> folderExists) =>
+        TaskRepeats.ParseRequest(words)
+            .Bind(request => found.Bind(task => ApplyRepeat(service, task, request, defaultFolder, folderExists).Map(() => task.Id)))
+            .Match(id => Success(Describe(service.Board.Tasks.First(t => t.Id == id))), ControlReply.Fail);
+
+    // The one service call of `task repeat`, after everything else is known to be fine (see TaskRepeatReply).
+    Result ApplyRepeat(TaskService service, TaskItem task, RepeatRequest request, Func<TaskItem, Result<string>> defaultFolder, Func<string, bool> folderExists) =>
+        request is RepeatRequest.Set set
+            ? set.Folder.Match(f => Result.Success(Folder(f) ?? f), () => defaultFolder(task))
+                .Map(ClaudeStart.RepoOf)
+                .Ensure(folderExists, "That folder does not exist; pass --folder <path> with a folder that does")
+                .Bind(folder => service.SetRepeat(task.Id, new TaskRepeat(set.Schedule, set.Model.GetValueOrDefault(TaskRepeat.DefaultModel), folder)))
+            : service.ClearRepeat(task.Id);
+
     /// <summary>Why `task open` refuses in a copy of Deskbar with no task windows (no openTaskWindow handed in).</summary>
     public const string TaskWindowUnavailable = "Task windows are not available in this copy of Deskbar";
 
@@ -674,4 +708,12 @@ public sealed record TaskSessionCommands(
     /// default is <see cref="Start"/> itself, so a copy that does not set it still starts the session.
     /// </summary>
     public Func<TaskItem, string, Maybe<string>, Result>? StartQuietly { get; init; }
+
+    /// <summary>
+    /// Whether a folder exists on this machine, for `task repeat` (recurring tasks spec, task 0b78269e): a repeat
+    /// starts a session there every time it fires, so a folder that is not there is refused when the repeat is set,
+    /// not discovered by a run that fails each hour. The App hands in <c>Directory.Exists</c>. An init property for the
+    /// same reason as Transcript; the default accepts every folder, so a copy or a test that sets none is not blocked.
+    /// </summary>
+    public Func<string, bool> FolderExists { get; init; } = _ => true;
 }

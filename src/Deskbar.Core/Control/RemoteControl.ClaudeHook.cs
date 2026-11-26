@@ -387,7 +387,9 @@ public sealed partial class RemoteControl
     //   task subtask <title> [--no-start] [--model <model>] --session <sid>
     //                                           a subtask of the session's own task (a sibling when that is a subtask), with
     //                                           a Claude session started on it at once unless --no-start (task fa056b2f)
-    //   task family --session <sid>             the family and linked tasks of the session's own task (subtasks spec)
+    //   task repeat <schedule>|off [--model <m>] [--folder <p>] --session <sid>
+    //                                           the session's own task repeats (recurring tasks spec, task 0b78269e)
+    //   task family --session <sid>           the family and linked tasks of the session's own task (subtasks spec)
 //   task pr <url> --session <sid>           a pull request the session opened some other way than `gh pr create`, on its
 //                                           own task (task e7aa49b1; the hook records `gh pr create` by itself)
     //   task deployed <note> --session <sid>    the session's own task's change was seen running where its app is deployed,
@@ -430,6 +432,12 @@ public sealed partial class RemoteControl
             // A session splits its work: a subtask of its own task, or a sibling when its task is already a subtask, and
             // a Claude session starts on it at once unless --no-start says not to (SessionSubtask, task fa056b2f).
             ["subtask", .. var rest] => SessionSubtask(service, session, folder, rest),
+            // A session makes its own task recurring (recurring tasks spec, task 0b78269e): `task repeat <schedule>|off
+            // [--model <m>] [--folder <p>]`. Own task only, there is no id to point at another. The folder defaults to the
+            // REPO of the folder the session was started in (CallerFolder, as `subtask` reads it), else it is refused.
+            ["repeat", .. var rest] => TaskRepeatReply(service, Own(), rest,
+                t => CallerFolder(service, session, folder) is { } here ? Result.Success(here) : Result.Failure<string>("No folder is known for this session; pass --folder <path>"),
+                taskSessions?.FolderExists ?? (_ => true)),
             ["new", var title] => Changed(service.Create(title, Here(), service.NewSession(session, folder ?? ""))),
             ["status-line", var text] => Changed(Own().Bind(t => service.SetStatusLine(t.Id, text).Map(() => t))),
             ["ask", var question] => Changed(Own().Bind(t => service.Ask(t.Id, question, session).Map(() => t))

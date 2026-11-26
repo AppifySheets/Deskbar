@@ -77,6 +77,8 @@ public static class TaskOverview
                 task.StatusLine,
                 task.Question.Map(q => $"asks: {Cut(OneLine(q), NoteLimit)}").GetValueOrDefault(""),
                 $"claude: {SessionsOf(task, busy)}",
+                // Recurring tasks (task 0b78269e): the manager sees which tasks run themselves, in the label the panel uses.
+                task.Repeat.Map(r => $"repeats {r.Schedule.Label}").GetValueOrDefault(""),
             }
             .Select((p, i) => i == 1 ? Cut(OneLine(p), NoteLimit) : p)
             .Where(p => !string.IsNullOrWhiteSpace(p));

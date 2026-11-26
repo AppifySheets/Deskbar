@@ -461,6 +461,40 @@ public class RemoteControlClaudeHookTests
 
     TaskItem Titled(string title) => tasks.Board.Tasks.Single(t => t.Title == title);
 
+    // Recurring tasks (docs/superpowers/specs/2026-11-26-recurring-tasks-design.md, task 0b78269e): a session sets a repeat
+    // on its OWN task, in the repo of the folder it was started in (a worktree is stored as its repo).
+    [Fact]
+    public void A_session_sets_a_repeat_on_its_own_task_in_its_repo()
+    {
+        var manager = Started();
+        Hooked(manager, "SessionStart");
+        Said(manager, "s1", Repo + @"\.claude\worktrees\x", "new", "Check the inbox");
+
+        var reply = Said(manager, "s1", Repo + @"\.claude\worktrees\x", "repeat", "daily", "09:00", "--model", "haiku");
+
+        Assert.Equal(ControlReply.Ok, reply.ExitCode);
+        var repeat = Titled("Check the inbox").Repeat.Value;
+        Assert.Equal("daily 09:00", repeat.Schedule.Text);
+        Assert.Equal("haiku", repeat.Model);
+        Assert.Equal(Repo, repeat.Folder);
+
+        Assert.Equal(ControlReply.Ok, Said(manager, "s1", Repo, "repeat", "off").ExitCode);
+        Assert.True(Titled("Check the inbox").Repeat.HasNoValue);
+    }
+
+    [Fact]
+    public void A_session_without_a_task_is_refused()
+    {
+        var manager = Started();
+        var before = tasks.Board;
+
+        var reply = Said(manager, "nobody", Repo, "repeat", "daily", "09:00");
+
+        Assert.Equal(ControlReply.Failed, reply.ExitCode);
+        Assert.Contains("has no open task", reply.Output);
+        Assert.Same(before, tasks.Board);
+    }
+
     // The spec's "What a session is offered": the open tasks on the session's own workspace, notes included, plus the
     // open Claude tasks on no workspace. Petre's notes on no workspace (errands) and other workspaces' tasks are not.
     [Fact]

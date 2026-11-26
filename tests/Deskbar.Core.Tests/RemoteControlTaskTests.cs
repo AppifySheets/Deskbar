@@ -374,6 +374,7 @@ public class RemoteControlTaskTests
     [InlineData("ask")]
     [InlineData("answered")]
     [InlineData("comment")]
+    [InlineData("repeat")]
     public void Manager_may_use_no_other_session_form(string form)
     {
         var manager = Started();
@@ -1192,6 +1193,7 @@ public class RemoteControlTaskTests
              "goal <id> <goal-id>|none",
              // Task 6da8d7eb: the snooze button's twins.
              "snooze <id> 1h|3h|tomorrow|monday|<n>m|<n>h|<n>d", "wake <id>",
+             "repeat <id> <schedule>|off [--model <model>] [--folder <path>]",
              // Task 3dd07539: the Reevaluate button's twin.
              "reevaluate <id>",
              // Task e7aa49b1: a pull request on a task by hand.
@@ -1444,4 +1446,146 @@ public class RemoteControlTaskTests
         Assert.Equal(ControlReply.Failed, Run(manager, "task", "stats", "--days", "0").ExitCode);
         Assert.Equal(ControlReply.Failed, Run(manager, "task", "stats", "--days", "many").ExitCode);
     }
+
+    // --- task repeat (recurring tasks, docs/superpowers/specs/2026-11-26-recurring-tasks-design.md, task 0b78269e) ---
+    //
+    // `task repeat <id> <schedule>|off [--model <m>] [--folder <p>]`. The folder must exist (FolderExists), the model is a
+    // name `claude` cannot misread, and a refusal changes nothing, so the board is compared by reference.
+
+    const string RepoDir = @"C:\repos\TaskSpaces";
+
+    // A control with the app's folder lookups stood in: the candidates the task offers and the folders that exist.
+    ControlReply RepeatRun(WorkspaceManager manager, string[] candidates, Func<string, bool> exists, params string[] args) =>
+        new RemoteControl(manager, tasks: tasks, goals: goals, taskSessions: new TaskSessionCommands(_ => Result.Success(), _ => candidates, (_, _, _) => Result.Success(), (_, _) => Result.Success())
+        {
+            ManagerFolder = ManagerDir,
+            FolderExists = exists,
+        }).Execute([.. args, "--from", RepoDir]);
+
+    ControlReply Repeated(WorkspaceManager manager, params string[] args) => RepeatRun(manager, [], _ => true, args);
+
+    [Fact]
+    public void Repeat_sets_the_schedule_the_default_model_and_the_folder()
+    {
+        var manager = Started();
+        var id = Prefix(Added(manager));
+
+        var reply = Repeated(manager, "task", "repeat", id, "every", "1h", "09:00-19:00", "--folder", RepoDir);
+
+        Assert.Equal(ControlReply.Ok, reply.ExitCode);
+        var repeat = Json(reply).GetProperty("repeat");
+        Assert.Equal("every 1h 09:00-19:00", repeat.GetProperty("schedule").GetString());
+        Assert.Equal("sonnet", repeat.GetProperty("model").GetString());
+        Assert.Equal(RepoDir, repeat.GetProperty("folder").GetString());
+        Assert.NotEqual(JsonValueKind.Null, Json(reply).GetProperty("nextRun").ValueKind);
+        Assert.True(Only.Repeat.HasValue);
+    }
+
+    [Fact]
+    public void Repeat_takes_a_model_and_stores_a_worktree_as_its_repo()
+    {
+        var manager = Started();
+        var id = Prefix(Added(manager));
+
+        var reply = Repeated(manager, "task", "repeat", id, "daily", "09:00", "--model", "haiku", "--folder", RepoDir + @"\.claude\worktrees\x");
+
+        Assert.Equal(ControlReply.Ok, reply.ExitCode);
+        Assert.Equal("haiku", Json(reply).GetProperty("repeat").GetProperty("model").GetString());
+        Assert.Equal(RepoDir, Json(reply).GetProperty("repeat").GetProperty("folder").GetString());
+    }
+
+    [Fact]
+    public void Repeat_without_a_folder_uses_the_only_candidate_and_refuses_several()
+    {
+        var manager = Started();
+        var id = Prefix(Added(manager));
+
+        var several = RepeatRun(manager, [RepoDir, @"C:\repos\Other"], _ => true, "task", "repeat", id, "daily", "09:00");
+        Assert.Equal(ControlReply.Failed, several.ExitCode);
+        Assert.Contains("Several folders", several.Output);
+        Assert.True(Only.Repeat.HasNoValue);
+
+        var one = RepeatRun(manager, [RepoDir], _ => true, "task", "repeat", id, "daily", "09:00");
+        Assert.Equal(ControlReply.Ok, one.ExitCode);
+        Assert.Equal(RepoDir, Json(one).GetProperty("repeat").GetProperty("folder").GetString());
+    }
+
+    [Theory]
+    [InlineData("every", "5m", "--folder", RepoDir)]
+    [InlineData("every", "1h", "--model", "--bad", "--folder", RepoDir)]
+    [InlineData("every", "1h", "--folder", @"C:\gone")]
+    [InlineData("never")]
+    public void Repeat_refuses_a_bad_schedule_a_bad_model_and_a_missing_folder_and_changes_nothing(params string[] words)
+    {
+        var manager = Started();
+        var id = Prefix(Added(manager));
+        var before = tasks.Board;
+
+        var reply = RepeatRun(manager, [], folder => folder == RepoDir, ["task", "repeat", id, .. words]);
+
+        AssertRefusedAndUnchanged(reply, before);
+    }
+
+    [Fact]
+    public void Repeat_off_ends_it()
+    {
+        var manager = Started();
+        var id = Prefix(Added(manager));
+        Repeated(manager, "task", "repeat", id, "daily", "09:00", "--folder", RepoDir);
+        Assert.True(Only.Repeat.HasValue);
+
+        var reply = Repeated(manager, "task", "repeat", id, "off");
+
+        Assert.Equal(ControlReply.Ok, reply.ExitCode);
+        Assert.Equal(JsonValueKind.Null, Json(reply).GetProperty("repeat").ValueKind);
+        Assert.True(Only.Repeat.HasNoValue);
+    }
+
+    [Fact]
+    public void List_shows_repeat_and_next_run_and_null_without_them()
+    {
+        var manager = Started();
+        Added(manager, "Plain");
+        var recurring = Prefix(Added(manager, "Recurring"));
+        Repeated(manager, "task", "repeat", recurring, "daily", "09:00", "--folder", RepoDir);
+
+        var list = Json(Run(manager, "task", "list")).EnumerateArray().ToArray();
+
+        var withRepeat = list.Single(t => t.GetProperty("title").GetString() == "Recurring");
+        Assert.Equal("daily 09:00", withRepeat.GetProperty("repeat").GetProperty("schedule").GetString());
+        Assert.Equal("every day at 09:00", withRepeat.GetProperty("repeat").GetProperty("label").GetString());
+        Assert.NotEqual(JsonValueKind.Null, withRepeat.GetProperty("nextRun").ValueKind);
+        var without = list.Single(t => t.GetProperty("title").GetString() == "Plain");
+        Assert.Equal(JsonValueKind.Null, without.GetProperty("repeat").ValueKind);
+        Assert.Equal(JsonValueKind.Null, without.GetProperty("nextRun").ValueKind);
+    }
+
+    [Fact]
+    public void Manager_may_set_a_repeat_by_id()
+    {
+        var manager = Started();
+        var id = Prefix(Added(manager));
+
+        var reply = RunAsManager(manager, "task", "repeat", id, "daily", "09:00", "--folder", RepoDir);
+
+        Assert.Equal(ControlReply.Ok, reply.ExitCode);
+        Assert.True(Only.Repeat.HasValue);
+    }
+
+    [Fact]
+    public void Overview_names_the_repeat()
+    {
+        var manager = Started();
+        var id = Prefix(Added(manager));
+        Repeated(manager, "task", "repeat", id, "daily", "09:00", "--folder", RepoDir);
+        // Between runs the task is snoozed and the overview counts it; a run in progress is a line, naming the repeat.
+        Assert.Equal(ControlReply.Ok, Run(manager, "task", "status", id, "in-progress").ExitCode);
+        Assert.True(Only.Repeat.HasValue);
+
+        Assert.Contains("repeats every day at 09:00", Run(manager, "task", "overview").Output);
+    }
+
+    [Fact]
+    public void Usage_lists_task_repeat() =>
+        Assert.Contains(ControlUsage.All, c => c.Verb == "task" && c.Arguments.StartsWith("repeat <id>"));
 }
