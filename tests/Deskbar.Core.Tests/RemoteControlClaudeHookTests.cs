@@ -515,16 +515,18 @@ public class RemoteControlClaudeHookTests
         Said(manager, "s1", Repo, "ask", "Merge?");
         Said(manager, "s1", Repo, "comment", "detail of the question");
         Said(manager, "s1", Repo, "comment", "second");
-        var detail = Titled("Tasks board").Comments[0].Id.ToString();
-        var second = Titled("Tasks board").Comments[1].Id.ToString();
+        // The ask put the question into the thread first (task 968c2216), so the session's two comments come after it.
+        Assert.True(Titled("Tasks board").Comments[0].Asks);
+        var detail = Titled("Tasks board").Comments[1].Id.ToString();
+        var second = Titled("Tasks board").Comments[2].Id.ToString();
 
         // Another session cannot settle it, and nothing changes.
         var refused = Said(manager, "s2", Repo, "comment-settle", detail);
         Assert.Equal(ControlReply.Failed, refused.ExitCode);
-        Assert.True(Titled("Tasks board").Comments[0].Settled.HasNoValue);
+        Assert.True(Titled("Tasks board").Comments[1].Settled.HasNoValue);
 
         Assert.Equal(ControlReply.Ok, Said(manager, "s1", Repo, "comment-settle", second).ExitCode);
-        Assert.True(Titled("Tasks board").Comments[1].Settled.HasValue);
+        Assert.True(Titled("Tasks board").Comments[2].Settled.HasValue);
 
         Said(manager, "s1", Repo, "answered");
         Assert.All(Titled("Tasks board").Comments, c => Assert.True(c.Settled.HasValue));

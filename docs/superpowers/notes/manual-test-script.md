@@ -1641,3 +1641,18 @@ QT2. Type a word and press Enter at once, before the results move: Enter takes t
 QT3. Leave the box open with text in it for a few seconds, then type: no letter waits about a second before showing.
 QT4. A search that took 100 ms or more writes a `quick find:` line to the trace naming the catalogue, ranking and draw
      times and how long it waited after the key.
+
+## The question is in the chat
+
+(Task 968c2216.) The tasks panel open on the List, and a Claude session on a task of its own.
+
+QC1. Have the session run `task ask`: the task waits on you with the question under its title, in orange, and its
+     comment count goes up by one.
+QC2. Click the line to open its thread: the question leaves the line, and the thread's last message is the session's,
+     the question, in orange. Click the line again to fold it: the question is back under the title.
+QC3. Open the task in its own window (Open in window): the thread holds the question in orange, and the box at the top
+     has no question in it (a task with no live session still says "no live session" there).
+QC4. Have the session ask the same question again: no second copy in the thread. Ask a different one: a new message,
+     the new question orange, the old one in the plain text colour.
+QC5. Reply, then have the session run `task answered`: the question folds away under "N settled comments" with the
+     session's other comments since it asked.

@@ -110,7 +110,10 @@ public sealed class TaskService(ITaskStore store, Func<DateTimeOffset> now, Func
         ApplyIfChanged(Board.SetStatusLine(id, text, now()))
             .Tap(() => ImmutableInterlocked.Update(ref statusLinesHeard, heard => heard.SetItem(id, now())));
 
-    public Result Ask(Guid id, string question) => Apply(Board.Ask(id, question, now()));
+    // `by`: who asked, a session's id or TaskComment.DeskbarAuthor; named, the question goes into the thread too (task
+    // 968c2216, TaskBoard.Ask). Not announced on Commented: a question is not a comment of Petre's that wakes a session.
+    public Result Ask(Guid id, string question, Maybe<string> by = default) =>
+        Apply(Board.Ask(id, question, now(), by.Map(asker => (asker, makeId()))));
 
     // A pull request the task's session opened (task e7aa49b1); one it already lists saves and pulses nothing.
     public Result AddPullRequest(Guid id, PullRequestLink link) => ApplyIfChanged(Board.AddPullRequest(id, link, now()));

@@ -1727,7 +1727,12 @@ public partial class TasksWindow : Window
         // THE DETAIL: the question while the task waits on Petre, else its status line. Cut to one line on a closed line,
         // wrapped on an open one, as the description is: a session's question was readable nowhere in full (Petre,
         // 2026-11-24, of a question cut at "Add an "O…" with its thread open: "where's the question?"). Tagged for tests.
-        if (row.Detail.Length > 0) below.Children.Add(row.Expanded ? Capped(DetailText(row), caps) : DetailText(row));
+        // THE QUESTION GOES TO THE CHAT WHILE IT IS OPEN (task 968c2216, Petre: "when asking a question, let that also be
+        // present in the chat. when i open chat, hide the question from the main bar, show it when i collapse it"). The
+        // ask writes the question into the thread too (TaskBoard.Ask), so an open line whose thread shows that comment
+        // leaves the question off and keeps the rest of its detail ("no live session"); folding the line brings it back.
+        var detail = DetailShown(row);
+        if (detail.Length > 0) below.Children.Add(row.Expanded ? Capped(DetailText(row, detail), caps) : DetailText(row, detail));
         // "Show all in window" under what was cut (task e91f8aa5). Only while something is: a short question and
         // description show whole, as before, and need no link.
         if (caps.Count > 0 && Actions?.OpenWindow is { } openWindow) below.Children.Add(ShowAllLink(row.Id, caps, openWindow));
@@ -1810,21 +1815,28 @@ public partial class TasksWindow : Window
     // it (a Button) never presses and does not pick the task, and the click opens the address in the default browser.
     // A press anywhere else on the text still falls through to the line as before. Web addresses and local files become
     // links (the MarkdownBlocks header): a session's text never runs a program from a click, a file link included.
-    TextBlock DetailText(TaskRowView row)
+    // The detail a line shows (task 968c2216): without the question while the line is open and its thread shows the
+    // question's comment, which can be folded behind "N earlier comments" and then is not on show, so the line keeps it.
+    string DetailShown(TaskRowView row) =>
+        row is { Expanded: true, DetailInThread: { } inThread } && ThreadComments(row).Shown.Any(c => c.AsksNow) ? inThread : row.Detail;
+
+    TextBlock DetailText(TaskRowView row, string detail)
     {
+        // Orange while it carries the question; what is left once the question moved to the chat is plain detail.
+        var asks = row.Status == TaskStatus.WaitingOnYou && detail == row.Detail;
         var text = new TextBlock
         {
             Tag = DetailTag,
             FontSize = 11,
-            Foreground = row.Status == TaskStatus.WaitingOnYou ? Orange : DimInk,
-            FontWeight = row.Status == TaskStatus.WaitingOnYou ? FontWeights.SemiBold : FontWeights.Normal,
+            Foreground = asks ? Orange : DimInk,
+            FontWeight = asks ? FontWeights.SemiBold : FontWeights.Normal,
             TextTrimming = row.Expanded ? TextTrimming.None : TextTrimming.CharacterEllipsis,
             TextWrapping = row.Expanded ? TextWrapping.Wrap : TextWrapping.NoWrap,
         };
         // Plain text stays the Text it always was: a TextBlock filled with inlines reports an empty Text (measured: the
         // window tests reading a status line through it saw ""), so inlines are used only when there is markdown to draw.
-        var inlines = MarkdownBlocks.InlinesOf(row.Detail, LinkOpener(row.Id));
-        if (inlines.All(inline => inline is Run { Tag: null } run && run.Text.Length > 0)) text.Text = row.Detail;
+        var inlines = MarkdownBlocks.InlinesOf(detail, LinkOpener(row.Id));
+        if (inlines.All(inline => inline is Run { Tag: null } run && run.Text.Length > 0)) text.Text = detail;
         else inlines.ToList().ForEach(text.Inlines.Add);
         return text;
     }
@@ -2444,7 +2456,8 @@ public partial class TasksWindow : Window
         actions.Add(Small(new TextBlock { Text = comment.Settled ? "Unsettle" : "Settle", Foreground = DimInk, FontSize = 10 },
             comment.Settled ? "Unsettle comment" : "Settle comment",
             () => Actions?.SettleComment(comment.Id, !comment.Settled), comment.Settled ? "Show it with the thread again" : "Fold this comment away, keeping it"));
-        var isEvent = comment.Who == CommentAuthor.Deskbar;
+        // A question Deskbar asked is a bubble like a session's, not an event line (task 968c2216).
+        var isEvent = comment.Who == CommentAuthor.Deskbar && !comment.Asks;
         // Images in tasks: the body renders the comment's text alone; its pictures are a row of their own after it
         // (TaskImageRow), outside the clipped box, so folding to three lines cuts text, never a picture.
         var split = TaskImages.Split(comment.Markdown);
@@ -2452,7 +2465,9 @@ public partial class TasksWindow : Window
         var timeInBody = isEvent && split.Images.Count == 0 && ChatThread.TimeFitsInline(split.Text);
         var document = MarkdownBlocks.Render(timeInBody ? $"{split.Text.Trim()} · {comment.Time}" : split.Text, LinkOpener(taskId));
         document.FontSize = isEvent ? 10.5 : 11.5;
-        document.Foreground = isEvent ? HeaderInk : Ink;
+        // The question waiting on Petre (task 968c2216) reads as it did on the line: orange, semibold.
+        document.Foreground = isEvent ? HeaderInk : comment.AsksNow ? Orange : Ink;
+        if (comment.AsksNow) document.FontWeight = FontWeights.SemiBold;
         if (isEvent) document.TextAlignment = TextAlignment.Center;
         var body = new RichTextBox
         {

@@ -728,10 +728,13 @@ public partial class FloatingBar
     // pull request it asks to have merged. The tasks window keeps it, and draws the link as one to click
     // (TasksWindow.DetailText); the bar's line is a single click target that picks its task, so there it is the link's
     // words alone (TaskViews.PlainInline), never "[Deskbar #490](https://github.com/...)" written out.
-    internal static string DetailOf(TaskItem task, bool withDescription = false, bool plain = false) =>
+    //
+    // `withQuestion` false (the tasks window's open line whose thread shows the question, task 968c2216): the question's
+    // place is left empty rather than given to the status line, so opening the chat only takes the question away.
+    internal static string DetailOf(TaskItem task, bool withDescription = false, bool plain = false, bool withQuestion = true) =>
         string.Join(TaskDetailSeparator, new[]
         {
-            task.Status == TaskStatus.WaitingOnYou && task.Question.HasValue ? Shown(task.Question.Value, plain)
+            task.Status == TaskStatus.WaitingOnYou && task.Question.HasValue ? (withQuestion ? Shown(task.Question.Value, plain) : "")
                 : task.StatusLine.Length > 0 ? Shown(task.StatusLine, plain)
                 : withDescription ? TaskViews.PlainFirstLine(task.Description) : "",
             task.IsClaudes && !task.HasLiveSession ? NoLiveSession : "",

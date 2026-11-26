@@ -146,6 +146,16 @@ public sealed record TaskComment(Guid Id, Maybe<string> SessionId, DateTimeOffse
     /// settled. `task answered` settles the session's comments since its ask; a session settles one of its own, Petre any.
     /// </summary>
     public Maybe<DateTimeOffset> Settled { get; init; }
+
+    /// <summary>
+    /// This comment is a question asked of Petre (task 968c2216, Petre: "when asking a question, let that also be present
+    /// in the chat"). TaskBoard.Ask writes the question into the thread as well as onto the line, so the thread reads as
+    /// a conversation: the question, then his reply under it. Its author is whoever asked (a session, or Deskbar for its
+    /// own asks). The tasks panel draws it in the question's orange and, while the line is open and the thread shows it,
+    /// leaves the question off the line. An init property like <see cref="Settled"/>: a comment saved before it existed
+    /// is not a question.
+    /// </summary>
+    public bool Asks { get; init; }
 }
 
 /// <summary>

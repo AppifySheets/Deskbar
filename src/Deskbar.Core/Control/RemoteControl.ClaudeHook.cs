@@ -137,7 +137,7 @@ public sealed partial class RemoteControl
         if (hook.ToolName != DialogQuestion.Tool || hook.DialogQuestion.HasNoValue) return Quiet;
         service.Board.TaskOf(hook.SessionId)
             .Where(t => t.Status is not (TaskStatus.WaitingOnYou or TaskStatus.Done))
-            .Tap(t => service.Ask(t.Id, hook.DialogQuestion.Value));
+            .Tap(t => service.Ask(t.Id, hook.DialogQuestion.Value, hook.SessionId));
         Attention(folder);
         return Quiet;
     }
@@ -404,7 +404,7 @@ public sealed partial class RemoteControl
             ["subtask", .. var rest] => SessionSubtask(service, session, folder, rest),
             ["new", var title] => Changed(service.Create(title, Here(), service.NewSession(session, folder ?? ""))),
             ["status-line", var text] => Changed(Own().Bind(t => service.SetStatusLine(t.Id, text).Map(() => t))),
-            ["ask", var question] => Changed(Own().Bind(t => service.Ask(t.Id, question).Map(() => t))
+            ["ask", var question] => Changed(Own().Bind(t => service.Ask(t.Id, question, session).Map(() => t))
                 .Tap(_ => Attention(folder))),
             ["done"] => Changed(Own().Bind(t => service.MarkDone(t.Id).Map(() => t))),
             // Ruling 49: the session says its question is settled (the user's reply answered it, or the session settled it

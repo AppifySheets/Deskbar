@@ -1435,17 +1435,13 @@ public sealed class TasksBoard : IDisposable
     // `inPlace`: whether a subtask whose thread is open carries its own row for the parent's thread to draw it in place.
     // Only the parent's own row does: the subtask's row is built with it off, so a hand-edited file where a task is its
     // own parent, or two tasks are each other's, cannot recurse for ever (review of task 0eb943d8).
-    TaskRowView RowOf(TaskItem task, bool open, bool inPlace = true) => new(
+    TaskRowView RowOf(TaskItem task, bool open, bool inPlace = true) => RowOf(task, open, inPlace, LiveQuestionComment(task));
+
+    // `liveQuestion`: the comment holding the question the task waits on now (LiveQuestionComment), worked out once per row.
+    TaskRowView RowOf(TaskItem task, bool open, bool inPlace, Maybe<Guid> liveQuestion) => new(
         task.Id,
         task.Title,
-        // A snoozed line (only the Snoozed filter shows one) says when it comes back, ahead of its usual detail.
-        // A closed duplicate (task links) says what it duplicates ahead of its usual detail, so the closed view tells it
-        // apart from a plain close at a glance.
-        task.SnoozedUntil.Match(
-            until => string.Join(" · ", new[] { $"Snoozed {TaskSnooze.UntilText(until.ToLocalTime(), now().ToLocalTime())}", FloatingBar.DetailOf(task) }.Where(part => part.Length > 0)),
-            () => tasks.Board.DuplicateTarget(task).Match(
-                original => string.Join(" · ", new[] { $"{TaskViews.DuplicateName} of {FloatingBar.FirstLine(original.Title)}", FloatingBar.DetailOf(task) }.Where(part => part.Length > 0)),
-                () => FloatingBar.DetailOf(task))),
+        LineDetail(task, withQuestion: true),
         task.Status,
         task.IsClaudes,
         SessionsText(task),
@@ -1455,8 +1451,11 @@ public sealed class TasksBoard : IDisposable
         task.Comments.Count,
         open,
         pendingCloses.ContainsKey(task.Id),
-        open ? task.Comments.Select(CommentView).ToArray() : [])
+        open ? task.Comments.Select(c => CommentView(c, liveQuestion)).ToArray() : [])
     {
+        // The line's detail while its open thread shows the question (task 968c2216): the same detail with the question
+        // left out, since the chat under it carries it. TasksWindow picks it only when that comment is on show.
+        DetailInThread = liveQuestion.HasValue ? LineDetail(task, withQuestion: false) : null,
         Created = task.Created,
         Assignee = task.Assignee,
         Description = task.Description,
@@ -1541,7 +1540,29 @@ public sealed class TasksBoard : IDisposable
             : $"{noun}, {live} live";
     }
 
-    TaskCommentView CommentView(TaskComment comment)
+    // A line's detail (TaskRowView.Detail), with or without the question (task 968c2216, DetailInThread).
+    // A snoozed line (only the Snoozed filter shows one) says when it comes back, ahead of its usual detail.
+    // A closed duplicate (task links) says what it duplicates ahead of its usual detail, so the closed view tells it
+    // apart from a plain close at a glance.
+    string LineDetail(TaskItem task, bool withQuestion) =>
+        task.SnoozedUntil.Match(
+            until => string.Join(" · ", new[] { $"Snoozed {TaskSnooze.UntilText(until.ToLocalTime(), now().ToLocalTime())}", FloatingBar.DetailOf(task, withQuestion: withQuestion) }.Where(part => part.Length > 0)),
+            () => tasks.Board.DuplicateTarget(task).Match(
+                original => string.Join(" · ", new[] { $"{TaskViews.DuplicateName} of {FloatingBar.FirstLine(original.Title)}", FloatingBar.DetailOf(task, withQuestion: withQuestion) }.Where(part => part.Length > 0)),
+                () => FloatingBar.DetailOf(task, withQuestion: withQuestion)));
+
+    // THE QUESTION'S COMMENT IN THE THREAD (task 968c2216): the comment TaskBoard.Ask wrote for the question the task waits
+    // on now, or none. It is the thread's LATEST question comment, unsettled, holding the very question on the line: an
+    // older question replaced by a newer one is history, and a question asked before questions went into the thread has
+    // no comment at all, so its line keeps showing it whatever the thread does.
+    static Maybe<Guid> LiveQuestionComment(TaskItem task) =>
+        task is { Status: TaskStatus.WaitingOnYou, Question.HasValue: true }
+        && task.Comments.LastOrDefault(c => c.Asks) is { Settled.HasValue: false } asked
+        && asked.Markdown == task.Question.Value
+            ? asked.Id
+            : Maybe<Guid>.None;
+
+    TaskCommentView CommentView(TaskComment comment, Maybe<Guid> liveQuestion)
     {
         var at = comment.At.ToLocalTime();
         var today = now().ToLocalTime().Date == at.Date;
@@ -1558,6 +1579,10 @@ public sealed class TasksBoard : IDisposable
             Time = at.ToString("HH:mm"),
             Day = DayOf(at.Date, now().ToLocalTime().Date),
             FullWhen = at.ToString("d MMM yyyy HH:mm"),
+            // The question the task waits on now (task 968c2216): drawn in the question's orange, and while the thread
+            // shows it the open line leaves the question off (TasksWindow).
+            AsksNow = liveQuestion.HasValue && liveQuestion.Value == comment.Id,
+            Asks = comment.Asks,
         };
     }
 
@@ -1678,6 +1703,15 @@ internal sealed record TaskCommentView(Guid Id, string Author, bool ByClaude, st
 
     /// <summary>The full date and time, the tooltip of the time under a bubble.</summary>
     public string FullWhen { get; init; } = "";
+
+    /// <summary>
+    /// The question the task waits on now, as TaskBoard.Ask wrote it into the thread (task 968c2216): drawn in the
+    /// question's orange, and the open line leaves its question off while the thread shows this comment.
+    /// </summary>
+    public bool AsksNow { get; init; }
+
+    /// <summary>A question an ask wrote into the thread, now or before (TaskComment.Asks): a bubble even when Deskbar asked it.</summary>
+    public bool Asks { get; init; }
 }
 
 /// <summary>A comment's author, as the chat thread tells them apart (task 39bc9c4d).</summary>
@@ -1702,6 +1736,13 @@ internal enum CommentAuthor
 internal sealed record TaskRowView(Guid Id, string Title, string Detail, TaskStatus Status, bool Claudes, string Sessions, int SessionCount, int LiveCount,
     TaskPlaceChoice Place, int CommentCount, bool Expanded, bool Closing, IReadOnlyList<TaskCommentView> Comments)
 {
+    /// <summary>
+    /// The detail without the question, for an open line whose thread shows the question (task 968c2216, Petre: "when i
+    /// open chat, hide the question from the main bar, show it when i collapse it"). Null while the task has no question
+    /// comment in its thread to stand in for it, and then the line keeps <see cref="Detail"/> open or not.
+    /// </summary>
+    public string? DetailInThread { get; init; }
+
     /// <summary>When the task appeared, for its age (TaskAge), which the window rewrites in place once a minute.</summary>
     public DateTimeOffset Created { get; init; }
 

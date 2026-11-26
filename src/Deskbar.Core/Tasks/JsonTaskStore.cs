@@ -90,8 +90,11 @@ public sealed class JsonTaskStore(string baseDirectory, Action<string>? trace = 
     sealed record SessionDto(string? Id, string? Folder, DateTimeOffset Joined, DateTimeOffset? Ended,
         [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] DateTimeOffset? ReplacedAt = null);
 
+    // Asks: TaskComment.Asks (task 968c2216), the question an ask wrote into the thread. Left out of the file unless set,
+    // so every other comment is written as before and an older build simply drops it (the comment stays, as a plain one).
     sealed record CommentDto(Guid Id, string? SessionId, DateTimeOffset At, string? Markdown,
-        [property: JsonConverter(typeof(TolerantTimeConverter))] DateTimeOffset? Settled = null);
+        [property: JsonConverter(typeof(TolerantTimeConverter))] DateTimeOffset? Settled = null,
+        [property: JsonConverter(typeof(TolerantFlagConverter)), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] bool? Asks = null);
 
     sealed record TaskDto(
         Guid Id,
@@ -243,7 +246,7 @@ public sealed class JsonTaskStore(string baseDirectory, Action<string>? trace = 
                 s.Ended.HasValue ? s.Ended.Value.ToUniversalTime() : null,
                 s.ReplacedAt.HasValue ? s.ReplacedAt.Value.ToUniversalTime() : null)).ToArray(),
             t.Comments.Select(c => new CommentDto(c.Id, c.SessionId.HasValue ? c.SessionId.Value : null,
-                c.At.ToUniversalTime(), c.Markdown, c.Settled.HasValue ? c.Settled.Value.ToUniversalTime() : null)).ToArray(),
+                c.At.ToUniversalTime(), c.Markdown, c.Settled.HasValue ? c.Settled.Value.ToUniversalTime() : null, c.Asks ? true : null)).ToArray(),
             t.Important, t.Urgent, t.Rank,
             t.GoalId.HasValue ? t.GoalId.Value : null,
             new AssigneeDto(t.Assignee.Kind.ToString().ToLowerInvariant(), t.Assignee.Id, t.Assignee.Name),
@@ -272,7 +275,7 @@ public sealed class JsonTaskStore(string baseDirectory, Action<string>? trace = 
                 ReplacedAt = s.ReplacedAt is { } replaced ? replaced.ToUniversalTime() : Maybe<DateTimeOffset>.None,
             }).ToArray(),
             (d.Comments ?? []).Select(c => new TaskComment(c.Id, Maybe.From(c.SessionId), c.At.ToUniversalTime(), c.Markdown ?? "")
-            { Settled = c.Settled is { } settled ? settled.ToUniversalTime() : Maybe<DateTimeOffset>.None }
+            { Settled = c.Settled is { } settled ? settled.ToUniversalTime() : Maybe<DateTimeOffset>.None, Asks = c.Asks ?? false }
             // Deskbar's own lines saved before they had an author of their own (TaskComment.DeskbarAuthor).
             .Attributed()).ToArray())
         {
@@ -467,6 +470,23 @@ public sealed class JsonTaskStore(string baseDirectory, Action<string>? trace = 
         }
     }
 
+    // A flag written as true or false, or absent: anything else (a string, a number) reads as absent (task 968c2216,
+    // a comment's `asks`), so a hand edit cannot make the whole file unreadable over one flag.
+    sealed class TolerantFlagConverter : JsonConverter<bool?>
+    {
+        public override bool? Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+        {
+            var parsed = reader.TokenType switch { JsonTokenType.True => true, JsonTokenType.False => false, _ => (bool?)null };
+            reader.Skip();
+            return parsed;
+        }
+
+        public override void Write(Utf8JsonWriter writer, bool? value, JsonSerializerOptions options)
+        {
+            if (value is { } flag) writer.WriteBooleanValue(flag);
+            else writer.WriteNullValue();
+        }
+    }
 
     // Reads a TaskStatus from its name in any case and writes it as its name. Anything else, a name a newer build
     // added, a number or null included, reads as Backlog: an open task this build cannot place, which keeps it on
