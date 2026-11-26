@@ -19,7 +19,9 @@ namespace Deskbar.App;
 // WHICH WINDOW. A layout belongs to a thread, so "the current language" means the language of the window you
 // were typing in. Every look first takes the window in front right now, whenever that is one you type in
 // (FollowForeground says why the events alone were wrong); a remembered one (NoteForeground keeps it, and never
-// sees the bar itself) only answers while the bar itself or a shell flyout is in front.
+// sees the bar itself) only answers while the bar itself or a shell flyout is in front. One of Deskbar's own windows
+// with a text box focused (the Report window, the tasks panel, the bar's add box) is a window you type in as well, and
+// is read and switched while it is in front (LanguageWindow says why).
 //
 // A CLICK ON THE SWITCHER DOES NOT ACTIVATE THE BAR. Petre: "it's changing apps when i click on it and then it's
 // inaccurate when i type", "not always, but very inconsistent". It used to: the click took the foreground from the
@@ -203,7 +205,43 @@ public partial class FloatingBar
     internal static bool IsOwnWindow(nint hwnd) =>
         Windows.Monitoring.NativeMethods.GetWindowThreadProcessId(hwnd, out var process) != 0 && process == (uint)Environment.ProcessId;
 
-    nint LanguageWindow() => languageTarget != 0 ? languageTarget : ForegroundWindow();
+    // DESKBAR'S OWN WINDOWS TAKE TYPING TOO. A colleague, on 2.6.49, typing a problem report in Georgian in
+    // Deskbar's own Report window: "I can't change the keyboard; it stays on KA. Right now, in this window"
+    // (Deskbar-reports issue 8). IsTypingWindow passes over every window of this process, which was right while the
+    // bar was the only one and a click on it was never a place you typed. Since then the Report window, the tasks
+    // panel and task windows, Manage and the bar's own add and search boxes all take text, and with one of them in
+    // front the button read and switched the REMEMBERED outside window (Chrome, a console) and then handed THAT
+    // window the foreground, so the click changed nothing where the caret was and pulled another app over it.
+    //
+    // So an own window in front whose keyboard focus is in a text box is the window switched, and nothing is handed
+    // the foreground. It is answered live from the window in front and never remembered: languageTarget stays the
+    // last outside window, so closing the Report window cannot leave the button pointing at a window that is gone.
+    // An own window with no text box focused (a row or a menu of the bar was clicked) keeps the old path.
+    nint LanguageWindow()
+    {
+        var front = ForegroundWindow();
+        return IsOwnTypingWindow(front) ? front : languageTarget != 0 ? languageTarget : front;
+    }
+
+    // The bar itself only while a task is being added or edited on it. Its add box keeps WPF's logical focus after
+    // the typing is over, and WPF hands the keyboard back to it whenever the bar is activated again, so after one
+    // task added from the bar, a click on its clock would otherwise make the bar "a window you type in" and take
+    // the old path (switch the window you were in, hand it the foreground back) away from exactly the case it is for.
+    bool IsOwnTypingWindow(nint hwnd) =>
+        hwnd != 0 && IsOwnWindow(hwnd)
+        && (hwnd != new System.Windows.Interop.WindowInteropHelper(this).Handle || TaskListAdding || TaskEditing)
+        && OwnWindowTakesTyping(hwnd);
+
+    // Whether this own window has the keyboard in a text box. A seam for the tests, like ForegroundWindow: a test
+    // cannot give a window real keyboard focus without activating it on the desktop of whoever runs the suite.
+    internal Func<nint, bool> OwnWindowTakesTyping { get; init; } = HasTextFocus;
+
+    // The element with the keyboard on this (the UI) thread, when it is a text box and sits in that very window.
+    // Keyboard focus is per thread, and every Deskbar window lives on the UI thread, so one look answers for all.
+    static bool HasTextFocus(nint hwnd) =>
+        Keyboard.FocusedElement is System.Windows.Controls.Primitives.TextBoxBase or PasswordBox
+        && PresentationSource.FromDependencyObject((DependencyObject)Keyboard.FocusedElement) is System.Windows.Interop.HwndSource source
+        && source.Handle == hwnd;
 
     // The language one step along from the current one, switched to, and shown at once rather than at the next
     // tick (the switch is posted, so reading it back straight away could still see the old one).
@@ -222,7 +260,8 @@ public partial class FloatingBar
         if (installed.Count < 2) return;
         FollowForeground();
         var front = ForegroundWindow();
-        var focusLost = front == 0 || IsOwnWindow(front);
+        // An own window you are typing in has not lost anything: it is the window switched (LanguageWindow).
+        var focusLost = front == 0 || IsOwnWindow(front) && !IsOwnTypingWindow(front);
         var window = LanguageWindow();
         var current = InputLanguages.Of(window).Map(now => installed.ToList().FindIndex(l => l.Layout == now.Layout)).GetValueOrDefault(-1);
         // A current language missing from the list (a layout Windows added for one program) counts as the first.
