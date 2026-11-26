@@ -2596,7 +2596,7 @@ public class TasksBoardTests
 
         Assert.Equal(sparrow.Id, t.Harness.Manager.CurrentWorkspaceId.Value);
         Assert.Equal(rebuilds, t.Window.Rebuilds);
-        Assert.Contains("on Sparrow", Inside(ButtonNamed(t.Window, "Add to workspace")).OfType<TextBlock>().Single().Text);
+        Assert.Equal("Sparrow ▾", Inside(ButtonNamed(t.Window, "Add to workspace")).OfType<TextBlock>().Single().Text);
     });
 
     // (d) 2026-11-23, Petre, of the add row's "on Deskbar site ▾": "dropdown doesn't work". The chip is a flat button
@@ -2616,7 +2616,7 @@ public class TasksBoardTests
         Assert.True(menu.IsOpen);
         Click(WorkspaceChipMenu.Chips(menu).Single(c => AutomationProperties.GetName(c) == "Sparrow"));
         Assert.False(menu.IsOpen);
-        Assert.Contains("on Sparrow", Inside(ButtonNamed(t.Window, "Add to workspace")).OfType<TextBlock>().Single().Text);
+        Assert.Equal("Sparrow ▾", Inside(ButtonNamed(t.Window, "Add to workspace")).OfType<TextBlock>().Single().Text);
 
         Assert.True(t.Window.TypeNote("encrypt data", Key.Enter));
         Assert.Equal(t.Sparrow, t.Tasks.Board.Tasks.Single(x => x.Title == "encrypt data").WorkspaceId.Value);

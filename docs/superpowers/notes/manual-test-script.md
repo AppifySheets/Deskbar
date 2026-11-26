@@ -237,9 +237,9 @@ The task list at the bottom of the bar (spec `docs/superpowers/specs/2026-11-22-
     brings it back done. After the six seconds, `$ts task list --closed` lists the closed note first and
     `$ts task reopen <id>` brings it back.
 53. Make the bar as narrow as it goes (drag its edge in). Nothing in the list is cut off at the right: the box,
-    "+N more", the lines' chips, and the add row ("on", the chip and the two toggles), which wraps onto a second
+    "+N more", the lines' chips, and the add row (the chip, the two toggles and the play button), which wraps onto a second
     line, a long workspace name trimmed with an ellipsis.
-54. Click the add chip ("on Deskbar ▾"): a menu opens with "none" first, then each workspace as its chip in its
+54. Click the add chip ("Deskbar ▾", no "on" before it): a menu opens with "none" first, then each workspace as its chip in its
     colour, in the bar's order, grouped workspaces under their group's name (which cannot be clicked), the chosen
     one ticked. Pick "none": the chip reads "none" and the box reads "Add…". Open it again and pick a workspace:
     the chip is that workspace's, in its colour, and the box reads "Add to <that workspace>…". There is no separate
@@ -312,7 +312,7 @@ written for the floating window and now describe the panel; 64a to 64n cover wha
     stands alone with Undo. Undo: the task comes back with its thread open again. Close a task whose thread is folded
     and Undo it: the thread stays folded.
 62. Click a note's line on a workspace: you go there and the panel stays open. "+ Add": a box
-    opens, "on <workspace> ▾" says where; Enter adds the note there, Esc closes the box.
+    opens, "<workspace> ▾" says where; Enter adds the note there, Esc closes the box.
 63. With flagged tasks, the panel's List shows Waiting on you, then the quadrants captioned "I Urgent and
     important" to "IV Not urgent, not important". The toggles and the drag work as on the bar, and the bar
     follows every change. Pick the "In progress" chip: the quadrants stay, with only tasks in progress.

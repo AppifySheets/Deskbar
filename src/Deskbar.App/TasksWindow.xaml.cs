@@ -3082,8 +3082,10 @@ public partial class TasksWindow : Window
         // Click handler added after Flat's, and Flat's own handler marks the click handled, so WPF never called the
         // second one: a handler added with += is skipped for an event already handled, even on the same element. The
         // menu now opens from Flat's press itself.
+        // The chip is the workspace's name and the arrow, no "on" before it, as on the bar's add row (task 47398c0f,
+        // Petre: "drop on; make it compact").
         Button? chip = null;
-        chip = Flat(new TextBlock { Text = $"on {target.Name} ▾", Foreground = Ink, FontSize = 11 }, "Add to workspace", () =>
+        chip = Flat(new TextBlock { Text = $"{target.Name} ▾", Foreground = Ink, FontSize = 11 }, "Add to workspace", () =>
         {
             var places = latest?.Places ?? [];
             OpenMenu(WorkspaceChipMenu.Build(places, target.Workspace,

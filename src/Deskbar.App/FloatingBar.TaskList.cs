@@ -30,8 +30,8 @@ namespace Deskbar.App;
 //                   when the truth is "your tasks could not be read".
 //   the text box    always there, with a placeholder naming where a note would go ("Add to Deskbar…", or
 //                   "Add…" on an unnamed desktop) that follows a desktop switch. A click in it takes the
-//                   keyboard (BeginTyping). Under it, always, "on" and ONE chip choosing where the note goes
-//                   (Ruling 45): the current workspace to begin with, or "none", with a small arrow; its press opens
+//                   keyboard (BeginTyping). Under it, always, ONE chip choosing where the note goes
+//                   (Ruling 45; the "on" before it went, task 47398c0f): the current workspace to begin with, or "none", with a small arrow; its press opens
 //                   the compact workspace menu (none first) and a pick changes the chip. The row wraps onto a second
 //                   line on a narrow bar rather than clip. A chip pressed while the box is idle
 //                   starts typing as a click in the box does. Enter
@@ -465,7 +465,6 @@ public partial class FloatingBar
     TextBox? taskAddBox;
     TextBlock? taskAddPlaceholder;
     WrapPanel? taskAddChips;
-    TextBlock? taskAddOn;
     TaskChipParts? taskAddChip;
     StackPanel? taskLinesPanel;
     ScrollViewer? taskLinesScroller;
@@ -828,7 +827,12 @@ public partial class FloatingBar
         // opens from the chip button's own press (TaskButton's Click), never from a second Click handler: that marks the
         // click handled, so a later handler never runs (the tasks window's dropdown, 2026-11-23).
         taskAddChip = TaskChip("", () => OpenAddTargetMenu());
-        taskAddOn = new TextBlock { Text = "on", Foreground = TaskDimInk, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(2, 1, 4, 1) };
+        // NO "on" BEFORE THE CHIP, AND A COMPACT ROW (task 47398c0f; Petre: "drop on; make it compact"). His screenshot
+        // had this row wrap its last button, the play glyph of Add and start Claude, onto a second line of its own. The
+        // word "on" said nothing the chip and its arrow do not, so it went, and the gaps between the chip, the toggles,
+        // the play glyph, "All tasks" and "Manager" are 2 DIP a side instead of 3 to 6 (the glyph margins of
+        // AddFlagToggle and AddAndStartClaudeButton, TaskChip's and ParentChipButton's right margin, the two right-hand
+        // buttons' padding and left margin). The row still wraps, rather than clips, on a bar too narrow for it.
         // The important and urgent toggles of a task line, for the note about to be added (Ruling 37), at the end of the
         // chip row: in the wrap, so on a narrow bar they wrap with the chips instead of widening the bar (the whole list
         // sits in TakesNoWidth), and the docked fit pass measures the row as it is.
@@ -841,7 +845,7 @@ public partial class FloatingBar
         {
             Tag = "task-add-chips",
             Margin = new Thickness(0, 3, 0, 0),
-            Children = { taskAddOn, taskAddChip.Button, ParentChipButton(), taskAddImportant.Button, taskAddUrgent.Button, taskAddStartClaude },
+            Children = { taskAddChip.Button, ParentChipButton(), taskAddImportant.Button, taskAddUrgent.Button, taskAddStartClaude },
         };
         PaintAddFlags();
         // RULING 50 (Petre: "move all tasks to the top to save vertical space, next to workspace selection"). "All tasks" /
@@ -861,8 +865,8 @@ public partial class FloatingBar
         taskMoreButton = TaskButton("More tasks", taskMoreLabel, OnTaskMoreClick, ignoredWhen: TaskClickIgnored);
         taskMoreButton.HorizontalAlignment = HorizontalAlignment.Right;
         taskMoreButton.VerticalAlignment = VerticalAlignment.Top;
-        taskMoreButton.Padding = new Thickness(6, 1, 6, 1);
-        taskMoreButton.Margin = new Thickness(4, 4, 0, 0);
+        taskMoreButton.Padding = new Thickness(4, 1, 4, 1);
+        taskMoreButton.Margin = new Thickness(2, 4, 0, 0);
         taskMoreButton.Visibility = Visibility.Collapsed;
         // The Manager button sits after "All tasks" in a third Auto column, styled like it (dim ink, same padding and margin),
         // and is collapsed when the App wired no OpenManager. It takes the same click guard as "All tasks", since the list
@@ -894,8 +898,8 @@ public partial class FloatingBar
             () => OpenManager?.Invoke(), ManagerTip, TaskClickIgnored);
         taskManagerButton.HorizontalAlignment = HorizontalAlignment.Right;
         taskManagerButton.VerticalAlignment = VerticalAlignment.Top;
-        taskManagerButton.Padding = new Thickness(6, 1, 6, 1);
-        taskManagerButton.Margin = new Thickness(4, 4, 0, 0);
+        taskManagerButton.Padding = new Thickness(4, 1, 4, 1);
+        taskManagerButton.Margin = new Thickness(2, 4, 0, 0);
         taskManagerButton.Visibility = OpenManager is null ? Visibility.Collapsed : Visibility.Visible;
         var chipRow = new Grid
         {
@@ -1064,7 +1068,7 @@ public partial class FloatingBar
             Child = new StackPanel { Orientation = Orientation.Horizontal, Children = { label, arrow } },
         };
         var button = TaskButton("Add to workspace", face, press, "Choose the workspace for the note");
-        button.Margin = new Thickness(0, 1, 4, 1);
+        button.Margin = new Thickness(0, 1, 2, 1);
         return new TaskChipParts(button, face, label, arrow);
     }
 
@@ -1076,7 +1080,6 @@ public partial class FloatingBar
     void ApplyTaskListTextSize()
     {
         Sized(taskMoreLabel, 8);
-        Sized(taskAddOn, 7.5);
         Sized(taskAddPlaceholder, 9.5);
         if (taskAddChip is not null)
         {
@@ -2241,7 +2244,7 @@ public partial class FloatingBar
             FontSize = Text(8.5),
             Foreground = TaskDimInk,
             VerticalAlignment = VerticalAlignment.Center,
-            Margin = new Thickness(3, 1, 3, 1),
+            Margin = new Thickness(2, 1, 2, 1),
         };
         // Pressed on an idle box (a draft left in it), it takes the keyboard first, as a chip or a flag toggle does, so
         // the add hands it back to the window noted now (BeginTyping) and not to one noted long ago.
@@ -2355,7 +2358,7 @@ public partial class FloatingBar
             FontFamily = IconFont,
             FontSize = Text(8.5),
             VerticalAlignment = VerticalAlignment.Center,
-            Margin = new Thickness(3, 1, 3, 1),
+            Margin = new Thickness(2, 1, 2, 1),
         };
         var button = TaskButton(name, glyph, () => ToggleAddFlag(flag), name);
         return new TaskAddToggle(button, glyph, flag);
@@ -2480,7 +2483,7 @@ public partial class FloatingBar
             Child = new StackPanel { Orientation = Orientation.Horizontal, Children = { taskAddParentLabel, cross } },
         };
         taskAddParentChip = TaskButton("Subtask of", face, DropTaskAddParent, "A subtask of this task; press to add a plain note instead");
-        taskAddParentChip.Margin = new Thickness(0, 1, 4, 1);
+        taskAddParentChip.Margin = new Thickness(0, 1, 2, 1);
         taskAddParentChip.Visibility = Visibility.Collapsed;
         return taskAddParentChip;
     }

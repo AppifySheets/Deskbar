@@ -1001,7 +1001,7 @@ public class FloatingBarTaskListTests
     });
 
     // RULING 45 (Petre, of the add box's chip row, "on [Deskbar] [none] [other…]": "those buttons could be only one, or
-    // two - selected or nothing"). The row is "on" and ONE chip, the chosen target, with a small arrow: the current
+    // two - selected or nothing"). The row is ONE chip, with no "on" before it (task 47398c0f), the chosen target, with a small arrow: the current
     // workspace's by default, or "none". Its press opens the compact workspace menu, none first; a pick changes the chip.
     const string AddChipName = "Add to workspace";
 
@@ -1020,7 +1020,7 @@ public class FloatingBarTaskListTests
     }
 
     [Fact]
-    public void The_chip_row_is_on_and_one_chip_naming_the_current_workspace() => StaThread.Run(() =>
+    public void The_chip_row_is_one_chip_naming_the_current_workspace_with_no_on_before_it() => StaThread.Run(() =>
     {
         using var t = Build();
 
@@ -1028,7 +1028,7 @@ public class FloatingBarTaskListTests
         var chips = Inside(t.Chips).OfType<Button>().Where(b => b.Content is Border { Tag: "task-chip" }).ToList();
         Assert.Single(chips);
         Assert.Equal("GEPHA", ChipText(t));
-        Assert.Single(Inside(t.Chips).OfType<TextBlock>(), b => b.Text == "on");
+        Assert.DoesNotContain(Inside(t.Chips).OfType<TextBlock>(), b => b.Text == "on");
         Assert.Contains("▾", Inside(AddChip(t)).OfType<TextBlock>().Select(b => b.Text));
         Assert.False(HasButtonNamed(t.List, "none"));
         Assert.False(HasButtonNamed(t.List, "other…"));
