@@ -119,10 +119,14 @@ public static class ControlArguments
     // a raw quote or any control character is refused rather than rewritten, which keeps every valid link as typed.
     static Result<string> Link(string raw, string usage) =>
         Uri.TryCreate(raw.Trim(), UriKind.Absolute, out var uri)
-        && !raw.Trim().Any(c => c == '"' || char.IsControl(c))
+        && IsPlainText(raw.Trim())
         && (!uri.IsFile || raw.TrimStart().StartsWith("file:", StringComparison.OrdinalIgnoreCase))
             ? raw.Trim()
             : Result.Failure<string>($"'{raw}' is not a link. {usage}");
+
+    // The one rule for text that reaches a command line: no quote and no control character (see Link above for why).
+    // Shared with BookmarkRules, so `open` and a bookmark can never disagree about what is safe to hand to the shell.
+    public static bool IsPlainText(string text) => !text.Any(c => c == '"' || char.IsControl(c));
 
     // Whether a link is a web page, the only kind `open` gives a browser window of its own: a mailto: or file: link
     // is the shell's to hand to whatever handles it.

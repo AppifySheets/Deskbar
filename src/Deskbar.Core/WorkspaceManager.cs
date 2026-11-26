@@ -5,6 +5,7 @@ using System.Reactive.Subjects;
 using CSharpFunctionalExtensions;
 using Deskbar.Core.Abstractions;
 using Deskbar.Core.Arrange;
+using Deskbar.Core.Bookmarks;
 using Deskbar.Core.Domain;
 using Deskbar.Core.Geometry;
 using Deskbar.Core.Overview;
@@ -1846,6 +1847,39 @@ public sealed class WorkspaceManager(
         {
             Workspaces = State.Workspaces.Select(w => w.Id == id ? w with { Folded = folded } : w).ToList(),
         }));
+
+    // BOOKMARKS in a workspace's row (docs/superpowers/specs/2026-11-26-workspace-bookmarks-design.md). Shaped like
+    // SetWorkspaceFolded: find the workspace, change its list, Persist (which saves and pulses once).
+    // Add order is display order. A bookmark that opens the same thing as one already there is refused with a message
+    // naming it, rather than silently doubled.
+    public Result<Bookmark> AddBookmark(Guid workspaceId, Bookmark bookmark) =>
+        Workspace(workspaceId).Bind(w => BookmarkRules.Check(bookmark)
+            .Ensure(b => !w.Bookmarks.Any(e => e.Id == b.Id), "A bookmark with this id already exists.")
+            .Ensure(b => !w.Bookmarks.Any(e => BookmarkRules.SameTarget(e, b)),
+                b => $"{w.Name} already has this bookmark ('{w.Bookmarks.First(e => BookmarkRules.SameTarget(e, b)).Name}').")
+            .Tap(b => ReplaceBookmarks(workspaceId, list => [..list, b])));
+
+    public Result RenameBookmark(Guid workspaceId, Guid bookmarkId, string name) =>
+        BookmarkInList(workspaceId, bookmarkId)
+            .Ensure(_ => !string.IsNullOrWhiteSpace(name), "A bookmark needs a name.")
+            .Tap(_ => ReplaceBookmarks(workspaceId, list => list.Select(b => b.Id == bookmarkId ? b with { Name = name.Trim() } : b).ToList()));
+
+    public Result RemoveBookmark(Guid workspaceId, Guid bookmarkId) =>
+        BookmarkInList(workspaceId, bookmarkId)
+            .Tap(_ => ReplaceBookmarks(workspaceId, list => list.Where(b => b.Id != bookmarkId).ToList()));
+
+    // Empty when the workspace or the bookmark is gone, so a caller holding a stale id just finds nothing.
+    public Maybe<Bookmark> BookmarkOf(Guid workspaceId, Guid bookmarkId) =>
+        BookmarkInList(workspaceId, bookmarkId).Match(b => Maybe.From(b), _ => Maybe<Bookmark>.None);
+
+    Result<Bookmark> BookmarkInList(Guid workspaceId, Guid bookmarkId) =>
+        Workspace(workspaceId).Bind(w => w.Bookmarks.TryFirst(b => b.Id == bookmarkId).ToResult<Bookmark>($"Bookmark {bookmarkId} not found."));
+
+    void ReplaceBookmarks(Guid workspaceId, Func<IReadOnlyList<Bookmark>, IEnumerable<Bookmark>> change) =>
+        Persist(State with
+        {
+            Workspaces = State.Workspaces.Select(w => w.Id == workspaceId ? w with { Bookmarks = change(w.Bookmarks).ToValueList() } : w).ToList(),
+        });
 
     // PINNING a workspace (see Workspace.Pinned): the row menu's "Pin to strip" and the pipe's pin-workspace.
     // Shaped like SetWorkspaceFolded, and idempotent for the same reason: the persist and the pulse are what make
