@@ -22,6 +22,20 @@ public class ClaudeCliTests
         Assert.Equal("hi", result.Value);
     }
 
+    // Task 0bdf74d0: a session whose git worktree was removed showed only Windows' "The directory name is invalid."
+    // The folder is checked first, and the failure names it in plain words; nothing is started.
+    [Fact]
+    public async Task A_folder_that_is_gone_fails_with_its_name_before_anything_runs()
+    {
+        var gone = Path.Combine(Path.GetTempPath(), $"deskbar-gone-{Guid.NewGuid():N}");
+
+        var result = await Cmd.Run(["/c", "echo hi"], gone, Generous);
+
+        Assert.True(result.IsFailure);
+        Assert.Contains(gone, result.Error);
+        Assert.Contains("no longer exists", result.Error);
+    }
+
     [Fact]
     public async Task A_non_zero_exit_is_a_failure_with_the_output()
     {

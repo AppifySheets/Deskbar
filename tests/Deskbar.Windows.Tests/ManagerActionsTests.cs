@@ -139,7 +139,7 @@ public class ManagerActionsTests
             Tasks.Load();
             Inbox = new CommentInbox(InboxFolder, () => Clock.Now);
             Sessions = new ClaudeSessions(Tasks, Harness.Manager, Cli, Clock, _ => Maybe<Guid>.None, Home,
-                background: Scheduler.Immediate, managerFolder: Folder);
+                background: Scheduler.Immediate, managerFolder: Folder, folderExists: _ => true);
             Actions = new ClaudeTaskActions(Tasks, Harness.Manager, Sessions.Live, new ClaudeTaskSeams(
                 Start: (_, _, _) => Task.FromResult(Result.Failure<string>("no task starts here")),
                 Resume: (_, _) => Task.FromResult(Result.Failure<ClaudeAgent>("no task resumes here")),

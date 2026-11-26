@@ -1896,7 +1896,7 @@ public partial class App : Application
             new System.Reactive.Concurrency.SynchronizationContextScheduler(new System.Windows.Threading.DispatcherSynchronizationContext(Dispatcher)),
             trace: ClickTrace.On ? ClickTrace.Write : null);
 
-        commentWaker = new CommentWaker(tasks!, () => manager.State.ClaudeTasksInEffect, claudeSessions.Live, claudeSessions.TranscriptExists, commentInbox,
+        commentWaker = new CommentWaker(tasks!, () => manager.State.ClaudeTasksInEffect, claudeSessions.Live, claudeSessions.Resumable, commentInbox,
             claudeSessions.ResumeWith, claudeSessions.StopNow, ClickTrace.On ? ClickTrace.Write : null);
 
         // ...and what a click on a task does with those sessions (ClaudeTaskActions, Task 9): the double-click's session
@@ -1913,8 +1913,9 @@ public partial class App : Application
                 BringForward: window => manager.JumpTo(window, claudeActivator),
                 // "Expired" (the spec, "Ended sessions and transcript retention"): Claude Code deleted the transcript.
                 // ClaudeSessions looks for it the way the keeper does, worktree project folders included, so the
-                // thread and the keeper cannot disagree about whether a session can be resumed.
-                TranscriptExists: claudeSessions.TranscriptExists,
+                // thread and the keeper cannot disagree about whether a session can be resumed. A session whose folder is
+                // gone counts as expired too (ClaudeSessions.Resumable, task 0bdf74d0), so its thread offers Start.
+                TranscriptExists: claudeSessions.Resumable,
                 // The folders the VS Code windows on a workspace show (the one in front for a free task), by name, as
                 // their titles carry them (EditorFolder.Of); ClaudeStart.EditorRepos makes them full paths.
                 EditorFolderNames: workspace => EditorFolderNamesOn(workspace.Or(manager.CurrentWorkspaceId)))
