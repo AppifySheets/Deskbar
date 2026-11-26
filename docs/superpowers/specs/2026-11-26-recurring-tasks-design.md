@@ -97,8 +97,9 @@ Wording is the builder's, inside `ClaudeStart`'s 1000-character cap.
 
 The model: there is no per-task model today, only the one `claude-model` setting (default opus) plus a `--model`
 on a single start, and the session-model-pick design ruled a per-task model out. An hourly job on Opus burns the
-weekly limit. OPEN, Petre's call: does the repeat carry its own model (stored with the schedule, chosen when the
-repeat is set), or do runs use the global setting like every other start?
+weekly limit. Decided (Petre, "okay" to the proposal on 2026-11-26): the repeat carries its own model, stored with
+the schedule and chosen when the repeat is set, Sonnet by default; CLI `--model <name>` checked by `ClaudeStart.Model`.
+Runs pass it as the start's `--model`. Other task sessions keep the global setting.
 
 ### A run ends
 
