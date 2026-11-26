@@ -255,6 +255,28 @@ public class ManagerSessionTests
         Assert.DoesNotContain("What needs me now", ManagerSession.FirstMessage);
     }
 
+    // Task 56b76f4a: "when asked to do the work, manager session should create a new task for it". The briefing turns
+    // asked-for work into a task with a session started on it, by the shim's own add/describe/start verbs, and counts an
+    // ask about the manager's own behaviour as Deskbar work rather than a memory note. Still under the 40 line cap.
+    [Fact]
+    public void Briefing_turns_asked_for_work_into_a_started_task()
+    {
+        var text = ManagerSession.Briefing(Shim);
+
+        Assert.Contains("When the user asks for work", text);
+        Assert.Contains("it becomes a task: never do it, save", text);
+        Assert.Contains("it to your memory or say it is not your job", text);
+        Assert.Contains("Asks about how you behave count too: this briefing is Deskbar's code.", text);
+        Assert.Contains("If an open task covers it, comment there, quoting the user.", text);
+        Assert.Contains($"{Shim} task add - --workspace <name>", text);
+        Assert.Contains("task describe <id> - quoting the user, then task start <id>.", text);
+        Assert.Contains("If start names several folders,", text);
+        Assert.Contains("if it knows none, use another task's folder on that workspace (task show), else ask.", text);
+        // "note" would clash with the shim's help, which calls task add adding a note (review of task 56b76f4a).
+        Assert.DoesNotContain("in a note", text);
+        Assert.True(text.Split('\n').Length < 40);
+    }
+
     // Task f171bca6: the manager's own window (violet icon and ring, glow, pinned to every desktop) is the Windows Terminal
     // window titled "Deskbar manager · Claude", and no task session's window is.
     const string Terminal = @"C:\Program Files\WindowsApps\Microsoft.WindowsTerminal_1.25.3131.0_x64__8wekyb3d8bbwe\WindowsTerminal.exe";

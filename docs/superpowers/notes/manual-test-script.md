@@ -1254,6 +1254,11 @@ MG8. From any terminal, `$ts task overview` prints one line per open task.
 MG9. (Task 1c9eefdf.) After a new day's manager has started, open the Claude app on the phone: "Deskbar manager" is in
      its list of sessions and a message sent from there reaches it. Start Claude on a task: that session is NOT in the
      phone's list, also with `"remoteControlAtStartup": true` in `~/.claude/settings.json`.
+MG10. (Task 56b76f4a, needs a manager started after this build.) Ask the manager for a small piece of work no open task
+     covers, in plain words and without saying "create a task", for example "the add box should keep its text when I
+     press Esc". It adds a task on the right workspace with your words quoted in its description, starts a Claude
+     session on it, and answers with the task's title and short id. Ask for work an open task already covers: that
+     task gets a comment quoting you, and no new task appears.
 
 Manager event wakes (docs/superpowers/specs/2026-11-25-manager-event-wakes-design.md):
 
