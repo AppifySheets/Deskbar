@@ -1774,7 +1774,7 @@ public partial class TasksWindow : Window
         // Dragged to the text's foot, the cap is "whole" (infinite), so text that grows later still shows whole.
         double Fitted(double height) => height >= cap.FullHeight - 0.5 ? double.PositiveInfinity : height;
         var grip = BodyGrip(text is RichTextBox ? "Resize description" : "Resize question",
-            shown: () => cap.ActualHeight, least: () => line, whole: () => cap.FullHeight,
+            shown: () => cap.ActualHeight, setting: () => cap.Cap, least: () => line, whole: () => cap.FullHeight,
             preview: height => cap.Cap = Fitted(height), keep: height => KeepCappedHeight(key, height, cap.FullHeight));
         // Collapsed until a layout pass says the cap cut something, as "Show all in window" is (the width, and so the
         // wrapping, is known only then). Never collapsed mid-drag, which would take the mouse from it.
@@ -2122,8 +2122,9 @@ public partial class TasksWindow : Window
           + string.Join(',', row.Links.Select(l => $"{l.Kind}{l.Id}")) + (linking is { } l && l.Task == row.Id ? $"picker{l.Duplicate}" : "")
           // The subtask box (task 0eb943d8) opens under the row of buttons, and Add subtask leaves the row meanwhile.
           + (subtaskUnder == row.Id ? "subtask-box" : "") + "/"
-          // A comment opened by Show more, or dragged to a height of its own (task 2088e1ed), moves everything under it.
-          + string.Join(',', ThreadComments(row).Shown.Select(c => $"{c.Id}{(longOpen.Contains(c.Id) ? "+" : "")}{(BodyHeight(CommentKey(c.Id)) is { } h ? $"~{h:0}" : "")}"))
+          // Not a height a comment was dragged to (task 2088e1ed): the lines moved under the pointer while it dragged, so
+          // nothing slides under it at the release, and the click guard would only eat the next click.
+          + string.Join(',', ThreadComments(row).Shown.Select(c => $"{c.Id}{(longOpen.Contains(c.Id) ? "+" : "")}"))
           + $"{settledOpen.Contains(row.Id)}{earlierOpen.Contains(row.Id)}";
 
     // The row of buttons (ThreadActions, task 1c17b7d6: Open in window, Open Claude or "Start Claude on this", Add subtask),
@@ -2538,7 +2539,7 @@ public partial class TasksWindow : Window
         // The grip under the text (task 2088e1ed): from one line to the whole comment. Dragged to its foot, the comment is
         // opened as Show more opens it (KeepCommentHeight).
         var grip = BodyGrip("Resize comment",
-            shown: () => body.ActualHeight, least: () => OneCommentLine, whole: () => body.ExtentHeight,
+            shown: () => body.ActualHeight, setting: () => body.MaxHeight, least: () => OneCommentLine, whole: () => body.ExtentHeight,
             preview: height => body.MaxHeight = height >= body.ExtentHeight - 0.5 ? double.PositiveInfinity : height,
             keep: height => KeepCommentHeight(comment.Id, height, body.ExtentHeight));
         var parts = new StackPanel { Children = { body, grip } };
@@ -2554,7 +2555,7 @@ public partial class TasksWindow : Window
             }, full ? "Fold the comment back to three lines" : "Show the whole comment");
         // Collapsed means it takes no room and is not in the tree for a reader, but it is there for the layout to switch on.
         // The grip shows with the button: only a comment long enough to be cut has anything to resize.
-        more.Visibility = full || isLong ? Visibility.Visible : Visibility.Collapsed;
+        more.Visibility = full || isLong || dragged is not null ? Visibility.Visible : Visibility.Collapsed;
         grip.Visibility = more.Visibility;
         parts.Children.Add(more);
         if (TaskImageRow.Of(StateDir, split.Images, OpenImage) is { } pictures) parts.Children.Add(pictures);
@@ -2562,7 +2563,9 @@ public partial class TasksWindow : Window
             body.LayoutUpdated += (_, _) =>
             {
                 if (body.ActualWidth <= 0 || body.Visibility != Visibility.Visible) return;
-                var wanted = body.ExtentHeight > ThreeLines + 0.5 ? Visibility.Visible : Visibility.Collapsed;
+                // A comment dragged to a height keeps both however short it gets (a wider panel, an edit), or one dragged
+                // to a line could stay cut with nothing left to undo it (review of task 2088e1ed).
+                var wanted = body.ExtentHeight > ThreeLines + 0.5 || dragged is not null ? Visibility.Visible : Visibility.Collapsed;
                 if (more.Visibility != wanted) more.Visibility = wanted;
                 // Never collapsed mid-drag, which would take the mouse from it.
                 if (grip.Visibility != wanted && !grip.IsMouseCaptured) grip.Visibility = wanted;
