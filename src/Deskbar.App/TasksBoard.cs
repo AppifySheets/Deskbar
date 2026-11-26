@@ -122,6 +122,8 @@ public sealed partial class TasksBoard : IDisposable
     readonly TaskSelection selection;
     readonly GoalService? goals;
     readonly Func<TaskItem, IReadOnlyList<SessionView>> sessionsOf;
+    // Where a session's transcript file is, none when it is gone (ClaudeSessions.TranscriptOf); null, no steps on the page.
+    readonly Func<TaskSession, Maybe<string>>? transcriptOf;
     readonly Func<TaskItem, string, Result>? openSession;
     readonly Func<TaskItem, int> workingOf;
     readonly Func<bool> knowsActivity;
@@ -257,10 +259,12 @@ public sealed partial class TasksBoard : IDisposable
         Func<TaskItem, bool>? opensSession = null,
         Func<Maybe<Guid>, Maybe<Guid>, Task<IReadOnlyList<SkillChoice>>>? workspaceSkills = null,
         Func<TaskItem, Action<string>, ContextMenu?>? pickFolder = null, Func<Guid, Result>? runNow = null,
-        Func<Guid, Task<IReadOnlyList<SkillChoice>>>? taskSkills = null)
+        Func<Guid, Task<IReadOnlyList<SkillChoice>>>? taskSkills = null,
+        Func<TaskSession, Maybe<string>>? transcriptOf = null)
     {
         this.pickFolder = pickFolder;
         this.runNow = runNow;
+        this.transcriptOf = transcriptOf;
         this.workingOf = workingOf ?? (_ => 0);
         this.knowsActivity = knowsActivity ?? (workingOf is null ? () => false : () => true);
         this.stopClaudeAndClose = stopClaudeAndClose;
@@ -333,6 +337,8 @@ public sealed partial class TasksBoard : IDisposable
             StopClaudeAndClose = id => Close(id, stopClaude: true),
             CloseAnyway = id => Close(id, anyway: true),
             OpenSession = openSession is null ? null : (id, session) => OpenSession(id, session),
+            // The transcript the task's Inbox page reads Claude's messages and steps from (TasksWindow.Transcript.cs).
+            TranscriptOf = transcriptOf is null ? null : ChatSourceOf,
             SubtaskParent = id => tasks.Board.SubtaskParentFor(id)
                 .Match(p => new SubtaskParentView(p.Id, p.Title, p.WorkspaceId), () => (SubtaskParentView?)null),
             AddSubtaskHere = (lineId, title, describe, inParentThread) => AddSubtaskInThread(lineId, title, describe, inParentThread).IsSuccess,
@@ -998,6 +1004,14 @@ public sealed partial class TasksBoard : IDisposable
         return Report(goTo(task.Value), id);
     }
 
+    // WHICH TRANSCRIPT A TASK'S PAGE READS (ClaudeChatSource.Choose): one session of the task, by the thread's own states.
+    // Resolved on the UI thread, since the states come from the same list the thread draws.
+    ChatSource ChatSourceOf(Guid id)
+    {
+        if (transcriptOf is not { } pathOf || tasks.Board.Tasks.TryFirst(t => t.Id == id) is not { HasValue: true } found) return ChatSource.Nothing;
+        var states = sessionsOf(found.Value).ToDictionary(s => s.Id, s => s.State);
+        return ClaudeChatSource.Choose(found.Value.Sessions, s => states.GetValueOrDefault(s.Id, SessionState.Ended), pathOf);
+    }
     /// <summary>
     /// A session's Open in the thread (see the header): what going to that session does, through `openSession`. The
     /// task is picked, as a click on its line picks it; a refusal shows on the problem line.
@@ -1693,6 +1707,7 @@ public sealed partial class TasksBoard : IDisposable
             // shows it the open line leaves the question off (TasksWindow).
             AsksNow = liveQuestion.HasValue && liveQuestion.Value == comment.Id,
             Asks = comment.Asks,
+            At = comment.At,
         };
     }
 
@@ -1828,6 +1843,9 @@ internal sealed record TaskCommentView(Guid Id, string Author, bool ByClaude, st
     /// for every bubble of a run by one author but the last (task 85218923, ChatThread.WithDays sets it).
     /// </summary>
     public bool NamesAuthor { get; init; } = true;
+
+    /// <summary>The moment it was written: where it goes among a session's messages and steps (ClaudeChatStream).</summary>
+    public DateTimeOffset At { get; init; }
 }
 
 /// <summary>A comment's author, as the chat thread tells them apart (task 39bc9c4d).</summary>
@@ -2175,6 +2193,13 @@ internal sealed partial record TasksWindowActions(
 
     /// <summary>A session's Open in the thread (Task 9): the task's id and the session's. None, no Open buttons.</summary>
     public Action<Guid, string>? OpenSession { get; init; }
+
+    /// <summary>
+    /// The transcript a task's Inbox page follows for Claude's messages and steps (ClaudeChatSource.Choose over the task's
+    /// sessions). Called on the UI thread; cheap (a remembered path and the thread's own session states). None, the page
+    /// shows its thread as before.
+    /// </summary>
+    public Func<Guid, ChatSource>? TranscriptOf { get; init; }
 
     /// <summary>
     /// "Add subtask…" on a line (subtasks spec, Petre's pick A): the task a subtask added from that line goes under, the
