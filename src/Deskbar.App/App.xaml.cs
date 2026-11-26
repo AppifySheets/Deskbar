@@ -1,4 +1,4 @@
-﻿using System.Drawing;
+using System.Drawing;
 using System.IO;
 using System.Reactive.Linq;
 using System.Windows;
@@ -2794,6 +2794,8 @@ public partial class App : Application
                 // Whether Open Claude on a task can open anything (task 6a57f59b): the line's Claude icon, its menu and its
                 // thread offer Start Claude on this instead when its session cannot come back (a removed worktree).
                 opensSession: task => claudeActions?.CanOpen(task) ?? true,
+                // Where a session's transcript is (the Inbox page reads Claude's messages and steps from it).
+                transcriptOf: session => claudeSessions?.TranscriptOf(session) ?? Maybe<string>.None,
                 // Whether there is a list to split the Claude working block by (task 10b49554): until the first one,
                 // and while the feature is off, the block stays whole rather than showing every task idle.
                 knowsActivity: () => claudeActions?.KnowsActivity ?? false,
