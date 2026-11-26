@@ -38,9 +38,21 @@ namespace Deskbar.Core.Tasks;
 //    it was measured where the app runs). One not reported needs GitHub's state, `gh pr view` alone (no compare, there
 //    is no running commit to compare with): open says "not merged yet", merged says "not reported deployed yet".
 //
-// UNKNOWN DRAWS AS TODAY. A pull request GitHub could not tell about (gh missing, signed out, offline, a local commit),
-// and that no report covers, leaves its task at DeliveryStage.None, the full disc, rather than a ring that might never
-// fill on a machine that cannot look. The ring is a claim ("not running yet"), and Deskbar only makes claims it measured.
+// UNKNOWN: CHECKING, OR CANNOT TELL. A pull request no answer and no report covers is one of two things.
+//
+// - NOT ASKED YET (task 8db4c78e). The watch asks once a minute, so for up to a minute after a task turns Done (and for
+//   the seconds after a start while it works through the list) nothing is known. That used to draw the full disc, and
+//   Petre caught a task he had just merged showing "deployed" ("why did you mark the task with the deployed chip?"):
+//   the full disc is the claim "it runs", and it was made before anything was measured. Now such a task is
+//   DeliveryStage.Checking: the hollow ring, which claims only "not confirmed running", and it fills (or stays a ring)
+//   when the answer lands.
+// - CANNOT TELL (gh missing, signed out, offline, a local commit GitHub has never seen): the watch's last look at it
+//   FAILED (`unreachable`), or the watch's last look failed for every pull request it asked (`blind`: a machine that
+//   cannot look at all, so a task that turns Done there is not ringed for the minute until its own look fails too). Its
+//   task keeps DeliveryStage.None, the full disc, as before this existed, rather than a ring that would never fill on a
+//   machine that cannot look. Deskbar draws the ring only while an answer is on its way. The one exception is the first
+//   seconds after a start on such a machine: nothing has failed yet, so the rings show until the first look fails, which
+//   is at once when gh is missing (its look fails before asking anything).
 public static class RunningChanges
 {
     /// <summary>
@@ -48,9 +60,14 @@ public static class RunningChanges
     /// Done task with a recorded pull request whose state is all known; otherwise Open while one of them is still open,
     /// Merged while one is merged but not running (not in the running build, or not reported deployed), and Running once
     /// every one runs.
-    /// <paramref name="facts"/> is keyed by <see cref="PullRequestLink.Key"/>; a missing key is unknown.
+    /// <paramref name="facts"/> is keyed by <see cref="PullRequestLink.Key"/>; a missing key is unknown: Checking while
+    /// its look is still to come, None once it is in <paramref name="unreachable"/> (its last look failed).
     /// </summary>
-    public static TaskDelivery Of(TaskItem task, RunningBuild build, IReadOnlyDictionary<string, PullRequestArrival> facts)
+    /// <paramref name="blind"/>: the watch's last look failed for every pull request it asked (gh missing, signed out,
+    /// offline), so one not asked yet cannot be answered either and keeps the full disc too, rather than a ring for the
+    /// minute until its own look fails.
+    public static TaskDelivery Of(TaskItem task, RunningBuild build, IReadOnlyDictionary<string, PullRequestArrival> facts,
+        IReadOnlySet<string>? unreachable = null, bool blind = false)
     {
         if (task.Status != TaskStatus.Done) return TaskDelivery.None;
         var links = Watched(task);
@@ -62,7 +79,12 @@ public static class RunningChanges
         bool Reported(PullRequestLink link) =>
             !build.Builds(link) && reported.Contains(link.Key)
             && !(facts.TryGetValue(link.Key, out var fact) && fact.State == PullRequestState.Open);
-        if (links.Count == 0 || links.Any(l => !Reported(l) && !facts.ContainsKey(l.Key))) return TaskDelivery.None;
+        if (links.Count == 0) return TaskDelivery.None;
+        // Unknown (see the header): a failed look cannot tell, so the full disc as before; one still to come is Checking,
+        // the ring, never the disc that says it runs.
+        var unknown = links.Where(l => !Reported(l) && !facts.ContainsKey(l.Key)).ToArray();
+        if (unknown.Any(l => blind || unreachable?.Contains(l.Key) == true)) return TaskDelivery.None;
+        if (unknown.Length > 0) return new TaskDelivery(DeliveryStage.Checking, CheckingNote);
         // Closed without a merge: never shipped, never will, so it neither holds the ring nor earns the disc.
         var shipped = links.Where(l => !(facts.TryGetValue(l.Key, out var fact) && fact.State == PullRequestState.Closed)).ToArray();
         if (shipped.Length == 0) return TaskDelivery.None;
@@ -73,6 +95,9 @@ public static class RunningChanges
         var stage = waiting.Any(l => facts[l.Key].State == PullRequestState.Open) ? DeliveryStage.Open : DeliveryStage.Merged;
         return new TaskDelivery(stage, string.Join(" ", waiting.Select(l => Waiting(l, facts[l.Key], build))));
     }
+
+    /// <summary>The hover line of a task whose pull requests are still being asked about (DeliveryStage.Checking).</summary>
+    public const string CheckingNote = "Checking with GitHub whether its change runs here yet.";
 
     // The hover line once every pull request runs. A Deskbar-only task keeps phase 1's sentence. With other repositories
     // involved it leads with the evidence of the latest report among them ("Deployed: 2026.11.25.39-3749d21 in the portal
@@ -203,8 +228,14 @@ public sealed record PullRequestArrival(PullRequestState State, bool Running)
 /// <summary>Where a Done task's change stands against the running build (RunningChanges.Of).</summary>
 public enum DeliveryStage
 {
-    /// <summary>Not a change Deskbar can check, or not known yet: the full tick, as before.</summary>
+    /// <summary>Not a change Deskbar can check, or one it cannot tell about (its look failed): the full tick, as before.</summary>
     None,
+
+    /// <summary>
+    /// Its pull requests have not been asked about yet (task 8db4c78e): the hollow ring until the answer lands, so a task
+    /// that just turned Done never shows the full disc, which says its change runs, before anything was measured.
+    /// </summary>
+    Checking,
 
     /// <summary>A recorded pull request is still open: the hollow ring, and the chip says so.</summary>
     Open,
@@ -221,6 +252,6 @@ public sealed record TaskDelivery(DeliveryStage Stage, string Note)
 {
     public static readonly TaskDelivery None = new(DeliveryStage.None, "");
 
-    /// <summary>Whether the change is not running yet (Open or Merged): the ring instead of the disc.</summary>
-    public bool Shipping => Stage is DeliveryStage.Open or DeliveryStage.Merged;
+    /// <summary>Whether the change is not known to run (Checking, Open or Merged): the ring instead of the disc.</summary>
+    public bool Shipping => Stage is DeliveryStage.Checking or DeliveryStage.Open or DeliveryStage.Merged;
 }
