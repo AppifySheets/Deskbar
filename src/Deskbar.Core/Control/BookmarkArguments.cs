@@ -27,6 +27,9 @@ public abstract record BookmarkRequest
     // `bookmark move`: the twin of dragging a chip (the second bookmarks PR). To is the workspace it goes to, null to
     // stay; Screen what happens to the screen it remembers.
     public sealed record Move(string Workspace, string Bookmark, string? To, ScreenChange Screen) : BookmarkRequest;
+
+    // `bookmark color`: the chip menu's Colour. Colour is "#RRGGBB" (upper case) or null for Default.
+    public sealed record Colour(string Workspace, string Bookmark, string? Value) : BookmarkRequest;
 }
 
 public static class BookmarkArguments
@@ -48,8 +51,21 @@ public static class BookmarkArguments
         ["open", var workspace, var bookmark] => new BookmarkRequest.Open(workspace, bookmark),
         ["open-all", var workspace] => new BookmarkRequest.OpenAll(workspace),
         ["move", var workspace, var bookmark, ..] => ParseMove(workspace, bookmark, args.Skip(3).ToList()),
+        ["color", var workspace, var bookmark, var colour] => ParseColour(colour)
+            .Map(value => (BookmarkRequest)new BookmarkRequest.Colour(workspace, bookmark, value)),
         _ => Usage(),
     };
+
+    // "default" clears; a palette name (the swatches the menu shows) is its hex; anything else must be #RRGGBB. No
+    // "none": a bookmark has nothing to be transparent over, so the workspace picker's Transparent has no twin here.
+    static Result<string?> ParseColour(string raw) =>
+        raw.Trim() is var colour && colour.Equals("default", StringComparison.OrdinalIgnoreCase)
+            ? Result.Success<string?>(null)
+            : Domain.WorkspacePalette.Named(colour) is { } swatch
+                ? Result.Success<string?>(swatch.Hex.ToUpperInvariant())
+                : BookmarkRules.IsColour(colour)
+                    ? Result.Success<string?>(colour.ToUpperInvariant())
+                    : Result.Failure<string?>($"'{raw}' is not a colour. Use #RRGGBB, a palette name or default.\n" + ControlUsage.LineFor("bookmark"));
 
     // `move <workspace> <name|id> [--to <workspace>] [--screen <n> | --any-screen]`. At least one of them, each once;
     // --screen and --any-screen exclude each other; a screen is a whole number from 1.

@@ -1875,6 +1875,13 @@ public sealed class WorkspaceManager(
             .Ensure(_ => !string.IsNullOrWhiteSpace(name), "A bookmark needs a name.")
             .Tap(_ => ReplaceBookmarks(workspaceId, list => list.Select(b => b.Id == bookmarkId ? b with { Name = name.Trim() } : b).ToList()));
 
+    // The chip menu's Colour and `bookmark color`: "#RRGGBB", or null for none (the menu's Default). BookmarkRules.Check
+    // refuses anything else, so the stored value is always one the chip can draw.
+    public Result<Bookmark> SetBookmarkColor(Guid workspaceId, Guid bookmarkId, string? colour) =>
+        BookmarkInList(workspaceId, bookmarkId)
+            .Bind(b => BookmarkRules.Check(b with { Color = colour?.ToUpperInvariant() }))
+            .Tap(coloured => ReplaceBookmarks(workspaceId, list => list.Select(b => b.Id == bookmarkId ? coloured : b).ToList()));
+
     public Result RemoveBookmark(Guid workspaceId, Guid bookmarkId) =>
         BookmarkInList(workspaceId, bookmarkId)
             .Tap(_ => ReplaceBookmarks(workspaceId, list => list.Where(b => b.Id != bookmarkId).ToList()));
