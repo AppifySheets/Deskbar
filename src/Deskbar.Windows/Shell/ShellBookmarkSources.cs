@@ -81,7 +81,8 @@ public sealed class ShellBookmarkSources : IBookmarkSources
     // The shell link's getters fill a caller-supplied buffer: ask for it, and treat an empty answer as none.
     static string? Text(Func<StringBuilder, int> ask)
     {
-        var buffer = new StringBuilder(2048);
+        // 32768 is the Windows command-line limit, so a .lnk's arguments cannot be longer than this and are not cut.
+        var buffer = new StringBuilder(32768);
         return ask(buffer) == 0 && buffer.ToString().Trim() is { Length: > 0 } text ? text : null;
     }
 

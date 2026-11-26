@@ -304,6 +304,9 @@ sealed class BookmarkIcons
     internal ImageSource For(Bookmark bookmark, Action arrived) =>
         (bookmark.Kind switch
         {
+            // IconCache.For keeps a miss for the whole run, so an exe on a drive that mounts later stays a letter tile
+            // until Deskbar restarts. Left as it is: the same cache serves every window icon, and one rare case is not
+            // worth a second lookup path here.
             BookmarkKind.Program => IconCache.For(bookmark.Target),
             BookmarkKind.App => AppIcon(bookmark.Target, arrived),
             _ => LinkIcon(bookmark, arrived),

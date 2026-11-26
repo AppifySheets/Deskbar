@@ -325,8 +325,10 @@ There are three ways to add one:
   the thing is over the row. A dragged address-bar link is named after the page title when the browser offers
   it, else after the site. An `.exe` is named after its file description. A Start menu shortcut of a Store app
   or PWA becomes an app bookmark. Only the first file of a drop is taken.
-- Right-click a window and pick **Bookmark in this workspace**. A PWA or Store app window gives an app
-  bookmark; any other window gives a program bookmark.
+- Right-click a window and pick **Bookmark in this workspace**. A PWA, a Store app or Windows Terminal
+  gives an app bookmark, and an ordinary desktop program gives a program bookmark. A plain browser window,
+  an Explorer or other shell window, an elevated window Deskbar cannot read, a Store app hosted by
+  ApplicationFrameHost with no app id, and Deskbar's own windows get no item.
 - Copy a link, right-click the row and pick **Bookmark link from clipboard**. The item is enabled only while
   the clipboard holds a web address.
 

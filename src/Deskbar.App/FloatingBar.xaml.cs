@@ -5133,9 +5133,14 @@ public partial class FloatingBar : Window
                 if (rowKey is { } bookmarkWorkspace && BookmarkDropData.From(e.Data).TryGetValue(out var dropped))
                 {
                     e.Handled = true;
-                    Report(BookmarkSources is { } sources
+                    var outcome = BookmarkSources is { } sources
                         ? BookmarkDropParser.Parse(dropped, sources).Bind(b => manager.AddBookmark(bookmarkWorkspace, b))
-                        : Result.Failure<Bookmark>("This copy of Deskbar cannot read dropped items."));
+                        : Result.Failure<Bookmark>("This copy of Deskbar cannot read dropped items.");
+
+                    // Said AFTER Drop returns: Report is a modal MessageBox, and one raised inside the OLE Drop
+                    // handler keeps the program that started the drag (a browser, Explorer) frozen until it is closed.
+                    // The add itself has already happened above, so only the message waits.
+                    Dispatcher.BeginInvoke(() => Report(outcome));
                     return;
                 }
 
@@ -8837,5 +8842,9 @@ public partial class FloatingBar : Window
     // Owned by the bar for the same reason PromptDialog.Ask now takes an owner: this window
     // is Topmost, so an unowned message box can open behind it and strand the user with an
     // invisible modal.
-    Result Report(Result result) => result.TapError(err => MessageBox.Show(this, err, "Deskbar"));
+    Result Report(Result result) => result.TapError(err => (ShowRefusal ?? (text => MessageBox.Show(this, text, "Deskbar")))(err));
+
+    // How a refusal is said. Null means the modal message box above. A seam so a test can see what would be said, and
+    // when, without a modal box (which hangs the hidden-desktop test run).
+    internal Action<string>? ShowRefusal { get; init; }
 }

@@ -60,6 +60,17 @@ public sealed class BookmarkShortcutTests : IDisposable
     }
 
     [Fact]
+    public void Long_shortcut_arguments_are_not_cut()
+    {
+        var arguments = new string('a', 5000);
+        var lnk = Write(Path.Combine(Environment.SystemDirectory, "notepad.exe"), arguments, null, null);
+
+        var resolved = new ShellBookmarkSources().ResolveShortcut(lnk);
+
+        Assert.Equal(arguments, resolved.Value.Arguments);
+    }
+
+    [Fact]
     public void A_shortcut_with_an_app_id_reports_it()
     {
         var lnk = Write(null, null, null, "Contoso.Fake_abc123!App");
