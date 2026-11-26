@@ -1506,7 +1506,7 @@ public sealed class TasksBoard : IDisposable
         tasks.Board.Tasks.FirstOrDefault(t => t.Comments.Any(c => c.Id == comment))?.Id;
 
     // Whether the panel's view draws the task's line: a line of the List or of the Matrix (whichever is shown), or a
-    // subtask drawn in place inside an open thread (SubtaskView.Row). The Stats view draws no line.
+    // subtask drawn as a full line inside its parent's open thread (SubtaskView.Row, task 249a1e8a). The Stats view draws no line.
     static bool Draws(TasksView view, Guid id) =>
         view.Stats is null
         && (view.Matrix ? view.Cells.SelectMany(c => c.Rows) : view.Groups.SelectMany(g => g.Rows)).Any(row => RowDraws(row, id));
