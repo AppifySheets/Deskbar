@@ -308,6 +308,9 @@ written for the floating window and now describe the panel; 64a to 64n cover wha
     coloured workspace menu), Close (the line stays struck through with Undo for six seconds; Undo brings back
     the status it had, a waiting task its question too, and the selection) and Delete, then Delete for good. While that menu is open, change a task from the pipe:
     nothing moves until the menu closes.
+61a. Click a line to open its thread, then close the task with its tick: the thread folds at once and the struck line
+    stands alone with Undo. Undo: the task comes back with its thread open again. Close a task whose thread is folded
+    and Undo it: the thread stays folded.
 62. Click a note's line on a workspace: you go there and the panel stays open. "+ Add": a box
     opens, "on <workspace> ▾" says where; Enter adds the note there, Esc closes the box.
 63. With flagged tasks, the panel's List shows Waiting on you, then the quadrants captioned "I Urgent and

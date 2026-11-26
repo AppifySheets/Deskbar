@@ -185,12 +185,15 @@ public sealed class TasksBoard : IDisposable
     /// </summary>
     internal Action<Uri> OpenUri { get; init; } = MarkdownBlocks.Open;
 
-    // What Undo gives back (Ruling 31): the status, the question of a task that waited on Petre, and the selection.
+    // What Undo gives back (Ruling 31): the status, the question of a task that waited on Petre, the selection, and the
+    // thread when it was open (task 44605767: a close folds it, see Close).
     sealed record PendingClose(TaskStatus Was, IDisposable Timer)
     {
         public Maybe<string> Question { get; init; } = Maybe<string>.None;
 
         public bool Selected { get; init; }
+
+        public bool Expanded { get; init; }
     }
 
     //   panel         the panel's app bar and place (TasksPanel), built on the same window by the App, or by the tests
@@ -967,15 +970,27 @@ public sealed class TasksBoard : IDisposable
             return Result.Success();
         }
         // Pending before Close pulses Changed, so the redraw that pulse causes already draws the line struck through.
+        // THE THREAD FOLDS WITH THE CLOSE (task 44605767, Petre: "after i close the task, i can't close its details"). A
+        // line in its undo window takes no click but Undo's (TasksWindow.ListLine's Click), so a thread left open under it
+        // could not be folded by the click that folds every other thread, and it hung there, dimmed, until the line left.
+        // A closed task's thread is done with, so the close folds it, and in the same step, before the pulse's redraw, so
+        // it is never drawn open under a struck line. Undo opens it again when it was open (Ruling 31: exactly undo).
+        var wasExpanded = expanded.Remove(id);
         pendingCloses[id] = new PendingClose(task.Status, undoTimer(UndoWindow, () => Forget(id)))
         {
             Question = task.Question,
             Selected = selection.IsSelected(id),
+            Expanded = wasExpanded,
         };
         var closed = !stopClaude ? tasks.Close(id)
             : stopClaudeAndClose is { } stop ? stop(task)
             : tasks.Close(id, stoppingClaude: true);
-        return Report(closed.TapError(_ => Forget(id)), id);
+        // A refused close leaves the task open, so its thread stays as it was too (added back before Forget's redraw).
+        return Report(closed.TapError(_ =>
+        {
+            if (wasExpanded) expanded.Add(id);
+            Forget(id);
+        }), id);
     }
 
     /// <summary>
@@ -987,6 +1002,8 @@ public sealed class TasksBoard : IDisposable
     {
         if (!pendingCloses.Remove(id, out var pending)) return Report(Result.Failure("Nothing to undo"));
         pending.Timer.Dispose();
+        // The thread the close folded opens again, before UndoClose's pulse redraws (task 44605767, see Close).
+        if (pending.Expanded) expanded.Add(id);
         var back = tasks.UndoClose(id, pending.Was, pending.Question);
         if (back.IsSuccess && pending.Selected) selection.Select(id);
         // SetStatus pulses Changed, which redraws; a refusal (the task is gone) still needs the line taken away.
@@ -1361,13 +1378,15 @@ public sealed class TasksBoard : IDisposable
                 ? t with { Status = p.Was }
                 : t).ToArray());
 
-    // A line closed here whose task is open again (reopened from the pipe, or from the bar) is not pending any more.
+    // A line closed here whose task is open again (reopened from the pipe, or from the bar) is not pending any more. The
+    // thread its close folded opens again, as Undo opens it (task 44605767).
     void ForgetReopened() =>
         pendingCloses.Where(p => tasks.Board.Tasks.All(t => t.Id != p.Key || t.Status != TaskStatus.Closed)).ToList()
             .ForEach(p =>
             {
                 p.Value.Timer.Dispose();
                 pendingCloses.Remove(p.Key);
+                if (p.Value.Expanded) expanded.Add(p.Key);
             });
 
     // The undo window is over: the line leaves.
