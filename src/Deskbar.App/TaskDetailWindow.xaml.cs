@@ -383,10 +383,10 @@ public partial class TaskDetailWindow : Window
     }
 
     // The status chip's word: "Merged" or "PR open" for a Done task whose change is not running here yet (task 8470d176),
-    // the status's name otherwise.
+    // the status's name otherwise ("Done" while Deskbar is still asking, TaskStatusMarks.ShippingWord).
     static string DeliveryWord(TaskRowView row) =>
         row.Status != TaskStatus.Done || !row.Delivery.Shipping ? TaskViews.StatusName(row.Status)
-        : row.Delivery.Stage == DeliveryStage.Open ? "PR open" : "Merged";
+        : TaskStatusMarks.ShippingWord(row.Delivery.Stage);
 
     static Border Chip(string text, Brush fill, Brush ink) => new()
     {

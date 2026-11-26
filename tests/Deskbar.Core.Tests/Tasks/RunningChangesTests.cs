@@ -108,10 +108,21 @@ public sealed class RunningChangesTests
     }
 
     [Fact]
-    public void Unknown_keeps_the_full_tick()
+    public void Not_asked_yet_is_checking_never_the_full_tick()
     {
-        // One answer missing (a failed look, or not asked yet) is a claim Deskbar cannot make.
-        Assert.Equal(TaskDelivery.None, RunningChanges.Of(Task(TaskStatus.Done, Pr573, Pr574), Build, Facts((Pr573, MergedNotHere))));
+        // Task 8db4c78e: one answer still to come draws the ring, not the disc that says the change runs, even when the
+        // answers already in say it runs.
+        Assert.Equal(new TaskDelivery(DeliveryStage.Checking, RunningChanges.CheckingNote),
+            RunningChanges.Of(Task(TaskStatus.Done, Pr573, Pr574), Build, Facts((Pr573, Running))));
+        Assert.True(RunningChanges.Of(Task(TaskStatus.Done, Pr573), Build, Facts()).Shipping);
+    }
+
+    [Fact]
+    public void A_failed_look_keeps_the_full_tick()
+    {
+        // A pull request whose look failed is a claim Deskbar cannot make, either way: the full disc, as before.
+        var unreachable = new HashSet<string> { Pr574.Key };
+        Assert.Equal(TaskDelivery.None, RunningChanges.Of(Task(TaskStatus.Done, Pr573, Pr574), Build, Facts((Pr573, MergedNotHere)), unreachable));
     }
 
     [Fact]
@@ -163,8 +174,11 @@ public sealed class RunningChangesTests
     }
 
     [Fact]
-    public void Unknown_and_unreported_elsewhere_keeps_the_full_tick() =>
-        Assert.Equal(TaskDelivery.None, RunningChanges.Of(Task(TaskStatus.Done, Elsewhere), Build, Facts()));
+    public void Unknown_and_unreported_elsewhere_is_checking_until_its_look_fails()
+    {
+        Assert.Equal(DeliveryStage.Checking, RunningChanges.Of(Task(TaskStatus.Done, Elsewhere), Build, Facts()).Stage);
+        Assert.Equal(TaskDelivery.None, RunningChanges.Of(Task(TaskStatus.Done, Elsewhere), Build, Facts(), new HashSet<string> { Elsewhere.Key }));
+    }
 
     [Fact]
     public void A_task_in_both_repositories_needs_both()
@@ -392,6 +406,60 @@ public sealed class RunningChangesTests
         // Settled for this run: the running build cannot change without a restart.
         watch.Clock.AdvanceBy(RunningChangeWatch.Poll.Ticks * 5);
         Assert.Equal([Pr573.Key], watch.Looked);
+    }
+
+    // Task 8db4c78e, the case Petre caught: a task turns Done (its pull request just merged) between two looks. Until the
+    // next look answers it shows the Checking ring, never the full disc; then the ring the answer says.
+    [Fact]
+    public void A_task_turning_done_between_looks_is_checking_until_the_next_look()
+    {
+        var (board, id) = Board(TaskStatus.InProgress, Pr573);
+        using var watch = new Watch(board);
+        watch.GitHub[Pr573.Key] = MergedNotHere;
+        watch.Clock.AdvanceBy(TimeSpan.FromSeconds(1).Ticks);
+        Assert.Empty(watch.Looked);
+
+        Assert.True(watch.Tasks.MarkDone(id).IsSuccess);
+        Assert.Equal(DeliveryStage.Checking, watch.Delivery.Stage);
+        Assert.True(watch.Delivery.Shipping);
+
+        watch.Clock.AdvanceBy(RunningChangeWatch.Poll.Ticks);
+        Assert.Equal(DeliveryStage.Merged, watch.Delivery.Stage);
+    }
+
+    // A machine that cannot ask GitHub (every look of the last round failed: no gh, signed out, offline) keeps a task that
+    // turns Done on the full disc, as before task 8db4c78e, rather than a ring for the minute until its own look fails.
+    [Fact]
+    public void Where_GitHub_cannot_be_asked_a_task_turning_done_keeps_the_full_tick()
+    {
+        var (first, _) = Board(TaskStatus.Done, Pr573);
+        var made = first.Create("Second change", Maybe<Guid>.None, Session, Made, Guid.NewGuid()).Value;
+        var board = made.Board.AddPullRequest(made.Task.Id, Pr574, Made).Value;
+        using var watch = new Watch(board);
+
+        // The fake GitHub answers nothing: the only look fails.
+        watch.Clock.AdvanceBy(TimeSpan.FromSeconds(1).Ticks);
+        Assert.True(watch.Tasks.MarkDone(made.Task.Id).IsSuccess);
+
+        Assert.Equal(TaskDelivery.None, watch.Tasks.DeliveryOf(watch.Tasks.Board.Tasks.Single(t => t.Id == made.Task.Id)));
+    }
+
+    // At a start the views learn the build before the first answer, so a Done task waits in Checking, not on the full
+    // disc; and each answer lands on its own, so one task does not wait for every other pull request to be asked.
+    [Fact]
+    public void Each_answer_lands_as_it_comes()
+    {
+        var (board, _) = Board(TaskStatus.Done, Pr573, Pr574);
+        using var watch = new Watch(board);
+        var seen = new List<DeliveryStage>();
+        watch.Tasks.Changed.Subscribe(_ => seen.Add(watch.Delivery.Stage));
+        watch.GitHub[Pr573.Key] = Running;
+        watch.GitHub[Pr574.Key] = Running;
+
+        watch.Clock.AdvanceBy(TimeSpan.FromSeconds(1).Ticks);
+
+        // Checking at once, still Checking with one answer in, Running with both.
+        Assert.Equal([DeliveryStage.Checking, DeliveryStage.Checking, DeliveryStage.Running], seen);
     }
 
     [Fact]

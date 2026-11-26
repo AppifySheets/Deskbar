@@ -1587,3 +1587,16 @@ WT2. Widen it to the most it goes (on a 2560 pixel screen at 150%, 853 DIP): the
      perhaps one more. Narrow it back under 850: slim again at the grip's drag end.
 WT3. On a full line, drag a column's left divider far to the left: the column grows until the line's end is down to ⋯
      and the title is at about 320 DIP, then stops. It never squeezes the title further.
+
+## A Done tick waits for GitHub
+
+(Task 8db4c78e.) A Claude task with a pull request recorded on it, in this repository.
+
+DT1. Once the pull request merges, mark the task Done (or let its session do it). From that moment the tick is the hollow
+     green ring with the chip reading "Done" outlined; its tooltip says Deskbar is checking with GitHub. It never shows
+     the full green disc first. Within about a minute the chip turns "Merged" (the copy you run does not hold the merge
+     yet), and after you update to the release that holds it, the disc fills.
+DT2. Restart Deskbar with several Done tasks that have pull requests: they show rings at first and each one settles on
+     its own within a second or two of the next, rather than all at once at the end.
+DT3. With gh signed out (`gh auth logout`, then log back in afterwards), restart: those Done tasks keep the full tick, as
+     before this change, since Deskbar cannot ask.

@@ -176,10 +176,15 @@ public sealed class TaskService(ITaskStore store, Func<DateTimeOffset> now, Func
     // to recompute.
     Maybe<RunningBuild> runningBuild = Maybe<RunningBuild>.None;
     IReadOnlyDictionary<string, PullRequestArrival> arrivals = ImmutableDictionary<string, PullRequestArrival>.Empty;
+    // The pull requests whose last look failed (task 8db4c78e): their tasks keep the full disc, where one still to be
+    // asked draws the Checking ring (RunningChanges' header).
+    ImmutableHashSet<string> unreachable = ImmutableHashSet<string>.Empty;
+    // Whether the watch's last look failed for everything it asked: a machine that cannot ask GitHub (RunningChanges.Of).
+    bool blind;
 
     /// <summary>Where a task's change stands against the running build (RunningChanges.Of); None until the watch has spoken.</summary>
     public TaskDelivery DeliveryOf(TaskItem task) =>
-        runningBuild.Map(build => RunningChanges.Of(task, build, arrivals)).GetValueOrDefault(TaskDelivery.None);
+        runningBuild.Map(build => RunningChanges.Of(task, build, arrivals, unreachable, blind)).GetValueOrDefault(TaskDelivery.None);
 
     /// <summary>
     /// Whether "Mark deployed" belongs on the task's menu (task 8470d176, phase 2): its change is merged but not running
@@ -196,17 +201,24 @@ public sealed class TaskService(ITaskStore store, Func<DateTimeOffset> now, Func
 
     /// <summary>
     /// What GitHub said about the recorded pull requests against <paramref name="build"/>, keyed by
-    /// PullRequestLink.Key: the whole set known so far, replacing the last. Pulses Changed only when it differs, so an
-    /// unchanged look redraws nothing.
+    /// PullRequestLink.Key: the whole set known so far, replacing the last, with the keys whose last look failed
+    /// (<paramref name="failed"/>, none when not given), and whether the last look failed for everything it asked
+    /// (<paramref name="cannotAsk"/>). Pulses Changed only when something differs, so an unchanged look redraws nothing.
     /// </summary>
-    public void Arrived(RunningBuild build, IReadOnlyDictionary<string, PullRequestArrival> facts)
+    public void Arrived(RunningBuild build, IReadOnlyDictionary<string, PullRequestArrival> facts, IEnumerable<string>? failed = null,
+        bool cannotAsk = false)
     {
+        var failing = (failed ?? []).ToImmutableHashSet();
         var same = runningBuild.HasValue && runningBuild.Value == build
             && facts.Count == arrivals.Count
-            && facts.All(f => arrivals.TryGetValue(f.Key, out var known) && known == f.Value);
+            && facts.All(f => arrivals.TryGetValue(f.Key, out var known) && known == f.Value)
+            && failing.SetEquals(unreachable)
+            && cannotAsk == blind;
         if (same) return;
         runningBuild = build;
         arrivals = facts.ToImmutableDictionary();
+        unreachable = failing;
+        blind = cannotAsk;
         changed.OnNext(Unit.Default);
     }
 

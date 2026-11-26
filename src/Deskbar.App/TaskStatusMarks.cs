@@ -98,12 +98,23 @@ internal static class TaskStatusMarks
     // A Done task's change not running yet: "Merged", or "PR open" while one of its pull requests is still open.
     static string ChipText(TaskStatus status, DeliveryStage delivery = DeliveryStage.None) =>
         status == TaskStatus.WaitingOnYou ? "Waiting"
-        : Shipping(status, delivery) ? (delivery == DeliveryStage.Open ? "PR open" : "Merged")
+        : Shipping(status, delivery) ? ShippingWord(delivery)
         : TaskViews.StatusName(status);
 
-    // Whether a Done task's change is not running yet (TaskDelivery.Shipping), so its marks are drawn hollow.
+    /// <summary>
+    /// The status word of a Done task drawn hollow, for the chip here and the task window's: "PR open", "Merged", or
+    /// "Done" while Deskbar is still asking GitHub (DeliveryStage.Checking, task 8db4c78e), when it knows neither.
+    /// </summary>
+    internal static string ShippingWord(DeliveryStage delivery) => delivery switch
+    {
+        DeliveryStage.Open => "PR open",
+        DeliveryStage.Checking => "Done",
+        _ => "Merged",
+    };
+
+    // Whether a Done task's change is not known to run (TaskDelivery.Shipping), so its marks are drawn hollow.
     static bool Shipping(TaskStatus status, DeliveryStage delivery) =>
-        status == TaskStatus.Done && delivery is DeliveryStage.Open or DeliveryStage.Merged;
+        status == TaskStatus.Done && new TaskDelivery(delivery, "").Shipping;
 
     /// <summary>
     /// The status chip of a Tasks window line, or null for a closed task. Not hit-testable, so a click on it selects the
