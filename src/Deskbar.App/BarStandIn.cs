@@ -35,6 +35,10 @@ namespace Deskbar.App;
 // the button AND opened a panel would be a second surface to explain.
 public sealed class BarStandIn : Window
 {
+    // UI Automation sees this window and nothing inside it, so WPF stops walking its element tree after every
+    // layout pass (QuietAutomation.cs has the measurement: 1.45 s freezes on a busy machine).
+    protected override System.Windows.Automation.Peers.AutomationPeer OnCreateAutomationPeer() => new QuietWindowPeer(this);
+
     // Raised for every gesture that means "give me the bar back": the taskbar button, the X on the
     // taskbar thumbnail, Alt+Tab. One event rather than three handlers in App, so the restore path
     // cannot drift between them.

@@ -34,6 +34,10 @@ namespace Deskbar.App;
 // to the primary (FloatingBar.DockGuard.cs, 2026-11-01). Everything here reads its own screen or nothing.
 public sealed class ScreenStrip : Window
 {
+    // UI Automation sees this window and nothing inside it, so WPF stops walking its element tree after every
+    // layout pass (QuietAutomation.cs has the measurement: 1.45 s freezes on a busy machine).
+    protected override System.Windows.Automation.Peers.AutomationPeer OnCreateAutomationPeer() => new QuietWindowPeer(this);
+
     // 24 DIP. It shipped at 32, the mockup Petre picked ("B", spec "The look"), and on his screens it was too tall:
     // "make the fonts smaller, maybe make the strip with less padding". 24 holds the 20 DIP icon with its 1 DIP of
     // breathing room and the 2 DIP underline. Turned into the screen's pixels at the screen's own scale, so 36 px at 150%.

@@ -37,6 +37,10 @@ namespace Deskbar.App;
 // whenever a move or resize ends, the window is maximized or restored, or it closes.
 public partial class TaskDetailWindow : Window
 {
+    // UI Automation sees this window and nothing inside it, so WPF stops walking its element tree after every
+    // layout pass (QuietAutomation.cs has the measurement: 1.45 s freezes on a busy machine).
+    protected override System.Windows.Automation.Peers.AutomationPeer OnCreateAutomationPeer() => new QuietWindowPeer(this);
+
     // The panel's colours (TasksWindow), so a task reads the same in both.
     static readonly Brush Ink = Frozen(0xFF, 0xE6, 0xE6, 0xE6);
     static readonly Brush DimInk = Frozen(0xFF, 0xA9, 0xAD, 0xB8);

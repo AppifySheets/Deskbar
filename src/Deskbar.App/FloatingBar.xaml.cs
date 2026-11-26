@@ -40,6 +40,10 @@ namespace Deskbar.App;
 // until explicitly hidden.
 public partial class FloatingBar : Window
 {
+    // UI Automation sees this window and nothing inside it, so WPF stops walking its element tree after every
+    // layout pass (QuietAutomation.cs has the measurement: 1.45 s freezes on a busy machine).
+    protected override System.Windows.Automation.Peers.AutomationPeer OnCreateAutomationPeer() => new QuietWindowPeer(this);
+
     readonly WorkspaceManager manager;
     readonly WindowActivator activator = new();
     IDisposable? subscription;

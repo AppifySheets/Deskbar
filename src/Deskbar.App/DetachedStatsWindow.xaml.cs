@@ -32,6 +32,10 @@ namespace Deskbar.App;
 // MiddleDragging has the long reasoning), kept in physical pixels through MiddleDrag.
 public partial class DetachedStatsWindow : Window
 {
+    // UI Automation sees this window and nothing inside it, so WPF stops walking its element tree after every
+    // layout pass (QuietAutomation.cs has the measurement: 1.45 s freezes on a busy machine).
+    protected override System.Windows.Automation.Peers.AutomationPeer OnCreateAutomationPeer() => new QuietWindowPeer(this);
+
     const string TaskManagerTip = "Click for Task Manager";
 
     // The monitor lookup's flag for the fallback; the lookup for a stored point is MONITOR_DEFAULTTONEAREST.

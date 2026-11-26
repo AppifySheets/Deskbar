@@ -28,6 +28,10 @@ namespace Deskbar.App;
 // The owner (WindowRings) tells it where, in what colour and above which window, and checks it every second.
 sealed class RingFrame : Window
 {
+    // UI Automation sees this window and nothing inside it, so WPF stops walking its element tree after every
+    // layout pass (QuietAutomation.cs has the measurement: 1.45 s freezes on a busy machine).
+    protected override System.Windows.Automation.Peers.AutomationPeer OnCreateAutomationPeer() => new QuietWindowPeer(this);
+
     // The line's thickness is given in PHYSICAL pixels (WindowRings asks for one). It was a fixed 2 DIP at first, 4 to 5 px
     // at Petre's 225%, then Windows' own border thickness (2 px there), then "can you do 1px?". Converted to DIPs at the
     // target's scale in Place, since WPF draws in DIPs, and snapped to whole pixels so 1 px stays a crisp 1 px rather

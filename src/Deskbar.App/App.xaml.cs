@@ -32,6 +32,10 @@ public partial class App : Application
 {
     TaskbarIcon? trayIcon;
     WorkspaceManager? manager;
+    // state.json and tasks.json are written by this, off the UI thread (DeferredWrites has why). Static so the crash
+    // handler, which is static, can put the last change on the disk before it starts the next copy. Flushed on every
+    // way out: ReleaseInstanceMutexes (Exit, update and restart handovers), SessionEnding and the Exit event.
+    static Core.Persistence.DeferredWrites? saves;
     // The remote control's listening end (`Deskbar.exe ctl ...` from another process). See
     // ControlCommandLine for the asking end and RemoteControl for the commands.
     ControlPipeServer? controlServer;
@@ -965,7 +969,10 @@ public partial class App : Application
             return false;
 
         ClickTrace.Write($"crash: {fault?.GetType().Name}: {fault?.Message}");
-        var lived = TimeSpan.FromMilliseconds(Environment.TickCount64 - startedAtTicks);
+        // The next copy reads state.json and tasks.json as it starts, so the last queued save lands first. Bounded:
+        // a stuck disk must not stop the relaunch.
+        if (saves?.Flush(TimeSpan.FromSeconds(2)) == false) ClickTrace.Write("crash: a save was still waiting after 2 s");
+        var lived =TimeSpan.FromMilliseconds(Environment.TickCount64 - startedAtTicks);
         var started = CrashRelaunch.Start(Environment.ProcessPath, lived);
         ClickTrace.Write(started.IsSuccess ? $"crash: started the next copy after {lived.TotalMinutes:N0} min" : $"crash: {started.Error}");
 
@@ -1623,8 +1630,11 @@ public partial class App : Application
         // probe hooked every event in both ranges and saw nothing), so this listens to the shell
         // hook instead, which is a different subscription with a different lifetime.
         attentionMonitor = new ShellHookAttentionMonitor();
+        // Saves are flushed to the disk off the UI thread from here on (DeferredWrites). A failed write is traced.
+        saves = new Core.Persistence.DeferredWrites(Core.Persistence.DurableFile.Write, ClickTrace.On ? ClickTrace.Write : null);
         // The store traces a fallback to state.json.previous, the one sign that the latest file was lost.
-        manager = new WorkspaceManager(desktops, monitor, new Win32WindowTitles(), new JsonPersistenceStore(stateDir, ClickTrace.On ? ClickTrace.Write : null, UpdateService.RunningVersion),
+        manager = new WorkspaceManager(desktops, monitor, new Win32WindowTitles(),
+            new JsonPersistenceStore(stateDir, ClickTrace.On ? ClickTrace.Write : null, UpdateService.RunningVersion, saves.Write),
             activator: new WindowActivator(), screenLayout: new ScreenLayout(), attention: attentionMonitor,
             // #94: which app started this one, so a window opened by another app joins it. Stateless
             // and cheap, asked only when a new window appears.
@@ -1652,7 +1662,7 @@ public partial class App : Application
         // The tasks board (docs/superpowers/specs/2026-11-22-tasks-board-design.md), in tasks.json beside state.json.
         // A failed load is traced and leaves the board empty, never fatal. The state folder is also where pasted images
         // live (task-images\<task id>\; docs/superpowers/specs/2026-11-24-task-images-design.md).
-        tasks = new Core.Tasks.TaskService(new Core.Tasks.JsonTaskStore(stateDir, ClickTrace.On ? ClickTrace.Write : null), () => DateTimeOffset.UtcNow,
+        tasks = new Core.Tasks.TaskService(new Core.Tasks.JsonTaskStore(stateDir, ClickTrace.On ? ClickTrace.Write : null, saves.Write),() => DateTimeOffset.UtcNow,
             trace: ClickTrace.On ? ClickTrace.Write : null, filesRoot: stateDir);
         tasks.Load().TapError(err => ClickTrace.Write($"tasks.json not loaded: {err}"));
         // SNOOZED TASKS COME BACK BY THEMSELVES (task 6da8d7eb, TaskBoard.WakeDue): once now, for a snooze that ran out
@@ -2883,6 +2893,9 @@ public partial class App : Application
         // Whatever is still unwritten when the app closes. Exiting is the one moment a lost five
         // minutes is guaranteed rather than merely possible.
         Exit += (_, _) => timeTracker.Flush();
+        // Every save made on the way out (the tasks panel's open state, the time tracker's last state) is queued by
+        // now: Exit is the last event the app raises. Disposing flushes them and writes any later one synchronously.
+        Exit += (_, _) => saves?.Dispose();
 
         // The "Restore workspaces?" prompt USED to appear here. Petre: "this seems like an
         // overkill", then "no, bad, don't want this". Gating it to first-run-after-reboot was
@@ -2938,6 +2951,9 @@ public partial class App : Application
             // this, that close reads as the user's Alt+F4 and saves it closed (TasksBoard.Shutdown).
             tasksBoard?.Shutdown();
             managerDock?.Shutdown();
+            // Windows may end the process soon after this returns, so the queued saves (the panel's state just above
+            // among them) go to the disk now rather than in the Exit event, which a sign-out may never reach.
+            if (saves?.Flush(TimeSpan.FromSeconds(5)) == false) ClickTrace.Write("sign-out: a save was still waiting after 5 s");
         };
 
         // WINDOW CLASS NAMES STAY AVAILABLE ON EVERY PROCESSOR (task c5e9b17f; ClassNameSlots has what was measured).
@@ -3454,6 +3470,10 @@ public partial class App : Application
     // when this copy opened it, and releasing a mutex the thread does not own throws.
     void ReleaseInstanceMutexes()
     {
+        // The copy that takes over once the mutex is free reads state.json and tasks.json, so the saves still queued
+        // land first (DeferredWrites). Bounded, as the crash path's is, so a stuck disk cannot hold up an exit.
+        if (saves?.Flush(TimeSpan.FromSeconds(5)) == false) ClickTrace.Write("exit: a save was still waiting after 5 s");
+
         if (singleInstance is { } held)
         {
             held.ReleaseMutex();
