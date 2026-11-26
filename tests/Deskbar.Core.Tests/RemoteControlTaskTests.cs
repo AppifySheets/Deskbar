@@ -969,6 +969,35 @@ public class RemoteControlTaskTests
         Assert.Equal(JsonValueKind.Null, Json(woken).GetProperty("snoozedUntil").ValueKind);
     }
 
+    // Task 3dd07539: the Reevaluate button's twin. `task reevaluate` on a task a session worked on announces it for the
+    // session (Reevaluations, which the app's CommentWaker delivers) and writes Deskbar's line in the thread; a note no
+    // session ever had has no one to ask and is refused with the board unchanged, and so is a closed task.
+    [Fact]
+    public void Reevaluate_asks_the_tasks_session_and_refuses_without_one()
+    {
+        var manager = Started();
+        var note = Prefix(Added(manager, "Just a note"));
+        var claudes = tasks.Create("Claude's one", WorkspaceId(manager, "Deskbar"),
+            new TaskSession("s1", @"C:\repos\TaskSpaces", clock, Maybe<DateTimeOffset>.None)).Value.Id;
+        var heard = new List<Guid>();
+        using var _ = tasks.Reevaluations.Subscribe(heard.Add);
+
+        Assert.Equal(ControlReply.Ok, Run(manager, "task", "reevaluate", claudes.ToString()[..6]).ExitCode);
+        Assert.Equal([claudes], heard);
+        var thread = tasks.Board.Tasks.Single(t => t.Id == claudes).Comments;
+        Assert.Equal(TaskService.ReevaluateNote, Assert.Single(thread).Markdown);
+        Assert.True(thread[0].ByDeskbar);
+
+        var before = tasks.Board;
+        AssertRefusedAndUnchanged(Run(manager, "task", "reevaluate", note), before);
+        // Done first: closing a task Claude is still working on is refused (TaskBoard.ClaudeStillWorking).
+        Assert.True(tasks.SetStatus(claudes, TaskStatus.Done).IsSuccess);
+        Assert.True(tasks.Close(claudes).IsSuccess);
+        before = tasks.Board;
+        AssertRefusedAndUnchanged(Run(manager, "task", "reevaluate", claudes.ToString()[..6]), before);
+        Assert.Equal([claudes], heard);
+    }
+
     // The manager session's cheap look (TaskOverview): the reply is text, not JSON, one line per open task.
     [Fact]
     public void Overview_prints_the_text()

@@ -4500,6 +4500,43 @@ public class TasksBoardTests
         Assert.Equal(["Open in window", "Start Claude on this", "Add subtask"], Words());
     });
 
+    // Task 3dd07539: Reevaluate. A Claude task waiting on Petre has the button in its line's last slot (a full line shows
+    // it) and in its open thread's row only while the line does not show it; a click asks the session (Reevaluations) and
+    // writes Deskbar's line. A Claude task in progress has no button but its menu has the item; a note has neither.
+    [Theory]
+    [InlineData(Wide)]
+    [InlineData(TasksPanelLayout.DefaultWidth)]
+    public void Reevaluate_on_a_waiting_Claude_task(double width) => StaThread.Run(() =>
+    {
+        using var t = Build(width: width, startClaude: _ => { }, openSession: (_, _) => Result.Success());
+        var waiting = t.Tasks.Create("Usage limit", t.Gepha, Session("s1")).Value.Id;
+        Assert.True(t.Tasks.Ask(waiting, "Merge #599").IsSuccess);
+        var working = t.Tasks.Create("Tasks redesign", t.Gepha, Session("s2")).Value.Id;
+        var note = t.Tasks.AddNote("Dishwasher tablets", t.Gepha).Value.Id;
+        var heard = new List<Guid>();
+        using var _ = t.Tasks.Reevaluations.Subscribe(heard.Add);
+        t.Controller.Show();
+        t.Controller.ToggleThread(waiting);
+        t.Window.UpdateLayout();
+
+        var onLine = t.Window.LineButtonsShown(waiting) > 7;
+        Console.WriteLine($"MEASURED {width}: line shows {t.Window.LineButtonsShown(waiting)} of 8");
+        Assert.Equal(width >= Wide, onLine);
+        var row = Inside(t.Window).OfType<WrapPanel>().Single(p => TasksWindow.ThreadActionsTag.Equals(p.Tag));
+        var inRow = row.Children.OfType<Button>().Any(b => AutomationProperties.GetName(b) == TasksWindow.ReevaluateText && b.Visibility == Visibility.Visible);
+        Assert.NotEqual(onLine, inRow);
+        Assert.False(HasButton(LineOf(t.Window, working), TasksWindow.ReevaluateText));
+        Assert.False(HasButton(LineOf(t.Window, note), TasksWindow.ReevaluateText));
+
+        Click(row.Children.OfType<Button>().Concat(Inside(LineOf(t.Window, waiting)).OfType<Button>())
+            .First(b => AutomationProperties.GetName(b) == TasksWindow.ReevaluateText && b.IsVisible));
+        Assert.Equal([waiting], heard);
+        Assert.Equal(TaskService.ReevaluateNote, t.Tasks.Board.Tasks.Single(x => x.Id == waiting).Comments.Last().Markdown);
+
+        Assert.Contains(TasksWindow.ReevaluateText, MenuWords(t.Window.OpenMenuFor(working)));
+        Assert.DoesNotContain(TasksWindow.ReevaluateText, MenuWords(t.Window.OpenMenuFor(note)));
+    });
+
     static bool HasButton(object scope, string name) => Inside(scope).OfType<Button>().Any(b => AutomationProperties.GetName(b) == name);
 
     // --- Tasks panel plan, Task 8: lines at the panel's width, the Matrix from 780, the working halo ------------------

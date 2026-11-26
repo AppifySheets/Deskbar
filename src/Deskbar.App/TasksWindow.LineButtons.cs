@@ -15,6 +15,7 @@ namespace Deskbar.App;
 // fixed order, between Open Claude and "⋯":
 //
 //   Edit (E70F)  Open in window (E737)  Add subtask (E710)  Assign to (E77B)  Related to (E71B)  Move to (E8DE)  Delete (E74D)
+//   Reevaluate (E72C, task 3dd07539: only on a Claude task waiting on Petre, see ReevaluateSlot)
 //
 // The order is the order they are given up in. Measured on a Claude task's line with a comment count: at 360 DIP (the
 // narrowest panel) Edit alone, at 460 (the default) six, and all seven a little wider. FitStrip (below) does the fitting from the width it is given, so a line never decides it from numbers
@@ -41,7 +42,25 @@ public partial class TasksWindow
     const int EditSlot = 0;
     const int OpenInWindowSlot = 1;
     const int AddSubtaskSlot = 2;
-    const int LineButtonSlots = 7;
+    const int ReevaluateSlot = 7;
+    const int LineButtonSlots = 8;
+
+    // REEVALUATE ON THE LINE (task 3dd07539). The eighth slot, LAST, because it applies to few lines: a task waiting on
+    // Petre (a question or Done) that a Claude session has worked on (Reevaluates). Anywhere earlier, its empty slot would
+    // leave a gap between two buttons on nearly every line. Last, a full line shows it, and a narrower one leaves it to the
+    // open thread's row (ThreadActions, which follows the line, FollowLine) and to the "⋯" menu, which has it on every open
+    // Claude task.
+    /// <summary>The words of the menu item, the line's button and the thread row's button (TaskService.Reevaluate).</summary>
+    internal const string ReevaluateText = "Reevaluate";
+
+    internal const string ReevaluateTip =
+        "Ask Claude to check where this task really stands and fix it: settle a question already answered, mark finished work done, rewrite an old status line";
+
+    // Whether a line and its thread offer Reevaluate as a button: a task in Waiting on you (a question or Done, the two
+    // statuses that wait on Petre) that a Claude session has worked on. That is where a stale question or status costs
+    // him: the task sits on top of his board asking for something already done. The menu offers it more widely (OpenMenuFor).
+    bool Reevaluates(TaskRowView row) =>
+        row.Claudes && row.Status.IsPinned() && !row.Closing && Actions?.Reevaluate is not null;
 
     /// <summary>The words of the menu item and the line's button, which open the assignee's choices.</summary>
     internal const string AssignToText = "Assign to";
@@ -86,6 +105,8 @@ public partial class TasksWindow
             }),
             IconButton(live, "", MoveToText, "Move it to another workspace", button => OpenMoveMenu(row.Id, row.Place.Workspace, button)),
             IconButton(live, "", DeleteText, "Delete it, after one more click", button => OpenDeleteMenu(row.Id, button)),
+            // Segoe's "Refresh", U+E72C, in both icon fonts.
+            IconButton(Reevaluates(row), "", ReevaluateText, ReevaluateTip, _ => Actions?.Reevaluate?.Invoke(row.Id)),
         };
         var strip = new FitStrip(ButtonColumn) { Tag = LineButtonsTag, VerticalAlignment = VerticalAlignment.Center };
         // An empty element holds a slot the action does not apply to, so the next button stays at its own x.
@@ -166,6 +187,7 @@ public partial class TasksWindow
         {
             OpenInWindowText => fitted > OpenInWindowSlot && strip.Children[OpenInWindowSlot] is Button,
             ThreadAddSubtaskText => fitted > AddSubtaskSlot && strip.Children[AddSubtaskSlot] is Button,
+            ReevaluateText => fitted > ReevaluateSlot && strip.Children[ReevaluateSlot] is Button,
             OpenClaudeText => !editing,
             StartClaudeText => !editing && StartsClaude(row),
             _ => false,
