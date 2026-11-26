@@ -814,12 +814,19 @@ public sealed class TasksBoard : IDisposable
     // opens a new one there when that desktop has none, so the workspace does not gain a browser window per click. A file
     // link's program or Explorer window opens on the desktop in front in the same way.
     //
-    // Stays as before when there is nowhere to go: a note on no workspace, or a task already in the current workspace. A
-    // switch that fails (the workspace's desktop was lost, say) is said on the problem line, and the link still opens
-    // where Petre is, since a link that opens on the wrong desktop is better than one that does not open at all.
+    // No switch when there is nowhere to go: no repository home (below) and a note on no workspace, or a target already in
+    // the current workspace. A switch that fails (the workspace's desktop was lost, say) is said on the problem line, and
+    // the link still opens where Petre is, since a link that opens on the wrong desktop is better than one that does not
+    // open at all.
+    //
+    // WHICH workspace (second round, Petre: "opened in personal, should have in deskbar"): a link to a GitHub repository
+    // goes to the workspace that holds most of that repository's tasks (LinkHome, in Core, with the measurements), so a
+    // Deskbar pull request linked from a task filed under Personal opens in Deskbar. Any other link, or a repository with
+    // no clear home, follows the task it was clicked on.
     void OpenLink(Guid id, Uri uri)
     {
-        var target = tasks.Board.Tasks.TryFirst(t => t.Id == id).Bind(t => t.WorkspaceId);
+        var target = LinkHome.WorkspaceFor(uri.AbsoluteUri, tasks.Board.Tasks, ws => manager.State.Workspaces.Any(w => w.Id == ws))
+            .Or(() => tasks.Board.Tasks.TryFirst(t => t.Id == id).Bind(t => t.WorkspaceId));
         var elsewhere = target.HasValue && manager.CurrentWorkspaceId.Map(current => current != target.Value).GetValueOrDefault(true);
         if (elsewhere) Report(manager.Switch(target.Value));
         OpenUri(uri);

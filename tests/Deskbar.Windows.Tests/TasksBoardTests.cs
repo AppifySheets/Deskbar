@@ -3357,6 +3357,28 @@ public class TasksBoardTests
         Assert.Equal([new Uri("https://example.com/browse/SHAR-13")], opened);
     });
 
+    // Second round (Petre: "opened in personal, should have in deskbar"): a link to a repository whose tasks are mostly on
+    // another workspace opens there, though the task it was clicked on is in the workspace in front (LinkHome).
+    [Fact]
+    public void A_repository_link_opens_where_that_repositorys_tasks_are() => StaThread.Run(() =>
+    {
+        var opened = new List<Uri>();
+        using var t = Build(openUri: opened.Add);
+        const string pr = "https://github.com/AppifySheets/Deskbar/pull/587";
+        var filedHere = t.Tasks.Create("Subtask drag", t.Gepha, Session("s1")).Value.Id;
+        t.Tasks.Ask(filedHere, $"Merge [Deskbar #587]({pr})");
+        new[] { "Bar fold", "Panel buttons" }.ToList().ForEach(title =>
+            Assert.True(t.Tasks.Describe(t.Tasks.AddNote(title, t.Sparrow).Value.Id, "https://github.com/AppifySheets/Deskbar/pull/1").IsSuccess));
+        t.Controller.Show();
+
+        Inside(LineOf(t.Window, filedHere)).OfType<TextBlock>().Single(b => Equals(b.Tag, TasksWindow.DetailTag))
+            .Inlines.OfType<Hyperlink>().Single().RaiseEvent(new RoutedEventArgs(Hyperlink.ClickEvent));
+
+        var sparrowDesktop = t.Harness.Manager.State.Workspaces.Single(w => w.Id == t.Sparrow).DesktopId!.Value;
+        Assert.Equal([sparrowDesktop], t.Harness.Desktops.Switched);
+        Assert.Equal([new Uri(pr)], opened);
+    });
+
     // Nowhere to go, so no switch: a task in the workspace in front, and a note on no workspace. Both links still open.
     [Fact]
     public void A_link_on_a_task_here_or_on_no_workspace_opens_without_a_switch() => StaThread.Run(() =>

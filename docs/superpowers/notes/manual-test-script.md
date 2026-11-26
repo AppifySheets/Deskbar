@@ -1083,6 +1083,9 @@ TW-L5. A note on no workspace with a link in its description: open it in its win
        link: it opens on the desktop you are on, with no switch.
 TW-L6. Open the B task in its own window while on A and click a link in its description or its pull requests: the
        same as TW-L1.
+TW-L7. A task on workspace A whose question links a pull request of a repository whose other tasks are mostly on B
+       (Deskbar's, for a task filed under Personal): click it while on A. Deskbar switches to B and the pull request
+       opens there, not on A.
 
 ## A merge settles its question
 
