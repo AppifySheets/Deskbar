@@ -74,7 +74,10 @@ public static class ControlClient
     // One request, one reply. Every way of not getting an answer becomes a ControlReply rather than an
     // exception, so the caller has exactly one thing to print and one exit code to return. `replyTimeout`
     // defaults to ReplyTimeout.
-    public static async Task<ControlReply> SendAsync(string pipeName, IReadOnlyList<string> args, TimeSpan connectTimeout, TimeSpan? replyTimeout = null)
+    // `serverImage` and `ownImage` are seams for the tests of the permission verb's stricter check (PipeTrust's N1): how
+    // the pipe's server process is read, and this client's own executable. Left null, the real ones.
+    public static async Task<ControlReply> SendAsync(string pipeName, IReadOnlyList<string> args, TimeSpan connectTimeout, TimeSpan? replyTimeout = null,
+        Func<SafeHandle, Result<string>>? serverImage = null, string? ownImage = null)
     {
         // Asked first, because .NET's ConnectAsync cannot tell "no such pipe" from "busy": on a name nobody serves
         // it retries until the timeout runs out (measured: 2 s every time, see PipeExistsAsync).
@@ -118,6 +121,23 @@ public static class ControlClient
             trusted = Result.Failure($"The control pipe's owner could not be read: {e.Message}");
         }
         if (trusted.IsFailure) return ControlReply.Fail(trusted.Error);
+
+        // The permission hook's call must reach Deskbar itself, not merely a pipe of its name and user (PipeTrust's N1):
+        // checked before a byte is written, since the request names the slot an answer would go into. A refusal is a
+        // failure on stderr and nothing on stdout, so the hook script has no code and the terminal asks.
+        if (ControlArguments.IsPermissionCall(args))
+        {
+            Result real;
+            try
+            {
+                real = PipeTrust.CheckServerImage((serverImage ?? PipeTrust.ServerImageOf)(pipe.SafePipeHandle), ownImage ?? Environment.ProcessPath);
+            }
+            catch (Exception e)
+            {
+                real = Result.Failure($"The program serving Deskbar's control pipe could not be checked: {e.Message}");
+            }
+            if (real.IsFailure) return ControlReply.Fail(real.Error);
+        }
 
         try
         {
