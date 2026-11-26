@@ -51,15 +51,20 @@ public partial class FloatingBar
     // (App.xaml.cs), is the one that draws with the opener. A second redraw here would only repeat it at startup.
     //
     // It does subscribe the rows to the opener's OpenedLinks: a link's browser window noted after a click, or dropped
-    // when that window closes, redraws the rows so its chip turns open or back to rest. Rebuild's own guard absorbs a
-    // pulse that lands mid-rebuild. The opener lives as long as the bar, so the subscription is not undone.
+    // when that window closes, redraws the rows so its chip turns open or back to rest. The opener lives as long as the
+    // bar, so the subscription is not undone.
+    //
+    // The redraw is POSTED, never run inline. A note is made on the foreground path, inside WindowMonitor.OnWinEvent,
+    // and that callback raises its foreground stream outside its own try/catch: an exception from an inline rebuild
+    // would unwind through user32's native frame and take the process down, and Rx would end this subscription for
+    // good (review of dea775c7). Posted, the rebuild runs from the dispatcher like any other queued work.
     public BookmarkOpener? BookmarkOpener
     {
         get => bookmarkOpener;
         init
         {
             bookmarkOpener = value;
-            value?.OpenedLinks.Changed.Subscribe(_ => Rebuild());
+            value?.OpenedLinks.Changed.Subscribe(_ => Dispatcher.BeginInvoke(new Action(Rebuild)));
         }
     }
 

@@ -216,6 +216,7 @@ public sealed class BookmarkOpenerTests
         var link = Added(work, Link("https://gph.local/"));
         watching.Open(work.Id, link.Id);
         receiver.OnNext(Edge);
+        Assert.NotEmpty(watching.OpenedLinks.Noted);
 
         gone.OnNext(Edge.Handle);
 
@@ -255,6 +256,7 @@ public sealed class BookmarkOpenerTests
         alive.Add(Edge.Handle);
         watching.Open(work.Id, link.Id);
         receiver.OnNext(Edge);
+        Assert.NotEmpty(watching.OpenedLinks.Noted);
 
         Assert.True(manager.RemoveBookmark(work.Id, link.Id).IsSuccess);
 
