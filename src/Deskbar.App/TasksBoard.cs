@@ -1288,6 +1288,18 @@ public sealed partial class TasksBoard : IDisposable
         return Report(tasks.Comment(id, Maybe<string>.None, markdown), id);
     }
 
+    /// <summary>
+    /// An answer button: option <paramref name="index"/> of the question the task waits on, posted as Petre's comment with
+    /// the option's exact words. It goes through <see cref="Comment"/>, the road a typed comment takes (this method adds
+    /// no comment logic of its own), so the thread opens to show it, the task's session is woken by the same
+    /// TaskService.Commented announcement and RepliedTasks sets the question aside as it does for typed words.
+    /// <paramref name="drawn"/> is the list the button was drawn from (TaskRowView.QuestionOptions): when the task's options
+    /// are no longer exactly it (the session asked again, or the question was answered meanwhile), or the index is outside
+    /// it, nothing is sent and the refusal is shown on the line like any other (Report).
+    /// </summary>
+    public Result AnswerWithOption(Guid id, int index, IReadOnlyList<string> drawn) =>
+        tasks.Board.OptionText(id, index, drawn).Match(text => Comment(id, text), refusal => Report(Result.Failure(refusal), id));
+
     public void Dispose()
     {
         disposed = true;
@@ -1533,7 +1545,8 @@ public sealed partial class TasksBoard : IDisposable
         Refresh();
     }
 
-    TaskRowView Row(TaskItem task) => RowOf(task, expanded.Contains(task.Id));
+    // Internal so a test reads what a line is built from (the answer options a later drawing makes buttons of).
+    internal TaskRowView Row(TaskItem task) => RowOf(task, expanded.Contains(task.Id));
 
     // A line as drawn, its thread (comments, sessions, subtasks) filled in only when `open`: a line whose thread is
     // expanded in the panel, or always for a task window (OpenWindow), which shows the whole task.
@@ -1573,6 +1586,8 @@ public sealed partial class TasksBoard : IDisposable
         Created = task.Created,
         Assignee = task.Assignee,
         Description = task.Description,
+        // The answers the open question offers (TaskItem.QuestionOptions), for the buttons under it; empty for none.
+        QuestionOptions = task.QuestionOptions,
         Important = task.Important,
         Urgent = task.Urgent,
         SnoozedUntil = task.SnoozedUntil.Map(until => (DateTimeOffset?)until).GetValueOrDefault(),
@@ -1883,6 +1898,13 @@ internal sealed record TaskRowView(Guid Id, string Title, string Detail, TaskSta
 
     /// <summary>Petre's own markdown under the title (Ruling 58), "" for none.</summary>
     public string Description { get; init; } = "";
+
+    /// <summary>
+    /// The answers the session offered with the question this task waits on now (TaskItem.QuestionOptions, AnswerOptions),
+    /// in its order, empty for none. A later drawing makes them buttons and hands the SAME list back to
+    /// <see cref="TasksBoard.AnswerWithOption"/>, which refuses a click on a list that is no longer the task's.
+    /// </summary>
+    public IReadOnlyList<string> QuestionOptions { get; init; } = [];
 
     /// <summary>The task's two flags (Task 12), drawn as the line's toggles.</summary>
     public bool Important { get; init; }
