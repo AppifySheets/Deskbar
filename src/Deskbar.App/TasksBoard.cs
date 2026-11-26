@@ -1552,8 +1552,21 @@ public sealed class TasksBoard : IDisposable
         {
             Settled = comment.Settled.HasValue,
             Editable = comment.SessionId.HasNoValue,
+            // The chat thread (task 39bc9c4d): the side and colour come from the author, the date moves to a day line
+            // above the first comment of each day, and each bubble keeps only its time.
+            Who = comment.BySession ? CommentAuthor.Claude : comment.ByDeskbar ? CommentAuthor.Deskbar : comment.ByManager ? CommentAuthor.Manager : CommentAuthor.You,
+            Time = at.ToString("HH:mm"),
+            Day = DayOf(at.Date, now().ToLocalTime().Date),
+            FullWhen = at.ToString("d MMM yyyy HH:mm"),
         };
     }
+
+    // How a day line names a day: "Today", "Yesterday", "25 Nov" this year, "25 Nov 2025" before it.
+    internal static string DayOf(DateTime day, DateTime today) =>
+        day == today ? "Today"
+        : day == today.AddDays(-1) ? "Yesterday"
+        : day.Year == today.Year ? day.ToString("d MMM")
+        : day.ToString("d MMM yyyy");
 
     // A workspace as a chip: its name and lane colour, or "none". A workspace that no longer exists reads as none, the
     // way TaskService.Prune will soon make it.
@@ -1653,6 +1666,31 @@ internal sealed record TaskCommentView(Guid Id, string Author, bool ByClaude, st
 
     /// <summary>Petre's own comment, the only kind with an Edit button (Ruling 58); not a session's, not Deskbar's.</summary>
     public bool Editable { get; init; }
+
+    /// <summary>Who wrote it, which decides the comment's side and colour in the chat thread (task 39bc9c4d, ChatThread).</summary>
+    public CommentAuthor Who { get; init; } = CommentAuthor.You;
+
+    /// <summary>Its clock time alone ("16:41"): the thread's day lines carry the date (ChatThread.WithDays).</summary>
+    public string Time { get; init; } = "";
+
+    /// <summary>The day it was written, as the day line reads: "Today", "Yesterday", "25 Nov", or "25 Nov 2025" in another year.</summary>
+    public string Day { get; init; } = "";
+
+    /// <summary>The full date and time, the tooltip of the time under a bubble.</summary>
+    public string FullWhen { get; init; } = "";
+}
+
+/// <summary>A comment's author, as the chat thread tells them apart (task 39bc9c4d).</summary>
+internal enum CommentAuthor
+{
+    /// <summary>Petre: the right side, in blue.</summary>
+    You,
+    /// <summary>A Claude session: the left side, warm, named.</summary>
+    Claude,
+    /// <summary>The manager session: the left side, named in its violet.</summary>
+    Manager,
+    /// <summary>Deskbar itself (resumed, stopped, set aside): a small centred event line, not a bubble.</summary>
+    Deskbar,
 }
 
 /// <summary>
