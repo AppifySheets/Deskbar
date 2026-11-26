@@ -23,12 +23,22 @@ public partial class TasksWindow
 {
     internal const string AnswerButtonsTag = "answer-buttons";
 
-    // What a click met when it was refused, by task.
-    readonly Dictionary<Guid, string> answerNote = [];
+    // What a click met when it was refused, by task, with the question and options on show WHEN it was refused (a click on
+    // buttons a newer question replaced is refused, and the line stands under the new question's buttons, which is where
+    // the owner looks). It is shown only under that question and those options: when either changes again it goes, and a
+    // new question starts clean (tester finding L3).
+    readonly Dictionary<Guid, (string Key, string Note)> answerNote = [];
 
-    // Part of the page's redraw signature: the options on show and the note.
+    // The question and its options as the buttons drawn for them know them.
+    static string AnswerKey(TaskRowView row) => row.Detail + "\u0002" + string.Join('\u0001', row.QuestionOptions);
+
+    // The refusal that belongs to what the task asks now, or none.
+    string AnswerNoteFor(TaskRowView? row) =>
+        row is not null && answerNote.TryGetValue(row.Id, out var shown) && shown.Key == AnswerKey(row) ? shown.Note : "";
+
+    // Part of the page's redraw signature: the question, its options and the note that goes with them.
     string AnswersSignature(TasksView view, Guid id) =>
-        "|ans:" + string.Join('\u0001', AllRows(view).FirstOrDefault(r => r.Id == id)?.QuestionOptions ?? []) + "|" + answerNote.GetValueOrDefault(id);
+        AllRows(view).FirstOrDefault(r => r.Id == id) is { } row ? "|ans:" + AnswerKey(row) + "|" + AnswerNoteFor(row) : "|ans:";
 
     /// <summary>The buttons for the page's task's question, or null when it offers none or this is not its page.</summary>
     FrameworkElement? AnswerButtons(Guid taskId)
@@ -55,7 +65,7 @@ public partial class TasksWindow
             buttons.Children.Add(button);
         }
         stack.Children.Add(buttons);
-        if (answerNote.GetValueOrDefault(taskId) is { Length: > 0 } note)
+        if (AnswerNoteFor(row) is { Length: > 0 } note)
         {
             var line = Text(note, 12, InboxLook.Ink2, margin: new Thickness(2, 0, 2, 0));
             line.TextWrapping = TextWrapping.Wrap;
@@ -64,11 +74,18 @@ public partial class TasksWindow
         return stack;
     }
 
+    /// <summary>For the tests: a click on answer <paramref name="index"/> of the buttons the page draws for the task now.</summary>
+    internal void ClickAnswer(Guid taskId, int index)
+    {
+        if (RowFor(taskId) is { } row) AnswerWith(taskId, index, row.QuestionOptions);
+    }
+
     void AnswerWith(Guid taskId, int index, IReadOnlyList<string> drawn)
     {
         if (Actions?.AnswerWithOption is not { } answer) return;
         var result = answer(taskId, index, drawn);
-        if (result.IsFailure) answerNote[taskId] = result.Error;
+        // The refusal belongs to the question on show now, which is not the drawn one when the click was a stale one.
+        if (result.IsFailure) answerNote[taskId] = (RowFor(taskId) is { } now ? AnswerKey(now) : "", result.Error);
         else answerNote.Remove(taskId);
         if (latest is not null) Draw(latest);
     }
