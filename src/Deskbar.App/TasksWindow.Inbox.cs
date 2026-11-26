@@ -138,7 +138,7 @@ public partial class TasksWindow
 
     // The Inbox in place of the List (DrawRows has emptied the lines' panel and every per-line table before this): the
     // header, the footer, then the chosen tab's lines under their captions, or the task's page over them.
-    void DrawInbox(TasksView view, IReadOnlyList<TaskRowView> shownRows)
+    void DrawInbox(TasksView view)
     {
         var inbox = view.Inbox!;
         matrixShown = false;
@@ -164,7 +164,10 @@ public partial class TasksWindow
             Rows.Children.Add(InboxLineOf(row, line));
         }
         Headers = captions;
-        Keys = shownRows.Select(r => r.Id).ToArray();
+        // THE LINES DRAWN, IN THEIR ORDER, as the List's Keys are (the tester's M1): F2 edits the selected line only when
+        // it is on show (EditSelected reads Keys), so a selection in another tab is no longer renamed with no editor
+        // drawn, which held every redraw (MustWait) until Esc.
+        Keys = lines.Select(l => l.Id).ToArray();
         EmptyText.Text = !inbox.Tabbed || view.Groups.All(g => g.Rows.Count == 0) ? view.EmptyText : EmptyTabText(inboxTab);
         EmptyText.Foreground = InboxLook.Ink3;
         EmptyText.Visibility = lines.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
