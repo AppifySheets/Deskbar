@@ -1330,6 +1330,23 @@ DR3. A done note, and a done task without a pull request, keep the full disc thr
 DR4. A done task marked done while its pull request is still open: ring, chip "PR open"; merge it and within a minute
      the chip says "Merged".
 
+Phase 2: a change to any other app fills its ring when a deploy is reported, since Deskbar cannot see that app's
+servers.
+
+DR5. Have a Claude session finish a task in another repository (its pull request recorded with `gh pr create`), merge
+     it, deploy it, and let the session check the app's logs or health page and run `deskbar.cmd task deployed -
+     --session <id>` with what it saw. Before the report the tick is a hollow ring, the chip says "Merged" and the
+     tooltip says "Merged in <repo> #N, not reported deployed yet"; after it, the full disc, the chip says "Done" and the
+     tooltip says "Deployed: <the session's note>". `deskbar.cmd task show <id>` lists the report under "deployed".
+DR6. Another such task merged but not reported: its menu in the tasks panel ("⋯" or a right-click) and on the bar
+     (right-click its line) has "Mark deployed". Pick it: the ring fills at once, the tooltip says "Deployed: Marked
+     deployed by hand", and the item is gone from both menus. A done Deskbar change still waiting for the next release
+     has no "Mark deployed".
+DR7. A task with pull requests in Deskbar and in another repository: it keeps the ring until both hold (the Deskbar one
+     in the copy you run, the other reported deployed), and the tooltip then says "Deployed: <note> Running in this
+     Deskbar (version)." With `gh` signed out, a reported task still shows the full disc; an unreported one in another
+     repository keeps the full disc too (unknown draws as before).
+
 ## The bar's waiting block folds after three
 
 (Task 39f4cc8a.) A docked bar, the tasks panel closed, Subtasks ticked.

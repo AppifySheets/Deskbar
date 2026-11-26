@@ -1901,10 +1901,12 @@ public partial class App : Application
             new System.Reactive.Concurrency.SynchronizationContextScheduler(new System.Windows.Threading.DispatcherSynchronizationContext(Dispatcher)),
             trace: ClickTrace.On ? ClickTrace.Write : null);
 
-        // A Done task's change shows a hollow ring until this very build holds it (task 8470d176, RunningChanges): the
-        // watch asks GitHub whether the commit this Deskbar was built from contains each recorded pull request's merge.
-        // The repository is this app's own, the one UpdateService reads releases from. A build whose version carries no
-        // commit (none should, but a hand-made one might) gets no watch, and every Done task keeps the full tick.
+        // A Done task's change shows a hollow ring until it runs (task 8470d176, RunningChanges): for a pull request of
+        // this app's own repository (the one UpdateService reads releases from), the watch asks GitHub whether the commit
+        // this Deskbar was built from contains its merge; for one of any other repository it asks only whether it merged,
+        // and the ring fills when a session reports the deploy (`task deployed`) or "Mark deployed" is picked. A build
+        // whose version carries no commit (none should, but a hand-made one might) gets no watch, and every Done task
+        // keeps the full tick.
         runningChangeWatch = Core.Tasks.RunningBuild.Of("AppifySheets", "Deskbar", UpdateService.RunningVersion)
             .Map(build => new Core.Tasks.RunningChangeWatch(tasks!, build, Deskbar.Windows.Claude.GitHubCli.Arrival,
                 new System.Reactive.Concurrency.SynchronizationContextScheduler(new System.Windows.Threading.DispatcherSynchronizationContext(Dispatcher)),

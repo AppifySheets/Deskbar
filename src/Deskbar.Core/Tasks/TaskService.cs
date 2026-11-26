@@ -111,6 +111,13 @@ public sealed class TaskService(ITaskStore store, Func<DateTimeOffset> now, Func
     // A pull request the task's session opened (task e7aa49b1); one it already lists saves and pulses nothing.
     public Result AddPullRequest(Guid id, PullRequestLink link) => ApplyIfChanged(Board.AddPullRequest(id, link, now()));
 
+    // A deploy seen running (task 8470d176, phase 2: `task deployed` and "Mark deployed"); reporting it again saves and
+    // pulses nothing (TaskBoard.MarkDeployed returns the same board).
+    public Result MarkDeployed(Guid id, string note) => ApplyIfChanged(Board.MarkDeployed(id, note, now()));
+
+    /// <summary>The note "Mark deployed" on a line's menu records (TaskService.MarkDeployed).</summary>
+    public const string MarkedByHand = "Marked deployed by hand";
+
     public Result MarkDone(Guid id) => Apply(Board.MarkDone(id, now()));
 
     // `stoppingClaude`: past the refusal for a task Claude is still working on (TaskBoard.Close, task 37cd7081), for
@@ -169,6 +176,17 @@ public sealed class TaskService(ITaskStore store, Func<DateTimeOffset> now, Func
     /// <summary>Where a task's change stands against the running build (RunningChanges.Of); None until the watch has spoken.</summary>
     public TaskDelivery DeliveryOf(TaskItem task) =>
         runningBuild.Map(build => RunningChanges.Of(task, build, arrivals)).GetValueOrDefault(TaskDelivery.None);
+
+    /// <summary>
+    /// Whether "Mark deployed" belongs on the task's menu (task 8470d176, phase 2): its change is merged but not running
+    /// (DeliveryStage.Merged), and at least one of its recorded pull requests is outside this build's repository and not
+    /// reported yet, the only kind a report can fill. A Deskbar change waits for the running build, which no report
+    /// overrides (RunningChanges' header), so the item would do nothing on one. False until the watch has spoken.
+    /// </summary>
+    public bool CanMarkDeployed(TaskItem task) =>
+        runningBuild.HasValue
+        && DeliveryOf(task).Stage == DeliveryStage.Merged
+        && task.PullRequests.Any(p => !runningBuild.Value.Builds(p) && task.Deployed.All(d => d.Key != p.Key));
 
     /// <summary>
     /// What GitHub said about the recorded pull requests against <paramref name="build"/>, keyed by

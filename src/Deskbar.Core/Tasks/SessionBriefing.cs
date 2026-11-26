@@ -379,6 +379,17 @@ public static class SessionBriefing
         // it live" when the work was finished. Done already means "waiting for the user to close it", and closing is
         // where Petre's own test happens, so the try-it-live step goes into the status line of a Done task, not an ask.
         "Once your pull request is merged, the task is done: do not ask the user to test it. Mark it done and put what to try in the status line; the user closes the task once they have tried it and it works.",
+        // A CHANGE IS DONE WHEN IT RUNS (task 8470d176, phase 2; RunningChanges' header). Petre: "it's not about deskbar
+        // only, but all other software tasks", and "for other projects - checking logs for app version". A Done task
+        // with a pull request outside Deskbar's own repository keeps a hollow ring until a deploy is reported, because
+        // Deskbar cannot see that app's servers; the session that did the work can, so it checks and reports. Done
+        // stops an idle session (task 8556944b), so the report has to come first when the deploy follows within the
+        // session; when it does not, the status line says the check is the user's, who then picks "Mark deployed".
+        // SHORT ON PURPOSE: the start briefing with twenty offered tasks has to stay under Claude Code's 10,000 characters
+        // for a hook's context (SessionBriefingTests), and it was within about 80 of that before this line. The longer
+        // form, with an example note, is in the skill's "Your task" section (ClaudeSkill.YourTask). A few other lines
+        // below were tightened to make the room, keeping every rule they state (about 55 characters are left).
+        $"For an app deployed outside Deskbar, its tick is a hollow ring until you see the merge running there (logs, health page) and run {Shim} task deployed - --session {sessionId}, the evidence on stdin, before task done (or say in the status line the check is the user's).",
         // AN OPEN PULL REQUEST STAYS ON TOP OF ITS BASE (task 6e4dc116, Petre: "still conflicting; you should keep rebasing
         // open prs", then "make that a deskbar level change"). Other sessions merge all day, so a pull request waiting on
         // the user falls behind its base or starts to conflict while it waits, and the merge he comes to do is blocked or
@@ -394,7 +405,7 @@ public static class SessionBriefing
         $"  {Shim} task answered --session {sessionId}   (when the user's reply settles your question, or you settle it yourself; run it straight away; it also settles, that is folds away, your comments written since you asked)",
         $"  {Shim} task comment-settle <comment-id> --session {sessionId}   (settle one of your own comments that no longer matters)",
         "A message from the user never resolves your question by itself: you do, with task answered. Never leave a question open once it is resolved.",
-        $"  {Shim} task comment - --session {sessionId}   (rare: only what the user must know, in one or two short lines; what they must do is task ask)",
+        $"  {Shim} task comment - --session {sessionId}   (rare: only what the user must know; what they must do is task ask)",
         $"  {Shim} task done --session {sessionId}   (when the work is finished and nothing waits on the user, so not while a pull request of yours waits to be merged; only the user closes a task)",
         $"  {Shim} task later - --session {sessionId}   (the title of a follow-up note on your workspace, linked to your task as related)",
         // Task 5016d533: the link for a pull request or issue, for a session that joined after its start briefing.
@@ -402,25 +413,25 @@ public static class SessionBriefing
         // Subtasks spec: a session splitting its work makes a subtask, which the next session picks up with this one's
         // context (its join reply names this session and its transcript). `task family` is not listed here: the join
         // reply, the start briefing and a subtask's prompt line carry it where it matters.
-        $"  {Shim} task subtask - --session {sessionId}   (split off a piece of your work as a subtask; the session that takes it up is briefed on your task and this session)",
+        $"  {Shim} task subtask - --session {sessionId}   (split off a piece of your work; whoever takes it up is briefed on yours)",
         // Task e52e33cb (design docs/superpowers/specs/2026-11-25-session-model-pick-design.md). A week of Petre's
         // transcripts, measured: the usage is in the long sessions, and about two thirds of it is the conversation
         // read again on every turn. So what a session keeps OUT of its own conversation is what saves his limits:
         // test runs, searches and rebases go to a subagent on a cheaper model, and only the outcome comes back. No
         // model is named, because which ones a person has depends on their plan.
-        "Keep your own conversation short, because all of it is read again on every turn: give test runs, builds, broad searches, rebases and other mechanical work to a subagent on a cheaper model than yours, and take back only the outcome. Keep the design, the decisions and the code that needs judgement for yourself.",
+        "Keep your own conversation short, as all of it is read again each turn: give test runs, builds, broad searches, rebases and other mechanical work to a subagent on a cheaper model than yours, and take back only the outcome. Keep the design, the decisions and the code that needs judgement for yourself.",
         // Petre: "can we also add a review step at the end by a smarter model?". A review reads the diff, not the
         // session, so it costs a fraction of the work it checks. It finds faults in the change; it does not rescue
         // a wrong approach, which is why a plan gets the same look before the code is written.
-        "Before you open a pull request, have a subagent on the strongest model you can use review the diff for bugs, and fix what it confirms. When the work needed a plan, have that subagent read the plan before you write the code.",
+        "Before you open a pull request, have a subagent on the strongest model you can use review the diff for bugs, and fix what it confirms. Have it read any plan the work needed before you write the code.",
         // TASK LINKS (docs/superpowers/specs/2026-11-25-task-links-design.md; Petre: "when working on a task, claude should
         // examine what's related to it"). Task 64cb52ab asked for a button that a merged PR had shipped that morning; the
         // session only found out because Petre said "see if something like this has already been done". So every session
         // looks first, links what it finds, and closes its own task as a duplicate rather than redoing finished work.
         $"Before you start on a task, look through {Shim} task list and {Shim} task list --closed for tasks about the same or related work, and read what their sessions did. Link what you find:",
-        $"  {Shim} task relate <id> --session {sessionId}   (your task and task <id> are related; both show the link and a session on either reads it. task unrelate <id> removes it)",
-        $"  {Shim} task duplicate-of <id> --session {sessionId}   (your task is the same work as task <id>, done or under way there: your task closes as its duplicate, and you do not redo the work)",
-        "Keep the task lean: say what needs the user, and nothing else. The title is a few words naming the work. The status line is one short phrase, under about 60 characters, saying where it stands. Comments are rare: a comment is for the user and only for what needs their attention or a result they must know (a decision made for them, a blocker, what a release shipped), in one or two short lines, with no progress logs, measurements, spike notes or findings dumps (those belong in the PR, the repo's notes or the session itself). When the user must act or decide, say exactly what the user must do in the first words, through task ask, never a comment: a comment does not move the task to the top.",
+        $"  {Shim} task relate <id> --session {sessionId}   (your task and task <id> are related, and a session on either reads the link; task unrelate <id> removes it)",
+        $"  {Shim} task duplicate-of <id> --session {sessionId}   (your task is the same work as task <id>, done or under way: it closes as its duplicate and you do not redo the work)",
+        "Keep the task lean: say what needs the user, and nothing else. The title is a few words naming the work. The status line is one short phrase, under about 60 characters, saying where it stands. Comments are rare: only for what needs the user's attention or a result they must know (a decision made for them, a blocker, what a release shipped), in one or two short lines, with no progress logs, measurements, spike notes or findings dumps (those belong in the PR or the repo's notes). When the user must act or decide, say exactly what the user must do in the first words, through task ask: a comment does not move the task to the top.",
         "Never close or delete a task, and leave the user's own notes alone unless they ask.",
     ];
 

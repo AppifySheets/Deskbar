@@ -200,7 +200,8 @@ public static class ControlArguments
     // `rename` was missing until task bd4f3580: `task rename <id> -` was sent on as it stood and set the title to a
     // literal "-". Every form that takes a title or text belongs on one of these two lists; a form left off takes `-`
     // as its text without a word. The goals' two title forms (`goal add`, `goal rename`) had the same hole.
-    static readonly string[] TextVerbs = ["status-line", "ask", "comment", "new", "later", "add", "describe", "comment-edit", "subtask", "rename"];
+    // `deployed` (task 8470d176, phase 2): a deploy's note is a version and where it was seen, free text like the rest.
+    static readonly string[] TextVerbs = ["status-line", "ask", "comment", "new", "later", "add", "describe", "comment-edit", "subtask", "rename", "deployed"];
 
     static readonly string[] GoalTextVerbs = ["add", "rename"];
 
@@ -255,7 +256,7 @@ public static class ControlArguments
 
     // The words of a task text form, its text as a length. The positional words are the text, except the id that the
     // user's `task comment <id> <markdown>` names first.
-    static readonly string[] IdFirst = ["comment", "describe", "comment-edit", "rename"];
+    static readonly string[] IdFirst = ["comment", "describe", "comment-edit", "rename", "deployed"];
 
     static IEnumerable<string> TextForTrace(IReadOnlyList<string> args)
     {

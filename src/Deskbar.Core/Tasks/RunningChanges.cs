@@ -8,72 +8,102 @@ namespace Deskbar.Core.Tasks;
 // sign when it hasn't yet", and "for deskbar it would mean checking the running version vs what the change asked for".
 // Mockup https://claude.ai/artifact/2NujT6C7cJyYNQUVupjhfp, his pick A: "ring fills on arrival".
 //
-// A session marks its task Done once its pull request merges, and the bar drew the same green disc for a change in the
-// Deskbar he is running and one merged a minute ago that the next release has not even built yet. So a Done task that
-// changed Deskbar now has two looks (TaskStatusMarks in the app): a hollow green ring while what it merged is not in the
-// running build, and the full disc once it is.
+// A session marks its task Done once its pull request merges, and the bar drew the same green disc for a change that
+// runs and one merged a minute ago that nothing has deployed yet. So a Done task with a change has two looks
+// (TaskStatusMarks in the app): a hollow green ring while what it merged is not running, and the full disc once it is.
 //
 // WHICH TASKS (Of): a Done task with at least one pull request RECORDED on it (TaskItem.PullRequests: the `gh pr create`
-// hook or `task pr`) in the repository this Deskbar is built from (RunningBuild.Builds). Links only mentioned in a
-// task's text are left out, because a thread can mention someone else's pull request. A pull request closed without a
-// merge is left out too: it never shipped and never will. Everything else keeps today's full tick, DeliveryStage.None:
-// a Done note, research, and work in other repositories (phase 2 of the task, a session reporting a deploy it checked in
-// the app's logs, is a later pull request).
+// hook or `task pr`), in any repository. Links only mentioned in a task's text are left out, because a thread can
+// mention someone else's pull request. A pull request closed without a merge is left out too: it never shipped and
+// never will. Everything else keeps today's full tick, DeliveryStage.None: a Done note, research, a task with no
+// recorded pull request.
 //
-// HOW "RUNNING" IS DECIDED. The running build knows its own commit: the SDK appends it to the InformationalVersion,
-// "2.6.23+<40 hex>" (RunningBuild.Of). GitHub knows each pull request's merge commit (with "Rebase and merge" it is the
-// pull request's last commit as it landed on main). The pull request runs here when the running commit CONTAINS the
-// merge commit, which GitHub's compare answers: `compare/<merge>...<running>` says "ahead" or "identical" when it does,
-// "behind" or "diverged" when it does not (measured 2026-11-25 on #570 against main and against v2.5.0's commit, a
-// second each). A local build whose commit GitHub has never seen answers 404, which is a failed look: unknown.
+// TWO SOURCES OF "RUNNING", one per kind of repository.
 //
-// UNKNOWN DRAWS AS TODAY. A pull request GitHub could not tell about (gh missing, signed out, offline, a local commit)
-// leaves its task at DeliveryStage.None, the full disc, rather than a ring that might never fill on a machine that
-// cannot look. The ring is a claim ("not running yet"), and Deskbar only makes claims it measured.
+// 1. THIS BUILD'S REPOSITORY (RunningBuild.Builds): Deskbar checks itself. The running build knows its own commit: the
+//    SDK appends it to the InformationalVersion, "2.6.23+<hex>" (RunningBuild.Of). GitHub knows each pull request's
+//    merge commit (with "Rebase and merge" it is the pull request's last commit as it landed on main). The pull request
+//    runs here when the running commit CONTAINS the merge commit, which GitHub's compare answers:
+//    `compare/<merge>...<running>` says "ahead" or "identical" when it does, "behind" or "diverged" when it does not
+//    (measured 2026-11-25 on #570 against main and against v2.5.0's commit, a second each). A local build whose commit
+//    GitHub has never seen answers 404, which is a failed look: unknown. The running build is the truth here: a deploy
+//    reported for such a pull request (TaskItem.Deployed) changes nothing, since it would claim this copy runs code it
+//    does not.
+//
+// 2. EVERY OTHER REPOSITORY (phase 2; Petre: "it's not about deskbar only, but all other software tasks", and "for
+//    other projects - checking logs for app version"). Deskbar cannot see where another app is deployed, so the session
+//    that did the work checks the deployed app's logs, health page or deploy output for the version carrying the merge
+//    and REPORTS it (`task deployed`), or Petre marks it by hand ("Mark deployed"); either lands in TaskItem.Deployed. A
+//    reported pull request counts as running, even when GitHub was never asked about it (the report is the claim, and
+//    it was measured where the app runs). One not reported needs GitHub's state, `gh pr view` alone (no compare, there
+//    is no running commit to compare with): open says "not merged yet", merged says "not reported deployed yet".
+//
+// UNKNOWN DRAWS AS TODAY. A pull request GitHub could not tell about (gh missing, signed out, offline, a local commit),
+// and that no report covers, leaves its task at DeliveryStage.None, the full disc, rather than a ring that might never
+// fill on a machine that cannot look. The ring is a claim ("not running yet"), and Deskbar only makes claims it measured.
 public static class RunningChanges
 {
     /// <summary>
     /// What a task's tick says (see the header): None (the full disc, as before this existed) for anything that is not a
-    /// Done task with a recorded pull request of this build's repository whose facts are all known; otherwise Open while
-    /// one of them is still open, Merged while one is merged but not in the running build, and Running once every one is
-    /// in it.
+    /// Done task with a recorded pull request whose state is all known; otherwise Open while one of them is still open,
+    /// Merged while one is merged but not running (not in the running build, or not reported deployed), and Running once
+    /// every one runs.
     /// <paramref name="facts"/> is keyed by <see cref="PullRequestLink.Key"/>; a missing key is unknown.
     /// </summary>
     public static TaskDelivery Of(TaskItem task, RunningBuild build, IReadOnlyDictionary<string, PullRequestArrival> facts)
     {
         if (task.Status != TaskStatus.Done) return TaskDelivery.None;
-        var links = Watched(task, build);
-        if (links.Count == 0 || links.Any(l => !facts.ContainsKey(l.Key))) return TaskDelivery.None;
+        var links = Watched(task);
+        var reported = task.Deployed.Select(d => d.Key).ToHashSet();
+        // An other-repository pull request that was reported deployed runs, whatever GitHub said or did not say.
+        bool Reported(PullRequestLink link) => !build.Builds(link) && reported.Contains(link.Key);
+        if (links.Count == 0 || links.Any(l => !Reported(l) && !facts.ContainsKey(l.Key))) return TaskDelivery.None;
         // Closed without a merge: never shipped, never will, so it neither holds the ring nor earns the disc.
-        var shipped = links.Where(l => facts[l.Key].State != PullRequestState.Closed).ToArray();
+        var shipped = links.Where(l => !(facts.TryGetValue(l.Key, out var fact) && fact.State == PullRequestState.Closed)).ToArray();
         if (shipped.Length == 0) return TaskDelivery.None;
-        var waiting = shipped.Where(l => !facts[l.Key].Running).ToArray();
-        if (waiting.Length == 0) return new TaskDelivery(DeliveryStage.Running, $"Running in this Deskbar ({build.Version}).");
+        // Running: in the running build for this build's repository, reported deployed for any other.
+        var waiting = shipped.Where(l => build.Builds(l) ? !facts[l.Key].Running : !Reported(l)).ToArray();
+        if (waiting.Length == 0) return new TaskDelivery(DeliveryStage.Running, RunningNote(task, shipped, build));
         // Open while any pull request is still open (the chip must not say "Merged" of one that is not), Merged otherwise.
         var stage = waiting.Any(l => facts[l.Key].State == PullRequestState.Open) ? DeliveryStage.Open : DeliveryStage.Merged;
         return new TaskDelivery(stage, string.Join(" ", waiting.Select(l => Waiting(l, facts[l.Key], build))));
     }
 
-    // The hover line for one pull request that does not run here yet.
-    static string Waiting(PullRequestLink link, PullRequestArrival fact, RunningBuild build) =>
-        fact.State == PullRequestState.Open
-            ? $"{link.Label} is not merged yet."
-            : $"Merged in {link.Label}, not in this Deskbar ({build.Version}) yet; it ships with the next release.";
+    // The hover line once every pull request runs. A Deskbar-only task keeps phase 1's sentence. With other repositories
+    // involved it leads with the evidence of the latest report among them ("Deployed: 2026.11.25.39-3749d21 in the portal
+    // logs"), then the Deskbar sentence when the task changed Deskbar too.
+    static string RunningNote(TaskItem task, IReadOnlyList<PullRequestLink> shipped, RunningBuild build)
+    {
+        var here = $"Running in this Deskbar ({build.Version}).";
+        var elsewhere = shipped.Where(l => !build.Builds(l)).Select(l => l.Key).ToHashSet();
+        if (elsewhere.Count == 0) return here;
+        var latest = task.Deployed.Where(d => elsewhere.Contains(d.Key)).MaxBy(d => d.At);
+        var deployed = $"Deployed: {latest?.Note}";
+        return shipped.Any(build.Builds) ? $"{deployed} {here}" : deployed;
+    }
 
-    /// <summary>A task's recorded pull requests in the running build's repository (see the header), whatever its status.</summary>
-    public static IReadOnlyList<PullRequestLink> Watched(TaskItem task, RunningBuild build) =>
-        task.PullRequests.Where(build.Builds).DistinctBy(l => l.Key).ToArray();
+    // The hover line for one pull request that does not run yet.
+    static string Waiting(PullRequestLink link, PullRequestArrival fact, RunningBuild build) =>
+        fact.State == PullRequestState.Open ? $"{link.Label} is not merged yet."
+        : build.Builds(link) ? $"Merged in {link.Label}, not in this Deskbar ({build.Version}) yet; it ships with the next release."
+        : $"Merged in {link.Label}, not reported deployed yet.";
+
+    /// <summary>A task's recorded pull requests, each once, in any repository (see the header), whatever its status.</summary>
+    public static IReadOnlyList<PullRequestLink> Watched(TaskItem task) =>
+        task.PullRequests.DistinctBy(l => l.Key).ToArray();
 
     /// <summary>
     /// The pull requests the watch should ask GitHub about now: those of Done tasks (Watched), each once, that have no
-    /// settled answer yet. Only an open one is ever asked again, since it can still merge. A merged or closed one is
-    /// settled for good: whether the running build holds a merge cannot change until Deskbar restarts, and a restart
-    /// starts the watch afresh with nothing known.
+    /// settled answer yet, leaving out a pull request of another repository that was reported deployed (the report
+    /// decides it, so GitHub's word is not needed). Only an open one is ever asked again, since it can still merge. A
+    /// merged or closed one is settled for good: whether the running build holds a merge cannot change until Deskbar
+    /// restarts, and a restart starts the watch afresh with nothing known; for another repository, what is left to know
+    /// after the merge is the report, which arrives on the board, not from GitHub.
     /// </summary>
     public static IReadOnlyList<PullRequestLink> ToLook(TaskBoard board, RunningBuild build, IReadOnlyDictionary<string, PullRequestArrival> facts) =>
         board.Tasks
             .Where(t => t.Status == TaskStatus.Done)
-            .SelectMany(t => Watched(t, build))
+            .SelectMany(t => Watched(t).Where(l => build.Builds(l) || t.Deployed.All(d => d.Key != l.Key)))
             .DistinctBy(l => l.Key)
             .Where(l => !facts.TryGetValue(l.Key, out var f) || !f.Settled)
             .ToArray();
@@ -152,7 +182,8 @@ public sealed record RunningBuild(string Owner, string Repo, string Version, str
 
 /// <summary>
 /// What GitHub says about one pull request against the running build: its state, and whether the running commit holds
-/// its merge (false unless merged). <see cref="Settled"/> answers are never asked again in this run.
+/// its merge (false unless merged, and always false for another repository's, which has no running commit to compare
+/// with: RunningChanges' header). <see cref="Settled"/> answers are never asked again in this run.
 /// </summary>
 public sealed record PullRequestArrival(PullRequestState State, bool Running)
 {
@@ -172,10 +203,10 @@ public enum DeliveryStage
     /// <summary>A recorded pull request is still open: the hollow ring, and the chip says so.</summary>
     Open,
 
-    /// <summary>Merged but not in the running build: the hollow ring.</summary>
+    /// <summary>Merged but not running: not in the running build, or (another repository) not reported deployed. The hollow ring.</summary>
     Merged,
 
-    /// <summary>Every pull request it recorded is in the running build: the full tick.</summary>
+    /// <summary>Every pull request it recorded runs (in the running build, or reported deployed): the full tick.</summary>
     Running,
 }
 

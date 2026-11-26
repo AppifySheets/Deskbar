@@ -188,6 +188,49 @@ public sealed class TaskPullRequestsTests : IDisposable
         Assert.Equal(expected, loaded.Value.Tasks.Single().PullRequests.Count);
     }
 
+    // Reported deploys (task 8470d176, phase 2; TaskItem.Deployed) are kept like the pull requests themselves.
+    [Fact]
+    public void The_deploy_reports_survive_a_save_and_a_load()
+    {
+        var (board, task) = Made();
+        var at = clock.AddHours(2);
+        var saved = board.AddPullRequest(task.Id, Pr(537, "iam.ge"), clock).Value.MarkDeployed(task.Id, "2026.11.25.39-3749d21 in the portal logs", at).Value;
+        var store = new JsonTaskStore(dir);
+
+        Assert.True(store.Save(saved).IsSuccess);
+        Assert.Contains("\"deployed\"", File.ReadAllText(Path.Combine(dir, "tasks.json")));
+        Assert.Equal([new DeployedPullRequest(Pr(537, "iam.ge").Key, at, "2026.11.25.39-3749d21 in the portal logs")],
+            store.Load().Value.Tasks.Single().Deployed);
+    }
+
+    [Fact]
+    public void No_deploy_reports_write_no_field()
+    {
+        var (board, task) = Made();
+        Assert.True(new JsonTaskStore(dir).Save(board.AddPullRequest(task.Id, Pr(523), clock).Value).IsSuccess);
+        Assert.DoesNotContain("deployed", File.ReadAllText(Path.Combine(dir, "tasks.json")));
+    }
+
+    // A hand edit of the wrong type reads as none, and an entry missing a part is dropped; the file still loads.
+    [Theory]
+    [InlineData("\"deployed\": \"yes\"", 0)]
+    [InlineData("\"deployed\": [5, {\"key\":\"appifysheets/iam.ge#537\"}, {\"key\":\"AppifySheets/iam.ge#537\",\"at\":\"2026-11-25T12:00:00Z\",\"note\":\"v1 in the logs\"}]", 1)]
+    public void An_odd_deployed_field_never_fails_the_file(string field, int expected)
+    {
+        Directory.CreateDirectory(dir);
+        File.WriteAllText(Path.Combine(dir, "tasks.json"), $$"""
+            {"version":2,"tasks":[{"id":"6e4dc116-25fd-4f3a-9c1e-0d2b3a4c5d6e","title":"t","status":"Done",
+             "created":"2026-11-25T10:00:00Z","updatedAt":"2026-11-25T10:00:00Z",{{field}}}]}
+            """);
+
+        var loaded = new JsonTaskStore(dir).Load();
+        Assert.True(loaded.IsSuccess, loaded.IsFailure ? loaded.Error : "");
+        var deployed = loaded.Value.Tasks.Single().Deployed;
+        Assert.Equal(expected, deployed.Count);
+        // The key is read in lower case, as PullRequestLink.Key makes it.
+        Assert.All(deployed, d => Assert.Equal("appifysheets/iam.ge#537", d.Key));
+    }
+
     // --- the hook's JSON ------------------------------------------------------------------------------
 
     // The shape measured on 2026-11-25 (Claude Code 2.1.332): tool_input.command and tool_response.stdout.
@@ -284,5 +327,64 @@ public sealed class TaskPullRequestsTests : IDisposable
 
         Assert.Equal([Pr(523), Pr(530)], tasks.Board.Tasks.Single().PullRequests);
         Assert.Contains(Url523, Ran(manager, "task", "list").Output);
+    }
+
+    // `task deployed <note> --session` reports a deploy the session checked (task 8470d176, phase 2), and needs a pull
+    // request on its task; without --session the one-word form is refused as a session's.
+    [Fact]
+    public void A_session_reports_its_deploy()
+    {
+        var manager = Started();
+        Ran(manager, "task", "new", "Portal accounts", "--session", "s1", "--from", @"C:\repos\iam.ge");
+
+        var none = Ran(manager, "task", "deployed", "v1 in the logs", "--session", "s1");
+        Assert.NotEqual(ControlReply.Ok, none.ExitCode);
+        Assert.Contains(TaskBoard.NoPullRequestToDeploy, none.Output);
+
+        Ran(manager, "task", "pr", "https://github.com/AppifySheets/iam.ge/pull/537", "--session", "s1");
+        var reply = Ran(manager, "task", "deployed", "2026.11.25.39-3749d21 in the portal logs", "--session", "s1");
+
+        Assert.Equal(ControlReply.Ok, reply.ExitCode);
+        Assert.Contains("\"deployed\"", reply.Output);
+        Assert.Equal(["2026.11.25.39-3749d21 in the portal logs"], tasks.Board.Tasks.Single().Deployed.Select(d => d.Note));
+        Assert.Contains("portal logs", Ran(manager, "task", "list").Output);
+
+        var refused = Ran(manager, "task", "deployed", "v2 in the logs");
+        Assert.NotEqual(ControlReply.Ok, refused.ExitCode);
+        Assert.Contains("is a session's form and needs --session", refused.Output);
+    }
+
+    // `task deployed <id> <note>`: the user's or the manager's form, the remote twin of "Mark deployed".
+    [Fact]
+    public void Anyone_can_report_a_deploy_by_the_task()
+    {
+        var manager = Started();
+        Ran(manager, "task", "new", "Portal accounts", "--session", "s1", "--from", @"C:\repos\iam.ge");
+        var id = tasks.Board.Tasks.Single().Id.ToString()[..8];
+        Ran(manager, "task", "pr", id, "https://github.com/AppifySheets/iam.ge/pull/537");
+
+        Assert.Equal(ControlReply.Ok, Ran(manager, "task", "deployed", id, TaskService.MarkedByHand).ExitCode);
+        Assert.NotEqual(ControlReply.Ok, Ran(manager, "task", "deployed", id, " ").ExitCode);
+
+        Assert.Equal([TaskService.MarkedByHand], tasks.Board.Tasks.Single().Deployed.Select(d => d.Note));
+    }
+
+    [Fact]
+    public void Help_lists_both_deployed_forms()
+    {
+        Assert.Contains(ControlUsage.All, c => c.Verb == "task" && c.Arguments.StartsWith("deployed <note>|- --session", StringComparison.Ordinal));
+        Assert.Contains(ControlUsage.All, c => c.Verb == "task" && c.Arguments.StartsWith("deployed <id> <note>", StringComparison.Ordinal));
+    }
+
+    // The note is free text, so `-` reads it from stdin, and the trace writes its length, never the words.
+    [Fact]
+    public void The_deploy_note_comes_from_stdin_and_stays_out_of_the_trace()
+    {
+        Assert.Equal(["task", "deployed", "v1 in the logs", "--session", "s1"],
+            ControlArguments.WithTextInput(["task", "deployed", "-", "--session", "s1"], () => "v1 in the logs\n"));
+        Assert.Equal(["task", "deployed", "6e4dc116", "v1 in the logs"],
+            ControlArguments.WithTextInput(["task", "deployed", "6e4dc116", "-"], () => "v1 in the logs"));
+        Assert.Equal("task deployed 6e4dc116 (14 characters)", ControlArguments.ForTrace(["task", "deployed", "6e4dc116", "v1 in the logs"]));
+        Assert.Equal("task deployed (14 characters) --session s1", ControlArguments.ForTrace(["task", "deployed", "v1 in the logs", "--session", "s1"]));
     }
 }

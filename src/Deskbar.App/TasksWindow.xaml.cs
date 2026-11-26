@@ -2007,6 +2007,9 @@ public partial class TasksWindow : Window
 
     /// <summary>The menus' and the thread's "Open in window" (task dca4ebeb), the panel's and the bar's alike.</summary>
     internal const string OpenInWindowText = "Open in window";
+
+    /// <summary>The menus' "Mark deployed" (task 8470d176, phase 2), the panel's and the bar's alike.</summary>
+    internal const string MarkDeployedText = "Mark deployed";
     /// <summary>
     /// A Claude task's menu item, on the bar and in this window, that goes to its session without opening the task first
     /// (task 7f61af2e): what a double-click on the line does, minus the click that opens it.
@@ -2640,6 +2643,13 @@ public partial class TasksWindow : Window
         menu.Items.Add(row.Status == TaskStatus.Closed && !row.Closing
             ? Item("Reopen", () => Actions?.Reopen(id))
             : Item("Close", () => Actions?.Close(id)));
+        // MARK DEPLOYED (task 8470d176, phase 2; RunningChanges' header). A Done task whose pull request in another
+        // repository is merged keeps its hollow ring until a deploy is reported, and Deskbar cannot see that app's
+        // servers. When the session could not check (or the deploy came later), Petre can: the ring fills with
+        // "Marked deployed by hand" as the evidence. Next to Close, its neighbour in finishing a task. Only while the
+        // item would change something (row.CanMarkDeployed); `task deployed <id> <note>` is its remote twin.
+        if (row.CanMarkDeployed && !row.Closing && Actions?.MarkDeployed is { } markDeployed)
+            menu.Items.Add(Item(MarkDeployedText, () => markDeployed(id)));
         // Snooze (task 6da8d7eb): the moon's lengths as a submenu, for every open line, waiting ones included, so a Matrix
         // line, which has no moon, reaches it too.
         if (Actions?.Snooze is not null && row.Status != TaskStatus.Closed && !row.Closing)

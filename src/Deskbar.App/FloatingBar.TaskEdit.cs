@@ -130,6 +130,11 @@ public partial class FloatingBar
             System.Windows.Threading.DispatcherPriority.Input)));
         menu.Items.Add(new Separator());
         menu.Items.Add(TaskMenuItem("Close", () => CloseWithUndo(line)));
+        // MARK DEPLOYED (task 8470d176, phase 2), as on the tasks panel's line menu (TasksWindow.OpenMenuFor): a Done task
+        // whose pull request in another repository is merged but not reported running gets its ring filled by hand, with
+        // TaskService.MarkedByHand as the evidence. Only while it would change something (TaskService.CanMarkDeployed).
+        if (taskService.Board.Tasks.FirstOrDefault(t => t.Id == id) is { } task && taskService.CanMarkDeployed(task))
+            menu.Items.Add(TaskMenuItem(TasksWindow.MarkDeployedText, () => Report(taskService.MarkDeployed(id, TaskService.MarkedByHand))));
         HoldFadeWhileOpen(menu);
         TaskLineMenu = menu;
         menu.IsOpen = true;

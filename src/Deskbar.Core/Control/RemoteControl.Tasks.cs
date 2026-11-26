@@ -122,7 +122,7 @@ public sealed partial class RemoteControl
             ["answered"] when byManager => ManagerAsked(ManagerQuestion.Answered(Maybe.From(manager.State.Manager))),
             // A session's form typed without its --session: it cannot know whose task is meant.
             ["done"] or ["answered"] or ["join", _] or ["new", _] or ["status-line", _] or ["ask", _] or ["later", _] or ["subtask", _] or ["pr", _]
-                or ["duplicate-of", _] or ["relate", _] or ["unrelate", _] =>
+                or ["duplicate-of", _] or ["relate", _] or ["unrelate", _] or ["deployed", _] =>
                 ControlReply.Fail($"task {args[0]} is a session's form and needs --session <id>"),
             ["list"] => Success(service.Board.Pile().Select(Listed).ToArray()),
             // The closed tasks, which every other view leaves out, so one closed by mistake can be found and reopened.
@@ -172,6 +172,9 @@ public sealed partial class RemoteControl
             ["pr", var id, var url] => AskedPullRequests.In(url) is [var link]
                 ? TaskChange(service, id, t => service.AddPullRequest(t.Id, link))
                 : ControlReply.Fail($"'{url}' is not a GitHub pull request link (https://github.com/<owner>/<repo>/pull/<n>)"),
+            // A deploy seen running, by the task (task 8470d176, phase 2): the remote twin of "Mark deployed" on a line's
+            // menu, and the user's or the manager's way to report one a session could not (TaskBoard.MarkDeployed).
+            ["deployed", var id, var note] => TaskChange(service, id, t => service.MarkDeployed(t.Id, note)),
             ["describe", var id, var markdown] => TaskChange(service, id, t => service.Describe(t.Id, markdown)),
             ["comment-edit", var comment, var markdown] => TaskCommentEdit(service, comment, markdown),
             ["assign", var id, var who] => ParseAssignee(who)
@@ -407,6 +410,9 @@ public sealed partial class RemoteControl
         snoozedUntil = task.SnoozedUntil.HasValue ? (DateTimeOffset?)task.SnoozedUntil.Value : null,
         // The pull requests its sessions opened (task e7aa49b1), as URLs, oldest first.
         pullRequests = task.PullRequests.Select(p => p.Url).ToArray(),
+        // The deploys reported running (task 8470d176, phase 2; `task deployed`), each as {key, at, note}, oldest first;
+        // key is the pull request's owner/repo#number in lower case.
+        deployed = task.Deployed.Select(d => new { key = d.Key, at = d.At, note = d.Note }).ToArray(),
         // Task links (2026-11-25-task-links-design.md): the original as {id, title} while the task is a closed duplicate
         // (status stays "closed", so a script reading status is unchanged), the ids of its duplicates, and the ids of the
         // tasks related to it either way.
