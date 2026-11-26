@@ -4017,6 +4017,124 @@ public class TasksBoardTests
         Assert.Single(ButtonsNamed(t, "Show more"));
     });
 
+    // Task 2088e1ed (Petre: "i should be able to increase or decrease issue or comment body"). The grips under texts, and
+    // the bodies they size, as a test finds them.
+    static List<Border> VisibleGrips(object scope) => Inside(scope).OfType<Border>()
+        .Where(b => Equals(b.Tag, TasksWindow.BodyGripTag) && b.Visibility == Visibility.Visible).ToList();
+
+    static RichTextBox LongCommentBody(Board t) => Inside(t.Window).OfType<RichTextBox>().First(b => b.IsReadOnly && b.Tag is null);
+
+    // A long comment has a grip under it and a short one has none. The height a drag ends on stays the comment's through
+    // a redraw; a drag to its foot opens it as Show more does; Show less goes back to three lines and forgets the height.
+    // A real mouse drag cannot run on the hidden desktop, so the test keeps heights the way the grip's release does.
+    [Fact]
+    public void A_long_comments_grip_keeps_the_height_it_was_dragged_to() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var id = t.Tasks.AddNote("note", t.Gepha).Value.Id;
+        t.Tasks.Comment(id, Maybe<string>.None, Long(9));
+        t.Tasks.Comment(id, Maybe<string>.None, "short");
+        var comment = t.Tasks.Board.Tasks.Single().Comments[0].Id;
+        t.Controller.Show();
+        t.Controller.ToggleThread(id);
+        t.Window.UpdateLayout();
+
+        Assert.Single(VisibleGrips(t.Window)); // the short comment has none
+        var whole = LongCommentBody(t).ExtentHeight;
+        Assert.True(whole > 80, $"the long comment is {whole} DIP");
+
+        // Taller than three lines, short of the whole: that height, kept through a redraw.
+        t.Window.KeepCommentHeight(comment, 90, whole);
+        t.Window.UpdateLayout();
+        Assert.Equal(90, LongCommentBody(t).MaxHeight);
+        Assert.Equal(90, LongCommentBody(t).ActualHeight, 0.5);
+        Assert.Single(ButtonsNamed(t, "Show more"));
+        Assert.Single(VisibleGrips(t.Window));
+
+        // Smaller than three lines.
+        t.Window.KeepCommentHeight(comment, 20, whole);
+        t.Window.UpdateLayout();
+        Assert.Equal(20, LongCommentBody(t).MaxHeight);
+
+        // To its foot: the whole comment, as Show more opens it, and the grip stays to shrink it again.
+        t.Window.KeepCommentHeight(comment, whole, whole);
+        t.Window.UpdateLayout();
+        Assert.True(double.IsPositiveInfinity(LongCommentBody(t).MaxHeight));
+        Assert.Single(ButtonsNamed(t, "Show less"));
+        Assert.Single(VisibleGrips(t.Window));
+
+        // Whole by a drag, and kept through the panel closing and opening (Show more's state is not).
+        t.Controller.Hide();
+        t.Controller.Show();
+        t.Controller.ToggleThread(id);
+        t.Window.UpdateLayout();
+        Assert.True(double.IsPositiveInfinity(LongCommentBody(t).MaxHeight));
+
+        // Show less on a comment dragged whole: three lines, the dragged height forgotten.
+        Click(ButtonsNamed(t, "Show less")[0]);
+        Assert.Null(t.Window.BodyHeight(TasksWindow.CommentKey(comment)));
+        Assert.True(LongCommentBody(t).MaxHeight < 80, $"clamped to {LongCommentBody(t).MaxHeight}");
+
+        // Shrunk by a drag, then Show more: whole, the dragged height forgotten.
+        t.Window.KeepCommentHeight(comment, 40, whole);
+        Click(ButtonsNamed(t, "Show more")[0]);
+        Assert.Null(t.Window.BodyHeight(TasksWindow.CommentKey(comment)));
+        Assert.True(double.IsPositiveInfinity(LongCommentBody(t).MaxHeight));
+    });
+
+    // An open line's description and question each have a grip while their cap cuts them. A height dragged to stays the
+    // cap's; dragged to the foot, the text shows whole, no longer cut, and keeps its grip to shrink it again.
+    [Fact]
+    public void An_open_lines_description_grip_keeps_the_height_it_was_dragged_to() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var id = t.Tasks.Create("Accounts case", t.Gepha, Session("s1")).Value.Id;
+        t.Tasks.Describe(id, "A brief that runs on.\n\n" + string.Join("\n\n", Enumerable.Range(1, 12).Select(n => $"Paragraph {n} of the brief.")));
+        t.Tasks.Ask(id, string.Join(" ", Enumerable.Repeat("Which accounts do we debit and credit offline, and what do we send where?", 20)));
+        t.Controller.Show();
+        t.Controller.ToggleThread(id);
+        t.Window.UpdateLayout();
+
+        var line = LineOf(t.Window, id);
+        Assert.Equal(2, VisibleGrips(line).Count);
+        HeightCap DescriptionCap() => Inside(LineOf(t.Window, id)).OfType<HeightCap>().Single(c => c.Child is RichTextBox);
+        var whole = DescriptionCap().FullHeight;
+        var before = DescriptionCap().ActualHeight;
+
+        t.Window.KeepCappedHeight(TasksWindow.DescriptionKey(id), before + 40, whole);
+        t.Window.UpdateLayout();
+        // Snapped to a line's top, so at most the height dragged to, and more than before.
+        Assert.InRange(DescriptionCap().ActualHeight, before + 1, before + 40.5);
+        Assert.True(DescriptionCap().Overflowing);
+
+        t.Window.KeepCappedHeight(TasksWindow.DescriptionKey(id), whole, whole);
+        t.Window.UpdateLayout();
+        Assert.False(DescriptionCap().Overflowing);
+        Assert.Equal(whole, DescriptionCap().ActualHeight, 0.5);
+        Assert.Equal(2, VisibleGrips(LineOf(t.Window, id)).Count);
+    });
+
+    // A press on the grip under an open line's description is the grip's: the line does not take it as a double-click
+    // that goes to the task's workspace, as a press on the description itself would.
+    [Fact]
+    public void A_press_on_a_description_grip_is_not_the_lines() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var id = t.Tasks.Create("Accounts case", t.Gepha, Session("s1")).Value.Id;
+        t.Tasks.Describe(id, "A brief that runs on.\n\n" + string.Join("\n\n", Enumerable.Range(1, 12).Select(n => $"Paragraph {n} of the brief.")));
+        t.Controller.Show();
+        t.Controller.ToggleThread(id);
+        t.Window.UpdateLayout();
+
+        var grip = VisibleGrips(LineOf(t.Window, id)).Single();
+        var press = new MouseButtonEventArgs(Mouse.PrimaryDevice, 0, MouseButton.Left) { RoutedEvent = UIElement.PreviewMouseLeftButtonDownEvent };
+        typeof(MouseButtonEventArgs).GetProperty(nameof(MouseButtonEventArgs.ClickCount))!.SetValue(press, 2);
+        grip.RaiseEvent(press);
+
+        Assert.False(press.Handled);
+        Assert.True(t.Window.ThreadShown(id));
+    });
+
     [Fact]
     public void Only_the_latest_three_comments_show_with_a_line_for_the_earlier_ones() => StaThread.Run(() =>
     {

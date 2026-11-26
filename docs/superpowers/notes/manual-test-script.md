@@ -1200,6 +1200,16 @@ TW10. (Task e91f8aa5.) Have a session ask a question of ten lines or more, on a 
      its line in the panel: the question and the description each stop after four lines, cut between two lines, and
      "Show all in window" sits under them. Click it: the task's window opens with both in full. A link inside the four
      lines of the question still opens in the browser. A task with a one-line question has no "Show all in window".
+TW11. (Task 2088e1ed.) On the TW10 task, a thin band with a short bar in its middle sits under the question and under
+     the description; the pointer over it turns into the up-down arrow. Drag the description's band down: more of it
+     shows as you drag, a line at a time; up: less, down to one line. Release at a height: it stays there. Drag it to
+     the bottom: the whole description shows and "Show all in window" goes if the question is whole too. A press on the
+     band neither folds the line nor starts dragging the task. Fold the line and open it again, and close and reopen the
+     panel: the heights you left stay. Restart Deskbar: back to four lines.
+TW12. (Task 2088e1ed.) In a thread, a comment cut at three lines has the same band under its text; a short comment has
+     none. Drag it down and up: the comment shows more and less, live. Release halfway: that height stays, and "Show
+     more" still opens it whole. Drag one to its bottom: its button says "Show less". Show less brings it back to three
+     lines.
 
 ## The narrow panel's titles
 

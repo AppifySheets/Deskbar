@@ -26,8 +26,27 @@ sealed class HeightCap : Decorator
         LayoutUpdated += (_, _) => Snap();
     }
 
-    /// <summary>The most of the child that shows, in DIP.</summary>
-    public double Cap { get; init; }
+    /// <summary>
+    /// The most of the child that shows, in DIP; positive infinity shows it whole. Settable since task 2088e1ed (Petre: "i
+    /// should be able to increase or decrease issue or comment body"): the grip under an open line's description or
+    /// question (TasksWindow.BodyGrip.cs) moves it while it is dragged. A new cap forgets the last line edge, so the next
+    /// layout pass snaps afresh from it.
+    /// </summary>
+    public double Cap
+    {
+        get => cap;
+        set
+        {
+            cap = value;
+            shown = double.NaN;
+            InvalidateMeasure();
+        }
+    }
+
+    double cap;
+
+    /// <summary>The child's whole height, from the last measure: what a cap at or past it shows in full.</summary>
+    public double FullHeight => Child?.DesiredSize.Height ?? 0;
 
     /// <summary>
     /// Where the cut really falls, given the laid-out child and <see cref="Cap"/>: the top of a line the cap would cut
@@ -58,7 +77,14 @@ sealed class HeightCap : Decorator
     // and wrapping: a second pass finds the same edge and stops, and a new width finds its own.
     void Snap()
     {
-        if (EdgeOf is null || Child is null || ActualWidth <= 0) return;
+        // A cap past the child's foot cuts nothing, so there is no line to snap to (and an infinite one, "show it whole",
+        // is no point a RichTextBox can be asked about).
+        if (EdgeOf is null || Child is null || ActualWidth <= 0 || Cap >= FullHeight) return;
+        // LayoutUpdated is raised on every subscriber after any layout pass, so a cap a redraw has dropped hears it too
+        // until it is collected, and its RichTextBox, out of the window's tree, throws when asked for a position ("The
+        // specified Visual is not a descendant of this Visual", measured in a test that redraws after a drag, task
+        // 2088e1ed). A cap no longer in a window has nothing to snap.
+        if (Window.GetWindow(this) is null) return;
         var edge = Math.Min(Cap, EdgeOf(Child, Cap));
         if (Math.Abs(edge - Shown) <= 0.5) return;
         shown = edge;

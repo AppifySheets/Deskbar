@@ -411,6 +411,8 @@ public partial class TasksWindow : Window
         || editingComment is not null
         // A line armed, dragged, or its drop still queued (TasksWindow.Drag.cs): no redraw under it (#48).
         || DragInFlight
+        // A text's height grip being dragged (task 2088e1ed, TasksWindow.BodyGrip.cs): a redraw would replace the grip.
+        || bodyGripDragging
         || (Mouse.LeftButton == MouseButtonState.Pressed && IsMouseOver);
 
     // What waited is drawn now that nothing holds it. Not from inside a draw: clearing the rows takes the keyboard
@@ -607,6 +609,8 @@ public partial class TasksWindow : Window
             string.Join('|', view.Places.Select(p => $"{p.IsGroup}{p.Workspace}{p.Name}{(p.Colour as SolidColorBrush)?.Color}")),
             view.EmptyText,
             $"{renaming}{editingComment}{linking}{subtaskUnder}{string.Join(",", settledOpen.Order())}|{string.Join(",", earlierOpen.Order())}|{string.Join(",", longOpen.Order())}",
+            // The heights texts were dragged to (task 2088e1ed), so a redraw after a drag builds them at that height.
+            BodyHeightsSignature,
             // The two width flags (Task 8): which line is drawn and whether the view switch shows. Not the width itself, so
             // a grip drag that crosses neither threshold redraws nothing.
             $"{view.Matrix}{view.MatrixAllowed}{view.Slim}",
@@ -1022,6 +1026,9 @@ public partial class TasksWindow : Window
         // (TasksWindow.Drag.cs), armed only, so a press released in place stays this Click.
         line.PreviewMouseLeftButtonDown += (_, e) =>
         {
+            // A press on the grip under the open line's description or question resizes that text (task 2088e1ed,
+            // TasksWindow.BodyGrip.cs): the grip takes it, and the line neither picks, folds nor arms a drag.
+            if (IsOnBodyGrip(e.OriginalSource)) return;
             // A PRESS ON A LINK IN THE OPEN LINE'S DESCRIPTION IS THE LINK'S (task e117cb92; Petre, of a WEB-657 link
             // under a task's title: "link in the description doesn't get clicked; it closes the issue panel"). The
             // description box takes no hits, so a press anywhere on it is a press on the line (DescriptionBlock says why),
@@ -1720,7 +1727,7 @@ public partial class TasksWindow : Window
             if (row.Description.Length > 0 && row.Expanded)
             {
                 var parts = TaskImages.Split(row.Description);
-                if (parts.Text.Length > 0) below.Children.Add(Capped(DescriptionBlock(row), caps));
+                if (parts.Text.Length > 0) below.Children.Add(Capped(DescriptionBlock(row), caps, DescriptionKey(row.Id)));
                 if (TaskImageRow.Of(StateDir, parts.Images, OpenImage) is { } pictures) below.Children.Add(pictures);
             }
         }
@@ -1732,7 +1739,7 @@ public partial class TasksWindow : Window
         // ask writes the question into the thread too (TaskBoard.Ask), so an open line whose thread shows that comment
         // leaves the question off and keeps the rest of its detail ("no live session"); folding the line brings it back.
         var detail = DetailShown(row);
-        if (detail.Length > 0) below.Children.Add(row.Expanded ? Capped(DetailText(row, detail), caps) : DetailText(row, detail));
+        if (detail.Length > 0) below.Children.Add(row.Expanded ? Capped(DetailText(row, detail), caps, DetailKey(row.Id)) : DetailText(row, detail));
         // "Show all in window" under what was cut (task e91f8aa5). Only while something is: a short question and
         // description show whole, as before, and need no link.
         if (caps.Count > 0 && Actions?.OpenWindow is { } openWindow) below.Children.Add(ShowAllLink(row.Id, caps, openWindow));
@@ -1744,21 +1751,40 @@ public partial class TasksWindow : Window
     // question and its description in full since #466, because nothing else showed them; the task window (task dca4ebeb)
     // now does, so the line keeps to OpenLineShown lines of each and "Show all in window" opens the window for the rest.
     // Without a window to open (no Actions.OpenWindow) nothing is capped, or the rest could be read nowhere.
-    UIElement Capped(FrameworkElement text, List<HeightCap> caps)
+    //
+    // THE CUT CAN BE DRAGGED (task 2088e1ed, TasksWindow.BodyGrip.cs): a grip under the cap moves it, from one line to the
+    // whole text, and the height it is left at (bodyHeights, under `key`) is where the cap starts on every later redraw.
+    // The grip shows while the cap cuts something, or once a height was dragged (so a text dragged whole can shrink again).
+    UIElement Capped(FrameworkElement text, List<HeightCap> caps, string key)
     {
         if (Actions?.OpenWindow is null) return text;
         // Lines of the text's own size in the window's font (the text inherits it, but only once it is in the tree), so
         // the cut falls between two lines rather than through one. Both texts are 11 DIP today.
         var size = text is TextBlock block ? block.FontSize : 11.0;
+        var line = Math.Ceiling(FontFamily.LineSpacing * size);
         // A TextBlock's lines are all one height (measured, Georgian and emoji included), so lines times that height is a
         // line's edge. The description's paragraphs are spaced, so its cut moves up to the top of the line it would split.
         var cap = new HeightCap
         {
-            Cap = Math.Ceiling(OpenLineShown * FontFamily.LineSpacing * size), Child = text, Tag = CappedTag,
+            Cap = bodyHeights.TryGetValue(key, out var dragged) ? dragged : Math.Ceiling(OpenLineShown * FontFamily.LineSpacing * size),
+            Child = text, Tag = CappedTag,
             EdgeOf = text is RichTextBox ? LineEdgeAbove : null,
         };
         caps.Add(cap);
-        return cap;
+        // Dragged to the text's foot, the cap is "whole" (infinite), so text that grows later still shows whole.
+        double Fitted(double height) => height >= cap.FullHeight - 0.5 ? double.PositiveInfinity : height;
+        var grip = BodyGrip(text is RichTextBox ? "Resize description" : "Resize question",
+            shown: () => cap.ActualHeight, least: () => line, whole: () => cap.FullHeight,
+            preview: height => cap.Cap = Fitted(height), keep: height => KeepCappedHeight(key, height, cap.FullHeight));
+        // Collapsed until a layout pass says the cap cut something, as "Show all in window" is (the width, and so the
+        // wrapping, is known only then). Never collapsed mid-drag, which would take the mouse from it.
+        grip.Visibility = Visibility.Collapsed;
+        grip.LayoutUpdated += (_, _) =>
+        {
+            var wanted = cap.Overflowing || bodyHeights.ContainsKey(key) || grip.IsMouseCaptured ? Visibility.Visible : Visibility.Collapsed;
+            if (grip.Visibility != wanted) grip.Visibility = wanted;
+        };
+        return new StackPanel { Children = { cap, grip } };
     }
 
     // The top of the description's line that a cut at `cap` would go through, or the cap when it falls between lines (in
@@ -2096,7 +2122,8 @@ public partial class TasksWindow : Window
           + string.Join(',', row.Links.Select(l => $"{l.Kind}{l.Id}")) + (linking is { } l && l.Task == row.Id ? $"picker{l.Duplicate}" : "")
           // The subtask box (task 0eb943d8) opens under the row of buttons, and Add subtask leaves the row meanwhile.
           + (subtaskUnder == row.Id ? "subtask-box" : "") + "/"
-          + string.Join(',', ThreadComments(row).Shown.Select(c => $"{c.Id}{(longOpen.Contains(c.Id) ? "+" : "")}"))
+          // A comment opened by Show more, or dragged to a height of its own (task 2088e1ed), moves everything under it.
+          + string.Join(',', ThreadComments(row).Shown.Select(c => $"{c.Id}{(longOpen.Contains(c.Id) ? "+" : "")}{(BodyHeight(CommentKey(c.Id)) is { } h ? $"~{h:0}" : "")}"))
           + $"{settledOpen.Contains(row.Id)}{earlierOpen.Contains(row.Id)}";
 
     // The row of buttons (ThreadActions, task 1c17b7d6: Open in window, Open Claude or "Start Claude on this", Add subtask),
@@ -2300,6 +2327,9 @@ public partial class TasksWindow : Window
     // Three lines of 11.5-point text, with a little to spare for a paragraph's spacing.
     const double ThreeLines = 54;
 
+    // The least of a comment its grip can leave showing (task 2088e1ed): one of those lines.
+    const double OneCommentLine = ThreeLines / 3;
+
 
     void ToggleSettled(Guid task)
     {
@@ -2489,11 +2519,15 @@ public partial class TasksWindow : Window
         // judged by the character count at first (the width is not known while the thread is built), and by the laid-out
         // height once it has been (review of the batch): a paragraph that fits three lines at the window's width loses its
         // button, and one that wraps to more gains it.
+        // A HEIGHT DRAGGED (task 2088e1ed, TasksWindow.BodyGrip.cs) replaces the three lines: the grip under a long comment
+        // shows more or less of it, and the height it was left at is where the comment starts on every later redraw.
+        // A comment dragged to its foot is whole (infinity), and reads as one Show more opened.
         var isLong = IsLong(split.Text);
-        var full = longOpen.Contains(comment.Id);
+        var dragged = BodyHeight(CommentKey(comment.Id));
+        var full = longOpen.Contains(comment.Id) || dragged is double.PositiveInfinity;
         if (!full)
         {
-            body.MaxHeight = ThreeLines;
+            body.MaxHeight = dragged ?? ThreeLines;
             body.ClipToBounds = true;
         }
         // A comment of pictures alone has no text box to show.
@@ -2501,15 +2535,27 @@ public partial class TasksWindow : Window
         // As wide as its text, so a short comment gets a short bubble (ChatThread.FitWidth); an event is centred.
         ChatThread.FitWidth(body);
         body.HorizontalAlignment = isEvent ? HorizontalAlignment.Center : HorizontalAlignment.Left;
-        var parts = new StackPanel { Children = { body } };
+        // The grip under the text (task 2088e1ed): from one line to the whole comment. Dragged to its foot, the comment is
+        // opened as Show more opens it (KeepCommentHeight).
+        var grip = BodyGrip("Resize comment",
+            shown: () => body.ActualHeight, least: () => OneCommentLine, whole: () => body.ExtentHeight,
+            preview: height => body.MaxHeight = height >= body.ExtentHeight - 0.5 ? double.PositiveInfinity : height,
+            keep: height => KeepCommentHeight(comment.Id, height, body.ExtentHeight));
+        var parts = new StackPanel { Children = { body, grip } };
         var more = Small(new TextBlock { Text = full ? "Show less" : "Show more", Foreground = HeaderInk, FontSize = 10.5 },
             full ? "Show less" : "Show more", () =>
             {
-                if (!longOpen.Remove(comment.Id)) longOpen.Add(comment.Id);
+                // By what shows, not by longOpen alone: a comment dragged whole says "Show less" without being in it.
+                if (full) longOpen.Remove(comment.Id);
+                else longOpen.Add(comment.Id);
+                // Either button says how much shows by itself: a dragged height goes (Show less is three lines again).
+                ForgetCommentHeight(comment.Id);
                 if (latest is not null) Draw(latest);
             }, full ? "Fold the comment back to three lines" : "Show the whole comment");
         // Collapsed means it takes no room and is not in the tree for a reader, but it is there for the layout to switch on.
+        // The grip shows with the button: only a comment long enough to be cut has anything to resize.
         more.Visibility = full || isLong ? Visibility.Visible : Visibility.Collapsed;
+        grip.Visibility = more.Visibility;
         parts.Children.Add(more);
         if (TaskImageRow.Of(StateDir, split.Images, OpenImage) is { } pictures) parts.Children.Add(pictures);
         if (!full)
@@ -2518,6 +2564,8 @@ public partial class TasksWindow : Window
                 if (body.ActualWidth <= 0 || body.Visibility != Visibility.Visible) return;
                 var wanted = body.ExtentHeight > ThreeLines + 0.5 ? Visibility.Visible : Visibility.Collapsed;
                 if (more.Visibility != wanted) more.Visibility = wanted;
+                // Never collapsed mid-drag, which would take the mouse from it.
+                if (grip.Visibility != wanted && !grip.IsMouseCaptured) grip.Visibility = wanted;
             };
         if (isEvent) more.HorizontalAlignment = HorizontalAlignment.Center;
         var placed = isEvent ? ChatThread.Event(comment, parts, timeInBody, actions) : ChatThread.Message(comment, parts, actions);
