@@ -98,7 +98,10 @@ public sealed partial class RemoteControl(WorkspaceManager manager, Func<bool, R
     // `bookmark open` and `open-all` (RemoteControl.Bookmarks.cs), and the `running` flag of `bookmark list`: the same
     // BookmarkOpener the bar's chips click through. Starting programs is the app's business, so the app hands it in; left
     // null, open and open-all refuse and `list` reports nothing as running.
-    BookmarkOpener? bookmarks = null)
+    BookmarkOpener? bookmarks = null,
+    // Allow / Deny from a task's page: the permission questions on show and their slots (PermissionDesk), which
+    // `claude-permission` registers into. Left null, the verb answers nothing and every question stays in the terminal.
+    PermissionDesk? permissions = null)
 {
     // `longPath` turns an 8.3 short path into its long form (GetLongPathNameW, LongPath on the Windows side), for
     // FolderPath. Left null, a path is taken as it is, which is all a test that names long paths needs.
@@ -134,6 +137,8 @@ public sealed partial class RemoteControl(WorkspaceManager manager, Func<bool, R
         (ControlArguments.ClaudeHookVerb, _) => ClaudeHook(rest),
         // A session's comment waiter registering (RemoteControl.ClaudeHook.cs, ClaudeWait).
         (ControlArguments.ClaudeWaitVerb, _) => ClaudeWait(rest),
+        // A permission hook registering its question (RemoteControl.Permission.cs). There is no verb that answers one.
+        (ControlArguments.ClaudePermissionVerb, _) => ClaudePermission(rest),
         ("task", _) => Task(rest),
         ("tasks-window", [var state]) => TasksWindow(state),
         ("goal", _) => Goal(rest),
@@ -198,6 +203,7 @@ public sealed partial class RemoteControl(WorkspaceManager manager, Func<bool, R
         ("claude-skill", [var onOff]) => ClaudeSkill(onOff),
         ("claude-tasks", [var onOff]) => ClaudeTasks(onOff),
         ("claude-resume", [var onOff]) => ClaudeResume(onOff),
+        ("claude-permissions", [var onOff]) => ClaudePermissions(onOff),
         ("claude-model", []) => ClaudeModel(Maybe<string>.None),
         ("claude-model", [var model]) => ClaudeModel(model),
         ("focus-ring", [var onOff]) => FocusRing(onOff),
