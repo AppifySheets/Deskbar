@@ -288,8 +288,13 @@ static class ClaudeSkill
     // %RANDOM%, not the code), and never in a trace (the reply is not traced, ControlArguments.ForTrace). It does live in
     // this cmd's environment, and so in the environment of the `ping` it starts for each tick. A process of the same user
     // that can read another process's memory or environment can therefore still learn it and answer; Deskbar does not
-    // defend against that, as it does not defend the user's own settings.json from such a process. Every path but those three ends in `exit /b 0` with nothing on stdout: Claude
-    // Code then keeps its own dialog (and never sees exit 2, which is not a decision on this event anyway).
+    // defend against that, as it does not defend the user's own settings.json from such a process.
+    // The call itself only takes a code from Deskbar: for this verb the client checks that the pipe's server process is
+    // Deskbar's own executable before it writes the request (PipeTrust.CheckServerImage, the re-review's N1), so a program
+    // that serves the pipe's name while Deskbar is closed gets nothing, and this script prints nothing.
+    //
+    // Every path but the three answers ends in `exit /b 0` with nothing on stdout: Claude Code then keeps its own dialog
+    // (and never sees exit 2, which is not a decision on this event anyway).
     //
     // A late answer is harmless by construction: when the user answered in the terminal first, Claude Code has its
     // decision and the hook's later line has nothing left to decide ("whichever decides first applies", the hooks

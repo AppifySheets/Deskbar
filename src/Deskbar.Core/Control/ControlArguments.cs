@@ -190,6 +190,10 @@ public static class ControlArguments
     // older Deskbar refuses it, the script then prints nothing, and the terminal dialog stays.
     public const string ClaudePermissionVerb = "claude-permission";
 
+    // The permission hook's call, the one verb whose client must reach Deskbar itself (ControlClient, PipeTrust's N1).
+    public static bool IsPermissionCall(IReadOnlyList<string> args) =>
+        args.Count > 0 && args[0].Equals(ClaudePermissionVerb, StringComparison.OrdinalIgnoreCase);
+
     public static bool IsClaudeHook(IReadOnlyList<string> args) =>
         args.Count > 0 && (args[0].Equals(ClaudeHookVerb, StringComparison.OrdinalIgnoreCase) || args[0].Equals(ClaudeWaitVerb, StringComparison.OrdinalIgnoreCase)
             || args[0].Equals(ClaudePermissionVerb, StringComparison.OrdinalIgnoreCase));
