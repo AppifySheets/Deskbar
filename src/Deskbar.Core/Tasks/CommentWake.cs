@@ -51,8 +51,10 @@ public abstract record WakePlan
 // A RECURRING TASK BETWEEN RUNS is asked first (task 0b78269e, spec docs/superpowers/specs/2026-11-26-recurring-tasks-design.md,
 // "A run ends"). Its last run is over and its session stopped, so a comment starts a run straight away (FreshRun), as
 // "Wake now" does: a fresh session that reads the thread, comment included, rather than the old run's session resumed
-// with it. Resuming would also bring an old run back that the keeper then leaves running for good, since it never
-// touches a task between runs. Only while NO session of the task is listed: the last run's session can still be there
+// with it. That is the spec's ruling: every run is a fresh session, never one long-lived session woken again (the
+// approach it considered and dropped, whose context grows run after run), and a run learns what was said since the last
+// one from the thread (ClaudeStart's scheduled-run line tells it to read the thread first). Only while NO session of the
+// task is listed: the last run's session can still be there
 // (not yet idle for the keeper's StopAfter, or with Petre's window on it), and then it reads the comment by the usual
 // road, since a fresh run beside it would put two sessions on one task. A run in progress or waiting on Petre is not
 // between runs and takes the usual road too.

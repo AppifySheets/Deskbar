@@ -1355,7 +1355,7 @@ public partial class TasksWindow : Window
         compactLines || row.RepeatLabel is not { } label ? null
             : new TextBlock
             {
-                Text = "", FontFamily = IconFont, FontSize = 12, Foreground = DimInk, VerticalAlignment = VerticalAlignment.Center,
+                Text = "\uE8EE", FontFamily = IconFont, FontSize = 12, Foreground = DimInk, VerticalAlignment = VerticalAlignment.Center,
                 Margin = new Thickness(3, 0, 3, 1), Tag = RepeatMarkTag,
                 ToolTip = TaskRepeats.MarkTip(label, row.NextRun, row.RepeatModel ?? TaskRepeat.DefaultModel, Now()),
             };

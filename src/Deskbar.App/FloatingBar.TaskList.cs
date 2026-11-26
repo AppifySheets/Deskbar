@@ -1483,7 +1483,7 @@ public partial class FloatingBar
         line.RepeatLabel is not { } label ? []
             : [new TextBlock
             {
-                Text = "", FontFamily = IconFont, FontSize = 12, Foreground = TaskDimInk, VerticalAlignment = VerticalAlignment.Center,
+                Text = "\uE8EE", FontFamily = IconFont, FontSize = 12, Foreground = TaskDimInk, VerticalAlignment = VerticalAlignment.Center,
                 Margin = new Thickness(4, 0, 0, 0), Tag = "task-repeat-mark",
                 ToolTip = TaskRepeats.MarkTip(label, line.NextRun, line.RepeatModel ?? TaskRepeat.DefaultModel, DateTimeOffset.Now),
             }];

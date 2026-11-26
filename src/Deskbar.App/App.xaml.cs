@@ -1679,10 +1679,10 @@ public partial class App : Application
         // RECURRING TASKS' RUNS START ON THE SAME SWEEP (task 0b78269e, RecurringRunner), and before WakeDue: a task whose
         // run is due is started (which ends its snooze) rather than first woken onto the bar for a sweep, and a skipped
         // occurrence puts it back to sleep before WakeDue could show it. The runner is built further down, with the Claude
-        // actions it starts through, so the call at start-up finds none and the first run waits for the first sweep. By
-        // then `claude agents` (read every 15 seconds) has normally answered, so a run still alive from before the restart
-        // counts as running; before any answer, ClaudeTaskActions.HasRunningSession goes by the hooks' word instead.
-        recurringRunner?.RunDue();
+        // actions it starts through, so nothing starts a run here: the first run waits for the first sweep, SnoozeSweep
+        // (30 seconds) after start-up. By then `claude agents` (read every 15 seconds) has normally answered, so a run
+        // still alive from before the restart counts as running; before any answer, ClaudeTaskActions.HasRunningSession
+        // goes by the hooks' word instead.
         tasks.WakeDue();
         Observable.Interval(SnoozeSweep).ObserveOn(new System.Windows.Threading.DispatcherSynchronizationContext(Dispatcher))
             .Subscribe(_ =>
