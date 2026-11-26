@@ -383,10 +383,12 @@ public sealed class JsonPersistenceStoreTests : IDisposable
         using var pulse = manager.StateChanged.Subscribe(_ => pulses++);
 
         // CurrentWorkspace (task ed1a01fc) is an init property, so it is checked to make the round trip too.
-        // HideSubtasks (task 173ef268) likewise, and the resizable columns' widths (task 3df2d28f).
+        // HideSubtasks (task 173ef268) likewise, and the resizable columns' widths (task 3df2d28f), and the Inbox view
+        // once chosen (task 740a2231).
         var panel = new TasksPanelState(Open: true, Width: 512.5)
         {
             CurrentWorkspace = true, HideSubtasks = true, Columns = Deskbar.Core.Tasks.TaskColumnWidths.Default with { Sessions = 101.5 },
+            Inbox = true,
         };
         Assert.True(manager.SaveTasksPanel(panel).IsSuccess);
         Assert.Equal(panel, store.Load().Value.TasksPanel);
@@ -416,6 +418,23 @@ public sealed class JsonPersistenceStoreTests : IDisposable
         Assert.Equal(Deskbar.Core.Tasks.TaskColumnWidths.Default, panel.ColumnWidths);
         // An older file shows subtasks, as every build before the checkbox did.
         Assert.False(panel.HideSubtasks);
+    }
+
+    // The Inbox view is opt in (task 740a2231): a file written before the key, or a panel state saved without it, keeps
+    // the view the profile had, the List or the Matrix.
+    [Fact]
+    public void A_panel_state_without_the_key_keeps_todays_view()
+    {
+        Directory.CreateDirectory(dir);
+        File.WriteAllText(Path.Combine(dir, "state.json"),
+            """{"Workspaces":[],"WorkspaceRules":[],"RenameRules":[],"Inventory":{},"TasksPanel":{"Open":true,"Width":500}}""");
+
+        var loaded = new JsonPersistenceStore(dir).Load();
+
+        Assert.True(loaded.IsSuccess);
+        Assert.NotNull(loaded.Value.TasksPanel);
+        Assert.False(loaded.Value.TasksPanel!.Inbox);
+        Assert.False(TasksPanelState.Default.Inbox);
     }
 
     [Fact]
