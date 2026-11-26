@@ -148,6 +148,74 @@ public partial class FloatingBarTaskListTests
         t.Bar.TaskMoveMenu!.IsOpen = false;
     });
 
+    // The selection and the glow paint the Inbox look's selected fill on the line's content.
+    [Fact]
+    public void The_selection_and_the_glow_use_the_inbox_fill() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var k = BarTasks(t);
+        InboxLook(t);
+        var fill = Color.FromRgb(0x27, 0x2C, 0x36);
+
+        t.Bar.Selection.Select(k.Note);
+        Assert.True(t.Bar.TaskLineSelected(k.Note));
+        Assert.Equal(fill, ((SolidColorBrush)Content(LineFor(t, k.Note)).Background).Color);
+
+        ClickBox(t);
+        t.Box.Text = "Call the accountant";
+        Press(t.Bar, t.Box, Key.Enter);
+        var added = t.Tasks.Board.Tasks.Single(x => x.Title == "Call the accountant").Id;
+        Assert.True(t.Bar.TaskLineGlowing(added));
+        Assert.Equal(FloatingBar.InboxBarLineTag, Content(LineFor(t, added)).Tag);
+    });
+
+    // A closed line keeps its place with Undo where its mark was, its title struck through; Undo brings it back.
+    [Fact]
+    public void A_closed_line_shows_undo_in_the_marks_place_and_undo_brings_it_back() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var k = BarTasks(t);
+        InboxLook(t);
+
+        CloseFromMenu(t, LineFor(t, k.Note));
+        var line = LineFor(t, k.Note);
+        Assert.True(((TaskLine)line.Tag).Closing);
+        Assert.Equal(TextDecorations.Strikethrough, Inside(line).OfType<TextBlock>().First(b => Equals(b.Tag, "task-text")).TextDecorations);
+        Click(Inside(line).OfType<Button>().Single(b => AutomationProperties.GetName(b) == "Undo"));
+        t.Bar.PaintTaskList();
+        Assert.False(((TaskLine)LineFor(t, k.Note).Tag).Closing);
+        Assert.NotEqual(TaskStatus.Closed, t.Tasks.Board.Tasks.Single(x => x.Id == k.Note).Status);
+    });
+
+    // Editing a title in place shows the bar's own editor where the title is.
+    [Fact]
+    public void A_title_being_edited_shows_the_editor() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var k = BarTasks(t);
+        InboxLook(t);
+
+        t.Bar.BeginTaskEdit(k.Note);
+        Assert.Contains(Inside(LineFor(t, k.Note)).OfType<TextBox>(), b => AutomationProperties.GetName(b) == "Edit task");
+    });
+
+    // The bar's drag works on the new lines: a line dragged below another lands below it.
+    [Fact]
+    public void A_drag_still_reorders() => StaThread.Run(() =>
+    {
+        using var t = DragBar(3);
+        InboxLook(t);
+        Settle(t);
+        var before = t.Lines.Select(l => ((TaskLine)l.Tag).Title).ToArray();
+        Assert.Equal(["n3", "n2", "n1"], before);
+
+        Drag(t, t.Lines[0], In(t, t.Lines[2], 0.8));
+        Settle(t);
+
+        Assert.Equal(["n2", "n1", "n3"], t.Lines.Select(l => ((TaskLine)l.Tag).Title));
+        Assert.Equal(FloatingBar.InboxBarLineTag, Content(t.Lines[0]).Tag);
+    });
+
     // "+N more waiting on you" in the Inbox look: no amber words.
     [Fact]
     public void The_waiting_group_line_has_no_amber_words() => StaThread.Run(() =>
