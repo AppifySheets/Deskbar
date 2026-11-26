@@ -82,6 +82,79 @@ public static class PipeTrust
         }
     }
 
+    // THE SERVER'S IMAGE, FOR `claude-permission` ONLY (the re-review's N1). The owner and the label say a pipe is this
+    // user's at Medium or above; they cannot tell Deskbar from any other program of the same user. For the permission
+    // hook that matters: the reply is the one-time code, and a program that served Deskbar's pipe name while Deskbar is
+    // closed (the hook entry stays in settings.json) or took it in the second a starting Deskbar waits to make it
+    // (ControlPipeServer's back-off) could answer with a code of its own, learn the slot from --slot and write
+    // "<code> allow" into it: an allow with no click. So before this verb's request is written, the pipe's SERVER PROCESS
+    // must be this client's own executable (the `ctl` path: Deskbar.exe started as the client), or Deskbar.exe beside it
+    // (deskbar-cli.exe, the Store package's console client, sits in the same package folder as the app). Read with
+    // GetNamedPipeServerProcessId and QueryFullProcessImageNameW; a path that cannot be read on either side is a refusal.
+    // The boundary, said plainly: a process of the same user that can replace or patch Deskbar's executable, or inject
+    // code into it, is out of scope; this stops a program that merely serves the pipe's name.
+    //
+    // The other verbs keep the owner and label check alone: their replies are JSON for a person or context for a session,
+    // and none of them hands out something that answers for the user.
+
+    /// <summary>The executables a pipe server may be for `claude-permission`: this client's own, and Deskbar.exe beside it.</summary>
+    public static IReadOnlyList<string> TrustedImages(string? ownImage) =>
+        ownImage is { Length: > 0 } own && Path.GetDirectoryName(own) is { } folder ? [own, Path.Combine(folder, "Deskbar.exe")] : [];
+
+    /// <summary>Whether a server's image is one of <paramref name="trusted"/>: full paths compared without case; nothing read is no.</summary>
+    public static bool SameImage(string? serverImage, IEnumerable<string> trusted) =>
+        Normal(serverImage) is { } server && trusted.Select(Normal).Any(t => string.Equals(t, server, StringComparison.OrdinalIgnoreCase));
+
+    static string? Normal(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path)) return null;
+        try { return Path.GetFullPath(path).TrimEnd('\\', '/'); }
+        catch (Exception e) when (e is ArgumentException or NotSupportedException or PathTooLongException) { return null; }
+    }
+
+    /// <summary>The decision for `claude-permission`: the server's image (or why it could not be read) against this client's.</summary>
+    public static Result CheckServerImage(Result<string> serverImage, string? ownImage) =>
+        serverImage.IsSuccess && SameImage(serverImage.Value, TrustedImages(ownImage))
+            ? Result.Success()
+            : Result.Failure(serverImage.IsFailure
+                ? $"The program serving Deskbar's control pipe could not be checked ({serverImage.Error}); nothing was sent."
+                : "Something other than Deskbar serves its control pipe; nothing was sent.");
+
+    /// <summary>The full path of the process serving the pipe the handle is connected to.</summary>
+    public static Result<string> ServerImageOf(SafeHandle pipe)
+    {
+        if (!GetNamedPipeServerProcessId(pipe, out var pid))
+            return Result.Failure<string>($"no server process id (error {Marshal.GetLastPInvokeError()})");
+        var process = OpenProcess(QueryLimitedInformation, false, pid);
+        if (process == IntPtr.Zero) return Result.Failure<string>($"process {pid} could not be opened (error {Marshal.GetLastPInvokeError()})");
+        try
+        {
+            var buffer = new System.Text.StringBuilder(32768);
+            var size = buffer.Capacity;
+            return QueryFullProcessImageNameW(process, 0, buffer, ref size)
+                ? buffer.ToString(0, size)
+                : Result.Failure<string>($"the image of process {pid} could not be read (error {Marshal.GetLastPInvokeError()})");
+        }
+        finally
+        {
+            CloseHandle(process);
+        }
+    }
+
+    const uint QueryLimitedInformation = 0x1000;  // PROCESS_QUERY_LIMITED_INFORMATION
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    static extern bool GetNamedPipeServerProcessId(SafeHandle pipe, out uint processId);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    static extern IntPtr OpenProcess(uint access, bool inherit, uint processId);
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    static extern bool QueryFullProcessImageNameW(IntPtr process, int flags, System.Text.StringBuilder name, ref int size);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    static extern bool CloseHandle(IntPtr handle);
+
     const int KernelObject = 6;           // SE_KERNEL_OBJECT
     const uint LabelInformation = 0x10;   // LABEL_SECURITY_INFORMATION
     const int MandatoryLabelAce = 0x11;   // SYSTEM_MANDATORY_LABEL_ACE_TYPE
