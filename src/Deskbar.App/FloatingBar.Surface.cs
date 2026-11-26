@@ -24,9 +24,10 @@ namespace Deskbar.App;
 // Why layers, measured from the layout, and not backgrounds on panels. The rows are a StackPanel inside the Root's
 // 4 DIP padding, so a background there would leave a frame of something else round them, and the pinned row is the
 // first child of Rows, so the band cannot simply start at Rows. The layers bleed over the padding to the bar's edges
-// (their -4 margins) and are moved after every layout pass. Each one's DESIRED height stays inside the content's own
-// height (the -4 margins pay for the bleed), because the bar is SizeToContent: a layer that asked for 4 DIP more
-// would grow the bar, which would grow the layer, every pass.
+// (their -4 margins) and are moved after every layout pass. They sit in a SurfaceLayers panel, which asks the bar for
+// no size at all, because the bar is SizeToContent: a layer's desired height used to count, and the foot layer's was the
+// bar's whole height, so the layers held the bar at its last height and it never shrank (Deskbar task 888cd56b, the
+// undocked bar kept the screen's height). Their desired heights no longer matter, only where they are drawn.
 //
 // A fourth layer, FrostSurface, lies under all three: the wallpaper behind the bar, blurred (FloatingBar.Frost.cs),
 // docked and, since task b971ca3f, floating too. The band then lays a lighter veil over it (BarSurface.FrostVeil)
@@ -72,7 +73,10 @@ public partial class FloatingBar
     // when their bands actually moved, so placing them cannot start another pass that places them again.
     void PlaceSurfaces()
     {
-        if (RowsSurface.Parent is not FrameworkElement surface) return;
+        // The bar's Grid, which holds both the content and the SurfaceLayers panel at the same origin and size: the
+        // pinned row and the footer are measured against it, and the layers, drawn in a panel of that same box, land
+        // on those numbers unchanged.
+        if (BarContent.Parent is not FrameworkElement surface) return;
         var total = surface.ActualHeight;
         var top = pinnedRowBox is { IsVisible: true } box && box.IsDescendantOf(surface)
             ? box.TranslatePoint(new Point(0, box.ActualHeight), surface).Y

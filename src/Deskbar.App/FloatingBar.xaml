@@ -56,9 +56,9 @@
              strip straight under the last row. -->
         <!-- Named so a seam dock across screens that are not level can inset it to the height they share
              (FloatingBar.SeamSpan); zero margin everywhere else. -->
-        <!-- A Grid only so the three surface layers can lie BEHIND the bar's content: declared first, drawn first.
+        <!-- A Grid only so the surface layers can lie BEHIND the bar's content: declared first, drawn first.
              They never take a click (the window-level handlers do the dragging) and never size the bar
-             (FloatingBar.Surface.cs keeps their desired heights inside the content's). Their -4 margins bleed them over
+             (their SurfaceLayers panel asks for no size, see SurfaceLayers.cs). Their -4 margins bleed them over
              the Root's padding to the bar's edges, and the top and foot layers carry the bar's rounded corners. -->
         <Grid>
         <!-- The frost: the wallpaper behind the bar, blurred, under everything (FloatingBar.Frost.cs). It covers
@@ -66,6 +66,9 @@
              rather than placed, and with no content, so it never asks the bar for any size. Its corners are the
              Root's, round while floating and square docked, or a floating frost would poke out past the bar's corners
              wherever the top or the footer is not drawn over it. -->
+        <!-- All four layers sit in a SurfaceLayers panel, which reports no size of its own: the layers draw over the
+             whole bar but never decide its height (Deskbar task 888cd56b; SurfaceLayers.cs has the latch this ended). -->
+        <app:SurfaceLayers IsHitTestVisible="False">
         <Border x:Name="FrostSurface" IsHitTestVisible="False" Margin="-4" Visibility="Collapsed"
                 CornerRadius="{Binding CornerRadius, ElementName=Root}"/>
         <Border x:Name="TopSurface" IsHitTestVisible="False" VerticalAlignment="Top" Height="0" Margin="-4,-4,-4,0"
@@ -74,6 +77,7 @@
                 Background="{x:Static app:BarSurface.SeeThrough}"/>
         <Border x:Name="FootSurface" IsHitTestVisible="False" VerticalAlignment="Top" Height="0" Margin="-4,0,-4,-4"
                 CornerRadius="0,0,8,8" Background="{x:Static app:BarSurface.Solid}"/>
+        </app:SurfaceLayers>
         <DockPanel x:Name="BarContent" LastChildFill="True">
             <!-- The rest of the taskbar's own buttons: the tray chevron, quick settings and the bell from the
                  left, the clock and the show desktop sliver at the right, where Windows puts them. Filled once
