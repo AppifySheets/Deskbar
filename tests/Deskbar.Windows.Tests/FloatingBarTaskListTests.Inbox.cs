@@ -88,6 +88,27 @@ public partial class FloatingBarTaskListTests
         }
     });
 
+    // The owner, after using the quiet second line: every bar line is its mark, its title and its chip, nothing more;
+    // the question or the status line is in the tooltip, in full, with the title.
+    [Fact]
+    public void Every_line_is_its_mark_title_and_chip_with_the_text_in_the_tooltip() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var k = BarTasks(t);
+        InboxLook(t);
+
+        foreach (var id in new[] { k.Asking, k.Done, k.Note })
+        {
+            var texts = Inside(LineFor(t, id)).OfType<TextBlock>().Where(b => !b.Text.Contains("GEPHA")).ToArray();
+            Assert.Single(texts, b => Equals(b.Tag, "task-text"));
+            Assert.DoesNotContain(texts, b => b.Text.Contains("Does the bar stay") || b.Text.Contains("1 GB lighter"));
+        }
+        var tip = $"{LineFor(t, k.Asking).ToolTip}";
+        Assert.Contains("Docked bar jumps", tip);
+        Assert.Contains("Does the bar stay where you put it?", tip);
+        Assert.Contains("1 GB lighter", $"{LineFor(t, k.Done).ToolTip}");
+    });
+
     [Fact]
     public void The_title_is_semibold_on_claudes_line_and_normal_on_a_note() => StaThread.Run(() =>
     {
@@ -99,32 +120,6 @@ public partial class FloatingBarTaskListTests
         Assert.Equal(FontWeights.SemiBold, Title(k.Asking).FontWeight);
         Assert.Equal(FontWeights.Normal, Title(k.Note).FontWeight);
         Assert.Equal(FontWeights.Bold, Title(k.Loose).FontWeight);
-    });
-
-    // The owner's ruling: a line that needs the user shows its question or status line on a quiet second line; every
-    // other line shows its title only. The tooltip keeps the title and the text in full.
-    [Fact]
-    public void A_line_that_needs_you_shows_its_text_on_a_quiet_second_line_and_others_the_title_only() => StaThread.Run(() =>
-    {
-        using var t = Build();
-        var k = BarTasks(t);
-        InboxLook(t);
-        TextBlock? Second(Guid id) => Inside(LineFor(t, id)).OfType<TextBlock>().SingleOrDefault(b => Equals(b.Tag, FloatingBar.InboxBarTextTag));
-
-        var question = Second(k.Asking)!;
-        Assert.Equal("Does the bar stay where you put it?", question.Text);
-        Assert.Equal(TextTrimming.CharacterEllipsis, question.TextTrimming);
-        Assert.Equal(TextWrapping.NoWrap, question.TextWrapping);
-        Assert.Equal(Deskbar.App.InboxLook.Ink2, question.Foreground);
-        Assert.Contains("1 GB lighter", Second(k.Done)!.Text);
-        Assert.Null(Second(k.Note));
-        Assert.Null(Second(k.Loose));
-        // Not the title's text: the question is no longer run into it.
-        Assert.DoesNotContain(Inside(LineFor(t, k.Asking)).OfType<TextBlock>().First(b => Equals(b.Tag, "task-text")).Inlines.OfType<Run>(),
-            r => r.Text.Contains("Does the bar stay"));
-        var tip = $"{LineFor(t, k.Asking).ToolTip}";
-        Assert.Contains("Docked bar jumps", tip);
-        Assert.Contains("Does the bar stay where you put it?", tip);
     });
 
     // The chip sits under the title with the workspace's full name, at the narrowest bar too; no chip without a workspace.
