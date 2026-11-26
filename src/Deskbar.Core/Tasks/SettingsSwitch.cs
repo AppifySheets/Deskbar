@@ -33,7 +33,7 @@ public abstract record SwitchStep
     /// <summary>Not now (<see cref="Why"/> is the line the picker shows); the switch waits, stored, for a pause.</summary>
     public sealed record Wait(string Why) : SwitchStep;
 
-    /// <summary>A session Deskbar does not restart (VS Code, a terminal, one it did not start): changed only in its window.</summary>
+    /// <summary>A session in a window of its own (VS Code, a terminal), which Deskbar cannot restart: changed only there.</summary>
     public sealed record ReadOnly(string Why) : SwitchStep;
 
     /// <summary>
@@ -127,10 +127,11 @@ public abstract record SwitchAction
 // for the next start. Every place that asks "the task's session" for a switch asks this.
 //
 // WHICH SESSIONS IT TOUCHES AT ALL (review M3): a copy is claimed only by the short id Claude printed for our own resume,
-// never by its folder; with no printed id there is no claim, and the switch is given up at once. A switch copies only a
-// background session Deskbar itself started (TaskSession.LaunchedWith set: a start, a copy or a relaunch of Deskbar's), so
-// the original it may later stop is always one of Deskbar's own (ClaudeSessions.StopForSwitch checks the same in one
-// place before any `claude stop`).
+// never by its folder; with no printed id there is no claim, and the switch is given up at once. A switch copies only the
+// task's own live session (SessionOf) when the list shows it as a BACKGROUND session, one with no window of the user's
+// own (review N2: not whether Deskbar holds a launch record for it, which every session from before the picker lacks), so
+// the original it may later stop is that same background session. ClaudeSessions.StopForSwitch checks this in one place,
+// MayStop, before any `claude stop`.
 //
 // A TASK CLOSED OR DELETED DURING A SWITCH (review L3): before the copy has answered, the copy is stopped and the original
 // stays the task's session; after, the copy stays and the original is stopped at its next pause as above. A replaced
@@ -151,7 +152,6 @@ public static class SettingsSwitch
     public const string Confirming = "Applies from Claude's next turn.";
     public const string OriginalStopsAtPause = "Switched. The earlier session stops at its next pause.";
     public const string NotDeskbars = "This session runs in its own window (VS Code or a terminal), which Deskbar cannot restart. Change it there: /model, /effort, Shift+Tab. Your pick applies to the next session Deskbar starts on this task.";
-    public const string NotStartedByDeskbar = "Deskbar did not start this session, so it does not restart it. Change it in its window: /model, /effort, Shift+Tab. Your pick applies to the next session Deskbar starts on this task.";
     public const string SessionMoved = "The session changed before the switch could be made (it ended, moved to another task, or was replaced). Your pick applies to the next session Deskbar starts on this task.";
     public const string CannotResume = "The session can no longer be resumed (its transcript or folder is gone). Your pick applies to the next session Deskbar starts on this task.";
     public const string NoCopy = "Claude Code did not list the copy it was asked to make within a minute, so the switch was given up. The session goes on as it was.";
@@ -186,9 +186,9 @@ public static class SettingsSwitch
             return resumable(session) ? new SwitchStep.AtNextWake(session, to) : new SwitchStep.NextStart(to);
 
         var agent = listing.Value;
-        if (!agent.Background || agent.ShortId.HasNoValue) return new SwitchStep.ReadOnly(NotDeskbars);
-        // Only a session Deskbar started is ever copied, so the original a switch later stops is always Deskbar's own.
-        if (!StartedByDeskbar(session)) return new SwitchStep.ReadOnly(NotStartedByDeskbar);
+        // Only a background session is ever copied, so the original a switch later stops is never one in a window of the
+        // user's own.
+        if (!IsBackground(agent)) return new SwitchStep.ReadOnly(NotDeskbars);
         if (recentlyWoken(session.Id)) return new SwitchStep.Wait(JustWoken);
         // Listed with no process (ClaudeAgent.HasProcess): nothing runs, so there is no step to lose.
         if (!agent.HasProcess) return new SwitchStep.CopyNow(session, agent.ShortId.Value, to);
@@ -206,10 +206,10 @@ public static class SettingsSwitch
         || (!agent.Busy && !agent.Status.Map(s => s == "waiting").GetValueOrDefault(false) && agent.State.Map(s => s == "done").GetValueOrDefault(false));
 
     /// <summary>
-    /// Whether Deskbar started the session (a start, a switch's copy or its relaunch: TaskSession.LaunchedWith is set only
-    /// then). Only such a session is copied, and only such an original is ever stopped by a switch.
+    /// Whether a listed session is a background one, with no window of the user's own (VS Code, a terminal): a background
+    /// row with a short id. The one test of what a switch may copy, and of an original it may stop (MayStop).
     /// </summary>
-    public static bool StartedByDeskbar(TaskSession session) => !session.LaunchedWith.IsEmpty;
+    public static bool IsBackground(ClaudeAgent agent) => agent.Background && agent.ShortId.HasValue;
 
     /// <summary>
     /// THE TASK'S SESSION, for every question a switch or the picker asks (see the header, review H2): live on this task,
@@ -321,15 +321,17 @@ public static class SettingsSwitch
             .GetValueOrDefault(false);
 
     /// <summary>
-    /// Whether a switch may run `claude stop` on <paramref name="shortId"/> (review M3, the one place this is decided): the
-    /// copy's short id as Claude printed it for our own resume, or the short id of the task's original session when Deskbar
-    /// itself started it. Nothing else, so a switch can never stop a session Deskbar did not start.
+    /// Whether a switch may run `claude stop` on <paramref name="shortId"/> (the one place this is decided): the copy's
+    /// short id as Claude printed it for our own resume, or the short id of the switch's original session, the task's own,
+    /// while <paramref name="listed"/> shows it as a background session (IsBackground, review N2). Nothing else, so a
+    /// switch never stops a session in a window of the user's own, nor any session it did not copy from or make.
     /// </summary>
-    public static bool MayStop(TaskItem task, PendingSwitch pending, string shortId) =>
+    public static bool MayStop(TaskItem task, PendingSwitch pending, string shortId, IReadOnlyCollection<ClaudeAgent> listed) =>
         shortId.Length >= 8
         && (pending.CopyShortId.Map(id => id.Equals(shortId, StringComparison.OrdinalIgnoreCase)).GetValueOrDefault(false)
-            || task.Sessions.Any(s => s.Id == pending.FromSession && StartedByDeskbar(s)
-                && s.Id.StartsWith(shortId, StringComparison.OrdinalIgnoreCase)));
+            || (task.Sessions.Any(s => s.Id == pending.FromSession && s.Id.StartsWith(shortId, StringComparison.OrdinalIgnoreCase))
+                && listed.Any(a => a.SessionId == pending.FromSession && IsBackground(a)
+                    && a.ShortId.Value.Equals(shortId, StringComparison.OrdinalIgnoreCase))));
 
     /// <summary>
     /// Whether a woken session came back on other settings than Deskbar started it with: its effort or permission mode,
