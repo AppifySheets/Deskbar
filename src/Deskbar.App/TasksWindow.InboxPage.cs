@@ -25,7 +25,11 @@ namespace Deskbar.App;
 // THE PAGE STAYS UNTIL IT IS LEFT (the PM's ruling on 2026-11-26): the arrow or Esc, opening another task, closing or
 // deleting its task (the close folds its thread, TasksBoard.Close), or another view. A terminal window coming to the front
 // moves the selection and never the page (InboxFollowsSelection). While a page is open, F2 and Esc act on the page's task
-// whatever is selected. A subtask in the page opens a page of its own; back returns to its parent's page.
+// whatever is selected. A subtask in the page opens a page of its own; back returns to its parent's page. That is the
+// only way pages stack (the tester's L2): a task shown from outside (the bar, Stats, a task link, Open parent, the
+// pipe) replaces the page and clears the stack, so back goes to the list, except when it is the page right under this
+// one on the stack ("Open parent" from a subtask's page), which goes back to it. The list's scroll place is the one
+// taken when the first page opened.
 public partial class TasksWindow
 {
     // The task whose page is open, none for the list; the pages it was opened from, for back; where the list was scrolled
@@ -149,7 +153,15 @@ public partial class TasksWindow
         var row = AllRows(latest).FirstOrDefault(r => r.Id == id);
         if (open && row is { Expanded: true })
         {
-            if (inboxPage is { } current && current != id) inboxPageStack.Push(current);
+            // A SHOW FROM OUTSIDE REPLACES THE PAGE (the tester's L2): back goes to the list, so the stack is cleared. Only
+            // a subtask opened from its parent's page stacks (OpenSubtaskPage). The one exception keeps "Open parent"
+            // natural: showing the page right under this one on the stack goes back to it, popping it. The list's scroll
+            // place stays the one taken when the first page opened.
+            if (inboxPage is { } current && current != id)
+            {
+                if (inboxPageStack.TryPeek(out var under) && under == id) inboxPageStack.Pop();
+                else inboxPageStack.Clear();
+            }
             else if (inboxPage is null) inboxListOffset = Scroller.VerticalOffset;
             inboxPage = id;
             if (inbox.Tabbed && inbox.TabOf(id) is { HasValue: true } tab) inboxTab = tab.Value;
