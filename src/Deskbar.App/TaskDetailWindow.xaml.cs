@@ -339,13 +339,32 @@ public partial class TaskDetailWindow : Window
         Meta.Children.Add(status);
         if (row.Closing && Actions is { } undoing)
             Meta.Children.Add(MetaButton(Flat("Undo", "Undo", () => undoing.Undo(row.Id), tip: "Undo the close")));
-        Meta.Children.Add(Chip(row.Place.Name, row.Place.Colour ?? ButtonFill, row.Place.Colour is null ? DimInk : Ink));
+        Meta.Children.Add(PlaceChip(row));
         Meta.Children.Add(Chip(row.Assignee.Name, ButtonFill, row.Assignee == Assignee.Claude ? ClaudeInk : DimInk));
         Meta.Children.Add(FlagChip(row, TaskFlag.Important, "Important", row.Important, ImportantInk));
         Meta.Children.Add(FlagChip(row, TaskFlag.Urgent, "Urgent", row.Urgent, UrgentInk));
         if (row.SnoozedUntil is { } until)
             Meta.Children.Add(Chip($"Snoozed {TaskSnooze.UntilText(until.ToLocalTime(), view.Now.ToLocalTime())}", ButtonFill, DimInk));
         Meta.Children.Add(Chip(TaskAge.Words(view.Now - row.Created), ButtonFill, HeaderInk));
+    }
+
+    /// <summary>The automation name of the workspace chip while it moves the task, for the tests.</summary>
+    internal const string PlaceChipName = "Move to workspace";
+
+    // The workspace chip moves the task (task 3757a3e1, as the panel's and the bar's line chips do): the same chip, now a
+    // flat button in the workspace's colour that opens the compact workspace menu under itself (OpenMoveMenu, the menu
+    // "⋯ > Move to…" opens). While a close can still be undone the chip stays a plain label, as the panel's does.
+    UIElement PlaceChip(TaskRowView row)
+    {
+        var fill = row.Place.Colour ?? ButtonFill;
+        var ink = row.Place.Colour is null ? DimInk : Ink;
+        if (row.Closing) return Chip(row.Place.Name, fill, ink);
+        var text = new TextBlock { Text = row.Place.Name, FontSize = 11.5, Foreground = ink };
+        Button? button = null;
+        button = Flat(text, PlaceChipName, () => OpenMoveMenu(button), new Thickness(8, 3, 8, 3),
+            tip: $"{row.Place.Name}: move it to another workspace");
+        button.Background = fill;
+        return MetaButton(button);
     }
 
     // A flag as a chip that toggles it: lit in its colour while on, dim while off.
@@ -739,9 +758,13 @@ public partial class TaskDetailWindow : Window
         var row = view.Row;
         var menu = WorkspaceChipMenu.Build(view.Places, row.Place.Workspace, workspace => Actions?.MoveTo(row.Id, workspace), anchor);
         Hold(menu);
+        MoveMenu = menu;
         menu.IsOpen = true;
         return menu;
     }
+
+    /// <summary>The workspace menu opened last (by the workspace chip or "⋯ > Move to…"), for the tests.</summary>
+    internal ContextMenu? MoveMenu { get; private set; }
 
     // A menu holds the redraws while it is open (they would rebuild what it points at), then lets the newest through.
     void Hold(ContextMenu menu)

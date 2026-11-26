@@ -926,7 +926,7 @@ public partial class TasksWindow : Window
         // here to the proper tasks window"). The bar's lines lost theirs that day, so the panel at its usual slim width
         // must show it, not only its tooltip. None in a Matrix line (no column there).
         Control(At(Part.Age), compactLines ? null : AgeOf(row));
-        Control(At(Part.Place), Chip(row.Place));
+        Control(At(Part.Place), PlaceChip(row));
         var comments = CommentsButton(row);
         Control(At(Part.Comments), comments);
         // The action column: Reopen on a closed task (full line only), else Open Claude on a Claude task (task 7f61af2e,
@@ -1849,6 +1849,36 @@ public partial class TasksWindow : Window
             TextTrimming = TextTrimming.CharacterEllipsis, VerticalAlignment = VerticalAlignment.Center, ToolTip = row.Sessions,
         });
         return panel;
+    }
+
+    /// <summary>The automation name of a line's workspace chip while it moves the task, for the tests.</summary>
+    internal const string PlaceChipName = "Move to workspace";
+
+    // A LINE'S WORKSPACE CHIP MOVES THE TASK (task 3757a3e1, Petre: "move it to another workspace should be offered by
+    // clicking the workspace chip"). The bar's line chip has done this since it was drawn (FloatingBar.WorkspaceChipButton);
+    // the panel's was a plain label, so the move lived only on the line's Move to button and in "⋯", away from the
+    // workspace it changes. Now the chip is a button with no face of its own around the chip (transparent, no padding, no
+    // edge), so it looks exactly as before and dims a little under the pointer like every flat button; a click opens the
+    // same compact workspace menu as the Move to button (OpenMoveMenu), anchored under the chip, the task's own workspace
+    // outlined. A line in its undo window keeps the plain chip, as its other buttons go (`live` in LineButtons). The click
+    // guard (ClickIgnored) and the handled click come from Flat, so the click never also lands on the line.
+    UIElement PlaceChip(TaskRowView row)
+    {
+        var chip = Chip(row.Place);
+        if (row.Closing) return chip;
+        // The chip's gap to the next column moves to the button, so the hover area is the chip and nothing more.
+        chip.Margin = new Thickness(0);
+        // WPF shows the tooltip of the innermost element under the pointer, and the chip covers the whole button, so the
+        // chip's own tip (the bare name) would hide the button's. The button's tip carries the full name too.
+        chip.ToolTip = null;
+        Button? button = null;
+        button = Flat(chip, PlaceChipName, () => OpenMoveMenu(row.Id, row.Place.Workspace, button), new Thickness(0), ClickIgnored);
+        button.Background = Brushes.Transparent;
+        button.BorderThickness = new Thickness(0);
+        button.HorizontalAlignment = HorizontalAlignment.Left;
+        button.Margin = new Thickness(0, 0, 6, 0);
+        button.ToolTip = $"{row.Place.Name}: move it to another workspace";
+        return button;
     }
 
     // A workspace chip in its row's colour, faded so the name reads on it, or a grey "none".
