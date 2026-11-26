@@ -509,7 +509,8 @@ public partial class TasksWindow : Window
         DrawFilters(view);
         // The manager's question above the List and the Matrix, never over the Stats view (TasksWindow.Manager.cs).
         DrawManagerLine(managerShown ? view.ManagerAsks : null);
-        Rows.Children.Clear();
+        // The List's rows are not cleared here: DrawList keeps the lines that did not change (TasksWindow.LineReuse.cs).
+        // The registries below are, and a kept line writes its entries back.
         menuButtons.Clear();
         lineButtons.Clear();
         dragLines.Clear();
@@ -530,6 +531,7 @@ public partial class TasksWindow : Window
         Filters.Visibility = statsShown ? Visibility.Collapsed : Visibility.Visible;
         if (view.Stats is { } stats)
         {
+            LeaveList();
             matrixShown = false;
             Scroller.Visibility = Visibility.Collapsed;
             MatrixGrid.Visibility = Visibility.Collapsed;
@@ -563,27 +565,12 @@ public partial class TasksWindow : Window
         SizeColumns(view, linedRows);
         fullGrids.Clear();
         fullGrids.Add(ColumnHeader);
-        if (view.Matrix) DrawMatrix(view);
-        else
-            view.Groups.Select((group, i) => (Group: group, Above: i > 0 ? view.Groups[i - 1].Kind : (TaskGroupKind?)null)).ToList().ForEach(x =>
-            {
-                var group = x.Group;
-                Rows.Children.Add(Header(group, x.Above));
-                group.Rows.ToList().ForEach(row =>
-                {
-                    closing[row.Id] = row.Closing;
-                    var line = Line(row);
-                    // The Claude working block's idle lines are dimmed (task 10b49554, see the header). Only Claude's: a
-                    // note nested under an idle parent is no idle Claude work.
-                    if (group.Kind == TaskGroupKind.ClaudeIdle && row.Claudes)
-                    {
-                        line.Opacity = IdleOpacity;
-                        idleLines.Add(row.Id);
-                    }
-                    Rows.Children.Add(line);
-                    if (row.Expanded) Rows.Children.Add(Thread(row));
-                });
-            });
+        if (view.Matrix)
+        {
+            LeaveList();
+            DrawMatrix(view);
+        }
+        else DrawList(view);
         Headers = view.Matrix ? view.Cells.Select(c => c.Header).ToArray() : view.Groups.Select(g => g.Header).ToArray();
         Keys = shownRows.Select(r => r.Id).ToArray();
         EmptyText.Text = view.EmptyText;
@@ -1423,6 +1410,14 @@ public partial class TasksWindow : Window
     {
         if (MustWait) return;
         var now = Now();
+        WriteAges(now);
+        RefreshManagerAge(now);
+    }
+
+    // Every line's age and slim tooltip for `now`. Also after each List draw, for the lines it kept (TasksWindow.LineReuse.cs):
+    // a kept line's age was written when it was built, which may be hours ago when the panel was closed in between.
+    void WriteAges(DateTimeOffset now)
+    {
         ages.Values.ToList().ForEach(age =>
         {
             age.Text.Text = TaskAge.Format(now - age.Created);
@@ -1430,7 +1425,6 @@ public partial class TasksWindow : Window
         });
         // A slim line's age is in its tooltip (Task 8).
         slimTips.Values.ToList().ForEach(tip => WriteSlimTip(tip, now));
-        RefreshManagerAge(now);
     }
 
     internal string AgeText(Guid id) => ages.TryGetValue(id, out var age) ? age.Text.Text : "";

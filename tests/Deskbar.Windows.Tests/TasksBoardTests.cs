@@ -2859,6 +2859,69 @@ public class TasksBoardTests
         Assert.Null(t.Window.Editor);
     });
 
+    // Task d0148d3b ("clicking and opening tasks in deskbar is slow"): a click opens one line's thread, and only that line
+    // is built again; every other line is kept as it was drawn, the same elements in the same order
+    // (TasksWindow.LineReuse.cs). Over Petre's own board this took a click from 200-370 ms to about 25.
+    [Fact]
+    public void A_click_on_a_line_rebuilds_that_line_alone() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var ids = Enumerable.Range(1, 5).Select(i => t.Tasks.AddNote($"note {i}", t.Gepha).Value.Id).ToArray();
+        t.Controller.Show();
+        var before = ids.ToDictionary(id => id, id => LineOf(t.Window, id));
+
+        Click(before[ids[2]]);
+
+        Assert.True(t.Window.ThreadShown(ids[2]));
+        Assert.Equal(1, t.Window.LinesBuilt);
+        Assert.Equal(4, t.Window.LinesKept);
+        Assert.NotSame(before[ids[2]], LineOf(t.Window, ids[2]));
+        ids.Where(id => id != ids[2]).ToList().ForEach(id => Assert.Same(before[id], LineOf(t.Window, id)));
+        // The lines stand in the order the view lists them, the new one where the old one was.
+        Assert.Equal(t.Window.Keys, Inside(t.Window).OfType<Button>().Where(b => b.Tag is Guid).Select(b => (Guid)b.Tag).ToArray());
+    });
+
+    // A kept line is the line it was: its click still picks and opens it, the selection paints on it, its age is still
+    // rewritten in place, and a change to another task builds that task's line alone.
+    [Fact]
+    public void A_kept_line_still_answers_and_a_change_rebuilds_only_its_task() => StaThread.Run(() =>
+    {
+        var now = Start.AddHours(1);
+        var selection = new TaskSelection();
+        using var t = Build(selection: selection, now: () => now);
+        var ids = Enumerable.Range(1, 5).Select(i => t.Tasks.AddNote($"note {i}", t.Gepha).Value.Id).ToArray();
+        t.Controller.Show();
+        Click(LineOf(t.Window, ids[2]));
+        var kept = LineOf(t.Window, ids[0]);
+
+        Click(kept);
+
+        Assert.True(t.Window.ThreadShown(ids[0]));
+        Assert.True(t.Window.ThreadShown(ids[2]));
+        Assert.True(t.Window.IsSelected(ids[0]));
+        Assert.False(t.Window.IsSelected(ids[2]));
+        var age = t.Window.AgeText(ids[4]);
+        // Three hours, not days: a new day builds every line again on purpose (SharedLineKey's date).
+        now = now.AddHours(3);
+        t.Window.RefreshAges();
+        Assert.NotEqual(age, t.Window.AgeText(ids[4]));
+
+        var untouched = LineOf(t.Window, ids[1]);
+        t.Tasks.Rename(ids[4], "note five");
+        Assert.Equal(1, t.Window.LinesBuilt);
+        Assert.Same(untouched, LineOf(t.Window, ids[1]));
+        Assert.Contains(Inside(LineOf(t.Window, ids[4])).OfType<TextBlock>(), b => b.Text == "note five");
+
+        // Closed and opened again an hour later (pre-PR review, finding 1): the kept lines say their age as of now, not
+        // as of their drawing, without waiting for the minute's RefreshAges.
+        var shown = t.Window.AgeText(ids[1]);
+        t.Controller.Hide();
+        now = now.AddHours(1);
+        t.Controller.Show();
+        Assert.Same(untouched, LineOf(t.Window, ids[1]));
+        Assert.NotEqual(shown, t.Window.AgeText(ids[1]));
+    });
+
     // A double-click anywhere on the line goes to the task, and does not edit it (editing is F2 or Edit in the menu).
     [Fact]
     public void A_double_click_on_a_line_goes_to_its_task_and_does_not_edit() => StaThread.Run(() =>
