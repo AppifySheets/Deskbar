@@ -26,7 +26,7 @@ namespace Deskbar.App;
 //     own arithmetic (see GroupRow);
 //   * half strength with a dashed outline at rest, full strength under the pointer, so a chip never passes for a
 //     running window ("A chip that could pass for a running window" is a non-goal in the spec);
-//   * a link's chip is drawn OPEN instead, full strength with a solid outline, while the browser window its last open
+//   * a link's chip is drawn OPEN instead, full strength on a light backing with a solid outline, while the browser window its last open
 //     went into still lives (BookmarkOpener.IsLinkOpen, option B). Deskbar sees windows, not tabs, so a link chip never
 //     hides the way a running program's does: Petre clicked two links, they opened as tabs in a browser already on
 //     that workspace, and the chips still looked "not started". Open is the answer to that, and a click on an open
@@ -88,6 +88,8 @@ public partial class FloatingBar
     // Frozen, as every static brush on this bar must be (CLAUDE.md, "Static WPF brushes must be frozen").
     static readonly Brush ChipOutline = Frozen(0x80, 0xFF, 0xFF, 0xFF);
     static readonly Brush ChipLinkDot = Frozen(0xC0, 0xFF, 0xFF, 0xFF);
+    // Light enough that a black favicon reads as lit on the dark row, not so light that a white one vanishes into it.
+    static readonly Brush ChipOpenBacking = Frozen(0x90, 0xFF, 0xFF, 0xFF);
     // Bright and solid, so it reads as a bar between the windows and the chips. At 0x55 it was lost beside the dashed
     // outline 2 DIP away: Petre, on the first live try, "vertical bar between them, please".
     static readonly Brush ChipDivider = Frozen(0xC8, 0xFF, 0xFF, 0xFF);
@@ -107,6 +109,11 @@ public partial class FloatingBar
         var resting = open ? 1.0 : ChipRestingOpacity;
         // The picture, the outline and (for a link) the dot. Faded as one, so the divider beside it is not.
         var face = new Grid { Width = size, Height = size, Opacity = resting, IsHitTestVisible = false };
+        // An open chip sits on a light rounded backing, a small lit tile. Full strength alone was not enough: the GitHub
+        // favicon is black, and on the dark row it looked the same opened as at rest (Petre: "github is started vs
+        // isn't, i think it needs something"; he picked the backing, option A). Drawn first, under the picture.
+        if (open)
+            face.Children.Add(new Border { Background = ChipOpenBacking, CornerRadius = new CornerRadius(3) });
         var image = new Image { Width = size, Height = size, Source = BookmarkIcons.For(bookmark, Rebuild) };
         RenderOptions.SetBitmapScalingMode(image, BitmapScalingMode.HighQuality);
         face.Children.Add(image);
