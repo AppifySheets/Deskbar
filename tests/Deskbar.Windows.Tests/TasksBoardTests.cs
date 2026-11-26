@@ -4518,6 +4518,45 @@ public class TasksBoardTests
         finally { Directory.Delete(root, true); }
     });
 
+    // Task b2ff3fb7: a subtask opened in place, inside its parent's thread, has no line of its own, and the line is what
+    // draws a task's description. Its thread shows the description's text and its pictures instead, so a screenshot
+    // pasted into a task is still there after the task is moved under another.
+    [Fact]
+    public void A_subtask_opened_in_place_shows_its_description_and_pictures() => StaThread.Run(() =>
+    {
+        var root = ScratchRoot();
+        var opened = new List<string>();
+        try
+        {
+            using var t = Build(stateDir: root, openImage: opened.Add);
+            var parent = t.Tasks.AddNote("Ship the release", t.Gepha).Value.Id;
+            var child = t.Tasks.AddNote("Write the notes", t.Gepha).Value.Id;
+            var picture = Pictured(root, child);
+            t.Tasks.Describe(child, TaskImages.Join("What the notes must say", [picture]));
+            // Moved under the other task afterwards, as in the report.
+            t.Tasks.SetParent(child, Maybe.From(parent));
+            t.Controller.Show();
+            // Subtasks folded into their parent, so the subtask has no line and opens in the parent's thread.
+            Click(ButtonNamed(t.Window, "Subtasks"));
+            t.Controller.ToggleThread(parent);
+            Assert.DoesNotContain(child, t.Window.Keys);
+            Assert.Null(PictureOf(t.Window));
+
+            Click(ButtonNamed(t.Window, "Subtask Write the notes"));
+
+            // Still no line of its own: what follows is drawn by the thread.
+            Assert.DoesNotContain(child, t.Window.Keys);
+            Assert.True(t.Window.ThreadShown(child));
+            Assert.Contains(RunTexts(t.Window), text => text == "What the notes must say");
+            Assert.DoesNotContain(RunTexts(t.Window), text => text.Contains("task-images"));
+            var thumbnail = PictureOf(t.Window);
+            Assert.NotNull(thumbnail);
+            Click(thumbnail!);
+            Assert.Equal([TaskImages.Resolve(picture, root).Value], opened);
+        }
+        finally { Directory.Delete(root, true); }
+    });
+
     // A picture whose file is gone shows its path as dim text: never an exception, never an empty gap.
     [Fact]
     public void A_missing_picture_shows_its_path() => StaThread.Run(() =>

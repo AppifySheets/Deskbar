@@ -1778,6 +1778,20 @@ public partial class TasksWindow : Window
         // thread, and the name is a button that opens the parent (TasksBoard.OpenParent).
         if (!inParent && row.ParentId is { } parentId && row.ParentTitle is { } parentTitle && Actions?.OpenParent is { } openParent)
             panel.Children.Add(ParentEntry(parentId, parentTitle, openParent));
+        // A SUBTASK OPENED IN PLACE SHOWS ITS DESCRIPTION (task b2ff3fb7; Petre, of a subtask whose two screenshots were
+        // nowhere to be seen once it sat under another task: "subtask may have lost its image after being moved into
+        // another task"). Nothing was lost: a task's description and its pictures are drawn by its LINE (TextOf), under
+        // the title, and a subtask open in its parent's thread has no line, only its entry and this thread. So the
+        // thread draws them itself, first, as the line would: the text capped with "Show all in window" under it when
+        // cut, then the pictures as thumbnails. A thread under a line of its own leaves them to that line.
+        if (inParent && row.Description.Length > 0)
+        {
+            var caps = new List<HeightCap>();
+            var parts = TaskImages.Split(row.Description);
+            if (parts.Text.Length > 0) panel.Children.Add(Capped(DescriptionBlock(row), caps));
+            if (TaskImageRow.Of(StateDir, parts.Images, OpenImage) is { } pictures) panel.Children.Add(pictures);
+            if (caps.Count > 0 && Actions?.OpenWindow is { } openWindow) panel.Children.Add(ShowAllLink(row.Id, caps, openWindow));
+        }
         // THE THREAD'S ACTIONS ARE ONE ROW OF BUTTONS AT ITS TOP (task 1c17b7d6; Petre, on a screenshot of an open thread
         // that stacked "Open in window", the session line's "Open" and "Add subtask" on three lines: "open a window, open
         // claude and add subtasks to be buttons at the top"). ThreadActions builds the row; the subtask box, when "Add

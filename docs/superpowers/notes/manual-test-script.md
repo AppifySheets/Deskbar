@@ -668,7 +668,7 @@ S10. Subtasks under their parent. Add two subtasks to a note in quadrant IV and 
     own place with "↳ <parent> › <title>". Ask something from a session on a subtask: it moves up to Waiting on you.
 S11. Open the parent in the tasks panel: with Subtasks ticked its thread lists neither subtask, since both have a line
     right under it (task 0eb943d8). Untick Subtasks: the thread lists both with their status and status line; click
-    one and it opens right there, its own thread (sessions, comments, its comment box) under its entry inside the
+    one and it opens right there, its own thread (its description and the description's pictures first, then sessions, comments, its comment box) under its entry inside the
     parent's thread, with no line of its own and no second "Subtask of" or **Add subtask**; click it again and it
     folds. Comment on it there: the comment shows in place. Each entry starts with a tick: tick one, it closes with
     Undo in the tick's place; Undo brings it back; after the undo window its entry says Closed and has no tick. A closed subtask in the thread opens the same way, without
