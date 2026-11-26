@@ -110,7 +110,7 @@ public partial class TasksWindow
         };
         var strip = new FitStrip(ButtonColumn) { Tag = LineButtonsTag, VerticalAlignment = VerticalAlignment.Center };
         // An empty element holds a slot the action does not apply to, so the next button stays at its own x.
-        slots.Select(button => (UIElement?)button ?? new FrameworkElement()).ToList().ForEach(slot => strip.Children.Add(slot));
+        slots.Select(button => (UIElement?)button ?? FitStrip.Gap()).ToList().ForEach(slot => strip.Children.Add(slot));
         strip.Children.Add(more);
         lineButtons[row.Id] = strip;
         return strip;
@@ -231,8 +231,22 @@ internal sealed class FitStrip : Panel
 
     // The leading children that fit beside the last one in this width. A DIP of slack, so layout rounding at a scaling
     // other than 100% (a device pixel off a column capped at exactly the slots' width) does not drop the last button.
-    int SlotsIn(double width) =>
-        double.IsInfinity(width) ? Children.Count - 1 : Math.Clamp((int)Math.Floor((width + 1) / slot) - 1, 0, Math.Max(0, Children.Count - 1));
+    // A gap at the END of the ones that fit is not shown (task 3dd07539): the last child moves up to right after the last
+    // real one. Gaps between real ones stay, so a button keeps its x on every line; only a trailing gap would push the
+    // last child one slot further than on the line above for nothing (the review of task 3dd07539: Reevaluate, the
+    // eighth slot, is a gap on nearly every line, and every full line had a blank slot before "⋯").
+    int SlotsIn(double width)
+    {
+        var fit = double.IsInfinity(width) ? Children.Count - 1 : Math.Clamp((int)Math.Floor((width + 1) / slot) - 1, 0, Math.Max(0, Children.Count - 1));
+        return Enumerable.Range(0, fit).LastOrDefault(i => !IsGap(Children[i]), -1) + 1;
+    }
+
+    /// <summary>An empty slot: holds the place of an action that does not apply to this line, so the next keeps its x.</summary>
+    public static FrameworkElement Gap() => new() { Tag = GapTag };
+
+    const string GapTag = "fit-strip-gap";
+
+    static bool IsGap(UIElement child) => child is FrameworkElement { Tag: GapTag };
 
     protected override Size MeasureOverride(Size available)
     {
