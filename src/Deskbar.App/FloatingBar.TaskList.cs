@@ -180,7 +180,7 @@ public partial class FloatingBar
             if (button.Content is not Border frame) return;
             var selected = selection.IsSelected(((TaskLine)button.Tag).Id);
             frame.BorderBrush = selected ? TaskPickedEdge : Brushes.Transparent;
-            frame.Background = selected ? TaskSelectedFill : Brushes.Transparent;
+            frame.Background = selected ? SelectedLineFill : Brushes.Transparent; // the look on show (FloatingBar.InboxLine.cs)
         });
         BringSelectedIntoSight();
     }
@@ -2381,7 +2381,7 @@ public partial class FloatingBar
         (taskLinesPanel?.Children.OfType<Button>() ?? [])
             .Where(b => b.Tag is TaskLine line && line.Id == id && selection.IsSelected(id))
             .Select(b => b.Content).OfType<Border>().ToList()
-            .ForEach(frame => frame.Background = TaskGlow.Fading(TaskSelectedFill));
+            .ForEach(frame => frame.Background = TaskGlow.Fading(SelectedLineFill));
 
     // For the tests: whether a line on show is glowing.
     internal bool TaskLineGlowing(Guid id) =>
