@@ -19,17 +19,28 @@ namespace Deskbar.Core.Tasks;
 // disk by Deskbar and never traced. A Deskbar that restarts has forgotten its questions, so it sweeps every slot left
 // over (Sweep): their scripts find their slot gone and print nothing, which leaves Claude Code's own terminal dialog.
 //
-// THE CODE. Register hands the script a fresh 128-bit code (32 hex digits, from the system's secure random generator),
-// which the script keeps in its own memory. An answer is "<code> <word>" in the slot's answer.txt, and the script acts on
-// it only when the code is its own (PermissionAnswer.LineFor). Any process of the same user can write into the slot
-// folder, another Claude session included, so the folder's ACL alone would let one session approve another's request; the
-// code is what stops that. A code answers once: Answer takes the request out of the desk, so a second click, or a click
-// after the request expired or ended, finds nothing and writes nothing.
+// THE CODE. Register hands the script a fresh 128-bit code (32 hex digits, from the system's secure random generator)
+// as the pipe's reply, and the script takes it straight from the call's output into a variable: it is never in a file
+// before the click (the plan first had the script park the reply in the slot's reply.txt for a moment; the review's M1
+// showed a file watcher could read it there, so a slot must now be EMPTY to register). An answer is "<code> <word>" in
+// the slot's answer.txt, written once at the click, and the script acts on it only when the code is its own
+// (PermissionAnswer.LineFor). Any process of the same user can write into the slot folder, another Claude session
+// included, so the folder's ACL alone would let one session approve another's request; the code is what stops that. Its
+// boundary, said plainly: the code lives in the hook script's environment, so a process of the same user that can read
+// another process's memory or environment can learn it; Deskbar does not defend against that (ClaudeSkill.PermissionScript
+// says where the code is and is not). A code answers once: Answer takes the request out of the desk, so a second click,
+// or a click after the request expired or ended, finds nothing and writes nothing.
+//
+// ONE CARD PER SESSION (the review's L5). A session's newer question means its older one is settled: answered in the
+// terminal, or given up. So a registration first takes every older question of the same session off and deletes its
+// slot (Register; RemoteControl.Permission does it for a question it does not show, too), and a click can never reach a
+// hook that no longer waits on it.
 //
 // EVERY WAY A QUESTION ENDS WITHOUT A CLICK deletes its slot, and a script whose slot is gone exits printing nothing:
 //   * Expire: the question has been held for HeldFor (the script's own wait less a margin, so a card never offers a
 //     click the script would no longer read);
 //   * Forget: the session ended, or the next event shows the question was settled elsewhere (in the terminal);
+//   * Register: a newer question of the same session arrived, so the older one was settled (one card per session);
 //   * Keep: the session list says the session no longer waits on a permission prompt;
 //   * ReleaseAll: Deskbar exits, or the setting is turned off;
 //   * Sweep: Deskbar starts, with nothing in memory.
@@ -65,9 +76,6 @@ public sealed class PermissionDesk(string folder, Func<DateTimeOffset> now)
     /// <summary>The answer file's name inside a slot.</summary>
     public const string AnswerFile = "answer.txt";
 
-    /// <summary>The file the script sends the registration's reply to; the only file a slot may hold when it registers.</summary>
-    public const string ReplyFile = "reply.txt";
-
     /// <summary>A slot's name as the script makes it: req-%RANDOM%-%RANDOM%, each number 0 to 32767.</summary>
     public static readonly Regex SlotName = new(@"^req-\d{1,5}-\d{1,5}$", RegexOptions.Compiled);
 
@@ -95,17 +103,18 @@ public sealed class PermissionDesk(string folder, Func<DateTimeOffset> now)
     /// <summary>
     /// A question registered under the script's slot, and the code the script must see in its answer. Refused for a
     /// slot name the script would not make, a slot that is not a folder in the desk's folder, one already registered, or
-    /// one holding anything but the reply file (an answer planted before the question was asked).
+    /// one holding anything at all (a file planted before the question was asked). Every older question of the same
+    /// session is taken off first and its slot deleted (one card per session, the header's L5).
     /// </summary>
     public Result<string> Register(string slot, PermissionRequest request) =>
         Result.SuccessIf(SlotName.IsMatch(slot ?? ""), $"\"{slot}\" is not a permission slot")
             .Ensure(() => held.All(h => h.Pending.Slot != slot), $"The slot {slot} is already registered")
-            .Bind(() => Result.Try(() => Directory.Exists(SlotPath(slot!))
-                    && Directory.EnumerateFileSystemEntries(SlotPath(slot!)).All(e => Path.GetFileName(e) == ReplyFile),
+            .Bind(() => Result.Try(() => Directory.Exists(SlotPath(slot!)) && !Directory.EnumerateFileSystemEntries(SlotPath(slot!)).Any(),
                 e => $"The slot could not be read: {e.Message}"))
-            .Ensure(usable => usable, $"The slot {slot} is not a fresh folder of the permission box")
+            .Ensure(usable => usable, $"The slot {slot} is not a fresh, empty folder of the permission box")
             .Map(_ =>
             {
+                Drop(h => h.Request.SessionId == request.SessionId);
                 var code = RandomNumberGenerator.GetHexString(32, lowercase: true);
                 var at = now();
                 held.Add((new Pending(slot!, request, at, at + HeldFor), code));

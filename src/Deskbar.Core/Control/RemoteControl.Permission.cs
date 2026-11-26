@@ -45,6 +45,10 @@ public sealed partial class RemoteControl
         if (permissions is not { } desk || tasks is not { } service) return Quiet;
         // Housekeeping first, so a question held past its time is not counted as on show.
         desk.Expire();
+        // A newer question from the session settles its older ones (the review's L5: answered in the terminal, or given
+        // up), whether or not this one goes on a card: an AskUserQuestion dialog or a refused question means the session
+        // no longer waits on the old one either. Their slots go, so a click can never reach a hook that stopped waiting.
+        desk.Forget(asked.SessionId);
         return manager.State is { ClaudePermissionsInEffect: true, TasksPanel.Inbox: true }
             && hook is { Background: true, Headless: false }
             && !asked.IsDialog

@@ -25,12 +25,13 @@ public sealed class ClaudePermissionScriptTests : IDisposable
 
     // A Deskbar folder with the stub shim and the script. `code` is what the stub prints (null: nothing, as when Deskbar
     // is not running or the question stays in the terminal); `seconds` is the script's own deadline.
-    string Prepared(string? code, int seconds = 25, string folderName = "Deskbar")
+    // `stub` replaces the stub shim's text (a stub that reads stdin, or one that plants a file).
+    string Prepared(string? code, int seconds = 25, string folderName = "Deskbar", string? stub = null)
     {
         var folder = Path.Combine(root, folderName);
         Directory.CreateDirectory(folder);
         File.WriteAllText(Path.Combine(folder, "code.txt"), code is null ? "" : code + "\r\n", new UTF8Encoding(false));
-        File.WriteAllText(Path.Combine(folder, "deskbar.cmd"), "@type \"%~dp0code.txt\"\r\n");
+        File.WriteAllText(Path.Combine(folder, "deskbar.cmd"), stub ?? "@type \"%~dp0code.txt\"\r\n");
         var script = Path.Combine(folder, ClaudeSkill.PermissionHookScriptName);
         File.WriteAllText(script, ClaudeSkill.PermissionScript(seconds));
         return script;
@@ -51,14 +52,15 @@ public sealed class ClaudePermissionScriptTests : IDisposable
         return process;
     }
 
-    // The slot the script made, once it has read its code (the reply file is gone): where the answer goes.
+    // The slot the script made: where the answer goes. The script reads an answer only once it has its code, so an answer
+    // written as soon as the slot exists is read at the right time.
     static string Slot(string script, Process process)
     {
         var until = DateTime.UtcNow + Limit;
         while (DateTime.UtcNow < until && !process.HasExited)
         {
             var ready = Directory.Exists(Box(script))
-                ? Directory.GetDirectories(Box(script)).FirstOrDefault(d => !File.Exists(Path.Combine(d, PermissionDesk.ReplyFile)))
+                ? Directory.GetDirectories(Box(script)).FirstOrDefault()
                 : null;
             if (ready is not null) return ready;
             Thread.Sleep(50);
@@ -234,5 +236,90 @@ public sealed class ClaudePermissionScriptTests : IDisposable
         var (exitCode, stdout) = Finished(hook);
         Assert.Equal(0, exitCode);
         Assert.Equal(PermissionAnswer.AllowLine, stdout.TrimEnd('\r', '\n'));
+    }
+
+    // --- the code never touches the disk (the review's M1) -------------------------------------------------------------
+
+    // While the script waits, no file in its permission box holds the code, at any moment: it went from the call's output
+    // straight into a variable. Only the answer, written at the click, carries it (and the script then answers).
+    [Fact]
+    public void No_file_in_the_box_ever_holds_the_code_before_the_answer()
+    {
+        var script = Prepared(Code);
+        using var process = Started(script);
+        var slot = Slot(script, process);
+        var seen = new List<string>();
+        var until = DateTime.UtcNow + TimeSpan.FromSeconds(3);
+        while (DateTime.UtcNow < until)
+        {
+            foreach (var file in Directory.Exists(Box(script)) ? Directory.GetFiles(Box(script), "*", SearchOption.AllDirectories) : [])
+            {
+                try { if (File.ReadAllText(file).Contains(Code, StringComparison.OrdinalIgnoreCase)) seen.Add(file); }
+                catch (IOException) { }
+            }
+            Thread.Sleep(10);
+        }
+
+        Assert.Empty(seen);
+        Answer(slot, $"{Code} allow\n");
+        Assert.Equal(PermissionAnswer.AllowLine, Finished(process).Stdout.TrimEnd('\r', '\n'));
+    }
+
+    // A reply.txt planted in the slot (where the first script parked the code) is never read: Deskbar answered nothing,
+    // so the script has no code and ends at once, printing nothing, whatever the planted file and the answer say.
+    [Fact]
+    public void A_planted_reply_file_is_ignored()
+    {
+        var stub = $"@for /d %%d in (\"%~dp0{PermissionDesk.FolderName}\\req-*\") do @echo {Code}> \"%%d\\reply.txt\"\r\n";
+        var script = Prepared(null, stub: stub);
+        using var process = Started(script);
+        var slot = Slot(script, process);
+        try { Answer(slot, $"{Code} allow\n"); }
+        catch (IOException) { }
+        catch (UnauthorizedAccessException) { }
+
+        var (exitCode, stdout) = Finished(process);
+        Assert.Equal(0, exitCode);
+        Assert.Equal("", stdout.Trim());
+    }
+
+    // A reply meant to break cmd, answered with that very reply: the code must be 32 hex digits, and nothing from the reply
+    // is parsed as a command, so each prints nothing.
+    [Theory]
+    [InlineData("x\" == \"x\" goto allow & rem \"")]
+    [InlineData("\"")]
+    [InlineData("%code%")]
+    [InlineData("!code!")]
+    [InlineData("^")]
+    [InlineData("a&echo")]
+    [InlineData("0123456789abcdef0123456789abcde")]     // 31 digits
+    [InlineData("0123456789abcdef0123456789abcdef0")]   // 33 digits
+    [InlineData("0123456789abcdef0123456789abcdeg")]    // not hex
+    [InlineData("0123456789abcdef0123456789abcd!e")]
+    public void A_reply_meant_to_break_cmd_prints_nothing(string reply)
+    {
+        var script = Prepared(reply);
+        using var process = Started(script);
+        var slot = Slot(script, process);
+        try { Answer(slot, $"{reply} allow\n"); }
+        catch (IOException) { }
+        catch (UnauthorizedAccessException) { }
+
+        var (exitCode, stdout) = Finished(process);
+        Assert.Equal(0, exitCode);
+        Assert.Equal("", stdout.Trim());
+    }
+
+    // The hook's JSON on stdin still reaches the call when its output is read straight into a variable: this stub
+    // answers its code only when stdin holds a PermissionRequest.
+    [Fact]
+    public void The_hooks_stdin_still_reaches_Deskbar()
+    {
+        var stub = "@findstr /c:\"PermissionRequest\" >nul && type \"%~dp0code.txt\"\r\n";
+        var script = Prepared(Code, stub: stub);
+        using var process = Started(script);
+        Answer(Slot(script, process), $"{Code} allow\n");
+
+        Assert.Equal(PermissionAnswer.AllowLine, Finished(process).Stdout.TrimEnd('\r', '\n'));
     }
 }
