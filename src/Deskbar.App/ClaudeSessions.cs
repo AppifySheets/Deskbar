@@ -790,8 +790,9 @@ public sealed class ClaudeSessions : IDisposable
             });
     }
 
-    // The status line NoteLimits writes, before the time.
-    const string LimitLine = "Stopped on the usage limit until ";
+    // The status line NoteLimits writes, before the time. The tasks panel's Inbox reads it too (TasksBoard.Inbox.cs): it is
+    // how a line knows its session is stopped on the usage limit.
+    internal const string LimitLine = "Stopped on the usage limit until ";
 
     // Clears the line NoteLimits wrote once it no longer holds: the open task's latest session is not stopped on a limit
     // any more, or the reset has passed. Only a status line still exactly Deskbar's is touched, never the session's own.
