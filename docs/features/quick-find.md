@@ -11,6 +11,8 @@ Quick find opens a search box over everything open on every workspace, and Enter
 
 Press `Win+Alt+Space`, or click the **Search** button on the bar. The box searches window titles, every browser tab and every VS Code editor tab. Type a few letters of anything in the title, in any order: `inv 10` finds "Invoice 2026-10".
 
+Keep typing while it searches: every letter shows at once, and the count beside the box reads `searching...` until the results catch up with what you typed. Enter always takes the top row for what is in the box.
+
 Results sit under the workspace they are in, in its colour, with the workspaces you used most recently first. Enter takes you there and `Esc` closes the box.
 
 A browser window is listed by its tabs, so you find the page, not the window that happens to show it. A tab is found by its own title or by its workspace, so `code` does not list every tab of every VS Code window.
