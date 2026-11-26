@@ -77,9 +77,17 @@ sealed class HeightCap : Decorator
     // and wrapping: a second pass finds the same edge and stops, and a new width finds its own.
     void Snap()
     {
+        if (EdgeOf is null || Child is null || ActualWidth <= 0) return;
         // A cap past the child's foot cuts nothing, so there is no line to snap to (and an infinite one, "show it whole",
-        // is no point a RichTextBox can be asked about).
-        if (EdgeOf is null || Child is null || ActualWidth <= 0 || Cap >= FullHeight) return;
+        // is no point a RichTextBox can be asked about). An edge found while it still cut (a narrower width, a longer
+        // text) is dropped, or it would go on cutting a text that now fits (review of task 2088e1ed).
+        if (Cap >= FullHeight)
+        {
+            if (double.IsNaN(shown)) return;
+            shown = double.NaN;
+            InvalidateMeasure();
+            return;
+        }
         // LayoutUpdated is raised on every subscriber after any layout pass, so a cap a redraw has dropped hears it too
         // until it is collected, and its RichTextBox, out of the window's tree, throws when asked for a position ("The
         // specified Visual is not a descendant of this Visual", measured in a test that redraws after a drag, task

@@ -99,12 +99,15 @@ public partial class TasksWindow
     }
 
     /// <summary>
-    /// The grip under one text: <paramref name="shown"/> is the height showing now, <paramref name="least"/> and
-    /// <paramref name="whole"/> the smallest and largest it can be dragged to, <paramref name="preview"/> shows a height
-    /// while the drag goes on (and puts the first one back if the drag is lost), and <paramref name="keep"/> keeps the one
-    /// a drag ends on. A press released where it started keeps nothing.
+    /// The grip under one text: <paramref name="shown"/> is the height showing now, <paramref name="setting"/> the limit
+    /// that makes it so (a comment's MaxHeight, a cap's Cap: the shown height can sit below it, on a line edge or at a
+    /// short text's foot), <paramref name="least"/> and <paramref name="whole"/> the smallest and largest it can be
+    /// dragged to, <paramref name="preview"/> sets a limit while the drag goes on (and puts the setting at the press back
+    /// if the drag is lost), and <paramref name="keep"/> keeps the height a drag ends on. A press released where it
+    /// started keeps nothing.
     /// </summary>
-    Border BodyGrip(string name, Func<double> shown, Func<double> least, Func<double> whole, Action<double> preview, Action<double> keep)
+    Border BodyGrip(string name, Func<double> shown, Func<double> setting, Func<double> least, Func<double> whole,
+        Action<double> preview, Action<double> keep)
     {
         // The bar: short, rounded, centred in the band. Never hit, so a press anywhere on the band is the band's.
         var bar = new Border
@@ -130,8 +133,8 @@ public partial class TasksWindow
             Child = bar,
         };
         AutomationProperties.SetName(grip, name);
-        // The press: the pointer's height in the window and the text's height then. Null while no drag is under way.
-        (double Y, double Height)? from = null;
+        // The press: the pointer's height in the window, the text's height and its limit then. Null while no drag is under way.
+        (double Y, double Height, double Setting)? from = null;
         var last = 0.0;
         grip.MouseEnter += (_, _) => bar.Opacity = 1;
         grip.MouseLeave += (_, _) =>
@@ -142,7 +145,7 @@ public partial class TasksWindow
         {
             // Handled: the line's button under it must not take this press as its click (see the top of this file).
             e.Handled = true;
-            from = (e.GetPosition(this).Y, shown());
+            from = (e.GetPosition(this).Y, shown(), setting());
             last = from.Value.Height;
             bodyGripDragging = true;
             grip.CaptureMouse();
@@ -169,12 +172,14 @@ public partial class TasksWindow
         grip.LostMouseCapture += (_, _) =>
         {
             if (from is not { } start) return;
-            // Another window took the mouse mid-drag: the text goes back to the height it had at the press.
+            // Another window took the mouse mid-drag: the text goes back to the limit it had at the press. What waited is
+            // drawn from the queue, never inside the capture change, whose grip a redraw would replace (as the line drag
+            // does, TasksWindow.Drag.cs).
             from = null;
             bodyGripDragging = false;
             bar.Opacity = BodyGripRest;
-            preview(start.Height);
-            Flush();
+            preview(start.Setting);
+            Dispatcher.BeginInvoke(new Action(Flush));
         };
         return grip;
     }
