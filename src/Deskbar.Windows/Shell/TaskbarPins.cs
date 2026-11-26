@@ -202,13 +202,19 @@ public sealed class ShellTaskbarPins : ITaskbarPins
     public Result Launch(TaskbarPin pin, string? arguments = null) =>
         (pin.IsInstalledApp, arguments, pin.TargetPath) switch
         {
-            (true, _, _) => Result.Try(() =>
-            {
-                using var started = Process.Start(new ProcessStartInfo("explorer.exe", $"shell:AppsFolder\\{pin.ParsingName}") { UseShellExecute = true });
-            }, e => $"Could not start {pin.Name}: {e.Message}"),
+            (true, _, _) => LaunchApp(pin.ParsingName, pin.Name),
             (false, { } args, { } target) => StartDetached(pin, target, [args], Path.GetDirectoryName(target)),
             _ => StartDetached(pin, pin.ParsingName, [], null),
         };
+
+    // An installed app by its AppUserModelID, through shell:AppsFolder the way Start does it. Pulled out of
+    // Launch so a workspace bookmark of kind App starts the same way a pinned installed app does. `name` is only
+    // for the failure message.
+    public static Result LaunchApp(string appId, string name) =>
+        Result.Try(() =>
+        {
+            using var started = Process.Start(new ProcessStartInfo("explorer.exe", $"shell:AppsFolder\\{appId}") { UseShellExecute = true });
+        }, e => $"Could not start {name}: {e.Message}");
 
     static Result StartDetached(TaskbarPin pin, string program, IReadOnlyList<string> arguments, string? workingDirectory) =>
         DetachedLauncher.Start(program, arguments, workingDirectory).MapError(e => $"Could not start {pin.Name}: {e}");
