@@ -119,11 +119,13 @@ internal static class InboxMarks
 
     /// <summary>
     /// An icon at <paramref name="size"/> DIP in <paramref name="ink"/>; `cut` is the colour the cut-out parts are drawn in,
-    /// the colour of whatever the icon sits on.
+    /// the colour of whatever the icon sits on. <paramref name="turning"/>: the icon turns, one slow turn in TurnTime, while
+    /// it is on screen (the working mark on a line and on a page; the PM's fix 4).
     /// </summary>
-    internal static FrameworkElement Icon(string name, double size, Brush ink, Brush? cut = null)
+    internal static FrameworkElement Icon(string name, double size, Brush ink, Brush? cut = null, bool turning = false)
     {
         var canvas = new Canvas { Width = 16, Height = 16, IsHitTestVisible = false };
+        if (turning) Turn(canvas);
         Icons[name].ToList().ForEach(part => canvas.Children.Add(new Path
         {
             Data = part.Shape,
@@ -137,6 +139,32 @@ internal static class InboxMarks
         }));
         return new Viewbox { Width = size, Height = size, Child = canvas, IsHitTestVisible = false };
     }
+
+    /// <summary>One turn of a turning mark.</summary>
+    internal static readonly TimeSpan TurnTime = TimeSpan.FromSeconds(1.2);
+
+    // A TURNING MARK COSTS LITTLE (the PM's fix 4): one turn in TurnTime at about 20 frames a second instead of WPF's 60,
+    // and only while the mark is loaded on screen. It starts when the mark is loaded and stops when it is unloaded (a
+    // redraw, another tab, the panel closing), so a hidden panel animates nothing.
+    static void Turn(Canvas canvas)
+    {
+        var rotate = new RotateTransform(0, 8, 8);
+        canvas.RenderTransform = rotate;
+        canvas.Tag = TurningTag;
+        canvas.Loaded += (_, _) =>
+        {
+            var turn = new System.Windows.Media.Animation.DoubleAnimation(0, 360, TurnTime)
+            {
+                RepeatBehavior = System.Windows.Media.Animation.RepeatBehavior.Forever,
+            };
+            System.Windows.Media.Animation.Timeline.SetDesiredFrameRate(turn, 20);
+            rotate.BeginAnimation(RotateTransform.AngleProperty, turn);
+        };
+        canvas.Unloaded += (_, _) => rotate.BeginAnimation(RotateTransform.AngleProperty, null);
+    }
+
+    /// <summary>The Tag of a turning mark's drawing, for the tests.</summary>
+    internal const string TurningTag = "inbox-turning";
 
     /// <summary>For the tests: the outline of a mark's icon as path data, to tell two marks' shapes apart.</summary>
     internal static string ShapeOf(InboxMark mark) =>

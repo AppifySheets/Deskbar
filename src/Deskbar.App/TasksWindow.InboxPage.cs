@@ -48,6 +48,8 @@ public partial class TasksWindow
     internal UIElement? InboxPageContent => InboxPage.Visibility == Visibility.Visible ? InboxPage.Child : null;
 
     /// <summary>For the tests: how far the page is scrolled, and how far it could be.</summary>
+    internal ScrollViewer? InboxPageScroller => pageScroller;
+
     internal (double Offset, double Extent) InboxPageScroll => pageScroller is { } s ? (s.VerticalOffset, s.ScrollableHeight) : (0, 0);
 
     // A line's click: the task picked and its thread open on the board (TasksBoard.OpenPage), and its page open here.
@@ -188,7 +190,6 @@ public partial class TasksWindow
         EmptyText.Visibility = Visibility.Collapsed;
         InboxHeader.Visibility = Visibility.Collapsed;
         InboxFooter.Visibility = Visibility.Collapsed;
-        ManagerLineHost.Visibility = Visibility.Collapsed;
         InboxPage.Visibility = Visibility.Visible;
         // The thread's comment box is drawn by Thread below, and authors[id] with it, which is what Esc's fold reads.
         var dock = new DockPanel { LastChildFill = true };
@@ -201,12 +202,17 @@ public partial class TasksWindow
             DockPanel.SetDock(bottom, Dock.Bottom);
             dock.Children.Add(bottom);
         }
+        // A CHAT READS FROM THE BOTTOM UP (the PM's fix 1 after checkpoint 1). A body shorter than the page sits at its
+        // bottom, so the comment box is at the bottom edge and the empty room is on top; a longer one scrolls. The
+        // scroller arranges its content at least as tall as the view, so the body's own bottom alignment does it.
+        var body = PageBody(row);
+        body.VerticalAlignment = VerticalAlignment.Bottom;
         pageScroller = new ScrollViewer
         {
             VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
             HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
             Focusable = false,
-            Content = PageBody(row),
+            Content = body,
         };
         dock.Children.Add(pageScroller);
         InboxPage.Child = dock;
@@ -254,7 +260,7 @@ public partial class TasksWindow
         {
             Tag = InboxMarkTag, Width = 28, Height = 28, CornerRadius = new CornerRadius(9), Background = InboxLook.Raised,
             Margin = new Thickness(4, 1, 10, 0), VerticalAlignment = VerticalAlignment.Top, ToolTip = InboxMarks.WordsOf(mark),
-            Child = Centred(InboxMarks.Icon(InboxMarks.IconOf(mark), 16, InboxMarks.InkOf(mark), InboxLook.Raised)),
+            Child = Centred(InboxMarks.Icon(InboxMarks.IconOf(mark), 16, InboxMarks.InkOf(mark), InboxLook.Raised, turning: mark == InboxMark.Working)),
         };
         DockPanel.SetDock(tile, Dock.Left);
         first.Children.Add(tile);
@@ -317,7 +323,7 @@ public partial class TasksWindow
         Actions?.OpenLink?.Invoke(task, new Uri(pr.Url));
     }
 
-    UIElement PageBody(TaskRowView row)
+    FrameworkElement PageBody(TaskRowView row)
     {
         var body = new StackPanel { Margin = new Thickness(10, 8, 10, 10) };
         if (row.Problem is { Length: > 0 } problem) body.Children.Add(ProblemOf(problem));
@@ -383,7 +389,9 @@ public partial class TasksWindow
                     body.Children.Add(Line(sub, inThreadOf: row.Id));
                 });
         // Today's thread, every part of it, without the frame it has under a List line: the page is its frame.
-        var thread = Thread(row);
+        // In the Inbox's colours (ChatThread.Using): blue-black bubbles, not the List's warm ones (the PM's fix 3).
+        UIElement thread;
+        using (ChatThread.Using(ChatThread.InboxLook)) thread = Thread(row);
         if (thread is Border frame)
         {
             frame.Background = Brushes.Transparent;

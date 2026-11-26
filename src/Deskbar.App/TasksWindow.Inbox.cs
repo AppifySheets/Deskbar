@@ -48,6 +48,9 @@ public partial class TasksWindow
     /// <summary>For the tests: whether the toolbar's title line (List / Matrix / Stats, "+ Add", ×) shows.</summary>
     internal bool ToolbarTitleShown => TitleLine.Visibility == Visibility.Visible;
 
+    /// <summary>For the tests: whether the search row shows under the Inbox's header.</summary>
+    internal bool InboxSearchShown => SearchRow.Visibility == Visibility.Visible;
+
     // The tab on show, the search row asked for by its button, and the Filter sheet unfolded: the window's own state, part of
     // the redraw signature (InboxSignature), kept while the panel is open.
     InboxTab inboxTab = InboxTab.NeedsYou;
@@ -338,6 +341,8 @@ public partial class TasksWindow
     {
         if (latest?.Inbox is null || inboxSearchOpen) return;
         inboxSearchOpen = true;
+        // Drawn again, so the signature knows the row is asked for; painted at once too, in case a redraw is held.
+        RedrawInbox();
         if (latest is not null) PaintInboxChrome(latest);
         UpdateLayout();
     }
