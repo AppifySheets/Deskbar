@@ -319,4 +319,44 @@ public class InboxTabsTests
         Assert.Equal(InboxTab.Notes, view.TabOf(k.Plan).Value);
         Assert.True(view.TabOf(Guid.NewGuid()).HasNoValue);
     }
-}
+
+    // --- a permission question (Allow / Deny from a task's page) ---------------------------------------------------------
+
+    // The task whose session waits on a permission question leads Needs you, in a section of its own, with the shield,
+    // whatever its group: working, idle or even waiting on a question of its own.
+    [Fact]
+    public void A_permission_question_leads_needs_you_with_its_own_mark()
+    {
+        var kinds = EveryKind();
+        bool Asks(TaskItem task) => task.Id == kinds.Working || task.Id == kinds.Asking;
+        var (listed, nested) = TaskViews.UnderParents(TaskViews.Grouped(board, TaskFilter.Open, TaskWorkspaceFilter.All, busy: Busy));
+
+        var view = InboxTabs.Split(listed, nested, board, Limited, Busy, asksPermission: Asks);
+
+        var needsYou = view.In(InboxTab.NeedsYou);
+        Assert.Equal(InboxSection.Permissions, needsYou[0].Section);
+        Assert.Equal(InboxSection.Permissions, needsYou[1].Section);
+        Assert.Equal(new[] { kinds.Asking, kinds.Working }.Order(), needsYou.Take(2).Select(l => l.Id).Order());
+        Assert.All(needsYou.Take(2), l => Assert.Equal(InboxMark.AsksPermission, l.Mark));
+        Assert.DoesNotContain(view.In(InboxTab.Claude), l => l.Id == kinds.Working);
+        Assert.Equal(("Asks permission", "a yes or a no"), InboxTabs.CaptionOf(InboxSection.Permissions));
+    }
+
+    // Closed and snoozed keep their own marks: no question can be answered from them.
+    [Fact]
+    public void A_closed_task_keeps_its_mark()
+    {
+        var id = Claudes("Closed one", "s9");
+        Change(b => b.Close(id, clock, stoppingClaude: true));
+
+        Assert.Equal(InboxMark.Closed, InboxTabs.MarkOf(Task(id), Limited, asksPermission: _ => true));
+    }
+
+    [Fact]
+    public void Without_a_question_nothing_changes()
+    {
+        EveryKind();
+        var (listed, nested) = TaskViews.UnderParents(TaskViews.Grouped(board, TaskFilter.Open, TaskWorkspaceFilter.All, busy: Busy));
+
+        Assert.Equal(Inbox(Busy).Lines, InboxTabs.Split(listed, nested, board, Limited, Busy, asksPermission: _ => false).Lines);
+    }}

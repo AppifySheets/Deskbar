@@ -1179,7 +1179,7 @@ public partial class FloatingBar
         // The group line is part of the shape too: where it sits, whether a selected line holds the fold open, and each
         // folded line's status (the ink, the tooltip's "Done: ") and title (the tooltip).
         var shape = string.Join("\n", all.Select(ShapeOf).Prepend(
-            $"{InboxBarOn}|{taskListExpanded}|{ToggleTasksPanel is null}|{TextOffset}|{problem.GetValueOrDefault("")}|{slots}|{editingTask}|{managerAsk}|" +
+            $"{InboxBarOn}|{taskListExpanded}|{ToggleTasksPanel is null}|{TextOffset}|{problem.GetValueOrDefault("")}|{slots}|{editingTask}|{managerAsk}|{PermissionShape()}|" +
             $"{fold.At}|{fold.KeptSelected}|{string.Join(',', fold.Folded.Select(l => $"{l.Id}:{l.Status}:{l.Title}"))}"));
         if (shape == lastTaskListShape) return;
         lastTaskListShape = shape;
