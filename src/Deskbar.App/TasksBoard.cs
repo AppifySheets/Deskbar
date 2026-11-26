@@ -806,10 +806,13 @@ public sealed class TasksBoard : IDisposable
         // an assignee or a goal, a click on a line could pick a task the panel does not draw, and the click looked like it
         // did nothing. It used to let only a closed task through (task links); now it is LetPastFilters, as a Stats line
         // and "Open parent" already were, and the search and the Claude working chip after it (RevealPastSearch).
-        LetPastFilters(id);
+        // THE PANEL OPENS FIRST: a hidden panel opens fresh (OpenFresh), which puts every filter back to its default,
+        // "Current workspace" included, so filters let through before it were reset again and the task stayed hidden
+        // (review of task acd76fbe). Let through after the open, they hold for the Refresh below.
         selection.Select(id);
-        RevealPastSearch(id);
         Show();
+        LetPastFilters(id);
+        RevealPastSearch(id);
         // Open starts a hidden window at the default view (no thread open); the task's own thread opens after it.
         expanded.Add(id);
         window.PaintSelection(selection.Current);

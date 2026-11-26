@@ -11,7 +11,7 @@ namespace Deskbar.App;
 // FloatingBarTaskListTests.A_title_takes_the_free_width_of_its_line).
 //
 // This panel lays the line out instead, left to right:
-//   Left     the tick box, Undo, or a Claude line's session icon, each at its own width;
+//   Left     Undo on a line just closed (the tick box went in task acd76fbe), at its own width;
 //   Title    everything the other parts do not take, so a title that does not fit ends right where the next part
 //            starts, with nothing empty in between;
 //   Right    the parts that show (a flag that is on, the close button, Undo), each at its own width;

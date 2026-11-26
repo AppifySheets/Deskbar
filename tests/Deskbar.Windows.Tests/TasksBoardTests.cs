@@ -2906,6 +2906,29 @@ public class TasksBoardTests
         Assert.True(t.Window.ThreadShown(there));
     });
 
+    // Task acd76fbe, review: with the panel HIDDEN and "Current workspace" persisted, ShowTask opens the panel first and only
+    // then lets the task past the filters; opened the other way round, the fresh open re-applied "Current workspace" from the
+    // saved panel state and hid the task again. The clicked task lives on Sparrow while GEPHA is current.
+    [Fact]
+    public void The_bars_click_on_a_hidden_panel_shows_a_task_past_the_saved_current_workspace_filter() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        t.Tasks.AddNote("here", t.Gepha);
+        var there = t.Tasks.AddNote("there", t.Sparrow).Value.Id;
+        SwitchTo(t, t.Gepha);
+        t.Controller.Show();
+        t.Controller.FilterWorkspace(TaskWorkspaceFilter.Current);
+        Assert.True(t.Harness.Manager.State.TasksPanel!.CurrentWorkspace);
+        t.Controller.Hide();
+        Assert.False(t.Window.IsOpen);
+
+        t.Controller.ShowTask(there);
+
+        Assert.True(t.Window.IsOpen);
+        Assert.Contains(there, t.Window.Keys);
+        Assert.True(t.Window.IsSelected(there));
+    });
+
     // RULING 52 (Petre's screenshot, "better alignment": the right-hand parts zigzagged, the lines had different widths,
     // Claude lines had no tick box and Done ones an X). In the List every line spans the list, and each column, the
     // flags, the sessions, the age, the chip, the comments and the menu button, starts at the same x on every line,

@@ -1866,6 +1866,32 @@ public class FloatingBarTaskListTests
         Assert.Empty(TextBlockOf(t.Lines.Single()).Inlines.OfType<LineBreak>());
     });
 
+    // Task acd76fbe, review: a question of several lines. When its first line fits beside the chip the TextBlock breaks there
+    // itself, so no LineBreak is forced; when the first line is long, exactly one LineBreak ends the first row, before the
+    // first newline of the joined text.
+    [Fact]
+    public void A_multi_line_question_gets_a_forced_break_only_when_its_first_line_is_long() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var shortFirst = t.Tasks.Create("Short first", t.Gepha, Session("s1")).Value;
+        t.Tasks.Ask(shortFirst.Id, "Ship it?\nThe second line is a long one that goes on and on about why, well past the chip and the width.");
+        var longFirst = t.Tasks.Create("Long first", t.Gepha, Session("s2")).Value;
+        t.Tasks.Ask(longFirst.Id, "Is it fine to restart Deskbar for the live check right now, with the other windows open?\nSecond line.");
+        t.Bar.ApplyWidth(240);
+        t.Bar.RequestRebuild();
+        t.Bar.UpdateLayout();
+
+        var shortText = TextBlockOf(t.Lines.Single(l => ((TaskLine)l.Tag).Id == shortFirst.Id));
+        Assert.Empty(shortText.Inlines.OfType<LineBreak>());
+
+        var longLine = t.Lines.Single(l => ((TaskLine)l.Tag).Id == longFirst.Id);
+        var inlines = TextBlockOf(longLine).Inlines.ToList();
+        Assert.Single(inlines.OfType<LineBreak>());
+        var before = string.Concat(inlines.TakeWhile(i => i is not LineBreak).OfType<Run>().Select(r => r.Text));
+        Assert.DoesNotContain('\n', before);
+        Assert.Contains('\n', TextOf(longLine));
+    });
+
     // NO AGE ON THE BAR (reverses Ruling 46; Petre, 2026-11-24, of the bar's "26m": "move the time from here to the proper
     // tasks window"). A line has no age text; its tooltip still says when the task was created. The tasks panel has the
     // age (TasksBoardTests.The_slim_lines_age_fits_at_its_widest_and_says_it_in_words).
