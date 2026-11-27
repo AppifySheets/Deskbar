@@ -1970,6 +1970,14 @@ public partial class FloatingBar
     void CloseWithUndo(TaskLine line, bool stopClaude = false, bool anyway = false)
     {
         if (taskService is null) return;
+        // OPEN SUBTASKS FIRST (task 452487b4): nothing gets past them, not "Stop Claude and close" and not "Close anyway",
+        // so a parent with an open subtask is refused at once, naming the subtask, rather than offering a menu whose
+        // every item is then refused. The board's own Close checks them first too.
+        if (taskService.Board.OpenSubtaskCount(line.Id) > 0)
+        {
+            Report(taskService.Close(line.Id));
+            return;
+        }
         if (!stopClaude && ClaudeStillWorking(line.Id))
         {
             OpenStopClaudeMenu(line);
