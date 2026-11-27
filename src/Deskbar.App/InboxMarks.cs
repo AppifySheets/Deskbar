@@ -274,6 +274,17 @@ internal static class InboxLook
                     Emphasise(inner, size);
                 }
         }
+        // A table (task 24813c78): its header row is bright like a heading, and every cell's text is emphasised like
+        // any paragraph's, so bold and code in a cell stand out as they do outside one.
+        else if (block is System.Windows.Documents.Table table)
+        {
+            foreach (var group in table.RowGroups)
+            {
+                if (Equals(group.Tag, MarkdownBlocks.TableHeaderTag)) group.Foreground = Strong;
+                foreach (var cell in group.Rows.SelectMany(row => row.Cells))
+                    foreach (var inner in cell.Blocks) Emphasise(inner, size);
+            }
+        }
         else if (block is System.Windows.Documents.Paragraph paragraph)
         {
             if (Equals(paragraph.Tag, MarkdownBlocks.HeadingTag)) paragraph.Foreground = Strong;
