@@ -430,9 +430,41 @@ public sealed class TaskService(ITaskStore store, Func<DateTimeOffset> now, Func
     /// <summary>
     /// Deskbar settles a question whose pull requests are merged or closed (PullRequestWatch, task b7f987b4). Saves and
     /// pulses only when the task still waited on that very question (TaskBoard.SettleQuestion).
+    /// Since task ede8dbe8 it also (1) records each merged pull request of the question on the task, as `task pr` would:
+    /// the question was about the task's own work, and without a recorded pull request `task deployed` is refused and no
+    /// deploy notice can reach the task; and (2) wakes the session through the watch's nudges with what happened, for every
+    /// close and for each merge the minute poll does not cover (RepoWatch.Covers, judged on the task as it was before this
+    /// recorded anything), since that poll tells its own merges and one merge must not be told twice.
     /// </summary>
-    public void SettleQuestion(Settlement settlement) =>
-        CommitIfChanged(Board.SettleQuestion(settlement.TaskId, settlement.Question, settlement.Note, now(), makeId()));
+    public void SettleQuestion(Settlement settlement)
+    {
+        var settled = Board.SettleQuestion(settlement.TaskId, settlement.Question, settlement.Note, now(), makeId());
+        if (ReferenceEquals(settled, Board)) return;
+        var before = Board.Tasks.Single(t => t.Id == settlement.TaskId);
+
+        // A pull request another task has recorded is that task's work, only mentioned here ("merge #600 so I can rebase"):
+        // it is not recorded on this one (review finding, task ede8dbe8). Recorded here too, the minute poll would count
+        // this task among its tasks, tell it the merge a second time, follow the runs for it, and its deploy would count.
+        bool OthersOwn(PullRequestLink link) =>
+            Board.Tasks.Any(t => t.Id != settlement.TaskId && t.PullRequests.Any(p => p.Key == link.Key));
+
+        var recorded = settlement.Ended
+            .Where(e => e.State == PullRequestState.Merged && !OthersOwn(e.Link))
+            .Aggregate(settled, (board, e) => board.AddPullRequest(settlement.TaskId, e.Link, now()) is { IsSuccess: true } added ? added.Value : board);
+        // A close is always told here: the minute poll has no rule for a pull request closed without a merge (review
+        // finding), so leaving a covered one to it would tell nobody. A merge is told here unless the poll covers it.
+        var untold = settlement.Ended
+            .Where(e => e.State != PullRequestState.Merged || !RepoWatch.Covers(watch, before, e.Link, now()))
+            .ToArray();
+        // A merge told here is remembered as seen merged when this task alone records it, so the minute poll, back from a
+        // spell of failed looks with the link still seen Open, does not tell it again as a new merge (review finding).
+        // When another task records it, that task's poll still has to see the merge itself, so nothing is marked.
+        watch = RepoWatch.SeenMerged(watch, untold.Where(e => e.State == PullRequestState.Merged && !OthersOwn(e.Link)).Select(e => e.Link));
+        Commit(recorded);
+        // After the commit, as Watched does: the session reads a board that already shows the question settled.
+        if (untold.Length > 0)
+            watchNudges.OnNext(new WatchNudge(settlement.TaskId, AskedPullRequests.WakeText(untold)));
+    }
 
     /// <summary>/clear ended the session (Ruling 19, TaskBoard.SessionCleared). Saves only when it was on a task.</summary>
     public void SessionCleared(string sessionId) => CommitIfChanged(Board.SessionCleared(sessionId, now()));

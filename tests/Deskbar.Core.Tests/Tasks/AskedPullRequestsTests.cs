@@ -249,6 +249,157 @@ public sealed class AskedPullRequestsTests
         Assert.Contains("[Deskbar #504]", task.Comments.Last().Markdown);
     }
 
+    // --- a settled question wakes its session (task ede8dbe8) -------------------------------------------------------------
+
+    // The colleague's case: the question linked a pull request that was not recorded on the task, so the minute poll never
+    // watched it. Settling must record it and tell the session, or the session sits idle with its deploy check undone.
+    [Fact]
+    public void A_merge_that_settles_a_question_records_the_pull_request_and_wakes_the_session()
+    {
+        var (board, id) = Waiting($"Merge [Deskbar #504]({Url504})");
+        using var watch = new Watch(board);
+        var heard = new List<WatchNudge>();
+        using var _ = watch.Tasks.WatchNudges.Subscribe(heard.Add);
+        watch.GitHub[Key504] = Merged(Asked.AddMinutes(2));
+
+        watch.Clock.AdvanceBy(TimeSpan.FromSeconds(1).Ticks);
+
+        var task = watch.Tasks.Board.Tasks.Single(t => t.Id == id);
+        Assert.Equal(TaskStatus.InProgress, task.Status);
+        Assert.Equal([Key504], task.PullRequests.Select(p => p.Key));
+        var nudge = Assert.Single(heard);
+        Assert.Equal(id, nudge.TaskId);
+        Assert.Contains("Deskbar #504", nudge.Text);
+        Assert.Contains("merged", nudge.Text);
+
+        // The next look finds no waiting question: nothing more is said.
+        watch.Clock.AdvanceBy(PullRequestWatch.Poll.Ticks);
+        Assert.Single(heard);
+    }
+
+    // A pull request closed without a merge also settles the question and is told, but is not recorded: it never ran
+    // anywhere, so it must not count for a deploy.
+    [Fact]
+    public void A_close_without_a_merge_wakes_the_session_but_records_nothing()
+    {
+        var (board, id) = Waiting($"Merge [Deskbar #504]({Url504})");
+        using var watch = new Watch(board);
+        var heard = new List<WatchNudge>();
+        using var _ = watch.Tasks.WatchNudges.Subscribe(heard.Add);
+        watch.GitHub[Key504] = ClosedAt(Asked.AddMinutes(2));
+
+        watch.Clock.AdvanceBy(TimeSpan.FromSeconds(1).Ticks);
+
+        Assert.Empty(watch.Tasks.Board.Tasks.Single(t => t.Id == id).PullRequests);
+        Assert.Contains("closed without merging", Assert.Single(heard).Text);
+    }
+
+    // When the minute poll already watches the pull request (recorded on the task, last seen open, polled recently), it
+    // tells the merge itself, so the settlement does not tell it a second time.
+    [Fact]
+    public void A_merge_the_minute_poll_covers_is_not_told_twice()
+    {
+        var (asked, id) = Waiting($"Merge [Deskbar #504]({Url504})");
+        var board = asked.AddPullRequest(id, AskedPullRequests.In(Url504).Single(), Asked).Value;
+        using var watch = new Watch(board);
+        watch.Tasks.Watched(new RepoWatchStep(RepoWatchState.Empty with
+        {
+            Seen = new Dictionary<string, PullRequestState> { [Key504] = PullRequestState.Open },
+            LastSuccess = new Dictionary<string, DateTimeOffset> { ["appifysheets/deskbar"] = watch.Clock.Now },
+        }, []));
+        var heard = new List<WatchNudge>();
+        using var _ = watch.Tasks.WatchNudges.Subscribe(heard.Add);
+        watch.GitHub[Key504] = Merged(Asked.AddMinutes(2));
+
+        watch.Clock.AdvanceBy(TimeSpan.FromSeconds(1).Ticks);
+
+        Assert.Equal(TaskStatus.InProgress, watch.Tasks.Board.Tasks.Single(t => t.Id == id).Status);
+        Assert.Empty(heard);
+    }
+
+    // Review finding: the minute poll has no rule for a close, so a covered pull request closed without a merge is still
+    // told by the settlement, or nobody tells it.
+    [Fact]
+    public void A_covered_close_is_still_told()
+    {
+        var (asked, id) = Waiting($"Merge [Deskbar #504]({Url504})");
+        var board = asked.AddPullRequest(id, AskedPullRequests.In(Url504).Single(), Asked).Value;
+        using var watch = new Watch(board);
+        watch.Tasks.Watched(new RepoWatchStep(RepoWatchState.Empty with
+        {
+            Seen = new Dictionary<string, PullRequestState> { [Key504] = PullRequestState.Open },
+            LastSuccess = new Dictionary<string, DateTimeOffset> { ["appifysheets/deskbar"] = watch.Clock.Now },
+        }, []));
+        var heard = new List<WatchNudge>();
+        using var _ = watch.Tasks.WatchNudges.Subscribe(heard.Add);
+        watch.GitHub[Key504] = ClosedAt(Asked.AddMinutes(2));
+
+        watch.Clock.AdvanceBy(TimeSpan.FromSeconds(1).Ticks);
+
+        Assert.Contains("closed without merging", Assert.Single(heard).Text);
+    }
+
+    // Review finding: a pull request another task recorded is that task's work. The asking task hears of the merge but
+    // does not take the pull request, or the minute poll would tell it again and its deploy would count it.
+    [Fact]
+    public void Another_tasks_pull_request_is_told_but_not_recorded()
+    {
+        var (asked, id) = Waiting($"Merge [Deskbar #504]({Url504}) so I can rebase");
+        var owner = asked.Create("Owner of 504", Maybe<Guid>.None, Session("s2"), Asked.AddHours(-1), Guid.NewGuid()).Value;
+        var board = owner.Board.AddPullRequest(owner.Task.Id, AskedPullRequests.In(Url504).Single(), Asked).Value;
+        using var watch = new Watch(board);
+        var heard = new List<WatchNudge>();
+        using var _ = watch.Tasks.WatchNudges.Subscribe(heard.Add);
+        watch.GitHub[Key504] = Merged(Asked.AddMinutes(2));
+
+        watch.Clock.AdvanceBy(TimeSpan.FromSeconds(1).Ticks);
+
+        Assert.Empty(watch.Tasks.Board.Tasks.Single(t => t.Id == id).PullRequests);
+        Assert.Equal(id, Assert.Single(heard).TaskId);
+        Assert.False(watch.Tasks.Watch.Seen.ContainsKey(Key504));
+    }
+
+    // Review finding: a merge the settlement told itself is remembered as seen merged, so the minute poll, back from a
+    // spell of failed looks with the link still seen Open, does not take it for a new merge.
+    [Fact]
+    public void A_merge_told_by_the_settlement_is_remembered_as_seen_merged()
+    {
+        var (asked, id) = Waiting($"Merge [Deskbar #504]({Url504})");
+        var board = asked.AddPullRequest(id, AskedPullRequests.In(Url504).Single(), Asked).Value;
+        using var watch = new Watch(board);
+        // Seen Open, but the last successful poll is long past: the poll does not cover it now.
+        watch.Tasks.Watched(new RepoWatchStep(RepoWatchState.Empty with
+        {
+            Seen = new Dictionary<string, PullRequestState> { [Key504] = PullRequestState.Open },
+            LastSuccess = new Dictionary<string, DateTimeOffset> { ["appifysheets/deskbar"] = watch.Clock.Now.AddHours(-1) },
+        }, []));
+        var heard = new List<WatchNudge>();
+        using var _ = watch.Tasks.WatchNudges.Subscribe(heard.Add);
+        watch.GitHub[Key504] = Merged(Asked.AddMinutes(2));
+
+        watch.Clock.AdvanceBy(TimeSpan.FromSeconds(1).Ticks);
+
+        Assert.Single(heard);
+        Assert.Equal(PullRequestState.Merged, watch.Tasks.Watch.Seen[Key504]);
+    }
+
+    // Review nit: a link that merged before the task began waiting is neither told nor recorded.
+    [Fact]
+    public void A_link_merged_before_the_ask_is_left_out()
+    {
+        var (board, id) = Waiting($"Now that [Deskbar #505]({Url505}) is in, merge [Deskbar #504]({Url504})");
+        using var watch = new Watch(board);
+        var heard = new List<WatchNudge>();
+        using var _ = watch.Tasks.WatchNudges.Subscribe(heard.Add);
+        watch.GitHub[Key505] = Merged(Asked.AddDays(-1));
+        watch.GitHub[Key504] = Merged(Asked.AddMinutes(2));
+
+        watch.Clock.AdvanceBy(TimeSpan.FromSeconds(1).Ticks);
+
+        Assert.Equal([Key504], watch.Tasks.Board.Tasks.Single(t => t.Id == id).PullRequests.Select(p => p.Key));
+        Assert.DoesNotContain("#505", Assert.Single(heard).Text);
+    }
+
     [Fact]
     public void With_no_question_linking_a_pull_request_the_watch_asks_GitHub_nothing()
     {
