@@ -117,7 +117,9 @@ gh run watch {id} --exit-status
 
 Check the run's `headSha` is the head just pushed. Mergeability still outranks the run: if the
 base moves or the pull request conflicts while CI is going (the PR watch in CLAUDE.md says so),
-go back to step 2 at once rather than waiting for the result. CI cancels the run on the replaced
+go back to step 2 at once rather than waiting for the result. Deskbar watches the pull request for
+you and nudges you when that happens, as long as your prompt line says it does; the Monitor loop in
+CLAUDE.md is the fallback, run only when the prompt line does not say so. CI cancels the run on the replaced
 head by itself (the `concurrency` group in `.github/workflows/ci.yml`).
 
 If the run fails, read the failing step (`gh run view {id} --log-failed`). This is when the local
