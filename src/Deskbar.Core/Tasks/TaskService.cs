@@ -117,8 +117,9 @@ public sealed class TaskService(ITaskStore store, Func<DateTimeOffset> now, Func
     // `by`: who asked, a session's id or TaskComment.DeskbarAuthor; named, the question goes into the thread too (task
     // 968c2216, TaskBoard.Ask). Not announced on Commented: a question is not a comment of Petre's that wakes a session.
     // `options`: the answers offered with the question (AnswerOptions), checked by the board; a bad list refuses the ask.
-    public Result Ask(Guid id, string question, Maybe<string> by = default, IReadOnlyList<string>? options = null) =>
-        Apply(Board.Ask(id, question, now(), by.Map(asker => (asker, makeId())), options));
+    // `deploy`: the ask is a deploy hand-over, not a question (task a87891ca, `task ask --deploy`, TaskItem.QuestionIsDeploy).
+    public Result Ask(Guid id, string question, Maybe<string> by = default, IReadOnlyList<string>? options = null, bool deploy = false) =>
+        Apply(Board.Ask(id, question, now(), by.Map(asker => (asker, makeId())), options, deploy));
 
     // A pull request the task's session opened (task e7aa49b1); one it already lists saves and pulses nothing.
     public Result AddPullRequest(Guid id, PullRequestLink link) => ApplyIfChanged(Board.AddPullRequest(id, link, now()));

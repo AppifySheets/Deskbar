@@ -191,7 +191,12 @@ public sealed class JsonTaskStore(string baseDirectory, Action<string>? trace = 
         [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull), JsonConverter(typeof(TolerantStringListConverter))]
         IReadOnlyList<string>? DeployPullRequests = null,
         [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull), JsonConverter(typeof(TolerantStringListConverter))]
-        IReadOnlyList<string>? DeployPullRequestsEnded = null);
+        IReadOnlyList<string>? DeployPullRequestsEnded = null,
+        // TaskItem.QuestionIsDeploy (task a87891ca): the question is a deploy hand-over. Written only when true, so a task
+        // with a plain question is written as before, and read tolerantly like the other flags. Still version 2: an older
+        // build drops it on its next save, which draws one hand-over as a plain question and never costs a task.
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull), JsonConverter(typeof(TolerantFlagConverter))]
+        bool? QuestionIsDeploy = null);
 
     // TaskItem.Repeat as stored: the schedule's canonical text (RepeatSchedule.Text), the model and the folder. Every part
     // is nullable because the reader fills what it finds and FromDto decides whether that is a repeat.
@@ -311,7 +316,8 @@ public sealed class JsonTaskStore(string baseDirectory, Action<string>? trace = 
             t.NextRun.HasValue ? t.NextRun.Value.ToUniversalTime() : null,
             t.QuestionOptions.Count > 0 ? t.QuestionOptions : null,
             t.DeployPullRequests.Count > 0 ? t.DeployPullRequests.Select(p => p.Url).ToArray() : null,
-            t.DeployPullRequestsEnded.Count > 0 ? t.DeployPullRequestsEnded : null);
+            t.DeployPullRequestsEnded.Count > 0 ? t.DeployPullRequestsEnded : null,
+            t.QuestionIsDeploy ? true : null);
 
     static TaskItem FromDto(TaskDto d) =>
         new(d.Id, d.Title ?? "",
@@ -364,6 +370,8 @@ public sealed class JsonTaskStore(string baseDirectory, Action<string>? trace = 
             QuestionOptions = !string.IsNullOrWhiteSpace(d.Question) && AnswerOptions.Check(d.QuestionOptions) is { IsSuccess: true } options
                 ? options.Value
                 : [],
+            // The hand-over mark lives with its question, open or set aside (TaskBoard.HandOverKept); alone it means nothing.
+            QuestionIsDeploy = d.QuestionIsDeploy == true && (!string.IsNullOrWhiteSpace(d.Question) || !string.IsNullOrWhiteSpace(d.QuestionSetAside)),
         };
 
     // A stored repeat as a TaskRepeat, or none (task 0b78269e). It needs a schedule that parses (so a minute-level hand edit

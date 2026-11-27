@@ -282,6 +282,22 @@ public sealed record TaskItem(
     public IReadOnlyList<string> QuestionOptions { get; init; } = [];
 
     /// <summary>
+    /// Whether the question is a DEPLOY HAND-OVER rather than a question (`task ask - --deploy`, task a87891ca): the change
+    /// is merged and built and only the user's deploy is left ("Redeploy the portal stack in Portainer"), so there is
+    /// nothing to answer. Petre, on an iam.ge task drawn as "Waits for your answer": "it's not a question. it should
+    /// qualify as merged, built, waiting for deploy". The task still waits on him (Waiting on you, at the top with the
+    /// questions), but the Inbox draws it as waiting for the deploy (InboxMark.WaitsForDeploy, DeployWait, task 1565789d)
+    /// even before Deskbar has measured the merge, Deskbar's deploy check finds it by this flag (DeployWaits), and `task deployed` settles it
+    /// (TaskBoard.MarkDeployed). It lives as long as the question or the question set aside: TaskBoard drops it once both
+    /// are gone (HandOverKept), and every ask sets it afresh. Stored as an optional `questionIsDeploy`, written only when
+    /// true; absent means a plain question.
+    /// </summary>
+    public bool QuestionIsDeploy { get; init; }
+
+    /// <summary>Whether the task waits on the user for a deploy hand-over (<see cref="QuestionIsDeploy"/>), not a question.</summary>
+    public bool AwaitsDeploy => Status == TaskStatus.WaitingOnYou && Question.HasValue && QuestionIsDeploy;
+
+    /// <summary>
     /// This task with Deskbar's set-aside lines (TaskComment.IsSetAsideNote) folded, the way a settled comment is (Ruling
     /// 62: kept, behind one line), unless the task still holds a set-aside question. Petre, task aa42794f: "too much bla
     /// bla", over a thread with two set-aside lines and the merged line under them. A set-aside line matters only while

@@ -103,7 +103,8 @@ public sealed partial class RemoteControl
         // A question Deskbar set aside while the session worked (SetAside, below) is asked about first, since it names the
         // question; otherwise a parked session is asked to say so (Parked).
         "Stop" => Quietly(Attention(Folder(from), SessionTitle.Read(hook.Transcript.GetValueOrDefault()))) is var blinked
-            && SetAside(hook) is { HasValue: true } setAside ? Nudge(hook, SessionBriefing.SetAsideNudge(setAside.Value), blinked)
+            && SetAside(hook) is { HasValue: true } setAside ? Nudge(hook, SessionBriefing.SetAsideNudge(setAside.Value,
+                tasks?.Board.TaskOf(hook.SessionId).Map(t => t.QuestionIsDeploy).GetValueOrDefault(false) ?? false), blinked)
             : Parked(hook) ? Nudge(hook, SessionBriefing.ParkedNudge, blinked) : blinked,
         _ => tasks is { } service && !hook.Headless && manager.State.ClaudeTasksInEffect
             ? TaskEvent(service, hook, Folder(from) ?? Folder(hook.Folder))
@@ -308,10 +309,12 @@ public sealed partial class RemoteControl
     ControlReply AskedReply(TaskBoard board, TaskItem task, bool gaveOptions)
     {
         var deploy = DeployHint(board, task);
-        if (gaveOptions && deploy.HasNoValue) return Success(Describe(task));
+        var handOver = HandOverHint(task);
+        if (gaveOptions && deploy.HasNoValue && handOver.HasNoValue) return Success(Describe(task));
         var json = System.Text.Json.JsonSerializer.SerializeToNode(Describe(task), Json)!.AsObject();
         if (!gaveOptions) json["hint"] = OptionsHint;
         if (deploy.HasValue) json["deployHint"] = deploy.Value;
+        if (handOver.HasValue) json["handOverHint"] = handOver.Value;
         return Success(json);
     }
 
@@ -323,6 +326,20 @@ public sealed partial class RemoteControl
     // the task's lists, and that no other task records as its own work ("merge #600 so I can rebase"), the reply says how
     // to register it. A registration is the session's call, never a guess from the question's text: a question can link
     // a pull request it only mentions.
+    // THE ASK'S REPLY ALSO TEACHES THE HAND-OVER (task a87891ca), for the same reason: the briefing names `--deploy` in a
+    // few words only. A plain ask that mentions a deploy is drawn as a question ("Waits for your answer"), which is what
+    // Petre objected to on an iam.ge task that was merged, built and only waiting for his redeploy. The reply says how to
+    // ask it as a hand-over instead. Only a hint: a question about a deploy ("deploy now or after the demo?") is a question.
+    public const string HandOverHintText =
+        "Your question mentions a deploy. If your change is merged and built and only the user's deploy is left, that is not a question: "
+        + "ask it again with deskbar.cmd task ask - --deploy --session <your session id>, so the task shows as merged and waiting for the deploy; "
+        + "your task deployed report then settles it.";
+
+    static Maybe<string> HandOverHint(TaskItem task) =>
+        !task.QuestionIsDeploy && task.Question.GetValueOrDefault("").Contains("deploy", StringComparison.OrdinalIgnoreCase)
+            ? HandOverHintText
+            : Maybe<string>.None;
+
     static Maybe<string> DeployHint(TaskBoard board, TaskItem task)
     {
         var unrecorded = AskedPullRequests.In(task.Question.GetValueOrDefault(""))
@@ -487,6 +504,12 @@ public sealed partial class RemoteControl
         Maybe<Guid> Here() => SessionWorkspace(service, folder, session);
         ControlReply Changed(Result<TaskItem> task) =>
             task.Map(t => service.Board.Tasks.First(x => x.Id == t.Id)).Match(t => Success(Describe(t)), ControlReply.Fail);
+        // `task ask`, a question or (deploy) a deploy hand-over (task a87891ca): the options are split off the text before
+        // the task is looked up, so a bad list refuses the whole ask and stores nothing.
+        ControlReply Ask(string text, bool deploy) => AnswerOptions.Split(text)
+            .Bind(asked => Own().Bind(t => service.Ask(t.Id, asked.Question, session, asked.Options, deploy).Map(() => (t.Id, Gave: asked.Options.Count > 0))))
+            .Tap(_ => Attention(folder))
+            .Match(asked => AskedReply(service.Board, service.Board.Tasks.First(x => x.Id == asked.Id), asked.Gave), ControlReply.Fail);
 
         return args switch
         {
@@ -521,10 +544,13 @@ public sealed partial class RemoteControl
             // The text may end in a `--options` line and the options, one per line (AnswerOptions): split here, checked before
             // the task is looked up, so a bad list refuses the whole ask and stores nothing.
             // The reply is the task as every form answers, plus a `hint` field when the ask gave no options (AskedReply).
-            ["ask", var text] => AnswerOptions.Split(text)
-                .Bind(asked => Own().Bind(t => service.Ask(t.Id, asked.Question, session, asked.Options).Map(() => (t.Id, Gave: asked.Options.Count > 0))))
-                .Tap(_ => Attention(folder))
-                .Match(asked => AskedReply(service.Board, service.Board.Tasks.First(x => x.Id == asked.Id), asked.Gave), ControlReply.Fail),
+            // `--deploy` (task a87891ca): the ask is a deploy hand-over, merged and built with only the user's deploy left,
+            // drawn as the merged ring rather than a question (TaskItem.QuestionIsDeploy). Either order of `-` and the flag.
+            // `task ask --deploy` with no text (the `-` forgotten) would otherwise store "--deploy" as a plain question.
+            ["ask", "--deploy"] => ControlReply.Fail("task ask --deploy needs the text, or - to read it from stdin"),
+            ["ask", var text, "--deploy"] => Ask(text, deploy: true),
+            ["ask", "--deploy", var flagFirst] => Ask(flagFirst, deploy: true),
+            ["ask", var text] => Ask(text, deploy: false),
             ["done"] => Changed(Own().Bind(t => service.MarkDone(t.Id).Map(() => t))),
             // Ruling 49: the session says its question is settled (the user's reply answered it, or the session settled it
             // itself). Waiting on you goes back to In progress, the question goes and the workspace's blink and glow stop.

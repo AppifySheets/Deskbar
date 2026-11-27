@@ -120,10 +120,12 @@ public sealed partial class RemoteControl
             // because it has no task, stores one question on the manager's record for the manager line at the top of
             // "Waiting on you"; `task answered` clears it. Checked before the session-form refusal below, which every
             // other caller without --session still gets.
+            // The manager's ask is a question of its own, never a deploy hand-over (task a87891ca): it has no task to hand over.
+            ["ask", _, "--deploy"] or ["ask", "--deploy", _] when byManager => ControlReply.Fail("The manager's task ask takes no --deploy: a deploy hand-over is a session's, on its own task"),
             ["ask", var question] when byManager => ManagerAsked(ManagerQuestion.Ask(Maybe.From(manager.State.Manager), question, service.Now)),
             ["answered"] when byManager => ManagerAsked(ManagerQuestion.Answered(Maybe.From(manager.State.Manager))),
             // A session's form typed without its --session: it cannot know whose task is meant.
-            ["done"] or ["answered"] or ["join", _] or ["new", _] or ["status-line", _] or ["ask", _] or ["later", _] or ["subtask", ..] or ["pr", _] or ["pr", _, "--deploy"]
+            ["done"] or ["answered"] or ["join", _] or ["new", _] or ["status-line", _] or ["ask", _] or ["ask", _, "--deploy"] or ["ask", "--deploy", _] or ["later", _] or ["subtask", ..] or ["pr", _] or ["pr", _, "--deploy"]
                 or ["duplicate-of", _] or ["relate", _] or ["unrelate", _] or ["deployed", _] =>
                 ControlReply.Fail($"task {args[0]} is a session's form and needs --session <id>"),
             // In the bar's order, the Done tasks' full discs before their hollow rings (task a1debf34, TaskBoard.Pinned).
@@ -399,6 +401,8 @@ public sealed partial class RemoteControl
         status = StatusName(task.Status),
         statusLine = task.StatusLine,
         question = task.Question.GetValueOrDefault(),
+        // Task a87891ca: the question is a deploy hand-over (`task ask --deploy`), not something to answer.
+        questionIsDeploy = task.QuestionIsDeploy,
         claudes = task.IsClaudes,
         sessions = task.Sessions.Select(s => new { id = s.Id, folder = s.Folder, live = s.IsLive }).ToArray(),
         comments = task.Comments.Count,

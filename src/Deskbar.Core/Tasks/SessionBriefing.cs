@@ -48,7 +48,7 @@ public static class SessionBriefing
     public const string ParkedNudge =
         StopNudgeOpening +
         $"If the next move is the user's (a pull request to merge, something to try before it merges, a decision), run {Shim} task ask with " +
-        $"what they must do, the text on stdin, and the pull request or page as a markdown link to click. If your pull request is merged, finish in order: released, deployed ({Shim} task deployed with the evidence, or ask for a deploy a person makes), then {Shim} task done with what to try in the status line. " +
+        $"what they must do, the text on stdin, and the pull request or page as a markdown link to click. If your pull request is merged, finish in order: released, deployed ({Shim} task deployed with the evidence, or {Shim} task ask - --deploy for a deploy a person makes), then {Shim} task done with what to try in the status line. " +
         "Otherwise stop without saying anything.";
 
     /// <summary>
@@ -58,12 +58,15 @@ public static class SessionBriefing
     /// does neither is asked once more, by Deskbar, to write it afresh (<see cref="Regenerate"/>, task 0cac3082), and
     /// only then gets the old text back on the user's board (RepliedTasks.Restore, TaskService.RegenerateGrace).
     /// </summary>
-    public static string SetAsideNudge(string question) =>
+    // Review finding on task a87891ca: a deploy hand-over (`handOver`, TaskItem.QuestionIsDeploy) set aside and asked again
+    // with plain `task ask` came back as a question with the question mark, and its deploy report no longer settled it.
+    // So the nudge names the flag for a hand-over, here and in Regenerate.
+    public static string SetAsideNudge(string question, bool handOver = false) =>
         StopNudgeOpening +
         $"While you worked after the user's reply, Deskbar took your task out of Waiting on you and set your question aside: \"{Cut(question)}\". " +
         // Task 0cac3082: "previous messages are not good enough". The session is told to write the question afresh from
         // the facts, not to repeat it, since repeating it word for word is what put a merged pull request back on the bar.
-        $"If the user still has to act, write the question afresh rather than repeating it: check each pull request it names with gh pr view, leave out what is already done, and run {Shim} task ask with what they must do now, the text on stdin, and the pull request or page as a markdown link to click. " +
+        $"If the user still has to act, write the question afresh rather than repeating it: check each pull request it names with gh pr view, leave out what is already done, and run {Shim} task ask{(handOver ? " - --deploy (it is a deploy hand-over)" : "")} with what they must do now, the text on stdin, and the pull request or page as a markdown link to click. " +
         $"If the reply settled it, run {Shim} task answered (and {Shim} task done if the work is finished and deployed). Then stop.";
 
     // The first words of both Stop nudges (task 8710ac09). Delivered by the waiter, a nudge arrives as a new message, so it
@@ -222,7 +225,7 @@ public static class SessionBriefing
         + $"- a question that is already settled (its pull request merged or closed, the decision made): run {Shim} task answered --session <your session id>\n"
         + $"- a question that still holds but no longer says what the user must do now: ask again with {Shim} task ask - --session <your session id>, the text on stdin\n"
         // Task 59d0aac1: a merged change that has to run is not finished until it does (the briefing's order).
-        + $"- a merged change that has to run but is not reported deployed: check where it runs, then {Shim} task deployed - --session <your session id> with the evidence, or ask for the deploy if a person makes it\n"
+        + $"- a merged change that has to run but is not reported deployed: check where it runs, then {Shim} task deployed - --session <your session id> with the evidence, or, if a person makes the deploy, hand it over with {Shim} task ask - --deploy --session <your session id>\n"
         + $"- work that is finished and deployed (or has nothing to deploy) with nothing waiting on the user: run {Shim} task done --session <your session id>, with what to try in the status line\n"
         + $"- a task marked done whose work is not finished after all: run {Shim} task join {task.Id.ToString()[..8]} --session <your session id> and carry on\n"
         + $"- a status line that no longer says where the task stands: rewrite it with {Shim} task status-line - --session <your session id>\n"
@@ -288,7 +291,9 @@ public static class SessionBriefing
         $"{StalledOpening}{task.Id.ToString()[..8]} \"{Cut(task.Title)}\" for {StalledTasks.After.TotalMinutes:0} minutes. "
         + $"Say what it is waiting on, or Deskbar hands it to the user in {StalledTasks.Answer.TotalMinutes:0} minutes as waiting on them.\n"
         + (task.StatusLine.Length > 0 ? $"Its status line now: \"{task.StatusLine}\"\n" : "")
-        + $"- the next move is the user's (a pull request to merge, something to try, a deploy, a decision): run {Shim} task ask - --session <your session id>, what they must do on stdin, with the pull request or page as a markdown link to click\n"
+        + $"- the next move is the user's (a pull request to merge, something to try, a decision): run {Shim} task ask - --session <your session id>, what they must do on stdin, with the pull request or page as a markdown link to click\n"
+        // Task a87891ca: a person's deploy is a hand-over, not a question, so it has its own flag.
+        + $"- only the user's deploy is left (merged and built): the same with --deploy, {Shim} task ask - --deploy --session <your session id>\n"
         + $"- you are waiting on something else (a CI run, a release, a deploy you can watch, a background job, another session, a time): run {Shim} task status-line - --session <your session id> with what and until when, even if the line already says it\n"
         // Task 59d0aac1: done comes after the deploy, as in the briefing's order, not at the merge.
         + $"- the work is finished and deployed (or has nothing to deploy): run {Shim} task done --session <your session id>, with what to try in the status line\n"
@@ -321,7 +326,7 @@ public static class SessionBriefing
         + "Write it afresh from where things stand now.\n"
         + (task.QuestionSetAside.HasValue ? $"Your old question: \"{Cut(task.QuestionSetAside.Value, QuestionLength)}\"\n" : "")
         + "Check every pull request, run and decision it names against the facts (gh pr view, gh run list), not from memory, and leave out whatever is already done.\n"
-        + $"- the user still has to act: run {Shim} task ask - --session <your session id>, on stdin what they must do now in the first words, with the pull request or page as a markdown link to click\n"
+        + $"- the user still has to act: run {Shim} task ask - {(task.QuestionIsDeploy ? "--deploy " : "")}--session <your session id>, on stdin what they must do now in the first words, with the pull request or page as a markdown link to click\n"
         + $"- nothing waits on the user any more: run {Shim} task answered --session <your session id> (and {Shim} task done --session <your session id> if the work is finished and deployed, with what to try in the status line)\n"
         + $"If you do neither within {RegenerateGrace} minutes, the old question goes back to the user as it was. Then stop without saying anything more.\n";
 
@@ -575,7 +580,7 @@ public static class SessionBriefing
         // ONE ORDER FOR DONE (task 59d0aac1). The ask's follow-up used to end "(the pull request is merged), run task
         // answered, then task done", a third place saying merged means done. It now stops at `answered`: what comes after
         // a merge is the one ordered rule below, and a deploy a person has to make is named here as an ask like a merge.
-        $"  {Shim} task ask - --session {sessionId}   (when the next move is the user's (a pull request to merge, something to try live before it merges, a deploy, a decision): what they must do in the first words, with what they must open (a pull request, a page) as a markdown link [text](https://...) (a file too: [text](file:///C:/path/page.html)); the task waits on them and moves to the top. Once they have done it, run {Shim} task answered --session {sessionId})",
+        $"  {Shim} task ask - --session {sessionId}   (when the next move is the user's (a pull request to merge, something to try live before it merges, a decision): what they must do in the first words, with what they must open (a pull request, a page) as a markdown link [text](https://...) (a file too: [text](file:///C:/path/page.html)); the task waits on them and moves to the top. Once they have done it, run {Shim} task answered --session {sessionId})",
         // A MERGED PULL REQUEST IS DONE (task b326761d, Petre: "when a pr is merged and a session is waiting for me to
         // check it, it should say the task is done and i will only close it if i test it and it works"). Sessions read
         // "something to try live" as a reason to ask again after the merge, so the task sat in Waiting on you with "Try
@@ -608,7 +613,15 @@ public static class SessionBriefing
         // describes: the running build is the truth there and a report changes nothing, so its order ends at the release.
         // The room for it came from the ask line above, the done line and the rebase line below, and the "lean" line's
         // last sentence, which repeated what the ask and comment lines say; every rule they stated is still stated.
-        $"After the merge, finish in this order: released (if the repository has a release step), deployed, done. Deployed: the running app's own evidence shows the new version; report it with {Shim} task deployed - --session {sessionId}, the evidence on stdin, or \"nothing to deploy\" for a change nothing runs (docs, a library). In Deskbar's own repository done follows the release. When Deskbar watches, it nudges you when your merge commit's runs finish. Never mark done before deployed. When a person deploys or only they see the evidence, ask (\"Redeploy X\"); Deskbar wakes you to check; once it shows: task answered, task deployed, task done. Do not ask the user to test it: put what to try in the status line; they close the task once it works.",
+        //
+        // A PERSON'S DEPLOY IS A HAND-OVER, NOT A QUESTION (task a87891ca). The ask line above listed "a deploy" among the
+        // asks and this line said `ask ("Redeploy X")`, so an iam.ge session that was merged, built and only waiting for
+        // Petre's redeploy did exactly that, and its task was drawn as "Waits for your answer" with the question mark.
+        // Petre: "it's not a question. it should qualify as merged, built, waiting for deploy". So the deploy left the
+        // ask line's list, and this line names `task ask - --deploy` (TaskItem.QuestionIsDeploy), which draws the merged
+        // ring instead. `task answered` left the end of the line, because `task deployed` settles a hand-over itself
+        // (TaskBoard.MarkDeployed); the two cuts pay for the flag, and the briefing is shorter than before.
+        $"After the merge, finish in this order: released (if the repository has a release step), deployed, done. Deployed: the running app's own evidence shows the new version; report it with {Shim} task deployed - --session {sessionId}, the evidence on stdin, or \"nothing to deploy\" for a change nothing runs (docs, a library). In Deskbar's own repository done follows the release. When Deskbar watches, it nudges you when your merge commit's runs finish. Never mark done before deployed. When a person deploys or only they see the evidence: task ask - --deploy (\"Redeploy X\"); Deskbar wakes you to check; once it shows: task deployed, task done. Do not ask the user to test it: put what to try in the status line; they close the task once it works.",
         // AN OPEN PULL REQUEST STAYS ON TOP OF ITS BASE (task 6e4dc116, Petre: "still conflicting; you should keep rebasing
         // open prs", then "make that a deskbar level change"). Other sessions merge all day, so a pull request waiting on
         // the user falls behind its base or starts to conflict while it waits, and the merge he comes to do is blocked or

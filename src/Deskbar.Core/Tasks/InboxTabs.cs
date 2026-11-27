@@ -203,7 +203,8 @@ public static class InboxTabs
         : task.Status == TaskStatus.WaitingOnYou ? SessionKeeper.GivenUp(task) ? InboxMark.WentQuiet
             // Merged, not running yet and no answer buttons: waiting for his deploy, not a question (task 1565789d,
             // DeployWait). `hollow` is the task's delivery: for a task that is not Done it is shipping only when merged.
-            : DeployWait.Waits(task.Status, hollow?.Invoke(task) == true, task.QuestionOptions.Count) ? InboxMark.WaitsForDeploy
+            // A hand-over the session marked (`task ask --deploy`, task a87891ca) waits for the deploy too.
+            : DeployWait.Waits(task.Status, hollow?.Invoke(task) == true, task.QuestionOptions.Count, task.AwaitsDeploy) ? InboxMark.WaitsForDeploy
             : InboxMark.Asks
         : task.Status == TaskStatus.Done ? hollow?.Invoke(task) == true ? InboxMark.FinishedNotRunning : InboxMark.Finished
         : HandedBack(task) ? InboxMark.WentQuiet

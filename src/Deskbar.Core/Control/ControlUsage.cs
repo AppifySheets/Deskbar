@@ -134,6 +134,10 @@ public static class ControlUsage
                 "the session's task waits on you with the question, and its workspace blinks as attention does. With -,\n"
                 + "      the text may end in a line `--options` and then up to 4 answers, one per line (each at most 40\n"
                 + "      characters, all different), which become buttons under the question; on stdin, never on the command line"),
+            // Task a87891ca: a deploy hand-over is asked like a question and drawn as merged, waiting for the user's deploy.
+            new("task", "ask <text>|- --deploy --session <session>",
+                "a deploy hand-over, not a question: the change is merged and built and only your deploy is left. The task\n"
+                + "      waits on you drawn as the merged ring (\"Merged. Waits for your deploy\"); task deployed settles it"),
             new("task", "answered --session <session>",
                 "the session's question is settled: its task goes back to in progress and the blink stops. A prompt\n"
                 + "      never settles it; the session runs this"),

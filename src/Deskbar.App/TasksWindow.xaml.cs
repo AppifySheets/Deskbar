@@ -955,7 +955,8 @@ public partial class TasksWindow : Window
         // column so it sits at the same x on every line. Only on a full line: none in a Matrix line (no room there; its
         // Done tick still shows) and none on a slim one (the tick still shows, and the status is named in its tooltip,
         // SlimTip), and none on a line in its undo window (it is closed).
-        Control(At(Part.Status), full && !row.Closing ? TaskStatusMarks.Chip(row.Status, row.Delivery.Stage) : null);
+        Control(At(Part.Status), full && !row.Closing ? TaskStatusMarks.Chip(row.Status, row.Delivery.Stage,
+            DeployWait.Waits(row.Status, row.Delivery.Shipping, row.QuestionOptions.Count, row.AwaitsDeploy)) : null);
         // A slim line has the sessions as squares alone, and no assignee or Reopen (Task 8): those are in its tooltip
         // and its "⋯" menu (SlimTip, OpenMenuFor).
         Control(At(Part.Sessions), compactLines ? null : slimLines ? SquaresOf(row) : SessionsOf(row));
