@@ -141,7 +141,12 @@ public sealed class TaskService(ITaskStore store, Func<DateTimeOffset> now, Func
     /// Whether a plain close of the task is refused because it is not finished (TaskBoard.Unfinished, task 579f2e4c), with
     /// what GitHub said about its pull requests: the bar's and the window's ticks ask this before they close.
     /// </summary>
-    public bool Unfinished(TaskItem task) => TaskBoard.Unfinished(task, Merged(task));
+    //
+    // A PARENT WITH AN OPEN SUBTASK IS REFUSED FOR THAT FIRST (TaskBoard.Close checks subtasks before anything else), so
+    // it is not "refused because it is not finished": the tick must report "Close its open subtask first", not offer
+    // "Close anyway", which the board would refuse in turn. Found on main, where the subtask refusal (task 452487b4) and
+    // this rule merged the same morning and a waiting parent's tick opened the menu instead of naming its subtask.
+    public bool Unfinished(TaskItem task) => Board.OpenSubtaskCount(task.Id) == 0 && TaskBoard.Unfinished(task, Merged(task));
 
     /// <summary>
     /// Whether the task's work is merged, for the close refusal (TaskBoard.Close, task 579f2e4c): it recorded at least one
