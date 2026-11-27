@@ -209,8 +209,17 @@ public class ChatStreamPanelTests
         Assert.Equal(created + 1, panel.Created);
         Assert.Equal(before, panel.Children.Cast<UIElement>().Take(before.Length));
 
-        // Steps between them end the run: the first message is named again, still the same element.
+        // Steps between them do not end the run (task ac1ebd57, "make these more compact"): Claude is still named once,
+        // under the last message, and the first one is still the same element.
         panel.Apply([Typed("Hello", 0), Said("Hi", 10), Run("r", Step("a", StepKind.Read, "A.cs", at: 15)), Said("Second", 20, "m20")]);
+
+        Assert.Equal(["you", "Claude"], Named(panel));
+        Assert.Contains(hi, panel.Children.Cast<UIElement>());
+        Assert.Empty(Named(hi));
+
+        // A marker between them does end it: the first message is named again, in place.
+        panel.Apply([Typed("Hello", 0), Said("Hi", 10), Run("r", Step("a", StepKind.Read, "A.cs", at: 15)),
+            new ChatMarker("k17", ChatMarkerKind.Interrupted, Now.AddSeconds(17)), Said("Second", 20, "m20")]);
 
         Assert.Equal(["you", "Claude", "Claude"], Named(panel));
         Assert.Contains(hi, panel.Children.Cast<UIElement>());
@@ -227,6 +236,20 @@ public class ChatStreamPanelTests
         var named = TasksWindow.GroupedInStream(shown, [Said("Between", 10)], earlierFolded: false).Select(c => c.NamesAuthor);
 
         Assert.Equal([false, true, true], named);
+    }
+
+    // Only Claude's steps between two of Petre's comments: still one run, "you" once (task ac1ebd57).
+    [Fact]
+    public void Comments_with_only_a_run_of_steps_between_them_are_one_run()
+    {
+        static TaskCommentView Mine(int seconds) =>
+            new(Guid.NewGuid(), "you", false, "", "words") { Who = CommentAuthor.You, Day = "Today", At = Now.AddSeconds(seconds) };
+        var shown = new[] { Mine(0), Mine(30) };
+
+        var named = TasksWindow.GroupedInStream(shown, [Run("r", Step("a", StepKind.Read, "A.cs", at: 10))], earlierFolded: false)
+            .Select(c => c.NamesAuthor);
+
+        Assert.Equal([false, true], named);
     }
 
     // The comments are the window's own elements; an item older than a comment falls before it.

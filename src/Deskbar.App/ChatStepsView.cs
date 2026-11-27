@@ -32,6 +32,9 @@ internal sealed class ChatStepsView : Border
     // The mockup's .steps background (#0C0F14), a shade under the Inbox's own: the block reads as a recess in the chat.
     static readonly Brush Recess = Frozen(0x0C, 0x0F, 0x14);
 
+    // A folded run's line: the size of the chat's grey times and captions, a step under the chat's text (InboxLook.ChatText).
+    const double FoldedText = 12;
+
     readonly ChatStreamDeps deps;
     readonly Button header;
     readonly StackPanel rows = new();
@@ -47,13 +50,11 @@ internal sealed class ChatStepsView : Border
         this.deps = deps;
         runId = run.Id;
         Tag = StepsTag;
-        Background = Recess;
-        BorderBrush = InboxLook.Hairline;
+        // The recess, its hairline and the gap under it are set by Paint: a folded run has none of them.
         BorderThickness = new Thickness(1);
         CornerRadius = new CornerRadius(12);
         // The whole column's width, like the mockup's align-self: stretch.
         HorizontalAlignment = HorizontalAlignment.Stretch;
-        Margin = new Thickness(0, 0, 0, 4);
         header = deps.Button(new Border(), "steps", Toggle);
         header.Focusable = true;
         header.HorizontalContentAlignment = HorizontalAlignment.Stretch;
@@ -104,6 +105,15 @@ internal sealed class ChatStepsView : Border
     {
         var open = Open;
         rows.Visibility = open ? Visibility.Visible : Visibility.Collapsed;
+        // FOLDED, A RUN OF STEPS IS ONE DIM LINE (task ac1ebd57, Petre: "make these more compact"; mockup option A): no
+        // recess, no hairline, the small grey text, "› 3 steps · 9 s · 3 commands" in one line, so it sits between two
+        // bubbles like a caption instead of a card. A run of steps also no longer ends an author's run of messages
+        // (ChatStreamPanel.Unnamed), so the name is not written above and below it. OPENED, it is the recessed block with
+        // its rows that it always was: the steps are then what is being read.
+        Background = open ? Recess : null;
+        BorderBrush = open ? InboxLook.Hairline : null;
+        Margin = new Thickness(0, 0, 0, open ? 4 : 2);
+        var size = open ? InboxLook.ChatText : FoldedText;
         var steps = current.Steps;
         var title = steps.Count == 1 ? "1 step" : $"{steps.Count} steps";
         var duration = DurationOf(steps);
@@ -112,22 +122,26 @@ internal sealed class ChatStepsView : Border
         // Two text blocks side by side, not one with two runs: a text block's Text is empty while it holds inlines, and
         // the words are what a test and a screen reader read.
         var heading = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
-        heading.Children.Add(new TextBlock { Text = title, FontSize = InboxLook.ChatText, FontWeight = FontWeights.SemiBold, Foreground = InboxLook.Ink });
-        if (duration.Length > 0) heading.Children.Add(new TextBlock { Text = " · " + duration, FontSize = InboxLook.ChatText, Foreground = InboxLook.Ink2 });
+        heading.Children.Add(new TextBlock { Text = title, FontSize = size, FontWeight = FontWeights.SemiBold, Foreground = open ? InboxLook.Ink : InboxLook.Ink2 });
+        if (duration.Length > 0) heading.Children.Add(new TextBlock { Text = " · " + duration, FontSize = size, Foreground = open ? InboxLook.Ink2 : InboxLook.Ink3 });
         var summary = new TextBlock
         {
-            Text = SummaryOf(steps, live), FontSize = 13, Foreground = InboxLook.Ink3, TextTrimming = TextTrimming.CharacterEllipsis,
-            VerticalAlignment = VerticalAlignment.Center, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(10, 0, 0, 0),
+            Text = open ? SummaryOf(steps, live) : " · " + SummaryOf(steps, live), FontSize = open ? 13 : FoldedText, Foreground = InboxLook.Ink3,
+            TextTrimming = TextTrimming.CharacterEllipsis, VerticalAlignment = VerticalAlignment.Center,
+            HorizontalAlignment = open ? HorizontalAlignment.Right : HorizontalAlignment.Left, Margin = new Thickness(open ? 10 : 0, 0, 0, 0),
         };
-        var chevron = InboxMarks.Icon(open ? "chevD" : "chevR", 12, InboxLook.Ink2);
-        chevron.Margin = new Thickness(0, 0, 8, 0);
+        var chevron = InboxMarks.Icon(open ? "chevD" : "chevR", open ? 12 : 10, InboxLook.Ink2);
+        chevron.Margin = new Thickness(0, 0, open ? 8 : 5, 0);
         chevron.VerticalAlignment = VerticalAlignment.Center;
-        var line = new DockPanel { LastChildFill = true, Margin = new Thickness(11, 7, 11, 7) };
+        // Folded, the summary follows the heading on the same line; opened, it sits at the block's right edge.
+        var line = new DockPanel { LastChildFill = true, Margin = open ? new Thickness(11, 7, 11, 7) : new Thickness(4, 1, 4, 1) };
         DockPanel.SetDock(chevron, Dock.Left);
-        DockPanel.SetDock(summary, Dock.Right);
+        DockPanel.SetDock(summary, open ? Dock.Right : Dock.Left);
+        DockPanel.SetDock(heading, Dock.Left);
         line.Children.Add(chevron);
-        line.Children.Add(summary);
+        if (open) line.Children.Add(summary);
         line.Children.Add(heading);
+        if (!open) line.Children.Add(summary);
         ((Border)header.Content).Child = line;
     }
 
