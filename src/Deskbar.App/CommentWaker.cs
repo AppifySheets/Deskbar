@@ -97,7 +97,15 @@ sealed class CommentWaker : IDisposable
             // Dropped when the task reported the deploy, finished or was put aside while this waited behind another delivery.
             StillDue = () => tasks.StillWaitsOnDeploy(notice),
         });
-        subscription = comments.Merge(reevaluations).Merge(stalled).Merge(regenerations).Merge(deploys)
+        // A NUDGE FROM DESKBAR'S REPOSITORY WATCH (task c8e6967d, RepoWatch) rides them too: the base of the task's pull
+        // request moved, it conflicts, it merged, or the runs on its merge commit finished. Quiet: it leaves no line in the
+        // thread, delivered or not, because a minute-by-minute watch would otherwise fill every thread with its own news.
+        // A session that cannot be reached just misses it; the stalled ask and the briefing's own rules still cover it.
+        var watched = tasks.WatchNudges.Select(nudge => new Delivery(nudge.TaskId, "a watch nudge", task => SessionBriefing.WatchNudge(task, nudge.Text))
+        {
+            Quiet = true,
+        });
+        subscription = comments.Merge(reevaluations).Merge(stalled).Merge(regenerations).Merge(deploys).Merge(watched)
             .Where(_ => enabled())
             .Select(delivery => live.Take(1).SelectMany(listed => Observable.FromAsync(() => Deliver(delivery, listed)))
                 // One delivery that throws must not end the waker for the rest of the run (final review, I5): it is traced,
@@ -121,6 +129,8 @@ sealed class CommentWaker : IDisposable
         public string? Unsent { get; init; }
         public Action? Undelivered { get; init; }
         public Func<bool>? StillDue { get; init; }
+        // Quiet: when no session can take it, write no thread line (a watch nudge, task c8e6967d).
+        public bool Quiet { get; init; }
     }
 
     async Task<System.Reactive.Unit> Deliver(Delivery delivery, IReadOnlyCollection<ClaudeAgent> listed)
@@ -162,7 +172,7 @@ sealed class CommentWaker : IDisposable
                 break;
             case WakePlan.Nothing(var why):
                 delivery.Undelivered?.Invoke();
-                tasks.Note(taskId, delivery.Unsent ?? why);
+                if (!delivery.Quiet) tasks.Note(taskId, delivery.Unsent ?? why);
                 break;
             // A recurring task between runs (see startRun at the constructor): the comment is already in the thread, which
             // the new run reads, so nothing is carried. A run that cannot start says why in the thread, as Nothing does.

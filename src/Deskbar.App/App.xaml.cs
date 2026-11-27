@@ -111,6 +111,7 @@ public partial class App : Application
     // closed, without waiting for the session's `task answered`. Built beside claudeSessions; disposed with it.
     Core.Tasks.PullRequestWatch? pullRequestWatch;
     Core.Tasks.RunningChangeWatch? runningChangeWatch;
+    Core.Tasks.RepoWatchPoll? repoWatchPoll;
 
     // Tiling (docs/superpowers/specs/2026-11-08-tiling-design.md): the Tiler decides, the surface does the
     // Win32. Both live for the process, both are null in compatibility mode (there are no desktops to tile),
@@ -2064,6 +2065,15 @@ public partial class App : Application
         if (runningChangeWatch is null && ClickTrace.On)
             ClickTrace.Write($"running changes: no watch, the version {UpdateService.RunningVersion} names no commit");
 
+        // DESKBAR WATCHES THE PULL REQUESTS (task c8e6967d, spec docs/superpowers/specs/2026-11-27-repo-watcher-design.md):
+        // once a minute it asks GitHub about every repository with a task in flight and nudges the sessions through
+        // CommentWaker (below). Like the other watches it is built always and asks nothing while no task is in flight; the
+        // `enabled` check keeps it silent while sessions do not keep their tasks (ClaudeTasksInEffect), as CommentWaker's.
+        repoWatchPoll = new Core.Tasks.RepoWatchPoll(tasks!, Deskbar.Windows.Claude.GitHubCli.Repository, Deskbar.Windows.Claude.GitHubCli.Runs,
+            new System.Reactive.Concurrency.SynchronizationContextScheduler(new System.Windows.Threading.DispatcherSynchronizationContext(Dispatcher)),
+            trace: ClickTrace.On ? ClickTrace.Write : null,
+            enabled: () => manager.State.ClaudeTasksInEffect);
+
         commentWaker = new CommentWaker(tasks!, () => manager.State.ClaudeTasksInEffect, claudeSessions.Live, claudeSessions.Resumable, claudeSessions.EndedOnApiError, commentInbox,
             claudeSessions.ResumeWith, claudeSessions.StopNow, ClickTrace.On ? ClickTrace.Write : null,
             // A comment on a recurring task between runs starts a run (WakePlan.FreshRun, task 0b78269e). The runner is
@@ -3002,6 +3012,7 @@ public partial class App : Application
             commentWaker?.Dispose();
             pullRequestWatch?.Dispose();
             runningChangeWatch?.Dispose();
+            repoWatchPoll?.Dispose();
             claudeSessions?.Dispose();
             // The tasks panel, before WPF's Shutdown closes its window (which follows this event when nothing cancels
             // it): saved open if it was, so it opens again at the next sign-in, and its strip given back. Without
@@ -3460,6 +3471,7 @@ public partial class App : Application
         commentWaker?.Dispose();
         pullRequestWatch?.Dispose();
         runningChangeWatch?.Dispose();
+        repoWatchPoll?.Dispose();
         claudeSessions?.Dispose();
         monitor?.Dispose();
         hotkeys?.Dispose(); // unregisters RegisterHotKey chords before the process exits
