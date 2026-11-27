@@ -337,7 +337,7 @@ public partial class TaskDetailWindow : Window
             // The pull requests section (task e7aa49b1): a new one redraws.
             string.Join('\u001e', r.PullRequests.Select(p => p.Key)),
             // The deploy pull requests section (task 1565789d).
-            string.Join('\u001e', r.DeployPullRequests.Select(p => p.Key)),
+            string.Join('\u001e', r.DeployPullRequests.Select(p => p.Key)), r.DeployBuilt,
             r.ClaudeWorking, r.WorkingCount,
             string.Join('\u001e', r.Comments.Select(c => $"{c.Id}|{c.Author}|{c.When}|{c.Settled}|{c.Editable}|{c.Markdown}")),
             string.Join('\u001e', r.SessionList.Select(s => $"{s.Id}|{s.State}|{s.Joined:O}")),
