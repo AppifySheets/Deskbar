@@ -54,6 +54,28 @@ public static class GitHubCli
             : Task.FromResult(Result.Failure<PullRequestArrival>("gh.exe is not on the PATH or in %ProgramFiles%\\GitHub CLI"));
 
     /// <summary>
+    /// What GitHub says about the given pull requests of one repository, in ONE request (Deskbar task c8e6967d, RepoWatch
+    /// holds the rules): <c>gh api graphql -f query=&lt;RepoWatch.Query&gt;</c>, read by RepoWatch.ParseRepository. The query
+    /// is a single argument of the argument list, so it needs no shell quoting. A failure when gh cannot be found or
+    /// run, or answers with anything but the expected JSON.
+    /// </summary>
+    public static Task<Result<IReadOnlyList<PullFacts>>> Repository(string repository, IReadOnlyList<PullRequestLink> links) =>
+        Find() is { HasValue: true } gh
+            ? new ClaudeCli(gh.Value).Run(["api", "graphql", "-f", $"query={RepoWatch.Query(links)}"], null, Timeout)
+                .Bind(json => RepoWatch.ParseRepository(links, json))
+            : Task.FromResult(Result.Failure<IReadOnlyList<PullFacts>>("gh.exe is not on the PATH or in %ProgramFiles%\\GitHub CLI"));
+
+    /// <summary>
+    /// The workflow runs on a merge commit (Deskbar task c8e6967d): <c>gh run list --repo o/r --commit &lt;sha&gt; --json
+    /// name,status,conclusion,url</c>, read by RepoWatch.ParseRuns. A failure as for <see cref="Repository"/>.
+    /// </summary>
+    public static Task<Result<IReadOnlyList<RunFacts>>> Runs(PullRequestLink link, string sha) =>
+        Find() is { HasValue: true } gh
+            ? new ClaudeCli(gh.Value).Run(["run", "list", "--repo", $"{link.Owner}/{link.Repo}", "--commit", sha, "--json", "name,status,conclusion,url"], null, Timeout)
+                .Bind(RepoWatch.ParseRuns)
+            : Task.FromResult(Result.Failure<IReadOnlyList<RunFacts>>("gh.exe is not on the PATH or in %ProgramFiles%\\GitHub CLI"));
+
+    /// <summary>
     /// The full path of gh.exe: on Deskbar's own PATH, then the user's and the machine's as the registry holds them now,
     /// then the folder GitHub's installer (and winget) puts it in. None when it is in none of them.
     /// </summary>

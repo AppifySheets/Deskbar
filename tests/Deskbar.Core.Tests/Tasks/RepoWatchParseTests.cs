@@ -69,6 +69,28 @@ public sealed class RepoWatchParseTests
         Assert.Equal(new RunFacts("Deploy", "https://x/2", false, ""), runs[1]);
     }
 
+    // Captured from the real gh on 2026-11-27 (Deskbar pull request 646 open, 665 merged; the merge commit's runs), the
+    // shapes the rules were written against: an open one has mergeCommit null, a merged one mergeable UNKNOWN.
+    [Fact]
+    public void ParsesTheRealGhAnswers()
+    {
+        var link646 = new PullRequestLink("AppifySheets", "Deskbar", 646);
+        var link665 = new PullRequestLink("AppifySheets", "Deskbar", 665);
+        const string repository = """
+            {"data":{"repository":{"p646":{"state":"OPEN","mergeable":"MERGEABLE","baseRefName":"main","baseRef":{"target":{"oid":"bc5072b3a049e56e01da198e86c74123ada18cc6"}},"mergeCommit":null},"p665":{"state":"MERGED","mergeable":"UNKNOWN","baseRefName":"main","baseRef":{"target":{"oid":"bc5072b3a049e56e01da198e86c74123ada18cc6"}},"mergeCommit":{"oid":"bc5072b3a049e56e01da198e86c74123ada18cc6"}}}}}
+            """;
+        const string runs = """
+            [{"conclusion":"success","name":"Store submission","status":"completed","url":"https://github.com/AppifySheets/Deskbar/actions/runs/45978464409"},{"conclusion":"success","name":"Release","status":"completed","url":"https://github.com/AppifySheets/Deskbar/actions/runs/45977664277"}]
+            """;
+
+        var facts = RepoWatch.ParseRepository([link646, link665], repository).Value;
+
+        Assert.Equal(new PullFacts(link646, PullRequestState.Open, Mergeable.Mergeable, "main", "bc5072b3a049e56e01da198e86c74123ada18cc6", Maybe<string>.None), facts[0]);
+        Assert.Equal(PullRequestState.Merged, facts[1].State);
+        Assert.Equal("bc5072b3a049e56e01da198e86c74123ada18cc6", facts[1].MergeCommit.Value);
+        Assert.All(RepoWatch.ParseRuns(runs).Value, run => Assert.True(run.Finished && run.Conclusion == "success"));
+    }
+
     [Fact]
     public void QueryNamesEveryPullRequest()
     {

@@ -246,6 +246,16 @@ public static class SessionBriefing
         + $"- the work is finished and deployed (or has nothing to deploy): run {Shim} task done --session <your session id>, with what to try in the status line\n"
         + "Then stop without saying anything more.\n";
 
+    /// <summary>
+    /// What a session reads when Deskbar's repository watch has news about its pull request (Deskbar task c8e6967d, spec
+    /// docs/superpowers/specs/2026-11-27-repo-watcher-design.md): the base moved, it conflicts, it merged or the runs on
+    /// its merge commit finished. Delivered on a comment's roads (the app's CommentWaker) and leaves no thread line. The
+    /// last line says it is not the user's word, so it never settles a question the way a comment from the user does.
+    /// </summary>
+    public static string WatchNudge(TaskItem task, string text) =>
+        $"Deskbar's watch, about your task {task.Id.ToString()[..8]}: {text}\n"
+        + "This is Deskbar, not the user: it settles no question and needs no comment back. Act on it, then go on.\n";
+
     const string RegenerateOpening = "Deskbar: your task ";
 
     /// <summary>
