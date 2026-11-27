@@ -28,7 +28,16 @@ namespace Deskbar.Core.Tasks;
 //
 // While the search box has text, a search by id found a task, or the status filter is Closed or Snoozed, the tabs do not
 // apply (TabsApply): the Inbox lists the matches in the List's order, in one list.
-public enum InboxTab { NeedsYou, Claude, Notes }
+//
+// A FOURTH TAB, ALL (the owner: "let's add all tasks here as well"), holds every line the other three hold, each once. It
+// is not a place a line is sorted into: a line's own Tab is always one of the three, and All is only a way of looking at
+// them together (InboxView.Count and In answer for it from the three). Its order is the one the lines already have,
+// Needs you's lines first, then Claude's, then Notes', each in its own tab's order under its own captions: Split sorts
+// the lines by section, and the sections are declared tab by tab, so that order costs nothing and the captions still say
+// which part a line is in. The List's order (WaitingOnYou, Claude working, the quadrants, Done last) was the other
+// candidate; it was not taken because it would part a tab's sections (Finished would go to the end, away from the
+// questions) and the captions would no longer match any tab's. All is declared last: its card is the row's last.
+public enum InboxTab { NeedsYou, Claude, Notes, All }
 
 /// <summary>
 /// The captioned part of a tab a line sits in, in the order the parts are drawn. <see cref="Matches"/> is the one list
@@ -57,14 +66,28 @@ public sealed record InboxView(bool Tabbed, IReadOnlyList<InboxLine> Lines)
 {
     public static readonly InboxView Empty = new(true, []);
 
-    /// <summary>How many lines a tab shows: its button's count.</summary>
-    public int Count(InboxTab tab) => Lines.Count(l => l.Tab == tab);
+    /// <summary>How many lines a tab shows: its button's count. All counts every line, each once.</summary>
+    public int Count(InboxTab tab) => Lines.Count(l => Holds(tab, l));
 
-    /// <summary>A tab's lines, in the order they are drawn.</summary>
-    public IReadOnlyList<InboxLine> In(InboxTab tab) => Lines.Where(l => l.Tab == tab).ToArray();
+    /// <summary>
+    /// A tab's lines, in the order they are drawn. All's are every line in the order Split left them: by tab, then by
+    /// section, then the List's order (see the header).
+    /// </summary>
+    public IReadOnlyList<InboxLine> In(InboxTab tab) => Lines.Where(l => Holds(tab, l)).ToArray();
 
-    /// <summary>The tab that holds a task's line, none when the Inbox has no line for it.</summary>
+    /// <summary>The tab that holds a task's line, none when the Inbox has no line for it. Never All: a line's own tab.</summary>
     public Maybe<InboxTab> TabOf(Guid id) => Lines.TryFirst(l => l.Id == id).Map(l => l.Tab);
+
+    /// <summary>
+    /// The tab to show a task's line in, from the tab on show: the tab on show while it holds the line (All holds every
+    /// line, so a user looking at All stays there), else the line's own tab; none when the Inbox has no line for it.
+    /// Every "bring this task's line on show" asks this (a task shown from the bar, a task just added, a terminal in front),
+    /// so none of them takes the user out of All to a tab that holds less.
+    /// </summary>
+    public Maybe<InboxTab> TabToShow(Guid id, InboxTab onShow) =>
+        Lines.TryFirst(l => l.Id == id).Map(l => Holds(onShow, l) ? onShow : l.Tab);
+
+    static bool Holds(InboxTab tab, InboxLine line) => tab == InboxTab.All || line.Tab == tab;
 }
 
 public static class InboxTabs

@@ -77,6 +77,10 @@ internal static class InboxMarks
         ["refresh"] = [S("M13.5 8a5.5 5.5 0 1 1-1.7-4"), S("M12.4 1.7v2.7H9.6")],
         ["stats"] = [S("M3 13.5V8.5M8 13.5V3M13 13.5V6.5")],
         ["inbox"] = [S("M1.75 9.5h3.5l1 2h3.5l1-2h3.5"), S("M3.5 3h9l1.75 6.5v3a1.25 1.25 0 0 1-1.25 1.25H3A1.25 1.25 0 0 1 1.75 12.5v-3z")],
+        // The Inbox's All tab (every line of the other three): a stack of cards, a rounded card with the edges of two more
+        // behind it. New here, the mockup has no All tab; drawn on the same grid and strokes as the rest, and unlike every
+        // state mark (no state is "all"), so it never reads as a line's state.
+        ["all"] = [Box(2.25, 6.25, 11.5, 7.5, 2), S("M3.75 3.9h8.5"), S("M5.25 1.75h5.5")],
         // The step kinds of a session's steps (ChatSteps, TasksWindow.Transcript.cs), and the marks a step row wears. Drawn on
         // the same grid and with the same strokes as the mockup's table above; the mockup has no step icons of its own, so
         // these are new: a page of text (read), a pencil (edit), a pencil on a line (write), a globe (web), three nodes joined

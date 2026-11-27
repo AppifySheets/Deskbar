@@ -175,7 +175,7 @@ public partial class TasksWindow
             }
             else if (inboxPage is null) inboxListOffset = Scroller.VerticalOffset;
             inboxPage = id;
-            if (inbox.Tabbed && inbox.TabOf(id) is { HasValue: true } tab) inboxTab = tab.Value;
+            if (inbox.Tabbed && inbox.TabToShow(id, inboxTab) is { HasValue: true } tab) inboxTab = tab.Value;
             RedrawInbox();
             return true;
         }
