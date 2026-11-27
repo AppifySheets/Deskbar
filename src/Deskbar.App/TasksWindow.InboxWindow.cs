@@ -16,7 +16,8 @@ namespace Deskbar.App;
 // What differs from a page in the panel is only what a window has no use for, and all of it is switched by one flag:
 //   * no back arrow, and Esc goes nowhere: there is no list behind it (PageTop, InboxBack);
 //   * a subtask opens in a window of its own, as it always did in a task window (OpensInOwnWindow);
-//   * the thread shows every comment, whole (ShowPage), where the panel's page shows the latest three, each cut short;
+//   * every comment is whole (ShowPage), where the panel's page cuts a long one short (both show every comment since
+//     task 5ee182cf; the earlier-comments fold left to hide here is a subtask thread's, inside the page);
 //   * a close can be undone from the page while its six seconds run, and Important and Urgent can be toggled, as the old
 //     task window's chips did (WindowStateRow);
 //   * "Open in window" is not on the "⋯" menu (it is this window), and "Show in the tasks panel" is (ShapeWindowMenu).
@@ -32,7 +33,8 @@ public partial class TasksWindow
     /// <summary>
     /// Draws the task's page from a view of that one task (TasksBoard.WithInboxPage), and again on every change. The page is
     /// the task's, whatever else the view says; its thread is whole: the earlier comments unfolded and every comment in full,
-    /// as a task window always showed it (the panel's page shows the latest three, each cut to three lines).
+    /// as a task window always showed it (the panel's page shows every comment too since task 5ee182cf, but cuts a long one
+    /// short). The earlier comments are unfolded here for a subtask's thread inside the page, which still folds them.
     /// </summary>
     internal void ShowPage(TasksView view, Guid id)
     {

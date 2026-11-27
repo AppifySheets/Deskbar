@@ -310,12 +310,17 @@ public partial class TasksWindow
             DockPanel.SetDock(bottom, Dock.Bottom);
             dock.Children.Add(bottom);
         }
-        // A CHAT READS FROM THE BOTTOM UP (the PM's fix 1 after checkpoint 1). A body shorter than the page sits at its
-        // bottom, so the comment box is at the bottom edge and the empty room is on top; a longer one scrolls. The
-        // scroller arranges its content at least as tall as the view, so the body's own bottom alignment does it.
+        // A SHORT CHAT STARTS AT THE TOP (task 5ee182cf). The PM's fix 1 after checkpoint 1 had a body shorter than the page
+        // sit at its bottom, a chat read from the bottom up, with the empty room on top. Petre, on a screenshot of a page that
+        // was mostly that empty room with the chat crowded at its foot: "chat shouldn't collapse on me in the inbox task
+        // view", and he picked "it starts at the top under the header and grows down". The comment box no longer needs the
+        // bottom alignment to sit at the bottom edge: it is docked below the scroller (TasksWindow.DockedBox.cs). So the body
+        // is top-aligned: a short chat reads from just under the header down, the empty room between it and the docked box;
+        // once it is taller than the page it scrolls and follows its newest as before (KeepPlace: a page that cannot scroll
+        // counts as at its end, so it is held at its end as it grows past the view).
         FollowTranscript(row.Id);
         var body = PageBody(row, mark);
-        body.VerticalAlignment = VerticalAlignment.Bottom;
+        body.VerticalAlignment = VerticalAlignment.Top;
         // A FastScrollViewer like every other scroller in the panel (FastScrollViewer.cs, task 85df5e3f), so a page's chat
         // scrolls as far per wheel notch as the list it was opened from.
         pageScroller = new FastScrollViewer
@@ -526,8 +531,8 @@ public partial class TasksWindow
         // THE QUESTION IS IN THE CHAT WHEN THE CHAT SHOWS IT (task 968c2216, on main): an ask writes the question into the
         // thread too, and an open line leaves it off while that comment is on show (DetailShown). The page follows the
         // same rule, so the question is never drawn twice: the bubble only for a question the chat does not carry (one
-        // asked before questions went into the thread, or folded behind "N earlier comments"), and what is left of the
-        // detail ("no live session") as plain text.
+        // asked before questions went into the thread; since task 5ee182cf a page folds no comment away, ThreadComments),
+        // and what is left of the detail ("no live session") as plain text.
         var shownDetail = DetailShown(row);
         if (shownDetail.Length > 0)
         {

@@ -2167,11 +2167,29 @@ public partial class TasksWindow : Window
 
     // --- the thread --------------------------------------------------------------------------------------------------
 
+    // Whether a thread is drawn as its task's page (task 5ee182cf), in the panel or a task window. The view being drawn must
+    // be the Inbox's too, not only inboxPage: a switch from a page to the List keys the click guard (DrawRows' placesKey,
+    // from ThreadLayoutKey) before PaintInboxChrome clears inboxPage, and with the page's rule there the real move from page
+    // to List started no guard while the next unrelated redraw did, eating a click (review of this change). `latest` is
+    // already the view being drawn when Draw runs, and a task window's page view has its Inbox set.
+    bool OnItsPage(Guid id) => inboxPage == id && latest?.Inbox is not null;
+
     // The comments a thread draws (settled ones folded away, then only the latest three unless the earlier ones are
     // unfolded) and how many were left out as earlier. The one place the rule lives: Thread draws from it and the click
     // guard's key (ThreadLayoutKey) reads it.
+    //
+    // A TASK'S PAGE KEEPS ITS WHOLE CHAT (task 5ee182cf; Petre, of a page whose chat had shrunk to its last few bubbles
+    // under an empty page: "chat shouldn't collapse on me in the inbox task view", "i mean old chat messages hiding,
+    // settling"). The page is a chat read top to bottom with a scroller of its own, so neither fold belongs there: a
+    // session's `task answered` settles every comment it wrote since it asked, and those bubbles vanished in front of him;
+    // past three comments the older ones folded, and the session's steps and messages older than the oldest comment shown
+    // folded with them (ClaudeChatStream.Build's earlierCommentsFolded), so one more comment could take most of the chat
+    // away. So on its page (in the panel or in its own window, both set inboxPage) a task's thread shows every comment in
+    // its place, a settled one dimmed as history (CommentOf), and reports none as earlier. The List's thread, and a subtask's
+    // thread drawn inside its parent's page, keep both folds: a thread under a line has no page of room to spend.
     (IReadOnlyList<TaskCommentView> Shown, int Earlier) ThreadComments(TaskRowView row)
     {
+        if (OnItsPage(row.Id)) return (row.Comments, 0);
         var candidates = row.Comments.Where(c => !c.Settled || settledOpen.Contains(row.Id)).ToList();
         var earlier = Math.Max(0, candidates.Count - LatestShown);
         return (earlier > 0 && !earlierOpen.Contains(row.Id) ? candidates.Skip(earlier).ToList() : candidates, earlier);
@@ -2279,7 +2297,8 @@ public partial class TasksWindow : Window
         // unfolds the rest (settled comments, folded above, do not count toward the three).
         // The two folds sit side by side, centred over the conversation, as a chat shows "earlier messages" (task 39bc9c4d).
         var folds = new WrapPanel { HorizontalAlignment = HorizontalAlignment.Center };
-        if (settledCount > 0) folds.Children.Add(SettledFold(row.Id, settledCount, unfolded));
+        // Not on the task's page, where the settled comments stay in their places (ThreadComments, task 5ee182cf).
+        if (settledCount > 0 && !OnItsPage(row.Id)) folds.Children.Add(SettledFold(row.Id, settledCount, unfolded));
         if (earlier > 0) folds.Children.Add(EarlierFold(row.Id, earlier, open));
         if (folds.Children.Count > 0) panel.Children.Add(folds);
         // The comments as a chat (task 39bc9c4d, ChatThread): bubbles on two sides, Deskbar's lines as events, a day line
@@ -2621,7 +2640,10 @@ public partial class TasksWindow : Window
         // comment stays either way.
         actions.Add(Small(new TextBlock { Text = comment.Settled ? "Unsettle" : "Settle", Foreground = DimInk, FontSize = 10 },
             comment.Settled ? "Unsettle comment" : "Settle comment",
-            () => Actions?.SettleComment(comment.Id, !comment.Settled), comment.Settled ? "Show it with the thread again" : "Fold this comment away, keeping it"));
+            () => Actions?.SettleComment(comment.Id, !comment.Settled),
+            // On its task's page a settled comment stays in place, dimmed (ThreadComments, task 5ee182cf): the hints say so.
+            comment.Settled ? OnItsPage(taskId) ? "Show it undimmed again" : "Show it with the thread again"
+            : OnItsPage(taskId) ? "Dim this comment as settled, keeping it in place" : "Fold this comment away, keeping it"));
         // A question Deskbar asked is a bubble like a session's, not an event line (task 968c2216).
         var isEvent = comment.Who == CommentAuthor.Deskbar && !comment.Asks;
         // Images in tasks: the body renders the comment's text alone; its pictures are a row of their own after it
@@ -2719,7 +2741,7 @@ public partial class TasksWindow : Window
         if (isEvent) more.HorizontalAlignment = HorizontalAlignment.Center;
         if (comment.AsksNow && AnswerButtons(taskId) is { } answers) parts.Children.Add(answers);
         var placed = isEvent ? ChatThread.Event(comment, parts, timeInBody, actions) : ChatThread.Message(comment, parts, actions);
-        // A settled comment, when unfolded, is dim: it is history.
+        // A settled comment, when unfolded or on its task's page (task 5ee182cf), is dim: it is history.
         placed.Opacity = comment.Settled ? 0.55 : 1;
         return placed;
     }
