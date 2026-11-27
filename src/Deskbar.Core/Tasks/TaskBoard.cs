@@ -482,8 +482,24 @@ public sealed record TaskBoard(IReadOnlyList<TaskItem> Tasks)
     // all ended, close as before, and a Done task closes whatever its session is doing (the keeper stops it once idle).
     // <paramref name="stoppingClaude"/> is the way past it, for "Stop Claude and close" (ClaudeTaskActions.StopAndClose
     // closes with it and then stops the sessions, and `task close --stop-claude`). It never skips the subtask rule.
-    // A task WAITING ON PETRE closes at once too (task 3cdd0a52, below on ClaudeStillWorking).
-    public Result<TaskBoard> Close(Guid id, DateTimeOffset now, bool stoppingClaude = false) =>
+    // A task WAITING ON PETRE is not Claude working (task 3cdd0a52, below on ClaudeStillWorking), but it is not finished
+    // either, so it has its own refusal, the next paragraph.
+    //
+    // NOT FINISHED (task 579f2e4c, 2026-11-27, Petre with a screenshot of a waiting task he had just ticked off: "i
+    // shouldn't be allowed to just close a task that's still ongoing / still has an active session or has a question,
+    // that hasn't yet been merged"). Task 3cdd0a52 let a task waiting on him close on one tick, so a waiting task with a
+    // question still open, a live session and nothing merged closed as easily as a note, and only the undo window saved
+    // it. So an open task that is not Done, still asks something or has a live session, and whose work is not merged
+    // (<see cref="Unfinished"/>) refuses a plain close too, with <see cref="TaskViews.UnfinishedRefusal"/>. Whether its
+    // work is merged is not on the board: it is what GitHub said about the task's recorded pull requests, which
+    // TaskService keeps (TaskService.Merged) and passes in as <paramref name="merged"/>. None given (the board on its own,
+    // the tests) means nothing is known merged. A task whose pull requests have merged closes at once again, as 3cdd0a52
+    // wanted for the installed change that started it. <paramref name="anyway"/> is the way past it, the ticks' "Close
+    // anyway" and `task close --anyway`: a task given up on has to be closable somehow, and a hard refusal would leave no
+    // way to drop one whose pull request will never merge. Stopping Claude passes it too, since that is also a close
+    // Petre asked for in so many words. Neither ever skips the subtask rule.
+    public Result<TaskBoard> Close(Guid id, DateTimeOffset now, bool stoppingClaude = false, bool anyway = false,
+        Func<TaskItem, bool>? merged = null) =>
         // Only an OPEN task is checked for open subtasks, so closing a closed task still says it is closed.
         // The refusal names the open subtasks (task 452487b4): Petre met it on a parent whose subtask was out of sight
         // and read it as "it doesn't have a subtask", so the words say which task is in the way.
@@ -492,7 +508,25 @@ public sealed record TaskBoard(IReadOnlyList<TaskItem> Tasks)
             // ClaudeStillWorking is false for a closed task, so closing a closed task still says it is closed.
             : !stoppingClaude && Tasks.FirstOrDefault(t => t.Id == id) is { } task && ClaudeStillWorking(task)
                 ? Result.Failure<TaskBoard>(TaskViews.ClaudeStillWorkingRefusal)
-                : ChangeOpen(id, t => t with { Status = TaskStatus.Closed, Question = Maybe<string>.None, UpdatedAt = now });
+                // Unfinished is false for a closed task too, for the same reason.
+                : !stoppingClaude && !anyway && Tasks.FirstOrDefault(t => t.Id == id) is { } unfinished
+                  && Unfinished(unfinished, merged?.Invoke(unfinished) ?? false)
+                    ? Result.Failure<TaskBoard>(TaskViews.UnfinishedRefusal)
+                    : ChangeOpen(id, t => t with { Status = TaskStatus.Closed, Question = Maybe<string>.None, UpdatedAt = now });
+
+    /// <summary>
+    /// Whether the task is not finished (see <see cref="Close"/>, task 579f2e4c): it is open and not Done, it still asks
+    /// Petre something or has a live session, and its work is not <paramref name="merged"/>. A plain close refuses it,
+    /// and the bar's and the window's ticks open the "Close anyway" menu instead. <see cref="ClaudeStillWorking"/> is
+    /// asked first, so a task Claude is working on gets the stop menu, never this one.
+    /// </summary>
+    //
+    // Only the question and a live session count as "still ongoing". Petre's notes have neither, and a task whose
+    // sessions have all ended and asks nothing closes on one tick as before (task 37cd7081's ruling: "live session, but
+    // offer stop", not every task short of Done). Done is finished whatever its pull requests say: a session marks Done
+    // only after its merge and deploy (the briefing's order), or Petre did by hand.
+    public static bool Unfinished(TaskItem task, bool merged) =>
+        task.IsOpen && task.Status != TaskStatus.Done && !merged && (task.Question.HasValue || task.HasLiveSession);
 
     /// <summary>
     /// Whether closing the task would leave Claude working on it (see <see cref="Close"/>): it is open, neither Done nor
@@ -1117,7 +1151,9 @@ public sealed record TaskBoard(IReadOnlyList<TaskItem> Tasks)
         Lookup(id).Bind(task => Lookup(of).Bind(target => OriginalOf(target)).Bind(original =>
             original.Id == id ? Result.Failure<TaskBoard>("A task cannot be a duplicate of itself")
             : task.DuplicateOf == original.Id && !task.IsOpen ? Result.Success(this)
-            : (task.IsOpen ? Close(id, now, stoppingClaude) : Result.Success(this))
+            // `anyway`: marking a duplicate is a deliberate close, never the slip of a tick that the not-finished refusal
+            // guards against (task 579f2e4c), and neither the panel's "Duplicate of" nor `task duplicate` has a way past it.
+            : (task.IsOpen ? Close(id, now, stoppingClaude, anyway: true) : Result.Success(this))
                 .Map(closed => closed.Replaced(closed.Tasks.First(t => t.Id == id) with { DuplicateOf = original.Id, UpdatedAt = now }))));
 
     // The task a duplicate chain ends at: the target itself when it duplicates nothing that still exists.

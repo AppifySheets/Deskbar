@@ -327,6 +327,7 @@ public sealed class TasksBoard : IDisposable
             // App sets OpenManager after this constructor. A refusal shows on the problem line like any other.
             OpenManager = () => Report(OpenManager?.Invoke() ?? Result.Failure("The manager is not available.")),
             StopClaudeAndClose = id => Close(id, stopClaude: true),
+            CloseAnyway = id => Close(id, anyway: true),
             OpenSession = openSession is null ? null : (id, session) => OpenSession(id, session),
             SubtaskParent = id => tasks.Board.SubtaskParentFor(id)
                 .Match(p => new SubtaskParentView(p.Id, p.Title, p.WorkspaceId), () => (SubtaskParentView?)null),
@@ -1003,14 +1004,22 @@ public sealed class TasksBoard : IDisposable
     /// <summary>
     /// Closes the task at once, keeping its line in place with Undo for the undo window (see the header). A task Claude is
     /// still working on (task 37cd7081, TaskBoard.ClaudeStillWorking) is not closed: the window opens its stop menu, whose
-    /// "Stop Claude and close" comes back here with <paramref name="stopClaude"/>, through the App's StopAndClose.
+    /// "Stop Claude and close" comes back here with <paramref name="stopClaude"/>, through the App's StopAndClose. A task
+    /// that is not finished (task 579f2e4c, TaskService.Unfinished: it still asks something or has a live session, and its
+    /// work is not merged) is not closed either: the window opens the "Close anyway" menu, which comes back here with
+    /// <paramref name="anyway"/>.
     /// </summary>
-    public Result Close(Guid id, bool stopClaude = false)
+    public Result Close(Guid id, bool stopClaude = false, bool anyway = false)
     {
         if (tasks.Board.Tasks.FirstOrDefault(t => t.Id == id) is not { IsOpen: true } task) return Report(tasks.Close(id), id);
         if (!stopClaude && TaskBoard.ClaudeStillWorking(task))
         {
             window.OpenStopClaudeMenu(id);
+            return Result.Success();
+        }
+        if (!stopClaude && !anyway && tasks.Unfinished(task))
+        {
+            window.OpenUnfinishedMenu(id, TaskViews.UnfinishedHeader(task));
             return Result.Success();
         }
         // Pending before Close pulses Changed, so the redraw that pulse causes already draws the line struck through.
@@ -1026,7 +1035,7 @@ public sealed class TasksBoard : IDisposable
             Selected = selection.IsSelected(id),
             Expanded = wasExpanded,
         };
-        var closed = !stopClaude ? tasks.Close(id)
+        var closed = !stopClaude ? tasks.Close(id, anyway: anyway)
             : stopClaudeAndClose is { } stop ? stop(task)
             : tasks.Close(id, stoppingClaude: true);
         // A refused close leaves the task open, so its thread stays as it was too (added back before Forget's redraw).
@@ -1567,6 +1576,8 @@ public sealed class TasksBoard : IDisposable
         SubtaskCount = tasks.Board.OpenSubtaskCount(task.Id),
         // Claude still at it (task 37cd7081): the tick's tip says it will offer to stop Claude.
         ClaudeWorking = TaskBoard.ClaudeStillWorking(task),
+        // Not finished and not merged (task 579f2e4c): the tick's tip says it will ask before closing.
+        Unfinished = tasks.Unfinished(task),
         // An open thread lists the task's subtasks (follow-up: an open parent showed none of them).
         Subtasks = open
             // EVERY SUBTASK CARRIES ITS WHOLE ROW (task 249a1e8a; Petre, on a screenshot of a parent's thread where the
@@ -1584,7 +1595,7 @@ public sealed class TasksBoard : IDisposable
                         Closing = pendingCloses.ContainsKey(c.Id),
                         // For a drag of its entry out of the thread (task f64d06ae): the drop rule asks for it.
                         Quadrant = c.Quadrant,
-                        TickTip = TaskViews.TickTip(c.IsClaudes, tasks.Board.OpenSubtaskCount(c.Id), TaskBoard.ClaudeStillWorking(c)),
+                        TickTip = TaskViews.TickTip(c.IsClaudes, tasks.Board.OpenSubtaskCount(c.Id), TaskBoard.ClaudeStillWorking(c), tasks.Unfinished(c)),
                     }).ToArray())
                 .GetValueOrDefault([])
             : [],
@@ -1953,6 +1964,9 @@ internal sealed record TaskRowView(Guid Id, string Title, string Detail, TaskSta
     /// <summary>Whether Claude is still working on the task (TaskBoard.ClaudeStillWorking): its tick offers to stop it.</summary>
     public bool ClaudeWorking { get; init; }
 
+    /// <summary>Whether the task is not finished (TaskService.Unfinished, task 579f2e4c): its tick asks before closing.</summary>
+    public bool Unfinished { get; init; }
+
     /// <summary>Drawn right under its parent (TaskViews.UnderParents), so the arrow needs no parent's name.</summary>
     public bool Nested { get; init; }
 
@@ -2129,6 +2143,9 @@ internal sealed record TasksWindowActions(
 
     /// <summary>The stop menu's "Stop Claude and close" (task 37cd7081): TasksBoard.Close with stopClaude.</summary>
     public Func<Guid, Result>? StopClaudeAndClose { get; init; }
+
+    /// <summary>The "Close anyway" menu's item (task 579f2e4c): TasksBoard.Close with anyway.</summary>
+    public Func<Guid, Result>? CloseAnyway { get; init; }
 
     /// <summary>A session's Open in the thread (Task 9): the task's id and the session's. None, no Open buttons.</summary>
     public Action<Guid, string>? OpenSession { get; init; }

@@ -132,8 +132,37 @@ public sealed class TaskService(ITaskStore store, Func<DateTimeOffset> now, Func
     public Result MarkDone(Guid id) => Apply(Board.MarkDone(id, now(), Zone));
 
     // `stoppingClaude`: past the refusal for a task Claude is still working on (TaskBoard.Close, task 37cd7081), for
-    // "Stop Claude and close", which stops the sessions right after.
-    public Result Close(Guid id, bool stoppingClaude = false) => Apply(Board.Close(id, now(), stoppingClaude));
+    // "Stop Claude and close", which stops the sessions right after. `anyway`: past the refusal for a task that is not
+    // finished (task 579f2e4c), for "Close anyway". Whether its work is merged comes from what GitHub said (Merged).
+    public Result Close(Guid id, bool stoppingClaude = false, bool anyway = false) =>
+        Apply(Board.Close(id, now(), stoppingClaude, anyway, Merged));
+
+    /// <summary>
+    /// Whether a plain close of the task is refused because it is not finished (TaskBoard.Unfinished, task 579f2e4c), with
+    /// what GitHub said about its pull requests: the bar's and the window's ticks ask this before they close.
+    /// </summary>
+    public bool Unfinished(TaskItem task) => TaskBoard.Unfinished(task, Merged(task));
+
+    /// <summary>
+    /// Whether the task's work is merged, for the close refusal (TaskBoard.Close, task 579f2e4c): it recorded at least one
+    /// pull request, and every one that was not closed unmerged is merged by GitHub's word, or (none known) was reported
+    /// deployed. One still open, or one the watch has not answered yet and nobody reported, is not merged.
+    /// </summary>
+    //
+    // From the same answers the merged ring reads (RunningChanges), but not through DeliveryOf: that leaves a task back
+    // from Done unmarked so an old pull request does not draw a disc on new work, and here an old merged pull request on a
+    // reopened task still counts. The cost is one close on one tick that might have asked; the refusal is a guard against
+    // a slip, not a lock. Unknown (gh missing, offline) is not merged, so on such a machine the tick asks: "Close anyway"
+    // is one click further, where a guess the other way would let the slip through.
+    public bool Merged(TaskItem task)
+    {
+        var shipped = RunningChanges.Watched(task)
+            .Where(l => !(arrivals.TryGetValue(l.Key, out var fact) && fact.State == PullRequestState.Closed))
+            .ToArray();
+        return shipped.Length > 0 && shipped.All(l => arrivals.TryGetValue(l.Key, out var fact)
+            ? fact.State == PullRequestState.Merged
+            : task.Deployed.Any(d => d.Key == l.Key));
+    }
 
     public Result Reopen(Guid id) => Apply(Board.Reopen(id, now(), Zone));
 

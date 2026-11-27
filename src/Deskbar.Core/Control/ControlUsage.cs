@@ -78,7 +78,7 @@ public static class ControlUsage
                 + "      whose folder holds the caller's own folder, else on the workspace of the\n"
                 + "      latest task worked on in that folder's repo; - reads the title from stdin;\n"
                 + "      --important and --urgent set its flags, and it goes to the top of the quadrant they give"),
-            new("task", "close <id> [--stop-claude]", "close a task: it leaves the bar and the window's open tasks; one Claude is still working on needs --stop-claude, which stops its background sessions"),
+            new("task", "close <id> [--stop-claude|--anyway]", "close a task: it leaves the bar and the window's open tasks; one Claude is still working on needs --stop-claude, which stops its background sessions; one that still asks something or has a live session, and whose work is not merged, needs --anyway"),
             new("task", "reopen <id>", "reopen a closed task: in progress while a session is live on it, else backlog"),
             new("task", "status <id> <backlog|in-progress|waiting|done>",
                 "set a task's status by hand (waiting is waiting on you); close closes"),

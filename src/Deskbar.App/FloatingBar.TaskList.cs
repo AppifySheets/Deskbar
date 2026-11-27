@@ -1962,12 +1962,23 @@ public partial class FloatingBar
     // the line menu's Close, open the stop menu instead (OpenStopClaudeMenu), whose one item closes with `stopClaude`:
     // through StopClaudeAndClose (the App's ClaudeTaskActions.StopAndClose, which closes and then stops the sessions),
     // with the same undo window as any close.
-    void CloseWithUndo(TaskLine line, bool stopClaude = false)
+    //
+    // NOT FINISHED (task 579f2e4c, TaskService.Unfinished). A task that still asks something or has a live session, and
+    // whose work is not merged, does not close on a tick either: Petre ticked off a waiting task with a question open and
+    // only Undo saved it. The tick opens the "Close anyway" menu (OpenUnfinishedMenu), whose one item closes with
+    // `anyway`, with the same undo window.
+    void CloseWithUndo(TaskLine line, bool stopClaude = false, bool anyway = false)
     {
         if (taskService is null) return;
         if (!stopClaude && ClaudeStillWorking(line.Id))
         {
             OpenStopClaudeMenu(line);
+            return;
+        }
+        if (!stopClaude && !anyway && taskService.Board.Tasks.FirstOrDefault(t => t.Id == line.Id) is { } task
+            && taskService.Unfinished(task))
+        {
+            OpenUnfinishedMenu(line, TaskViews.UnfinishedHeader(task));
             return;
         }
         // The place among the lines BEFORE the Waiting on you fold (unfoldedTaskLines), the list WithPendingCloses puts
@@ -1980,7 +1991,7 @@ public partial class FloatingBar
         };
         pending = pending with { Timer = TaskUndoTimer(UndoWindow, () => ForgetPendingClose(pendingCloses.FirstOrDefault(p => p.Line.Id == line.Id), repaint: true)) };
         pendingCloses.Add(pending);
-        var closed = !stopClaude ? taskService.Close(line.Id)
+        var closed = !stopClaude ? taskService.Close(line.Id, anyway: anyway)
             : StopClaudeAndClose is { } stop ? stop(line.Id)
             // No App behind the bar (the tests): the close alone, nothing to stop.
             : taskService.Close(line.Id, stoppingClaude: true);
@@ -2014,6 +2025,28 @@ public partial class FloatingBar
             System.Windows.Threading.DispatcherPriority.Input)));
         HoldFadeWhileOpen(menu);
         StopClaudeMenu = menu;
+        menu.IsOpen = true;
+        return menu;
+    }
+
+    /// <summary>For the tests: the last "Close anyway" menu a tick opened (task 579f2e4c).</summary>
+    internal ContextMenu? UnfinishedMenu { get; private set; }
+
+    /// <summary>
+    /// The menu a tick opens on a task that is not finished (task 579f2e4c), at the pointer: <paramref name="header"/>
+    /// (TaskViews.UnfinishedHeader), which takes no click and says what the close would drop, and "Close anyway". Esc or
+    /// a click elsewhere leaves the task open. Held open the way the bar's menus are (HoldFadeWhileOpen). Internal, for
+    /// the tests.
+    /// </summary>
+    internal ContextMenu OpenUnfinishedMenu(TaskLine line, string header)
+    {
+        var menu = OwnMenus.AtPointer(this); // the bar as its target, for its screen's scaling
+        menu.Items.Add(new MenuItem { Header = new TextBlock { Text = header }, IsEnabled = false });
+        // Run once this menu has closed, so the line's undo paint is not held back by the menu still being open.
+        menu.Items.Add(TaskMenuItem(TaskViews.CloseAnyway, () => Dispatcher.BeginInvoke(() => CloseWithUndo(line, anyway: true),
+            System.Windows.Threading.DispatcherPriority.Input)));
+        HoldFadeWhileOpen(menu);
+        UnfinishedMenu = menu;
         menu.IsOpen = true;
         return menu;
     }

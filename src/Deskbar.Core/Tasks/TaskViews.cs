@@ -585,13 +585,35 @@ public static class TaskViews
     public const string StopClaudeAndClose = "Stop Claude and close";
 
     /// <summary>
+    /// Why a task that is not finished will not close (TaskBoard.Close, task 579f2e4c): it still asks something or has a
+    /// live session, and its work is not merged. The bar's message, the window's problem line and `task close` say it,
+    /// each with its way past it (the ticks' "Close anyway" menu, `--anyway` on the pipe).
+    /// </summary>
+    public const string UnfinishedRefusal = "This task is not finished and its work is not merged yet. Answer it, wait for the merge, or close it anyway";
+
+    /// <summary>The one item of the menu a tick opens on a task that is not finished (FloatingBar.TaskList and TasksWindow).</summary>
+    public const string CloseAnyway = "Close anyway";
+
+    /// <summary>
+    /// The line above "Close anyway" on that menu, which takes no click: what is still open on the task, so the click that
+    /// goes past it is made knowing what it drops. A question wins over a session, since the question is what waits on
+    /// Petre.
+    /// </summary>
+    public static string UnfinishedHeader(TaskItem task) =>
+        task.Question.HasValue ? "This task still asks you something, and its work is not merged yet."
+        : "A Claude session is still on this task, and its work is not merged yet.";
+
+    /// <summary>
     /// The tooltip on a line's tick box, the bar's and the window's alike: what ticking it off does, or, on a parent with
     /// open subtasks, why it will not (the same words the refusal uses), so the reason shows before the click.
     /// </summary>
     // `working` (task 37cd7081): Claude is still at it (TaskBoard.ClaudeStillWorking), so the tick offers to stop it first.
-    public static string TickTip(bool claudes, int openSubtasks, bool working = false) =>
+    // `unfinished` (task 579f2e4c): it still asks something or has a live session and is not merged (TaskBoard.Unfinished),
+    // so the tick asks before it closes.
+    public static string TickTip(bool claudes, int openSubtasks, bool working = false, bool unfinished = false) =>
         openSubtasks > 0 ? CloseSubtasksFirst(openSubtasks)
         : working ? "Claude is still working on this: tick to stop Claude and close"
+        : unfinished ? "Not finished and not merged yet: tick asks before closing"
         : claudes ? "Tick off: closes Claude's task"
         : "Tick off: closes the note";
 

@@ -3023,6 +3023,31 @@ public class TasksBoardTests
         Assert.Equal(TaskStatus.InProgress, t.Tasks.Board.Tasks.Single().Status);
     });
 
+    // Task 579f2e4c: the tick on a waiting task with its question open and nothing merged says it will ask, and opens the
+    // "Close anyway" menu with what is still open; its item closes the task with the usual undo window.
+    [Fact]
+    public void The_tick_on_an_unfinished_task_asks_before_closing() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var waiting = t.Tasks.Create("How far the fix goes", t.Gepha, Session("s1")).Value.Id;
+        t.Tasks.Ask(waiting, "Numbered spots only?");
+        t.Controller.Show();
+
+        Assert.True(t.Controller.Close(waiting).IsSuccess);
+        Assert.Equal(TaskStatus.WaitingOnYou, t.Tasks.Board.Tasks.Single().Status);
+        var ask = Assert.IsAssignableFrom<ContextMenu>(t.Window.OpenedMenu);
+        Assert.Contains(ask.Items.OfType<MenuItem>(), i => i.Header is TextBlock { Text: var text } && !i.IsEnabled
+            && text == TaskViews.UnfinishedHeader(t.Tasks.Board.Tasks.Single()));
+        var item = ask.Items.OfType<MenuItem>().Single(i => i.Header is TextBlock { Text: TaskViews.CloseAnyway });
+        item.RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+        ask.IsOpen = false;
+        t.Window.Dispatcher.Invoke(() => { }, System.Windows.Threading.DispatcherPriority.Background);
+
+        Assert.Equal(TaskStatus.Closed, t.Tasks.Board.Tasks.Single().Status);
+        Assert.True(t.Controller.Undo(waiting).IsSuccess);
+        Assert.Equal("Numbered spots only?", t.Tasks.Board.Tasks.Single().Question.Value);
+    });
+
     // Ruling 42 (Petre: "don't say claude; mark with claude at the beginning with the" orange edge): a Claude line has
     // no CL badge in the window either; its mark is the orange edge at its start, and its title begins where the badge
     // was.

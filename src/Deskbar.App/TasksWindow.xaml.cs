@@ -627,7 +627,7 @@ public partial class TasksWindow : Window
             // working changes the squares' halos and nothing else, and must still redraw the line. Not in a Matrix cell's:
             // a compact line draws no sessions, so it would only rebuild the Matrix for nothing (review minor 2).
             string.Join('\u0002', view.Cells.Select(c => $"{c.Header}:" + string.Join('\u0003', c.Rows.Select(r =>
-                $"{r.Id}|{r.Title}|{r.Detail}|{r.Description}|{r.Status}|{r.Claudes}|{r.Assignee.Id}|{PlaceSignature(r.Place)}|{r.CommentCount}|{r.Expanded}|{r.Closing}|{r.Important}|{r.Urgent}|{r.ParentTitle}|{r.ParentId}|{r.SubtaskCount}|{r.ClaudeWorking}|" +
+                $"{r.Id}|{r.Title}|{r.Detail}|{r.Description}|{r.Status}|{r.Claudes}|{r.Assignee.Id}|{PlaceSignature(r.Place)}|{r.CommentCount}|{r.Expanded}|{r.Closing}|{r.Important}|{r.Urgent}|{r.ParentTitle}|{r.ParentId}|{r.SubtaskCount}|{r.ClaudeWorking}|{r.Unfinished}|" +
                 // The ring or the disc and its tooltip line (task 8470d176): GitHub's answer changes nothing else on a line.
                 $"{r.Delivery.Stage}|{r.Delivery.Note}|{r.Problem}|" +
                 SubtasksSignature(r) + "|" +
@@ -638,7 +638,7 @@ public partial class TasksWindow : Window
     // own row, read the same way inside braces, so a comment or a session on it redraws the parent's thread.
     static string ListRowSignature(TaskRowView r) =>
         $"{r.Id}|{r.Title}|{r.Detail}|{r.Description}|{r.Status}|{r.Claudes}|{r.Assignee.Id}|{r.Sessions}|{r.SessionCount}|{r.LiveCount}|{PlaceSignature(r.Place)}|{r.CommentCount}|" +
-        $"{r.Expanded}|{r.Closing}|{r.Important}|{r.Urgent}|{r.WorkingCount}|{r.ParentTitle}|{r.ParentId}|{r.SubtaskCount}|{r.ClaudeWorking}|{r.Nested}|" +
+        $"{r.Expanded}|{r.Closing}|{r.Important}|{r.Urgent}|{r.WorkingCount}|{r.ParentTitle}|{r.ParentId}|{r.SubtaskCount}|{r.ClaudeWorking}|{r.Unfinished}|{r.Nested}|" +
         // Which Claude button the line has (task 6a57f59b, OpensSession): it changes when the first agents list arrives or
         // a session's worktree goes, with nothing else on a closed line changing, so without it the orange icon would stay.
         $"{r.OpensSession}|" +
@@ -1599,7 +1599,7 @@ public partial class TasksWindow : Window
     UIElement LeftOf(TaskRowView row, string? title = null) =>
         // A parent with open subtasks is refused by the board (task 842e1ba4); the tip says so before the click, and the
         // click's refusal shows on the problem line (TasksBoard.Close reports it).
-        TickOf(row.Id, row.Status, row.Closing, TaskViews.TickTip(row.Claudes, row.SubtaskCount, row.ClaudeWorking), title, inThread: row.Nested);
+        TickOf(row.Id, row.Status, row.Closing, TaskViews.TickTip(row.Claudes, row.SubtaskCount, row.ClaudeWorking, row.Unfinished), title, inThread: row.Nested);
 
     // A CLOSED SUBTASK MUST LOOK CLOSED IN ITS PARENT'S THREAD (task a78ce57a: "i can't really tell the
     // subtask is closed"). Inside a thread a closed subtask lost only its tick box and read almost like an open sibling.
@@ -3326,6 +3326,24 @@ public partial class TasksWindow : Window
         menu.Items.Add(new MenuItem { Header = new TextBlock { Text = "Claude is still working on this task." }, IsEnabled = false });
         // Run once this menu has closed, so the redraw the close causes is not held back by it (MustWait).
         menu.Items.Add(Item(TaskViews.StopClaudeAndClose, () => Dispatcher.BeginInvoke(() => Actions?.StopClaudeAndClose?.Invoke(id),
+            System.Windows.Threading.DispatcherPriority.Input)));
+        OpenMenu(menu);
+        return menu;
+    }
+
+    /// <summary>
+    /// The menu a tick (or the More menu's Close) opens on a task that is not finished (task 579f2e4c: it still asks
+    /// something or has a live session, and its work is not merged), at the pointer: <paramref name="header"/>, which
+    /// takes no click and says what the close would drop (TaskViews.UnfinishedHeader), and "Close anyway"
+    /// (TasksWindowActions.CloseAnyway). Esc or a click elsewhere leaves the task open, which is the point: one tick no
+    /// longer closes such a task. Opened by TasksBoard.Close; internal, and answering the menu, for the tests.
+    /// </summary>
+    internal ContextMenu OpenUnfinishedMenu(Guid id, string header)
+    {
+        var menu = OwnMenus.AtPointer(this); // this window as its target, for its screen's scaling
+        menu.Items.Add(new MenuItem { Header = new TextBlock { Text = header }, IsEnabled = false });
+        // Run once this menu has closed, so the redraw the close causes is not held back by it (MustWait).
+        menu.Items.Add(Item(TaskViews.CloseAnyway, () => Dispatcher.BeginInvoke(() => Actions?.CloseAnyway?.Invoke(id),
             System.Windows.Threading.DispatcherPriority.Input)));
         OpenMenu(menu);
         return menu;

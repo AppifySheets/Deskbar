@@ -344,9 +344,12 @@ public class FloatingBarTaskListTests
 
         CloseFromMenu(t, line);
 
-        // Task 3cdd0a52: its session is still live, but the task waits on Petre, so Claude is not working on it and the
-        // close goes through at once, with no "Stop Claude and close" menu (TaskBoard.ClaudeStillWorking).
+        // Task 3cdd0a52: its session is still live, but the task waits on Petre, so Claude is not working on it and no
+        // "Stop Claude and close" menu opens (TaskBoard.ClaudeStillWorking). Task 579f2e4c: it still asks something and
+        // nothing of it is merged, so the close asks first, and "Close anyway" closes it.
         Assert.Null(t.Bar.StopClaudeMenu);
+        Assert.Equal(TaskStatus.WaitingOnYou, t.Tasks.Board.Tasks.Single().Status);
+        CloseAnyway(t);
         Assert.Equal(TaskStatus.Closed, t.Tasks.Board.Tasks.Single().Status);
         var closing = t.Lines.Single();
         Assert.True(Closing(closing));
@@ -383,6 +386,37 @@ public class FloatingBarTaskListTests
 
         Assert.Equal(TaskStatus.Closed, t.Tasks.Board.Tasks.Single().Status);
     });
+
+    // Task 579f2e4c: a waiting task with its question open and nothing merged opens the "Close anyway" menu, whose header
+    // says what is still open; Esc (the menu closing unanswered) leaves the task as it was.
+    [Fact]
+    public void Closing_an_unfinished_task_asks_first_and_esc_keeps_it() => StaThread.Run(() =>
+    {
+        using var t = Build(sessionWindow: _ => Maybe.From((nint)0x4242));
+        var task = t.Tasks.Create("How far the fix goes", t.Gepha, Session("s1")).Value;
+        t.Tasks.Ask(task.Id, "Numbered spots only, or every spot?");
+        CloseFromMenu(t, t.Lines.Single());
+
+        var menu = Assert.IsAssignableFrom<ContextMenu>(t.Bar.UnfinishedMenu);
+        Assert.Contains(menu.Items.OfType<MenuItem>(), i => i.Header is TextBlock { Text: var text } && text == TaskViews.UnfinishedHeader(t.Tasks.Board.Tasks.Single()));
+        menu.IsOpen = false;
+        PumpBar(t);
+
+        var kept = t.Tasks.Board.Tasks.Single();
+        Assert.Equal(TaskStatus.WaitingOnYou, kept.Status);
+        Assert.Equal("Numbered spots only, or every spot?", kept.Question.Value);
+        Assert.False(Closing(t.Lines.Single()));
+    });
+
+    // Picks "Close anyway" on the menu a close opened on a task that is not finished (task 579f2e4c).
+    static void CloseAnyway(ListBar t)
+    {
+        var menu = Assert.IsAssignableFrom<ContextMenu>(t.Bar.UnfinishedMenu);
+        var item = menu.Items.OfType<MenuItem>().Single(i => i.Header is TextBlock { Text: TaskViews.CloseAnyway });
+        item.RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+        menu.IsOpen = false;
+        PumpBar(t);
+    }
 
     // Petre, 2026-11-23: "i can't currently see statuses". A Done task's line carries the green tick in front of its title
     // (TaskStatusMarks.DoneTick); a note does not, and the tick goes once the line is closed (in its undo window).
