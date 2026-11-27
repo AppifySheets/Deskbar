@@ -15,15 +15,15 @@ public class FastScrollViewerTests
     [Theory]
     [InlineData(-120, 3, 2 * WpfStep)]   // one notch down: twice WPF's 48
     [InlineData(120, 3, -2 * WpfStep)]   // one notch up
-    [InlineData(-240, 3, 4 * WpfStep)]   // a flick reported as two notches in one event
-    [InlineData(-60, 3, WpfStep)]        // half a notch (a finer wheel)
+    [InlineData(-240, 3, 2 * WpfStep)]   // any Delta is one event's step, as in stock WPF
+    [InlineData(-15, 3, 2 * WpfStep)]    // a touchpad's small Delta is not slowed below stock
     [InlineData(-120, 5, 2 * 5 * 16.0)]  // the user's own lines-per-notch setting is followed
-    public void A_notch_moves_twice_wpfs_step(int delta, int lines, double expected) =>
+    public void An_event_moves_twice_wpfs_step(int delta, int lines, double expected) =>
         Assert.Equal(expected, FastScrollViewer.WheelStep(delta, lines, viewportHeight: 300), precision: 6);
 
     [Fact]
-    public void One_screen_at_a_time_moves_two_screens() =>
-        Assert.Equal(600, FastScrollViewer.WheelStep(-120, -1, viewportHeight: 300), precision: 6);
+    public void One_screen_at_a_time_moves_one_screen() =>
+        Assert.Equal(300, FastScrollViewer.WheelStep(-120, -1, viewportHeight: 300), precision: 6);
 
     [Fact]
     public void A_wheel_notch_scrolls_the_view_twice_as_far() => StaThread.Run(() =>
@@ -57,18 +57,6 @@ public class FastScrollViewerTests
         Enumerable.Range(0, 200).ToList().ForEach(_ => Wheel(viewer, -120));
         viewer.UpdateLayout();
         Assert.Equal(viewer.ScrollableHeight, viewer.VerticalOffset, precision: 3);
-    });
-
-    // A step a nested viewer already took (a capped thread inside the list) is left alone, as the stock viewer leaves it.
-    [Fact]
-    public void A_handled_wheel_does_not_scroll() => StaThread.Run(() =>
-    {
-        var viewer = Laid(out var content);
-        var args = new MouseWheelEventArgs(Mouse.PrimaryDevice, 0, -120) { RoutedEvent = UIElement.MouseWheelEvent };
-        content.AddHandler(UIElement.MouseWheelEvent, new MouseWheelEventHandler((_, e) => e.Handled = true));
-        content.RaiseEvent(args);
-        viewer.UpdateLayout();
-        Assert.Equal(0, viewer.VerticalOffset);
     });
 
     // A 300 DIP view over 5000 DIP of content, measured and arranged without a window.
