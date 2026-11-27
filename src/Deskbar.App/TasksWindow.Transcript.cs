@@ -103,7 +103,8 @@ public partial class TasksWindow
     {
         if (stream is null || transcript is null) return;
         var scroller = pageScroller;
-        var pinned = scroller is null || scroller.VerticalOffset >= scroller.ScrollableHeight - 24;
+        // What the page is held at wins over where the scroller is now: a stream that was empty has pulled its offset to the top.
+        var pinned = pageHold is { } held ? held.AtEnd : scroller is null || scroller.VerticalOffset >= scroller.ScrollableHeight - 24;
         stream.Apply(transcript.Latest?.Items ?? [], NoteOf(transcript), transcript.Source.Kind == ChatSourceKind.Live);
         if (scroller is not null && pinned)
         {
