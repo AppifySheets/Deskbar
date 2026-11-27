@@ -21,6 +21,8 @@ public class WorkspaceFolderTests
     [Theory]
     [InlineData(null, null)]
     [InlineData("  ", null)]
+    [InlineData(@"\", null)]
+    [InlineData(" / ", null)]
     [InlineData(@" E:\repos\x\ ", @"E:\repos\x")]
     [InlineData(@"E:\repos\x//", @"E:\repos\x")]
     [InlineData(@"E:\", @"E:\")]

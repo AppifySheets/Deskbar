@@ -29,8 +29,14 @@ public sealed partial class RemoteControl
     // match a workspace Petre already has, both mean "make sure it exists", and failing them would only
     // teach the caller to ignore errors from this command. An existing workspace is left WHERE IT IS
     // whatever placement was asked for, and the reply's group and row say where that is.
+    // With --folder the workspace, new or found, then gets that folder (WorkspaceManager.SetWorkspaceFolder, task
+    // 6edcc65a); without it a found workspace keeps the folder it has.
     ControlReply Create(CreateRequest request) =>
-        Ensure(request.Name, create: true, request.Placement).Match(
+        Ensure(request.Name, create: true, request.Placement)
+            .Bind(found => request.Folder is null
+                ? Result.Success(found)
+                : manager.SetWorkspaceFolder(found.Workspace.Id, request.Folder).Map(() => found))
+            .Match(
             found => Success(new { created = found.Created, workspace = Describe(found.Workspace.Id) }),
             ControlReply.Fail);
 

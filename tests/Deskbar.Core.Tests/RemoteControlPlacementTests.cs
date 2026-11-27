@@ -70,6 +70,37 @@ public class RemoteControlPlacementTests
         Assert.Equal(2, Ws(reply).GetProperty("row").GetInt32());
     }
 
+    // --folder, the pipe's twin of the New workspace dialog's folder box (task 6edcc65a): it sets the folder of a new
+    // workspace and of one that already exists, a blank value clears it, and only create takes it.
+    [Fact]
+    public void Create_with_a_folder_sets_the_workspaces_folder_new_or_found()
+    {
+        var manager = Started();
+
+        Assert.Equal(ControlReply.Ok, Run(manager, "create", "wt-login", "--folder", @"E:\repos\wt-login\").ExitCode);
+        Assert.Equal(@"E:\repos\wt-login", manager.State.Workspaces.Single(w => w.Name == "wt-login").Folder);
+
+        Assert.Equal(ControlReply.Ok, Run(manager, "create", "Main", "--folder", @"E:\repos\main").ExitCode);
+        Assert.Equal(@"E:\repos\main", manager.State.Workspaces.Single(w => w.Name == "Main").Folder);
+
+        Assert.Equal(ControlReply.Ok, Run(manager, "create", "Main", "--folder", "").ExitCode);
+        Assert.Null(manager.State.Workspaces.Single(w => w.Name == "Main").Folder);
+
+        Assert.Equal(ControlReply.Ok, Run(manager, "create", "wt-login").ExitCode);
+        Assert.Equal(@"E:\repos\wt-login", manager.State.Workspaces.Single(w => w.Name == "wt-login").Folder);
+    }
+
+    [Fact]
+    public void Only_create_takes_a_folder()
+    {
+        var manager = Started();
+
+        var reply = Run(manager, "move", "Main", "--hwnd", "0x10", "--folder", @"E:\repos\x");
+
+        Assert.Equal(ControlReply.Failed, reply.ExitCode);
+        Assert.Contains("--folder only applies to create", reply.Output);
+    }
+
     [Fact]
     public void Create_in_a_group_that_does_not_exist_names_the_groups_there_are_and_creates_nothing()
     {

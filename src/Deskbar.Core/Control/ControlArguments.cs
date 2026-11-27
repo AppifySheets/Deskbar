@@ -24,8 +24,9 @@ public abstract record Placement
     public static Placement End { get; } = new AtEnd();
 }
 
-// The `create` command, parsed.
-public sealed record CreateRequest(string Name, Placement Placement);
+// The `create` command, parsed. Folder is `--folder`, the workspace's folder (Workspace.Folder, task 6edcc65a), the
+// remote twin of the New workspace dialog's folder box; null when not given.
+public sealed record CreateRequest(string Name, Placement Placement, string? Folder = null);
 
 // The `move` command, parsed. Handles and titles are the two ways to name a window, and a request may
 // mix them; every one of them has to find a window or nothing moves (see RemoteControl.Move).
@@ -71,7 +72,7 @@ public static class ControlArguments
 
     // Everything `create` and `move` accept after their first argument, gathered before it is judged,
     // so each refusal can name the actual conflict rather than the first option that happened to be odd.
-    sealed record Options(bool Create, IReadOnlyList<Placement> Placements, IReadOnlyList<WindowHandle> Handles, IReadOnlyList<string> Titles, bool NoFollow = false, string? WorkingDirectory = null)
+    sealed record Options(bool Create, IReadOnlyList<Placement> Placements, IReadOnlyList<WindowHandle> Handles, IReadOnlyList<string> Titles, bool NoFollow = false, string? WorkingDirectory = null, string? Folder = null)
     {
         public static Options None { get; } = new(false, [], [], []);
     }
@@ -93,6 +94,7 @@ public static class ControlArguments
             .Bind(name => Gather(Options.None, args.Skip(1).Take(separator - 1).ToArray())
                 .Ensure(o => o.Handles.Count == 0 && o.Titles.Count == 0 && !o.NoFollow,
                     "start takes no --hwnd, --title or --no-follow: the window does not exist yet, and a started window never takes you along.")
+                .Ensure(o => o.Folder is null, "--folder only applies to create.")
                 .Ensure(o => o.Create || o.Placements.Count == 0,
                     "--group, --position, --before and --after only apply with --create.")
                 .Bind(o => OnePlacement(o).Map(placement =>
@@ -300,15 +302,18 @@ public static class ControlArguments
 
     static readonly IReadOnlyList<string> HookOptionNames = ["--entry", "--attended", "--job", "--from", "--json"];
 
-    // `create <name> [--group <g> | --position <n> | --before <ws> | --after <ws>]`
+    // `create <name> [--group <g> | --position <n> | --before <ws> | --after <ws>] [--folder <path>]`
+    //
+    // --folder gives the workspace its folder (task 6edcc65a), on a new workspace and on one that already exists, where
+    // it replaces the folder it had; an empty value clears it. Only the path is stored: unlike the dialog, the pipe
+    // makes no folder on disk, because the caller can and the running app should not guess at a typo.
     public static Result<CreateRequest> ParseCreate(IReadOnlyList<string> args) =>
         FirstArgument(args, "create needs a workspace name, e.g. create wt-login --group EC")
             .Bind(name => Gather(Options.None, args.Skip(1).ToArray())
                 .Ensure(o => o.WorkingDirectory is null, "--cwd only applies to start.")
                 .Ensure(o => !o.Create && !o.NoFollow && o.Handles.Count == 0 && o.Titles.Count == 0,
                     "create only takes a placement (--group, --position, --before or --after); use move to move windows.")
-                .Bind(OnePlacement)
-                .Map(placement => new CreateRequest(name, placement)));
+                .Bind(o => OnePlacement(o).Map(placement => new CreateRequest(name, placement, o.Folder))));
 
     // `move <workspace> [--create [placement]] [--hwnd <handle>]... [--title <text>]...`
     public static Result<MoveRequest> ParseMove(IReadOnlyList<string> args) =>
@@ -316,6 +321,7 @@ public static class ControlArguments
             .Bind(name => Gather(Options.None, args.Skip(1).ToArray())
                 .Ensure(o => o.WorkingDirectory is null, "--cwd only applies to start.")
                 .Ensure(o => o.Handles.Count > 0 || o.Titles.Count > 0, "move needs at least one --hwnd or --title to say which windows")
+                .Ensure(o => o.Folder is null, "--folder only applies to create.")
                 // Placement only means something for a workspace being made. Accepting it for one that
                 // exists would leave the caller believing the row had moved; `reorder` does that.
                 .Ensure(o => o.Create || o.Placements.Count == 0,
@@ -349,6 +355,8 @@ public static class ControlArguments
         // The folder a started program runs in (start only). Given by the caller, because the running app
         // cannot see the caller's current folder: the pipe carries only the arguments.
         ["--cwd", var folder, .. var tail] when Named(folder) => Gather(so with { WorkingDirectory = folder }, tail),
+        // The workspace's folder (create only, task 6edcc65a). Blank is allowed on purpose: it clears the folder.
+        ["--folder", var path, .. var tail] => Gather(so with { Folder = path }, tail),
         ["--title", var text, .. var tail] when Named(text) => Gather(so with { Titles = [.. so.Titles, text] }, tail),
         ["--hwnd", var raw, .. var tail] => Handle(raw).Bind(handle => Gather(so with { Handles = [.. so.Handles, handle] }, tail)),
         ["--group", var group, .. var tail] when Named(group) => Gather(With(so, new Placement.InGroup(group.Trim())), tail),

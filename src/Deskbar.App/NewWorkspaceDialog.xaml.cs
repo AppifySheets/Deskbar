@@ -44,7 +44,13 @@ public partial class NewWorkspaceDialog : Window
         FolderInput.ItemsSource = existing;
         NameInput.TextChanged += (_, _) => FollowName();
         // An editable ComboBox raises its text box's TextChanged, which bubbles; a pick from the list arrives that way too.
-        FolderInput.AddHandler(TextBoxBase.TextChangedEvent, new TextChangedEventHandler((_, _) => FolderEdited()));
+        // Listened to only once the dialog has loaded: applying the box's template copies any Text already set into its
+        // text box, which raises TextChanged with nobody typing, and that would end the following before it began.
+        Loaded += (_, _) =>
+        {
+            FolderInput.AddHandler(TextBoxBase.TextChangedEvent, new TextChangedEventHandler((_, _) => FolderEdited()));
+            ShowHint();
+        };
         FollowName();
     }
 
@@ -92,8 +98,23 @@ public partial class NewWorkspaceDialog : Window
 
     void FolderEdited()
     {
-        if (!writingFolder) followsName = false;
+        if (writingFolder) return;
+        followsName = false;
+        ForgetStaleSelection();
         ShowHint();
+    }
+
+    // Typing over a folder picked from the list leaves that item selected (text search is off), so picking the same item
+    // again would change no selection and put nothing back in the box. Once the text no longer is the selected item,
+    // the selection is dropped, keeping the typed text whatever the box does with its text on the way.
+    void ForgetStaleSelection()
+    {
+        if (FolderInput.SelectedItem is not string selected || selected == FolderInput.Text) return;
+        var typed = FolderInput.Text;
+        writingFolder = true;
+        FolderInput.SelectedIndex = -1;
+        if (FolderInput.Text != typed) FolderInput.Text = typed;
+        writingFolder = false;
     }
 
     void WriteFolder(string folder)
@@ -111,7 +132,8 @@ public partial class NewWorkspaceDialog : Window
             null => "No folder: Claude sessions start where they would without one.",
             var f when !Path.IsPathFullyQualified(f) => "Give the whole path, starting with the drive.",
             var f when Directory.Exists(f) => "Existing folder",
-            var f => $"New folder in {Path.GetDirectoryName(f)}, made when you press OK",
+            // A share's root (\\server\share) has no parent to name, so the path itself is named.
+            var f => $"New folder in {Path.GetDirectoryName(f) ?? f}, made when you press OK",
         };
 
     void OnBrowse(object s, RoutedEventArgs e)
