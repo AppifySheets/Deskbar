@@ -17,15 +17,16 @@ namespace Deskbar.App;
 /// under the pointer takes the step first, exactly as before, only bigger.
 ///
 /// THE STEP: WPF scrolls a pixel-scrolling viewer by WheelScrollLines × 16 DIP per wheel event (48 DIP at Windows' default
-/// of three lines), whatever the event's Delta. Here a notch (Delta 120) moves twice that, and a Delta that is a fraction
-/// or a multiple of a notch moves that fraction or multiple, so a fast flick that Windows reports as one event of 240
-/// moves two notches' worth. Windows' "one screen at a time" setting (WheelScrollLines -1) scrolls one view per notch in
-/// WPF and twice that here.
+/// of three lines), whatever the event's Delta. Here every event moves twice that, also whatever its Delta. Scaling by
+/// Delta/120 was tried and rejected in review: a precision touchpad or a free-spinning wheel sends many events of 10 to
+/// 40, so a Delta-scaled step would have made those devices SLOWER than stock WPF, the opposite of the request. Windows'
+/// "one screen at a time" setting (WheelScrollLines -1) moves one view per event: two views would skip a whole screen of
+/// tasks unseen.
 ///
-/// SEVERAL EVENTS IN ONE FRAME: ScrollToVerticalOffset is queued and VerticalOffset only changes at the next layout, so a
-/// burst of wheel events before that layout would each start from the same stale offset and collapse into one step. The
-/// target is therefore kept between events and dropped once the viewer reports a scroll (ScrollChanged runs after layout,
-/// when VerticalOffset is current again).
+/// SEVERAL EVENTS BEFORE ONE LAYOUT: ScrollToVerticalOffset takes an absolute offset, is queued, and VerticalOffset only
+/// changes at the next layout, so two wheel events before that layout would both start from the same offset and the
+/// second step would be lost. The target is therefore kept between events and dropped once the viewer reports a scroll
+/// (ScrollChanged runs after layout, when VerticalOffset is current again).
 /// </remarks>
 internal sealed class FastScrollViewer : ScrollViewer
 {
@@ -35,9 +36,6 @@ internal sealed class FastScrollViewer : ScrollViewer
     // WPF's line height for a pixel-scrolling viewer (ScrollViewer._scrollLineDelta, 16 DIP), which its wheel step is
     // measured in.
     const double LineDip = 16;
-
-    // One wheel notch as Windows reports it (WHEEL_DELTA).
-    const double Notch = 120;
 
     // Where the wheel has asked the view to go but layout has not taken it yet; null when VerticalOffset is current.
     double? pendingOffset;
@@ -52,8 +50,9 @@ internal sealed class FastScrollViewer : ScrollViewer
 
     protected override void OnMouseWheel(MouseWheelEventArgs e)
     {
-        // Taken already by a viewer nested inside this one (or by the PassWheelAtEnd hand-off, which marks the original
-        // handled and raises a fresh event here): the stock viewer does nothing either.
+        // WPF does not call this for an event a nested viewer already took (the class handler is not registered for
+        // handled events), so the innermost viewer wins; PassWheelAtEnd's hand-off arrives here as a fresh event. The
+        // check is the stock viewer's own, kept for a caller that invokes the handler by hand.
         if (e.Handled) return;
         e.Handled = true;
         if (ScrollableHeight <= 0) return;
@@ -64,8 +63,8 @@ internal sealed class FastScrollViewer : ScrollViewer
 
     /// <summary>
     /// How far, in DIP, a wheel event of <paramref name="delta"/> moves the view: positive scrolls down. Twice WPF's step
-    /// per notch, scaled by how many notches the event carries.
+    /// for every event, whatever the size of its Delta (see THE STEP); one view per event under "one screen at a time".
     /// </summary>
     internal static double WheelStep(int delta, int wheelScrollLines, double viewportHeight) =>
-        -delta / Notch * Speed * (wheelScrollLines < 0 ? viewportHeight : wheelScrollLines * LineDip);
+        -Math.Sign(delta) * (wheelScrollLines < 0 ? viewportHeight : Speed * wheelScrollLines * LineDip);
 }
