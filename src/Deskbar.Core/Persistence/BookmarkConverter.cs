@@ -18,7 +18,12 @@ public sealed class BookmarkConverter : JsonConverter<Bookmark>
     // Screen is last and optional, so a file written before bookmarks remembered a screen loads with none.
     // Color likewise (the bookmark colour, added after the screen).
     sealed record Entry(Guid Id, string Name, BookmarkKind Kind, string Target, string? Arguments = null, string? WorkingDirectory = null,
-        int? Screen = null, string? Color = null);
+        int? Screen = null, string? Color = null)
+    {
+        // Fields this build does not know (Bookmark.Extra), read and written back as they were.
+        [JsonExtensionData]
+        public Dictionary<string, JsonElement>? Extra { get; init; }
+    }
 
     // Whether a parsed bookmark is usable: exactly what the manager would have accepted, so a hand-edited file cannot
     // hold what the menu refuses. A Name or Link target that only needs trimming is accepted as it stands.
@@ -34,7 +39,12 @@ public sealed class BookmarkConverter : JsonConverter<Bookmark>
             return entry.RootElement.Deserialize<Entry>(options) is { } e
                    && new Bookmark(e.Id, e.Name, e.Kind, e.Target, e.Arguments, e.WorkingDirectory,
                        e.Screen is > 0 && e.Kind != BookmarkKind.Link ? e.Screen : null,
-                       e.Color is { } colour && BookmarkRules.IsColour(colour) ? colour : null) is var bookmark
+                       e.Color is { } colour && BookmarkRules.IsColour(colour) ? colour : null)
+                   {
+                       // Cloned as insurance: System.Text.Json already gives extension data elements of their own,
+                       // but these come from `entry`, which is disposed when this method returns.
+                       Extra = e.Extra?.ToDictionary(kv => kv.Key, kv => kv.Value.Clone()),
+                   } is var bookmark
                    && Acceptable(bookmark)
                 ? bookmark
                 : null;
@@ -47,5 +57,8 @@ public sealed class BookmarkConverter : JsonConverter<Bookmark>
     }
 
     public override void Write(Utf8JsonWriter writer, Bookmark value, JsonSerializerOptions options) =>
-        JsonSerializer.Serialize(writer, new Entry(value.Id, value.Name, value.Kind, value.Target, value.Arguments, value.WorkingDirectory, value.Screen, value.Color), options);
+        JsonSerializer.Serialize(writer, new Entry(value.Id, value.Name, value.Kind, value.Target, value.Arguments, value.WorkingDirectory, value.Screen, value.Color)
+        {
+            Extra = value.Extra?.ToDictionary(kv => kv.Key, kv => kv.Value),
+        }, options);
 }
