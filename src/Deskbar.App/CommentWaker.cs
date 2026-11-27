@@ -41,9 +41,14 @@ sealed class CommentWaker : IDisposable
     // spec docs/superpowers/specs/2026-11-26-recurring-tasks-design.md, "A run ends"). CommentWake.Plan answers FreshRun
     // for such a task when none of its sessions is listed, and the comment then starts a fresh run that reads the thread,
     // as "Wake now" does. Without one (tests that do not need it), such a comment starts nothing and the thread says so.
+    //
+    // knowsSkill (task 29bdd158, "add /skills support to comments"): whether Claude Code listed a skill in the folder of one
+    // of the task's sessions (SkillCatalog's kept answers, which the comment box's "/" list fills). A comment that opens with
+    // such a skill ("/iam-logs mails 14 and 15") is delivered with the request to run it (SessionBriefing.Commented, skill).
+    // Without one, or for a skill it does not know, the comment goes as plain words, as it always did.
     public CommentWaker(TaskService tasks, Func<bool> enabled, IObservable<IReadOnlyCollection<ClaudeAgent>> live, Func<TaskSession, bool> hasTranscript,
         Func<TaskSession, bool> endedOnApiError, CommentInbox inbox, Func<Guid, TaskSession, string, Task<Result>> resumeWith, Func<string, Task<Result>> stop,
-        Action<string>? trace = null, Func<Guid, Result>? startRun = null)
+        Action<string>? trace = null, Func<Guid, Result>? startRun = null, Func<TaskItem, string, bool>? knowsSkill = null)
     {
         this.tasks = tasks;
         this.live = live;
@@ -59,8 +64,11 @@ sealed class CommentWaker : IDisposable
         // REEVALUATE (task 3dd07539) rides the same roads: a press of a task's Reevaluate button (TaskService.Reevaluations)
         // is delivered exactly as a comment is, with SessionBriefing.Reevaluate as its message, in the same one-at-a-time
         // queue, so a press and a comment never race each other into one session.
+        // The skill a comment opens with counts only when Claude Code lists it where the task's sessions run (knowsSkill).
         var comments = tasks.Commented.Select(commented => new Delivery(commented.TaskId, "a comment",
-            task => SessionBriefing.Commented(task, tasks.ExpandImages(commented.Comment.Markdown), commented.Comment.ByManager)));
+            task => SessionBriefing.Commented(task, tasks.ExpandImages(commented.Comment.Markdown), commented.Comment.ByManager,
+                ClaudeSkills.SkillOf(commented.Comment.Markdown.TrimStart())
+                    .Where(skill => knowsSkill?.Invoke(task, skill) ?? false))));
         var reevaluations = tasks.Reevaluations.Select(taskId => new Delivery(taskId, "a reevaluate request", SessionBriefing.Reevaluate)
         {
             // CommentWake's own words name a comment, which a press of Reevaluate is not.

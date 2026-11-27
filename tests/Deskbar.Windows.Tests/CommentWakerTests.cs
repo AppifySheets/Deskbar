@@ -68,7 +68,11 @@ public sealed class CommentWakerTests : IDisposable
         {
             runs.Add(id);
             return Result.Success();
-        });
+        },
+        knowsSkill: (task, skill) => task.Sessions.Any(session => knownSkills.Contains((session.Folder, skill))));
+
+    // The skills Claude Code listed, by folder (CommentWaker's knowsSkill, task 29bdd158).
+    readonly List<(string Folder, string Skill)> knownSkills = [];
 
     // The recurring runs a comment asked for (CommentWaker's startRun, task 0b78269e), by task.
     readonly List<Guid> runs = [];
@@ -93,6 +97,39 @@ public sealed class CommentWakerTests : IDisposable
         Assert.Contains("look at this", InboxText("aaaaaaaa-1"));
         Assert.StartsWith("Deskbar: the user commented on your task", InboxText("aaaaaaaa-1"));
         Assert.Empty(resumed);
+    }
+
+    // Task 29bdd158: a comment opening with a skill Claude Code lists in the session's folder asks the session to run it.
+    [Fact]
+    public void A_comment_opening_with_a_known_skill_asks_for_it()
+    {
+        var id = ClaudeTask("aaaaaaaa-1");
+        knownSkills.Add((@"E:\repos\Work", "refresh-pr"));
+        inbox.Register("aaaaaaaa-1");
+        live.OnNext([Running("aaaaaaaa-1")]);
+        using var waker = Waker();
+
+        tasks.Comment(id, Maybe<string>.None, "/refresh-pr 245");
+
+        Assert.Contains("run it now with your Skill tool (skill \"refresh-pr\")", InboxText("aaaaaaaa-1"));
+    }
+
+    // A skill the session's folder does not have, or a path that only looks like one, goes as plain words.
+    [Theory]
+    [InlineData("/logout does nothing")]
+    [InlineData("/etc/hosts is wrong")]
+    public void A_comment_opening_with_an_unknown_skill_asks_for_none(string comment)
+    {
+        var id = ClaudeTask("aaaaaaaa-1");
+        knownSkills.Add((@"E:\repos\Other", "logout"));
+        inbox.Register("aaaaaaaa-1");
+        live.OnNext([Running("aaaaaaaa-1")]);
+        using var waker = Waker();
+
+        tasks.Comment(id, Maybe<string>.None, comment);
+
+        Assert.Contains(comment, InboxText("aaaaaaaa-1"));
+        Assert.DoesNotContain("Skill tool", InboxText("aaaaaaaa-1"));
     }
 
     [Fact]

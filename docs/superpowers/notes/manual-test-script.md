@@ -1547,6 +1547,13 @@ AS5b. Type `/` again: the list now opens at once. Esc closes it and keeps the bo
 AS5c. On a workspace whose tasks know two repos, a repo's own skill shows that repo's name beside it, and starting a
      task titled with it starts in that repo without the folder list.
 AS5d. The tasks panel, + Add: the same list under its box.
+AS5e. (Task 29bdd158.) Open the thread of a Claude task whose session works in this repo and type `/` in its comment
+     box: the same list opens under the box with this repo's own skills (`/refresh-pr`). Type `ref`, Tab: the box reads
+     `/refresh-pr ` with the caret after the space. Enter while the list is open picks, not posts; type `245` and press
+     Enter: the comment posts, and the session runs /refresh-pr with 245 (its next turn shows the Skill tool call).
+     Esc with the list open closes only the list, even with the + Add box shown. A comment "/etc/hosts is wrong" goes
+     as plain words. The task's own window (Open in window): `/` in its comment box shows the same list, Ctrl+Enter
+     takes the pick and posts.
 AS5. The button on an empty box adds nothing and starts nothing. With Claude sessions off in Manage the note is
      still added, and the same refusal "Start Claude on this" gives says why no session started.
 

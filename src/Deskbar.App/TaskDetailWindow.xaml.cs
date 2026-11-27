@@ -89,6 +89,9 @@ public partial class TaskDetailWindow : Window
     Guid? editingComment;
     TextBox? commentEditor;
 
+    // The comment box's "/" list of Claude Code skills (task 29bdd158, SkillCompletion); kept so it lives with the window.
+    readonly SkillCompletion commentSkills;
+
     // Whether the thread shows its settled comments.
     bool settledOpen;
 
@@ -100,6 +103,14 @@ public partial class TaskDetailWindow : Window
     {
         InitializeComponent();
         CommentBox.TextChanged += (_, _) => CommentPlaceholder.Visibility = CommentBox.Text.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
+        // THE "/" LIST OF SKILLS (task 29bdd158), as the panel's comment boxes have: "/" at the start of the comment lists
+        // the Claude Code skills of the folder the comment reaches (TasksWindowActions.TaskSkills, read at the keystroke,
+        // since Actions is set after this constructor). Tab or Enter puts "/skill " in the box; Ctrl+Enter puts the pick in
+        // and lets the key go on, so it posts at once. Attached before the box's own keys, so Enter picks while it is open.
+        commentSkills = new SkillCompletion(CommentBox,
+            () => Actions?.TaskSkills is { } skills && TaskId != Guid.Empty ? skills(TaskId) : Task.FromResult<IReadOnlyList<SkillChoice>>([]),
+            () => Actions?.TaskSkills is not null,
+            new SkillCompletion.Look(DetailFill, ThreadEdge, Ink, DimInk, Frozen(0x38, 0xFF, 0xFF, 0xFF)));
         CommentBox.PreviewKeyDown += (_, e) =>
         {
             // Ctrl+Enter posts; a plain Enter is a new line, since a comment written here is often long.
@@ -138,6 +149,9 @@ public partial class TaskDetailWindow : Window
 
     /// <summary>The task this window shows (Guid.Empty before the first Present).</summary>
     internal Guid TaskId => latest?.Row.Id ?? Guid.Empty;
+
+    // For the tests: the comment box's "/" list of skills (task 29bdd158).
+    internal SkillCompletion CommentSkills => commentSkills;
 
     // A click on a link in this task's text (task 26f15d70): the controller's OpenLink, which goes to the task's workspace
     // before opening it. The task's id is read at the click, not when the link was drawn. Without a controller (a test

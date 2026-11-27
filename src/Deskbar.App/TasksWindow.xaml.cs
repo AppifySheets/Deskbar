@@ -149,6 +149,9 @@ public partial class TasksWindow : Window
     // The drafts outlive a redraw, so a comment half typed survives a change arriving from a session.
     readonly Dictionary<Guid, Button> menuButtons = [];
     readonly Dictionary<Guid, TextBox> commentBoxes = [];
+    // Each comment box's "/" list of Claude Code skills (task 29bdd158, SkillCompletion), by task: kept so the window's
+    // Esc can close an open list before it does anything else (Escape), and for the tests. Cleared with the boxes.
+    readonly Dictionary<Guid, SkillCompletion> commentSkills = [];
     readonly Dictionary<Guid, IReadOnlyList<string>> authors = [];
     readonly Dictionary<Guid, IReadOnlyList<Guid>> shownComments = [];
     readonly Dictionary<Guid, bool> closing = [];
@@ -263,6 +266,9 @@ public partial class TasksWindow : Window
     /// <summary>For the tests: stands in for "a comment box has the keyboard", which a window that never activates cannot have.</summary>
     internal Func<bool>? EscapeIgnoresThreadWhile { get; set; }
     internal TextBox? CommentBoxOf(Guid id) => commentBoxes.GetValueOrDefault(id);
+
+    // For the tests: a line's comment box's "/" list of skills (task 29bdd158).
+    internal SkillCompletion? CommentSkillsOf(Guid id) => commentSkills.GetValueOrDefault(id);
 
     // THE CLICK GUARD, the bar's (#48, Ruling 10; FloatingBar.TaskClickIgnored), fix round 1, Important 1. A line
     // closed here stays six seconds and then leaves, and a tick or Reopen takes its line away, so the next line slides
@@ -523,6 +529,7 @@ public partial class TasksWindow : Window
         dragLines.Clear();
         dragEntries.Clear();
         commentBoxes.Clear();
+        commentSkills.Clear();
         ages.Clear();
         slimTips.Clear();
         selectionFrames.Clear();
@@ -2799,6 +2806,15 @@ public partial class TasksWindow : Window
             drafts[id] = box.Text;
             placeholder.Visibility = box.Text.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
         };
+        // THE "/" LIST OF SKILLS (task 29bdd158, "add /skills support to comments"), as the add box has (task 3a872301):
+        // "/" at the start of the comment lists the Claude Code skills of the folder the comment reaches (the task's
+        // session's, TasksWindowActions.TaskSkills); Tab or Enter puts "/skill " in the box for its arguments, and the
+        // next Enter posts it. CommentWaker then asks the session to run that skill. Attached BEFORE PressInComment, so
+        // while the list is open its Enter picks instead of posting.
+        commentSkills[id] = new SkillCompletion(box,
+            () => Actions?.TaskSkills is { } skills ? skills(id) : Task.FromResult<IReadOnlyList<SkillChoice>>([]),
+            () => Actions?.TaskSkills is not null,
+            new SkillCompletion.Look(Frozen(0xFF, 0x15, 0x16, 0x1A), PickedEdge, Ink, DimInk, SelectedFill));
         box.PreviewKeyDown += (_, e) => e.Handled = PressInComment(id, e.Key, Keyboard.Modifiers) != KeyOutcome.Ignored;
         // Ctrl+V and drops of pictures (TasksWindow.Images.cs). After the handler above, which sets Handled for every key.
         TakePictures(box, id);
@@ -3574,6 +3590,9 @@ public partial class TasksWindow : Window
         if (SearchBox.IsKeyboardFocusWithin) EndSearch();
         else if (renaming is not null) EndRename();
         else if (editingComment is not null) EndCommentEdit();
+        // A comment box's skill list closes before anything else does (task 29bdd158): the window's Esc runs ahead of the
+        // box's, and with the add box also shown it would otherwise hide that box and leave the list open.
+        else if (commentSkills.Values.Any(skills => skills.Dismiss())) { }
         // The subtask box in a thread (TasksWindow.SubtaskAdd.cs) closes first: before the add box, and before the thread
         // it sits in, which the next Esc folds.
         else if (subtaskUnder is not null) EndSubtaskAdd();

@@ -1080,6 +1080,17 @@ public partial class App : Application
             ? skillCatalog.For(actions.NewTaskFolders(workspace, parent))
             : Task.FromResult<IReadOnlyList<Deskbar.Core.Tasks.SkillChoice>>([]);
 
+    // A comment box's "/" list (task 29bdd158, "add /skills support to comments"): the skills of the folder the comment
+    // would reach, which is where the task's latest session runs (its repo, for a worktree, as KnowsSkill reads it), so
+    // the list and CommentWaker's check agree. A task that never had a session lists what a new task on its workspace,
+    // under its parent, would have, as the add box does: Claude started on it later reads the thread from the top.
+    Task<IReadOnlyList<Deskbar.Core.Tasks.SkillChoice>> TaskSkillsOf(Guid taskId) =>
+        tasks?.Board.Tasks.FirstOrDefault(t => t.Id == taskId) is { } task
+            ? task.Sessions.OrderByDescending(session => session.Joined).FirstOrDefault() is { } latest
+                ? skillCatalog.For([Deskbar.Core.Tasks.ClaudeStart.RepoOf(latest.Folder)])
+                : WorkspaceSkillsOf(task.WorkspaceId, task.ParentId)
+            : Task.FromResult<IReadOnlyList<Deskbar.Core.Tasks.SkillChoice>>([]);
+
     IEnumerable<string> EditorFolderNamesOn(Maybe<Guid> workspace) =>
         workspace.HasNoValue
             ? []
@@ -2087,7 +2098,10 @@ public partial class App : Application
             claudeSessions.ResumeWith, claudeSessions.StopNow, ClickTrace.On ? ClickTrace.Write : null,
             // A comment on a recurring task between runs starts a run (WakePlan.FreshRun, task 0b78269e). The runner is
             // built just below, after the Claude actions; this is read when a comment arrives.
-            startRun: id => recurringRunner?.RunNow(id) ?? Result.Failure("Deskbar is still starting up"));
+            startRun: id => recurringRunner?.RunNow(id) ?? Result.Failure("Deskbar is still starting up"),
+            // A comment that opens with a skill Claude Code lists where one of the task's sessions runs is delivered with
+            // the request to run it (task 29bdd158). KnowsSkill is set just below and read when a comment arrives.
+            knowsSkill: (task, skill) => task.Sessions.Any(session => claudeSessions.KnowsSkill(session.Folder, skill)));
 
         // ...and what a click on a task does with those sessions (ClaudeTaskActions, Task 9): the double-click's session
         // window, "Start Claude on this", the thread's list and Open, the pipe's three verbs. Its answers land on this
@@ -2817,6 +2831,8 @@ public partial class App : Application
                 startClaude: id => claudeActions?.Offer(id),
                 // The add box's "/" list of skills (task 3a872301), as the bar's (WorkspaceSkillsOf).
                 workspaceSkills: WorkspaceSkillsOf,
+                // The comment boxes' "/" list of skills (task 29bdd158): the skills where the task's session runs.
+                taskSkills: TaskSkillsOf,
                 // A tick on a task Claude is still working on (task 37cd7081): closed, then its sessions stopped.
                 stopClaudeAndClose: task => claudeActions?.StopAndClose(task) ?? Result.Failure(ClaudeActionsNotReady),
                 openSession: (task, session) => claudeActions?.OpenSession(task, session) ?? Result.Failure(ClaudeActionsNotReady),
