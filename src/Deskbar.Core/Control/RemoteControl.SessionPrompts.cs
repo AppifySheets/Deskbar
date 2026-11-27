@@ -24,10 +24,18 @@ namespace Deskbar.Core.Control;
 // session's transcript has moved past it (SessionPrompts.Moved, TranscriptMark): the dialog was answered, refused or
 // escaped in the session, which writes the conversation's next line.
 //
-// THE RULES ARE ASKUSERQUESTION'S (task 493b7ba9, DialogAsked): a task already Waiting on you keeps its question (a
-// `task ask` about a pull request to merge must not be replaced and then settled unseen), unless that question is the
-// session's own earlier dialog question; a Done task stays Done; settling touches a task only while it still shows the
-// very question that was placed, so a question the session asked since is the session's to settle.
+// THE RULES ARE ASKUSERQUESTION'S (task 493b7ba9, DialogAsked), one predicate for both (TakesDialogQuestion): a task
+// already Waiting on you keeps its question (a `task ask` about a pull request to merge must not be replaced and then
+// settled unseen), unless that question is the session's own earlier dialog question; a Done task stays Done. Two more
+// from the review of this branch: a task whose question Deskbar SET ASIDE while Claude works on Petre's reply (task
+// 8bd18246) is left alone, since asking would drop that question and the Stop nudge that brings it back; and so is a
+// task Petre took (Assignee Me), since settling would hand it back to Claude (`task answered` does). Settling touches a
+// task only while it still shows the very question that was placed, so a question the session asked since is the
+// session's to settle.
+//
+// KNOWN LIMIT: while the Allow / Deny card shows a tool permission, its Notification places nothing (the card is the
+// question). If the card is held past PermissionDesk.HeldFor (about ten minutes) and taken off while the terminal still
+// waits, nothing on the task says so: the Notification fired once, six seconds in. The workspace blinked then.
 public sealed partial class RemoteControl
 {
     // The dialogs sessions wait on: details noted and questions placed. Its clock is the task service's, so tests can
@@ -55,13 +63,26 @@ public sealed partial class RemoteControl
         if (type == "permission_prompt" && permissions?.Asks(hook.SessionId) == true) return blinked;
 
         var detail = prompts.Detail(hook.SessionId);
-        SessionPrompt.Text(type, hook.Message.GetValueOrDefault(""), detail)
-            .Bind(text => service.Board.TaskOf(hook.SessionId)
-                .Where(t => t.Status is not TaskStatus.Done && (t.Status is not TaskStatus.WaitingOnYou || PlacedOn(t)))
-                .Map(t => (Task: t, Text: text)))
-            .Tap(found => PlaceQuestion(service, found.Task, found.Text, hook, detail.Bind(d => d.AgentId)));
+        // Claude's multiple-choice dialog is a permission dialog in Claude Code's registry too ("Claude needs your
+        // permission", measured in the 2.1.332 binary by the branch's review): its question is DialogAsked's, worded from
+        // the dialog itself and settled by PostToolUse, so its Notification must not replace it (finding 1).
+        if (detail.Map(d => d.Tool == DialogQuestion.Tool).GetValueOrDefault(false)) return blinked;
+
+        var message = hook.Message.GetValueOrDefault("");
+        // The detail's subagent picks the transcript to watch only when the detail named the question.
+        var agent = SessionPrompt.Named(type, message, detail).HasValue ? detail.Bind(d => d.AgentId) : Maybe<string>.None;
+        SessionPrompt.Text(type, message, detail)
+            .Bind(text => service.Board.TaskOf(hook.SessionId).Where(TakesDialogQuestion).Map(t => (Task: t, Text: text)))
+            .Tap(found => PlaceQuestion(service, found.Task, found.Text, hook, agent));
         return blinked;
     }
+
+    // Whether a dialog's question may go on the task (the header's rules).
+    bool TakesDialogQuestion(TaskItem task) =>
+        task.Status is not TaskStatus.Done
+        && task.QuestionSetAside.HasNoValue
+        // The session's own earlier dialog question may be replaced whatever the ask did to the task's assignee.
+        && (PlacedOn(task) || (task.Status is not TaskStatus.WaitingOnYou && task.Assignee.Kind == AssigneeKind.Claude));
 
     // Puts the question on the task as `task ask` would (Waiting on you, at the top, asked by the session) and remembers it
     // with where its transcript stands: the subagent's own when a subagent asked (TranscriptMark.For), none when that file
@@ -81,15 +102,17 @@ public sealed partial class RemoteControl
     void PromptDetailNoted(string json, ClaudeHookEvent hook)
     {
         if (hook.Event == PermissionRequest.Event)
-            PermissionRequest.Parse(json).Tap(NotePermission);
+            PermissionRequest.Parse(json).Tap(asked => NotePermission(asked, hook.Transcript));
         else if (hook.Event == "Elicitation" && hook.McpServer.HasValue)
             prompts.Note(hook.SessionId, PromptDetail.Elicitation(hook.McpServer.Value, hook.Message.GetValueOrDefault(""),
-                hook.AgentId, tasks?.Now ?? DateTimeOffset.UtcNow));
+                hook.AgentId, tasks?.Now ?? DateTimeOffset.UtcNow), TranscriptMark.Take(TranscriptMark.For(hook.Transcript, hook.AgentId)));
     }
 
-    // Also called by `claude-permission` (the card's hook), so the detail is there whether or not the card is on.
-    void NotePermission(PermissionRequest asked) =>
-        prompts.Note(asked.SessionId, PromptDetail.Of(asked, tasks?.Now ?? DateTimeOffset.UtcNow));
+    // Also called by `claude-permission` (the card's hook), so the detail is there whether or not the card is on. The
+    // mark is where the transcript the dialog is decided in stands now: once it moves, the detail is spent.
+    void NotePermission(PermissionRequest asked, Maybe<string> transcript) =>
+        prompts.Note(asked.SessionId, PromptDetail.Of(asked, tasks?.Now ?? DateTimeOffset.UtcNow),
+            TranscriptMark.Take(TranscriptMark.For(transcript, asked.AgentId)));
 
     // The session went on: its turn ended (Stop, which cannot come while a dialog waits), the user typed to it (a prompt
     // Claude Code or Deskbar delivered does not count, SessionBriefing.FromTheUser: it may arrive while the dialog still

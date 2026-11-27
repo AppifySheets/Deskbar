@@ -146,7 +146,7 @@ public sealed partial class RemoteControl
     {
         if (hook.ToolName != DialogQuestion.Tool || hook.DialogQuestion.HasNoValue) return Quiet;
         service.Board.TaskOf(hook.SessionId)
-            .Where(t => t.Status is not TaskStatus.Done && (t.Status is not TaskStatus.WaitingOnYou || PlacedOn(t)))
+            .Where(TakesDialogQuestion)
             .Tap(t => PlaceQuestion(service, t, hook.DialogQuestion.Value, hook));
         Attention(folder);
         return Quiet;
@@ -161,8 +161,9 @@ public sealed partial class RemoteControl
     // next Stop or the user's next prompt would (PromptsSettledBy).
     ControlReply DialogAnswered(TaskService service, ClaudeHookEvent hook)
     {
-        // The dialog is closed, so its placement (and its transcript watch) goes either way.
-        prompts.Take(hook.SessionId);
+        // The dialog is closed, so its placement (and its transcript watch) goes, settling the question it placed; the
+        // older rule below still settles a dialog question placed before this Deskbar started (same text).
+        Settle(service, prompts.Take(hook.SessionId));
         service.Board.TaskOf(hook.SessionId)
             .Where(t => t.Status == TaskStatus.WaitingOnYou && hook.DialogQuestion.HasValue && t.Question == hook.DialogQuestion)
             .Tap(t => Resolve(service, t, hook.SessionId));

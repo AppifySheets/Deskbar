@@ -69,13 +69,19 @@ public static class SessionPrompt
             ? Maybe<string>.None
             : Named(type, said, detail).GetValueOrDefault($"{Lead} {said}");
 
-    static Maybe<string> Named(string type, string said, Maybe<PromptDetail> detail) =>
-        detail.Bind(d =>
+    /// <summary>
+    /// The question worded from the detail, or none when the detail is not about this dialog (Text then says Claude
+    /// Code's own words). The caller takes the detail's subagent for the transcript watch only when this has a value.
+    /// The SDK's "Claude needs your permission to use &lt;tool&gt;" must name the detail's own tool.
+    /// </summary>
+    public static Maybe<string> Named(string type, string message, Maybe<PromptDetail> detail) =>
+        OneLine(message) is var said && said.Length == 0 ? Maybe<string>.None : detail.Bind(d =>
             ElicitationTypes.Contains(type, StringComparer.Ordinal) && d.IsElicitation
                 ? $"Answer {d.Server} in the session: {d.Summary}"
             : type == "permission_prompt" && said.StartsWith(PlanText, StringComparison.Ordinal) && d.Tool == PlanTool
                 ? d.Summary.Length > 0 ? $"Approve the plan in the session: {d.Summary}" : "Approve the plan in the session"
             : type == "permission_prompt" && said.StartsWith(PermissionText, StringComparison.Ordinal) && !d.IsElicitation && d.Tool != PlanTool
+                && (said.Length == PermissionText.Length || said == $"{PermissionText} to use {d.Tool}")
                 ? d.Summary.Length > 0 ? $"Allow {d.Tool} in the session: {d.Summary}" : $"Allow {d.Tool} in the session"
             : Maybe<string>.None);
 

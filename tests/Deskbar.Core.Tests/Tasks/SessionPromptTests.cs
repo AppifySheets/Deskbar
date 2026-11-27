@@ -40,6 +40,12 @@ public sealed class SessionPromptTests : IDisposable
         Assert.Equal($"Allow Bash in the session: {new string('a', PromptDetail.SummaryLength - 1)}…", text);
     }
 
+    // The SDK's words name the tool: a detail for another tool does not name it.
+    [Fact]
+    public void The_sdk_text_must_name_the_details_tool() =>
+        Assert.Equal($"{SessionPrompt.Lead} Claude needs your permission to use Edit",
+            SessionPrompt.Text("permission_prompt", "Claude needs your permission to use Edit", Bash("ls")).Value);
+
     [Fact]
     public void A_plan_is_named_by_its_first_line()
     {

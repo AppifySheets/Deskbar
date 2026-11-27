@@ -6,9 +6,10 @@ namespace Deskbar.Core.Tasks;
 // session, both in memory only, since a dialog does not outlive the Claude Code process that drew it:
 //
 //   * the latest DETAIL a hook gave when a dialog opened (a PermissionRequest's tool and command, an Elicitation's server
-//     and message). The Notification that makes the question comes six seconds later and names neither. A detail older
-//     than DetailFor is not used: by then it belongs to some earlier dialog, and a wrong command on the bar is worse
-//     than none;
+//     and message). The Notification that makes the question comes six seconds later and names neither. A detail is
+//     not used once its own dialog was decided (its transcript mark moved on: the conversation went on, so the dialog
+//     now on screen is another one, say a computer-use approval that fires no PermissionRequest of its own), nor when
+//     older than DetailFor: a wrong command on the bar is worse than none (review of the branch, finding 3);
 //   * the questions PLACED on tasks from dialogs, each with where the session's transcript stood (TranscriptMark). The
 //     transcript takes nothing while a dialog waits, and its next conversation line means the dialog was answered,
 //     refused or escaped (TranscriptMark's probe), so Moved finds the answered ones on Deskbar's five-second tick, and
@@ -23,18 +24,25 @@ public sealed class SessionPrompts(Func<DateTimeOffset> now)
     /// <summary>A question placed on a task from a session's dialog, and the transcript it is answered in.</summary>
     public sealed record Placement(string Session, Guid Task, string Question, Maybe<TranscriptMark> Mark);
 
-    readonly Dictionary<string, PromptDetail> details = new(StringComparer.Ordinal);
+    readonly Dictionary<string, (PromptDetail Detail, Maybe<TranscriptMark> Mark)> details = new(StringComparer.Ordinal);
     readonly List<Placement> placed = [];
 
     /// <summary>The questions placed and not yet settled, oldest first.</summary>
     public IReadOnlyList<Placement> All => placed.ToList();
 
-    /// <summary>Notes what a hook said about a dialog that just opened; a newer detail replaces the session's older one.</summary>
-    public void Note(string session, PromptDetail detail) => details[session] = detail;
+    /// <summary>
+    /// Notes what a hook said about a dialog that just opened, with where the transcript it is decided in stood then; a
+    /// newer detail replaces the session's older one.
+    /// </summary>
+    public void Note(string session, PromptDetail detail, Maybe<TranscriptMark> mark = default) => details[session] = (detail, mark);
 
-    /// <summary>The session's latest detail while it is fresh (DetailFor), or none.</summary>
+    /// <summary>The session's latest detail while it is fresh (DetailFor) and its dialog undecided, or none.</summary>
     public Maybe<PromptDetail> Detail(string session) =>
-        details.TryGetValue(session, out var detail) && now() - detail.At <= DetailFor ? detail : Maybe<PromptDetail>.None;
+        details.TryGetValue(session, out var noted)
+        && now() - noted.Detail.At <= DetailFor
+        && !noted.Mark.Map(m => m.MovedOn()).GetValueOrDefault(false)
+            ? noted.Detail
+            : Maybe<PromptDetail>.None;
 
     /// <summary>
     /// Remembers a question placed on a task, with the transcript mark it is settled by (none: only the session's

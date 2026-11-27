@@ -203,4 +203,47 @@ public sealed class RemoteControlSessionPromptTests : IDisposable
 
         Assert.Equal(TaskStatus.InProgress, Task().Status);
     }
+
+    // Review finding 1: Claude's multiple-choice dialog is a permission dialog in Claude Code's registry too, so its own
+    // Notification ("Claude needs your permission") and PermissionRequest come with it. Its question stays the dialog's
+    // and its answer settles it.
+    [Fact]
+    public void The_ask_dialogs_own_notification_leaves_its_question()
+    {
+        var input = new { questions = new[] { new { question = "Which one?", header = "h", options = new[] { new { label = "A" } } } } };
+        Hook(new { session_id = "s1", transcript_path = transcript, cwd = Repo, hook_event_name = "PreToolUse", tool_name = DialogQuestion.Tool, tool_input = input });
+        var asked = Task().Question.Value;
+        Permission(DialogQuestion.Tool, input);
+        Notified();
+        Assert.Equal(asked, Task().Question.Value);
+
+        Hook(new { session_id = "s1", transcript_path = transcript, cwd = Repo, hook_event_name = "PostToolUse", tool_name = DialogQuestion.Tool, tool_input = input });
+
+        Assert.Equal(TaskStatus.InProgress, Task().Status);
+    }
+
+    // Review finding 3: a prompt answered at once leaves its detail behind; a later dialog with the same words (one that
+    // fires no PermissionRequest of its own) must not be named after that spent command.
+    [Fact]
+    public void A_decided_prompts_detail_names_nothing_later()
+    {
+        Permission();
+        Appended("assistant");
+
+        Notified();
+
+        Assert.Equal($"{SessionPrompt.Lead} Claude needs your permission", Task().Question.Value);
+    }
+
+    // Review finding 2: a task Petre took is not handed back to Claude by a dialog's question being settled.
+    [Fact]
+    public void A_task_petre_took_is_left_alone()
+    {
+        Assert.True(tasks.Assign(Task().Id, Assignee.Me).IsSuccess);
+
+        Notified("Session paused");
+
+        Assert.True(Task().Question.HasNoValue);
+        Assert.Equal(Assignee.Me, Task().Assignee);
+    }
 }
