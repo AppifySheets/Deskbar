@@ -318,8 +318,9 @@ public class TaskBoardTests
 
     // Task 37cd7081, Petre: "let's prohibit closing tasks that aren't yet done", narrowed to a live session with an offer
     // to stop it. A task Claude is still working on (open, not Done, a live session) refuses to close in every status
-    // short of Done; stopping Claude is the way past it. Done closes whatever its session does, and so do a note and a
-    // task whose session has ended.
+    // short of Done and Waiting on you; stopping Claude is the way past it. Done closes whatever its session does, and so
+    // do a note and a task whose session has ended. A task waiting on Petre closes at once too (task 3cdd0a52): its turn
+    // is his, and the keeper stops the session once the task is closed.
     [Fact]
     public void A_task_claude_is_still_working_on_closes_only_by_stopping_claude()
     {
@@ -327,8 +328,9 @@ public class TaskBoardTests
         Assert.True(TaskBoard.ClaudeStillWorking(Get(working, id1)));
         Assert.Equal(TaskViews.ClaudeStillWorkingRefusal, working.Close(id1, clock).Error);
 
-        var asking = working.Ask(id1, "Merge?", clock).Value;
-        Assert.Equal(TaskViews.ClaudeStillWorkingRefusal, asking.Close(id1, clock).Error);
+        var asking = working.Ask(id1, "Install the update", clock).Value;
+        Assert.False(TaskBoard.ClaudeStillWorking(Get(asking, id1)));
+        Assert.Equal(TaskStatus.Closed, Get(asking.Close(id1, clock).Value, id1).Status);
         var backlog = working.SetStatus(id1, TaskStatus.Backlog, clock).Value;
         Assert.Equal(TaskViews.ClaudeStillWorkingRefusal, backlog.Close(id1, clock).Error);
 

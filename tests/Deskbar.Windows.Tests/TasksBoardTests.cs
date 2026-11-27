@@ -3713,7 +3713,7 @@ public class TasksBoardTests
         t.Controller.Show();
         selection.Select(id);
 
-        // Its session is still live, so the close is "Stop Claude and close" (task 37cd7081).
+        // Stop Claude and close (task 37cd7081) still works on a waiting task, though a plain close would do too (task 3cdd0a52).
         Assert.True(t.Controller.Close(id, stopClaude: true).IsSuccess);
         Assert.True(t.Controller.Undo(id).IsSuccess);
 

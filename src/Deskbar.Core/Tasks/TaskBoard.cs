@@ -477,11 +477,12 @@ public sealed record TaskBoard(IReadOnlyList<TaskItem> Tasks)
     // offered the choice, "live session, but offer stop"). Closing ends no session, so a task closed under a session
     // still working left that session running with nowhere to report: every one of its task commands is refused on a
     // closed task, and a PR it had in flight could finish or stall with no word on the task. So an open task that is
-    // not Done and has a live session (<see cref="ClaudeStillWorking"/>) refuses too, with
+    // neither Done nor waiting on Petre and has a live session (<see cref="ClaudeStillWorking"/>) refuses too, with
     // <see cref="TaskViews.ClaudeStillWorkingRefusal"/>. Only that: Petre's own notes, and tasks whose sessions have
     // all ended, close as before, and a Done task closes whatever its session is doing (the keeper stops it once idle).
     // <paramref name="stoppingClaude"/> is the way past it, for "Stop Claude and close" (ClaudeTaskActions.StopAndClose
     // closes with it and then stops the sessions, and `task close --stop-claude`). It never skips the subtask rule.
+    // A task WAITING ON PETRE closes at once too (task 3cdd0a52, below on ClaudeStillWorking).
     public Result<TaskBoard> Close(Guid id, DateTimeOffset now, bool stoppingClaude = false) =>
         // Only an OPEN task is checked for open subtasks, so closing a closed task still says it is closed.
         Tasks.FirstOrDefault(t => t.Id == id) is { IsOpen: true } && OpenSubtaskCount(id) is var open and > 0
@@ -492,11 +493,23 @@ public sealed record TaskBoard(IReadOnlyList<TaskItem> Tasks)
                 : ChangeOpen(id, t => t with { Status = TaskStatus.Closed, Question = Maybe<string>.None, UpdatedAt = now });
 
     /// <summary>
-    /// Whether closing the task would leave Claude working on it (see <see cref="Close"/>): it is open, not Done, and a
-    /// session is live on it. The bar's and the window's ticks ask this first and offer "Stop Claude and close" instead.
+    /// Whether closing the task would leave Claude working on it (see <see cref="Close"/>): it is open, neither Done nor
+    /// waiting on Petre, and a session is live on it. The bar's and the window's ticks ask this first and offer "Stop
+    /// Claude and close" instead.
     /// </summary>
+    //
+    // WAITING ON PETRE IS NOT CLAUDE WORKING (task 3cdd0a52, 2026-11-27, Petre with a screenshot: "done task is asking me
+    // to close claude"). The task had asked him to install the release that carried its change; he installed it, its
+    // mark filled in green, and the tick still said "Claude is still working on this task" and offered to stop it. A
+    // task waiting on Petre has handed its turn to him: a reply from him sets the question aside and puts it back In
+    // progress first, so while it waits Claude is not working on the task. What can still run is the end of the turn
+    // that asked, or the session's own background job (a Monitor on a pull request or a release, which may wake it to
+    // rebase while the question holds, RepliedTasks' header). Closing the task does not strand that one: the
+    // keeper stops a Closed task's session once its turn is over, even while such a job runs (SessionKeeper, task
+    // 607af1db). So the stop menu here only got in the way, and its words were wrong. This is also how the lists already
+    // read it: TaskViews.AtWork leaves a waiting task out of the Claude working block.
     public static bool ClaudeStillWorking(TaskItem task) =>
-        task.IsOpen && task.Status != TaskStatus.Done && task.HasLiveSession;
+        task.IsOpen && task.Status is not (TaskStatus.Done or TaskStatus.WaitingOnYou) && task.HasLiveSession;
 
     /// <summary>
     /// A closed task comes back: In progress while a session is live on it, else Backlog, at the top of its quadrant

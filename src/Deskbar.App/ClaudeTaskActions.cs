@@ -59,8 +59,8 @@ namespace Deskbar.App;
 // leaves the reason, with the way to install by hand, in the task's thread. The question is asked whichever way the start
 // came (a menu, the thread's button, the pipe's `task start`), as the trust question is.
 //
-// STOP CLAUDE AND CLOSE (task 37cd7081, StopAndClose). A task Claude is still working on (open, not Done, a live
-// session) refuses a plain close (TaskBoard.Close): closing ends no session, and a session left running on a closed task
+// STOP CLAUDE AND CLOSE (task 37cd7081, StopAndClose). A task Claude is still working on (open, neither Done nor
+// waiting on Petre, a live session; task 3cdd0a52) refuses a plain close (TaskBoard.Close): closing ends no session, and a session left running on a closed task
 // has nowhere to report. The ticks, the menus' Close and `task close --stop-claude` offer this instead: the task is
 // closed first, past the refusal, so the keeper never resumes it, and then each of its sessions the latest list shows
 // running in the background gets `claude stop`, which keeps the conversation (measured 2026-11-23: double-click the task

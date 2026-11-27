@@ -1957,7 +1957,7 @@ public partial class FloatingBar
     // without the message would look like a tick that does nothing. Several lines can be pending at once, each with
     // its own timer.
     //
-    // CLAUDE STILL AT IT (task 37cd7081). A task Claude is still working on (open, not Done, a live session) does not close
+    // CLAUDE STILL AT IT (task 37cd7081). A task Claude is still working on (open, neither Done nor waiting on Petre, a live session; task 3cdd0a52) does not close
     // on a tick: closing ends no session, and the session would be left running with nowhere to report. The tick, and
     // the line menu's Close, open the stop menu instead (OpenStopClaudeMenu), whose one item closes with `stopClaude`:
     // through StopClaudeAndClose (the App's ClaudeTaskActions.StopAndClose, which closes and then stops the sessions),
