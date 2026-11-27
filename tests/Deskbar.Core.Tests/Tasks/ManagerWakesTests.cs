@@ -246,6 +246,41 @@ public sealed class ManagerWakesTests
             Plan(Record(), Board(Reporter(At(10)), WaitingOnDeploy(id1, portal2) with { SnoozedUntil = At(600) }), At(45), pullRequests: states));
     }
 
+    // A Done task's session already settled its deploy (merged, released, deployed, done), and a comment would resume an
+    // old session on every deploy of the repository. A recurring task between runs would start a whole new run.
+    [Fact]
+    public void A_done_task_or_one_between_runs_is_not_waiting()
+    {
+        var states = Merged(portal1, portal2);
+        var repeat = new TaskRepeat(TaskRepeats.Parse("every 1h 09:00-19:00").Value, "sonnet", @"E:\repos\portal");
+        Assert.IsType<ManagerWake.Nothing>(
+            Plan(Record(), Board(Reporter(At(10)), WaitingOnDeploy(id1, portal2) with { Status = TaskStatus.Done }), At(45), pullRequests: states));
+        Assert.IsType<ManagerWake.Nothing>(Plan(Record(),
+            Board(Reporter(At(10)), WaitingOnDeploy(id1, portal2) with { Status = TaskStatus.Backlog, Repeat = repeat }), At(45), pullRequests: states));
+    }
+
+    // The briefing tells a session whose change nothing runs to report "nothing to deploy": that is no deploy.
+    [Fact]
+    public void A_nothing_to_deploy_report_wakes_nothing()
+    {
+        var docs = Reporter(At(10)) with { Deployed = [new DeployedPullRequest(portal1.Key, At(10), "Nothing to deploy: docs")] };
+        Assert.IsType<ManagerWake.Nothing>(Plan(Record(), Board(docs, WaitingOnDeploy(id1, portal2)), At(45), pullRequests: Merged(portal1, portal2)));
+    }
+
+    // One report stamps every pull request of the task: the wake says which repositories it covered.
+    [Fact]
+    public void A_report_covering_two_repositories_says_so()
+    {
+        var both = Reporter(At(10)) with
+        {
+            PullRequests = [portal1, api1],
+            Deployed = [new DeployedPullRequest(portal1.Key, At(10), "portal log"), new DeployedPullRequest(api1.Key, At(10), "portal log")],
+        };
+        var wake = Assert.IsType<ManagerWake.Wake>(
+            Plan(Record(), Board(both, WaitingOnDeploy(id1, portal2)), At(45), pullRequests: Merged(portal1, portal2, api1)));
+        Assert.Contains("One report for appifysheets/api, appifysheets/portal, so it may be another's deploy.", wake.Message);
+    }
+
     // A session marks done right after its report and the user may close the task at once: the report still counts.
     [Fact]
     public void A_closed_reporters_deploy_still_wakes() =>

@@ -45,6 +45,10 @@ public abstract record ManagerWake
 //     `task deployed` itself, because a deploy of one service does not prove another service of the repository was
 //     redeployed. No dot: this is sessions' business, not the user's (task 6a87df67, "manager doesn't have to tell
 //     me each merge"). It shares the gap and the busy rule with the hand-backs: a batch waits, nothing is lost.
+//     Who waits and what counts as a deploy is narrowed in Deploys and Waits (no Done task, no "nothing to deploy").
+//     Two gaps are accepted: a hand-back wake that fires while GitHub's answers are still arriving (just after a
+//     Deskbar start) moves Since past a deploy whose waiters were not known yet, and a pull request merged after the
+//     deploy can still be listed. Both cost at most a missed or a wasted nudge, and the session checks either way.
 //
 // A PURE FUNCTION: the record, the board, the listed sessions, the day and the time come in; nothing is read or written.
 // ManagerWaker (in the app) runs it on every sessions poll and delivers the message.
@@ -100,25 +104,49 @@ public static class ManagerWakes
     /// (the task that made it and its evidence), and the other open tasks with a session whose merged pull request in
     /// that repository has no deploy report yet.
     /// </summary>
-    sealed record RepositoryDeploy(string Repository, TaskItem Reporter, string Evidence, IReadOnlyList<TaskItem> Waiting);
+    /// <remarks>
+    /// <see cref="Covered"/> is every repository the same report stamped. TaskBoard.MarkDeployed stamps all of a task's
+    /// pull requests with one time and one note, so a task with pull requests in two repositories (an app and its stack
+    /// file, say) reports both at once, though the evidence may speak for one. The wake says so, and the waiting session
+    /// checks its own app's evidence either way.
+    /// </remarks>
+    sealed record RepositoryDeploy(string Repository, TaskItem Reporter, string Evidence, IReadOnlyList<string> Covered,
+        IReadOnlyList<TaskItem> Waiting);
 
     // The repositories with a deploy reported after `since` that some other task waits on. Every task on the board can
     // report (a session marks done right after its report, and the user may close it at once), but only open, unsnoozed
     // ones wait. Repositories are compared by PullRequestLink.Key's "owner/repo" part, already lower case.
+    //
+    // A "nothing to deploy" report is not a deploy: the session briefing (SessionBriefing.Commands) tells a session whose
+    // change nothing runs (docs, a skill, a library) to report exactly that, and it must not send the repository's
+    // waiting sessions off to look for one.
     static IReadOnlyList<RepositoryDeploy> Deploys(TaskBoard board, IReadOnlyList<TaskItem> open, DateTimeOffset since,
         IReadOnlyDictionary<string, PullRequestArrival> pullRequests) =>
         board.Tasks
-            .SelectMany(task => task.Deployed.Where(d => d.At > since).Select(d => (Task: task, Report: d)))
+            .SelectMany(task => task.Deployed
+                .Where(d => d.At > since && !d.Note.TrimStart().StartsWith(NothingToDeploy, StringComparison.OrdinalIgnoreCase))
+                .Select(d => (Task: task, Report: d)))
             .GroupBy(r => RepositoryOf(r.Report.Key))
             .Select(reports => (Repository: reports.Key, Latest: reports.MaxBy(r => r.Report.At)))
             .Select(r => new RepositoryDeploy(
                 r.Repository,
                 r.Latest.Task,
                 r.Latest.Report.Note,
-                open.Where(t => t.Id != r.Latest.Task.Id && t.Sessions.Count > 0 && WaitsOn(t, r.Repository, pullRequests)).ToList()))
+                r.Latest.Task.Deployed.Where(d => d.At == r.Latest.Report.At).Select(d => RepositoryOf(d.Key)).Distinct().Order(StringComparer.Ordinal).ToList(),
+                open.Where(t => t.Id != r.Latest.Task.Id && Waits(t) && WaitsOn(t, r.Repository, pullRequests)).ToList()))
             .Where(d => d.Waiting.Count > 0)
             .OrderBy(d => d.Repository, StringComparer.Ordinal)
             .ToList();
+
+    /// <summary>How a session reports a change nothing runs (the session briefing's words); such a report is no deploy.</summary>
+    public const string NothingToDeploy = "nothing to deploy";
+
+    // Who can be waiting on a deploy: a task with a Claude session (the manager's comment is what wakes it) that is still
+    // under way. A Done task is left out: the briefing's order (merged, released, deployed, done) means its session
+    // already settled the deploy, and an older Done task without a report would otherwise get a resumed turn on every
+    // deploy in its repository, for good. So is a recurring task between runs, where a comment starts a whole new run
+    // (CommentWake.Plan's FreshRun).
+    static bool Waits(TaskItem task) => task.Sessions.Count > 0 && task.Status != TaskStatus.Done && !task.IsBetweenRuns;
 
     // A pull request of `repository` that GitHub says is merged and the task has not reported deployed.
     static bool WaitsOn(TaskItem task, string repository, IReadOnlyDictionary<string, PullRequestArrival> pullRequests) =>
@@ -143,7 +171,9 @@ public static class ManagerWakes
                 Section("Deployed (a deploy ships what merged before it, so the tasks under it may be in it too):",
                     deploys.SelectMany(d => new[]
                         {
-                            $"{d.Repository}, reported by {Name(d.Reporter)}: \"{Cut(d.Evidence, 120)}\". Waiting on a deploy of it:",
+                            $"{d.Repository}, reported by {Name(d.Reporter)}: \"{Cut(d.Evidence, 120)}\"."
+                                + (d.Covered.Count > 1 ? $" One report for {string.Join(", ", d.Covered)}, so it may be another's deploy." : "")
+                                + " Waiting on a deploy of it:",
                         }.Concat(d.Waiting.Select(t => $"  {Name(t)}")))),
                 deploys.Count > 0
                     ? new[]
