@@ -460,7 +460,10 @@ public sealed partial class TasksBoard : IDisposable
         + $"|{manager.CurrentWorkspaceId}|{manager.State.TasksMatrix}|{manager.State.TasksPanel?.Inbox}"
         // The manager's question (task 61e4d143): `task ask`, `task answered` and the user's reply change only
         // AppState.Manager, so without this the open panel would drop their pulse and show the line late.
-        + $"|{manager.State.Manager?.Question}|{manager.State.Manager?.AskedAt}";
+        + $"|{manager.State.Manager?.Question}|{manager.State.Manager?.AskedAt}"
+        // The manager's answer (task 2c5de076) the same way: the turn's end, opening the manager and its window coming
+        // to the front change only Answer and AnsweredAt.
+        + $"|{manager.State.Manager?.Answer}|{manager.State.Manager?.AnsweredAt}";
 
     /// <summary>
     /// The window's handle, created if it is not yet: what the App pins to every desktop, opts out of the window list
