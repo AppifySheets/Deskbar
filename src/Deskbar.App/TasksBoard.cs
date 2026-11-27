@@ -328,7 +328,7 @@ public sealed partial class TasksBoard : IDisposable
             // A comment box's "/" list of Claude Code skills (task 29bdd158, SkillCompletion): none, no list.
             TaskSkills = taskSkills,
             // The add box's Start Claude button (task 3c40dec9): none, as StartClaude, while Claude cannot be started.
-            // Since task 7b17a573 it starts in the background (`startClaudeInBackground`, no window, a silent tray
+            // Since task 7b17a573 it starts in the background (`startClaudeInBackground`, no window, a "Claude started" card that takes no focus
             // notification) when the App gives that; the tests give only `startClaude`.
             AddNoteAndStartClaude = (startClaudeInBackground ?? startClaude) is { } start
                 ? (title, workspace, quadrant, describe) => AddNoteAndStartClaude(start, title, workspace, quadrant, describe)
@@ -1237,7 +1237,7 @@ public sealed partial class TasksBoard : IDisposable
     bool AddNoteAndStartClaude(Action<Guid> startClaude, string title, Maybe<Guid> workspace, Quadrant quadrant,
         Func<Guid, Result<string>>? describe) =>
         // Not selected or scrolled to (show: false, task 7b17a573; Petre: "don't even take me away from my current
-        // thread"): the panel stays on the thread he has open, and the tray's "Claude started" confirms the start.
+        // thread"): the panel stays on the thread he has open, and the "Claude started" card confirms the start.
         AddNote(title, workspace, quadrant, describe: describe, show: false,
             added: id => window.Dispatcher.BeginInvoke(() => startClaude(id), System.Windows.Threading.DispatcherPriority.Input)).IsSuccess;
 

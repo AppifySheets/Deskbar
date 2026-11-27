@@ -51,7 +51,7 @@ public partial class FloatingBar
 
     /// <summary>
     /// The add box's Ctrl+Enter and play button (task 7b17a573): the App's ClaudeTaskActions.OfferInBackground, which
-    /// starts the session with no window and confirms it with a silent tray notification. Unset (the tests), the add box
+    /// starts the session with no window and confirms it with a card that takes no focus (ClaudeStartedNotice). Unset (the tests), the add box
     /// falls back to <see cref="StartClaude"/>.
     /// </summary>
     internal Func<Guid, ContextMenu?>? StartClaudeInBackground { get; init; }

@@ -496,7 +496,7 @@ public sealed class ClaudeTaskActions : IDisposable
     /// don't open a terminal. confirm it has started as a mild notification, don't even take me away from my current
     /// thread"). Everything up to the start is Offer's (the refusals, the folder pick list when there are several), but
     /// the session then runs in the background: no window is attached to it, and
-    /// <see cref="ClaudeTaskSeams.StartedInBackground"/> (a silent tray notification in the app) says it started. A failed
+    /// <see cref="ClaudeTaskSeams.StartedInBackground"/> (the app's ClaudeStartedNotice, a card that takes no focus) says it started. A failed
     /// start is still told the loud way, as Offer's is, since it needs Petre: nothing runs and nothing else would say so.
     /// </summary>
     public ContextMenu? OfferInBackground(Guid id) => Offer(id, background: true);
@@ -798,7 +798,7 @@ public sealed record ClaudeTaskSeams(
 
     /// <summary>
     /// A background start went through (task 7b17a573, ClaudeTaskActions.OfferInBackground): the task as the board has it
-    /// now and the folder the session runs in. The app shows a silent tray notification that takes no focus; nothing by
+    /// now and the folder the session runs in. The app shows ClaudeStartedNotice, a card in the screen's corner that takes no focus; nothing by
     /// default.
     /// </summary>
     public Action<TaskItem, string> StartedInBackground { get; init; } = (_, _) => { };

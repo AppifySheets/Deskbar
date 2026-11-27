@@ -2315,7 +2315,7 @@ public partial class FloatingBar
                 EndTyping(clear: true, handBack: !starts);
                 // A note handed to Claude is not selected or scrolled to (task 7b17a573, Petre: "don't even take me away
                 // from my current thread"): the selection is shared with the tasks panel, and moving it would scroll the
-                // panel off the thread he has open. The tray's "Claude started" says where it went instead.
+                // panel off the thread he has open. The "Claude started" card says where it went instead.
                 if (starts) StartAddedTask(task.Id);
                 else ShowAddedTask(task.Id);
             })
@@ -2370,13 +2370,26 @@ public partial class FloatingBar
     //
     // Since task 7b17a573 the start runs in the background (StartClaudeInBackground, the App's
     // ClaudeTaskActions.OfferInBackground): no Claude window opens, so with one folder the keyboard goes straight back to
-    // where Petre was, and a silent tray notification says the session started.
+    // where Petre was, and a "Claude started" card in the screen's corner (ClaudeStartedNotice) says so.
     void StartAddedTask(Guid id)
     {
         if (AddedTaskStarter is not { } start) return;
         Dispatcher.BeginInvoke(() =>
         {
-            if (start(id) is { } pick) HoldFadeWhileOpen(pick);
+            if (start(id) is { } pick)
+            {
+                HoldFadeWhileOpen(pick);
+                // In the background no Claude window comes to the front after the pick (review of task 7b17a573), so
+                // the keyboard would stay in the bar's idle box and the next keystrokes meant for the terminal would land
+                // there. Once the list has closed and whatever its item opened has had its turn (Background priority),
+                // the keyboard goes back, but only while the bar itself still has it: "Choose a folder…" or a refusal's
+                // message box in front keeps it.
+                if (StartClaudeInBackground is not null)
+                    pick.Closed += (_, _) => Dispatcher.BeginInvoke(() =>
+                    {
+                        if (ForegroundWindow() == new System.Windows.Interop.WindowInteropHelper(this).Handle) GiveTaskKeyboardBack();
+                    }, DispatcherPriority.Background);
+            }
             else GiveTaskKeyboardBack();
         }, DispatcherPriority.Input);
     }
