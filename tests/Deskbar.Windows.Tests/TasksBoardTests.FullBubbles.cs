@@ -67,7 +67,7 @@ public partial class TasksBoardTests
     });
 
     [Fact]
-    public void The_list_thread_still_clips_a_long_comment_to_three_lines() => StaThread.Run(() =>
+    public void The_list_thread_still_clips_a_long_comment_to_six_lines() => StaThread.Run(() =>
     {
         using var t = Build(width: 460);
         var id = SessionTaskWithComments(t, ("s1", Paragraphs(16)));
@@ -77,7 +77,8 @@ public partial class TasksBoardTests
 
         Assert.Null(t.Window.InboxPageContent);
         var box = BoxWith(t.Window, "Paragraph 16 of a made-up");
-        Assert.Equal(54, box.MaxHeight);
+        // The List's fold, TasksWindow.FoldedLines: six lines of 18 DIP since task f0168cdd (it was Ruling 63's three, 54).
+        Assert.Equal(6 * 18, box.MaxHeight);
         Assert.True(box.ClipToBounds);
         Assert.True(HasNamed(t.Window, "Show more"));
     });
