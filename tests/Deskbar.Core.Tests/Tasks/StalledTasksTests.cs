@@ -50,6 +50,41 @@ public sealed class StalledTasksTests
         Assert.Empty(step.TakenBack);
     }
 
+    // DESKBAR FOLLOWS THE MERGE (Deskbar task c8e6967d, spec 2026-11-27-repo-watcher-design.md): a task whose merge commit's
+    // runs Deskbar follows is quiet on purpose, so it is neither asked nor handed back.
+    [Fact]
+    public void FollowedMergeGetsNoStalledNudge()
+    {
+        var board = Claudes(TaskBoard.Empty, id1);
+
+        var step = StalledTasks.Step(board, Nobody, Nobody, NoneBusy, At(30), following: new HashSet<Guid> { id1 });
+
+        Assert.Empty(step.Nudge);
+        Assert.Same(board, step.Board);
+    }
+
+    [Fact]
+    public void FollowedMergeIsNotHandedBack()
+    {
+        var asked = StalledTasks.Step(Claudes(TaskBoard.Empty, id1), Nobody, Nobody, NoneBusy, At(15));
+        Assert.Equal([id1], asked.Nudge);
+
+        var later = StalledTasks.Step(asked.Board, Nobody, Nobody, asked.LastBusy, At(15) + StalledTasks.Answer, asked.Nudged,
+            following: new HashSet<Guid> { id1 });
+
+        Assert.Empty(later.HandedBack);
+        Assert.Equal(Assignee.Claude, Get(later.Board, id1).Assignee);
+    }
+
+    // Review Focus 3: a restart forgets the follow (it is in memory only), so the same quiet task is asked again.
+    [Fact]
+    public void WithoutFollowTheStalledNudgeReturns()
+    {
+        var step = StalledTasks.Step(Claudes(TaskBoard.Empty, id1), Nobody, Nobody, NoneBusy, At(30), following: new HashSet<Guid>());
+
+        Assert.Equal([id1], step.Nudge);
+    }
+
     [Fact]
     public void Quiet_for_14_minutes_keeps_it_with_Claude()
     {
