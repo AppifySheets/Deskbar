@@ -121,6 +121,9 @@ public class ClaudeSessionsTests
         public string Home { get; } = Path.Combine(Path.GetTempPath(), "deskbar-claude-sessions-" + Guid.NewGuid().ToString("N"));
         public Func<string, Maybe<Guid>> WorkspaceOfFolder { get; set; } = _ => Maybe<Guid>.None;
         public Func<TaskItem, bool> WindowOpen { get; set; } = _ => false;
+        // Whether the task's window is the one in front (task 2eeb5589), and the windows opened again after a restart.
+        public Func<TaskItem, bool> WindowInFront { get; set; } = _ => false;
+        public List<(Guid TaskId, string SessionId, DateTimeOffset At)> Reopened { get; } = [];
         // The manager session's folder, handed to ClaudeSessions; none, nothing is left out.
         public string? ManagerFolder { get; set; }
         public ClaudeSessions? Sessions { get; private set; }
@@ -147,7 +150,8 @@ public class ClaudeSessionsTests
         {
             T0 = Clock.Now;
             Sessions = new ClaudeSessions(Tasks, Manager, Cli, Clock, WorkspaceOfFolder, Home, background: Scheduler.Immediate, trace: Traces.Add,
-                windowOpen: task => WindowOpen(task), managerFolder: ManagerFolder, folderExists: folder => !GoneFolders.Contains(folder));
+                windowOpen: task => WindowOpen(task), managerFolder: ManagerFolder, folderExists: folder => !GoneFolders.Contains(folder),
+                windowInFront: task => WindowInFront(task), reopenWindow: (task, agent) => Reopened.Add((task.Id, agent.SessionId, Clock.Now)));
             return Sessions;
         }
 
@@ -1197,26 +1201,93 @@ public class ClaudeSessionsTests
         Assert.Contains(rig.Task(taskId).Comments, c => c.ByDeskbar && c.Markdown.StartsWith("Resumed, since the usage limit", StringComparison.Ordinal));
     }
 
-    // With a window of Deskbar's on the task, `claude stop` would close it under Petre: the restart waits for it to close.
-    [Fact]
-    public void A_limited_session_with_its_window_open_is_not_restarted()
+    // A session stopped on a usage limit, its transcript ending on the limit's error with this reset moment. The error
+    // carries its timestamp (an hour before the reset), as Claude Code writes it: without one the keeper cannot tell a
+    // wake already made since the error, and wakes again after every grace.
+    static void LimitedTranscript(Rig rig, string sessionId, DateTimeOffset resetsAt)
     {
-        using var rig = new Rig();
-        var (_, sessionId) = rig.Running("limits");
         var path = ClaudeTranscript.PathOf(rig.Home, @"E:\repos\Work", sessionId);
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         File.WriteAllLines(path,
         [
             """{"type":"user","message":{"role":"user","content":"start"}}""",
-            "{\"type\":\"assistant\",\"isApiErrorMessage\":true,\"apiErrorParams\":{\"rate_limit_info\":{\"resetsAt\":"
-                + (Origin - TimeSpan.FromHours(1)).ToUnixTimeSeconds() + "}},\"message\":{\"role\":\"assistant\",\"stop_reason\":\"stop_sequence\"}}",
+            "{\"type\":\"assistant\",\"timestamp\":\"" + (resetsAt - TimeSpan.FromHours(1)).ToString("O")
+                + "\",\"isApiErrorMessage\":true,\"apiErrorParams\":{\"rate_limit_info\":{\"resetsAt\":"
+                + resetsAt.ToUnixTimeSeconds() + "}},\"message\":{\"role\":\"assistant\",\"stop_reason\":\"stop_sequence\"}}",
         ]);
+    }
+
+    // With the window of Deskbar's on the task in front, Petre is in it and may be typing: `claude stop` would close it
+    // under his hands, so the restart waits until he has left it (task 2eeb5589).
+    [Fact]
+    public void A_limited_session_whose_window_is_in_front_is_not_restarted_until_it_is_left()
+    {
+        using var rig = new Rig();
+        var (_, sessionId) = rig.Running("limits");
+        LimitedTranscript(rig, sessionId, Origin - TimeSpan.FromHours(1));
+        var inFront = true;
         rig.WindowOpen = _ => true;
+        rig.WindowInFront = _ => inFront;
+        rig.Begin();
+
+        rig.RunTo(TimeSpan.FromMinutes(5));
+        Assert.Empty(rig.Cli.Stops);
+        Assert.Empty(rig.Cli.Resumes);
+
+        inFront = false;
+        rig.RunTo(TimeSpan.FromMinutes(5) + ClaudeSessions.Poll + SessionKeeper.Spacing + Seconds(1));
+        Assert.Single(rig.Cli.Stops);
+        Assert.Single(rig.Cli.Resumes);
+    }
+
+    // TASK 2eeb5589, session 1e34bf27: the five-hour limit stopped it with its Deskbar window open behind other windows,
+    // and it waited 17 minutes past the reset for Petre to notice. Now it is restarted at the reset like any other, and
+    // the window the stop closed is opened again once the woken session is listed and the old window has gone.
+    [Fact]
+    public void A_limited_session_with_its_window_open_is_restarted_and_its_window_opened_again()
+    {
+        using var rig = new Rig();
+        var (taskId, sessionId) = rig.Running("limits");
+        LimitedTranscript(rig, sessionId, Origin + TimeSpan.FromMinutes(30));
+        var windowOpen = true;
+        rig.WindowOpen = _ => windowOpen;
+        // `claude stop` closes the attached window (measured 2026-11-25), a moment later than the stop answers.
+        rig.Cli.Stop = shortId =>
+        {
+            rig.Cli.Listed.RemoveAll(row => row.SessionId.StartsWith(shortId, StringComparison.Ordinal));
+            rig.Clock.Schedule(Seconds(20), () => windowOpen = false);
+            return Result.Success($"stopped {shortId}");
+        };
+        rig.Begin();
+
+        rig.RunTo(TimeSpan.FromMinutes(10));
+        Assert.Single(rig.Task(taskId).Comments, c => c.ByDeskbar && c.Markdown.StartsWith("Stopped on the usage limit. Deskbar resumes it", StringComparison.Ordinal)
+            && c.Markdown.EndsWith("and opens its window again.", StringComparison.Ordinal));
+
+        rig.RunTo(TimeSpan.FromMinutes(30) + SessionKeeper.LimitMargin + TimeSpan.FromMinutes(1));
+        Assert.Single(rig.Cli.Stops);
+        Assert.Equal(["--bg", "--resume", sessionId, ContinueText], Assert.Single(rig.Cli.Resumes).Arguments);
+        var reopened = Assert.Single(rig.Reopened);
+        Assert.Equal((taskId, sessionId), (reopened.TaskId, reopened.SessionId));
+        // Not while the old window was still closing: it would only have been brought forward, and then closed.
+        Assert.True(reopened.At >= rig.Cli.Stops[0].At + Seconds(20));
+
+        rig.RunTo(TimeSpan.FromMinutes(40));
+        Assert.Single(rig.Reopened);
+    }
+
+    // A restart of a session with no window open opens none.
+    [Fact]
+    public void A_limited_session_without_a_window_gets_none_after_its_restart()
+    {
+        using var rig = new Rig();
+        var (_, sessionId) = rig.Running("limits");
+        LimitedTranscript(rig, sessionId, Origin - TimeSpan.FromHours(1));
         rig.Begin();
 
         rig.RunTo(TimeSpan.FromMinutes(5));
 
-        Assert.Empty(rig.Cli.Stops);
-        Assert.Empty(rig.Cli.Resumes);
+        Assert.Single(rig.Cli.Resumes);
+        Assert.Empty(rig.Reopened);
     }
 }

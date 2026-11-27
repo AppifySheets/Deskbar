@@ -785,8 +785,10 @@ two minutes after Deskbar next starts. A session you cleared with `/clear` is no
 its place on the task.
 A session whose turn died on your Claude usage limit is shown as stopped: its task's thread and status line say
 so and name the time the limit resets. Deskbar resumes it a couple of minutes after that time and tells it to
-continue, also when Claude Code still lists it, as long as it runs in the background and no Deskbar window is
-open on it. A session in a VS Code panel or a terminal cannot be restarted from outside, so you type in it. A
+continue, also when Claude Code still lists it, as long as it runs in the background. A Deskbar window open on
+it closes with the restart and opens again on the woken session, so a restart waits while you are working in
+that window. A session in a VS Code panel or a terminal cannot be restarted from
+outside, so you type in it. A
 comment on such a task reaches the session straight away, even before the limit resets. The same goes for a
 session Claude Code still lists after its process has ended: a comment stops and resumes it with the comment,
 instead of leaving it in an inbox nothing reads.

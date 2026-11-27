@@ -123,6 +123,25 @@ public sealed class ClaudeSessions : IDisposable
     readonly Func<string, Maybe<Guid>> workspaceOfFolder;
     readonly Func<TaskItem, bool> windowOpen;
 
+    // TASK 2eeb5589 (Petre: "after the limit claude reaches, deskbar should auto resume all sessions that were stopped
+    // due to the limit"). On 2026-11-27 the five-hour limit stopped a session whose Deskbar window was open, and it waited
+    // 17 minutes past the reset because a restart used to be skipped while a window was attached (`claude stop` closes
+    // it, measured 2026-11-25). Now the restart goes ahead and the window is opened again on the woken session, with two
+    // seams for it: whether that window is the one in FRONT (Petre is in it, maybe typing, so the restart waits until he
+    // leaves it rather than closing it under his hands), and how to open the window again (ClaudeTaskActions.Reopen).
+    readonly Func<TaskItem, bool> windowInFront;
+    readonly Action<TaskItem, ClaudeAgent> reopenWindow;
+
+    // Restarted sessions whose window the restart closed, by session id, with their task and when the restart answered.
+    // Each poll opens the window again once the woken session is listed and the old window has gone (it closes a moment
+    // after the stop, and a window still found by its title would only be brought forward and then close). An entry
+    // not reopened within ReopenWithin is dropped: by then the session is not coming back listed, and a window opened
+    // much later would surprise Petre more than help.
+    ImmutableDictionary<string, (Guid TaskId, DateTimeOffset At)> reopen = ImmutableDictionary<string, (Guid, DateTimeOffset)>.Empty;
+
+    /// <summary>How long after a restart its closed window may still be opened again (see <c>reopen</c>).</summary>
+    public static readonly TimeSpan ReopenWithin = TimeSpan.FromMinutes(2);
+
     // CommentInbox.Retire in the app: called right before every resume, so a comment waiter orphaned by the session's
     // ended process exits instead of claiming the next comment meant for the woken session (task daeaa26c).
     readonly Action<string> retireWaiter;
@@ -243,11 +262,23 @@ public sealed class ClaudeSessions : IDisposable
     /// resumed and stopped only by his click, so the keeper neither adopts nor stops it. None, nothing is left out.
     /// </param>
     /// <param name="longPath">Expands 8.3 short forms when comparing folders; the file system's answer unless a test says otherwise.</param>
+    /// <param name="windowInFront">
+    /// Whether Petre is at the window of Deskbar's on the task's session (task 2eeb5589): in the App, it is in front and
+    /// the machine had input in the last two minutes. A session stopped on a usage limit is not restarted while he is,
+    /// since the restart closes that window. Left out, nobody ever is.
+    /// </param>
+    /// <param name="reopenWindow">
+    /// Opens the window on a task's background session again (ClaudeTaskActions.Reopen), after a limit restart closed it
+    /// (task 2eeb5589). Left out, nothing is opened.
+    /// </param>
     public ClaudeSessions(TaskService tasks, WorkspaceManager manager, IClaudeCli cli, IScheduler scheduler,
         Func<string, Maybe<Guid>> workspaceOfFolder, string claudeHome, IScheduler? background = null, Action<string>? trace = null,
         Func<TaskItem, bool>? windowOpen = null, string? managerFolder = null, Func<string, string>? longPath = null,
-        Func<string, bool>? folderExists = null, Action<string>? retireWaiter = null)
+        Func<string, bool>? folderExists = null, Action<string>? retireWaiter = null,
+        Func<TaskItem, bool>? windowInFront = null, Action<TaskItem, ClaudeAgent>? reopenWindow = null)
     {
+        this.windowInFront = windowInFront ?? (_ => false);
+        this.reopenWindow = reopenWindow ?? ((_, _) => { });
         this.retireWaiter = retireWaiter ?? (_ => { });
         this.folderExists = folderExists ?? Directory.Exists;
         this.managerFolder = managerFolder;
@@ -608,6 +639,8 @@ public sealed class ClaudeSessions : IDisposable
             .ToList()
             .ForEach(step => Take(step, resuming));
         NoteLimits(listed, now, resuming);
+        // Task 2eeb5589: windows a limit restart closed come back once their woken session is listed.
+        Reopen(listed, now);
 
         // Job 5: finished tasks' idle sessions are stopped. Asked after the keeper's steps, on the same board and list.
         idleSince = listed.Where(agent => !agent.Busy).Select(agent => agent.SessionId).Distinct()
@@ -671,9 +704,11 @@ public sealed class ClaudeSessions : IDisposable
                     .Tap(() => LatestSessionOf(giveUp.TaskId).Tap(id => givenUp = givenUp.Add(id)))
                     .TapError(e => trace?.Invoke($"claude sessions: give-up not asked on {giveUp.TaskId}: {e}"));
                 break;
-            // A restart (StopFirst) never while a window of Deskbar's is attached to the task: `claude stop` would close it
-            // under Petre (measured 2026-11-25), and with the window open he sees the limit's message and can type himself.
-            case KeeperStep.Resume resume when resuming && !Queued(resume.Session.Id) && !(resume.StopFirst.HasValue && WindowOpenOn(resume.TaskId)):
+            // A restart (StopFirst) never while the window of Deskbar's on the task is in front: `claude stop` closes it
+            // (measured 2026-11-25), and in front Petre may be typing in it. A window open behind others no longer holds the
+            // restart back (task 2eeb5589): the session was woken 17 minutes late waiting for Petre to notice. Wake notes
+            // the window and Reopen opens it again on the woken session.
+            case KeeperStep.Resume resume when resuming && !Queued(resume.Session.Id) && !(resume.StopFirst.HasValue && WindowInFrontOn(resume.TaskId)):
                 queue = queue.Enqueue(resume);
                 break;
         }
@@ -685,6 +720,33 @@ public sealed class ClaudeSessions : IDisposable
 
     bool WindowOpenOn(Guid taskId) =>
         tasks.Board.Tasks.TryFirst(t => t.Id == taskId).Map(windowOpen).GetValueOrDefault(false);
+
+    bool WindowInFrontOn(Guid taskId) =>
+        tasks.Board.Tasks.TryFirst(t => t.Id == taskId).Map(windowInFront).GetValueOrDefault(false);
+
+    // TASK 2eeb5589: the window a limit restart closed (see the field `reopen`), opened again on the woken session once
+    // the list shows it and the old window has gone. A task closed meanwhile, or a session the list shows interactive (a
+    // person took it into a VS Code panel), gets no window; an entry past ReopenWithin is dropped with a trace line.
+    void Reopen(IReadOnlyCollection<ClaudeAgent> listed, DateTimeOffset now)
+    {
+        var expired = reopen.Where(pair => now - pair.Value.At > ReopenWithin).Select(pair => pair.Key).ToList();
+        // The trace names which of the two waits ran out: the woken session never listed, or listed with the old window
+        // still open (it lingered, or something attached to the session again).
+        expired.ForEach(id => trace?.Invoke(listed.Any(agent => agent.SessionId == id)
+            ? $"claude sessions: window on {id} not reopened, a window on its task was still open after {ReopenWithin}"
+            : $"claude sessions: window on {id} not reopened, the session was not listed within {ReopenWithin}"));
+        reopen = reopen.RemoveRange(expired);
+        reopen
+            .Select(pair => (SessionId: pair.Key, Task: tasks.Board.Tasks.TryFirst(t => t.Id == pair.Value.TaskId && t.IsOpen),
+                Agent: listed.TryFirst(agent => agent.SessionId == pair.Key)))
+            .Where(item => item.Agent.HasValue && (item.Task.HasNoValue || !windowOpen(item.Task.Value)))
+            .ToList()
+            .ForEach(item =>
+            {
+                reopen = reopen.Remove(item.SessionId);
+                if (item.Task.HasValue && item.Agent.Value.Background) reopenWindow(item.Task.Value, item.Agent.Value);
+            });
+    }
 
     // SHOWN AS STOPPED (task daeaa26c). A session whose turn died on the usage limit is still listed, idle, and its hooks
     // never said it ended, so the board went on showing it live with its last status line ("PR 574 open, CI running")
@@ -715,12 +777,12 @@ public sealed class ClaudeSessions : IDisposable
                 var status = LimitLine + when;
                 if (item.Task.StatusLine == status) return;
                 // An interactive session (a VS Code panel, a terminal) cannot be restarted from outside (SessionKeeper's
-                // header), and a background one with a Deskbar window open on it is not (Take), so their line says what
-                // Petre can do instead of promising a wake.
+                // header), so its line says what Petre can do instead of promising a wake. A background one with a
+                // Deskbar window open on it is restarted like any other (task 2eeb5589), and its window opened again.
                 var interactive = listed.Any(agent => agent.SessionId == item.Session.Id && !agent.Background);
                 Say(item.Task.Id,
                     interactive ? $"Stopped on the usage limit, which resets at {when}. It runs in a window Deskbar cannot restart, so type in it once the limit has reset."
-                    : windowOpen(item.Task) ? $"Stopped on the usage limit, which resets at {when}. Its window is open, so type in it then, or close it and Deskbar resumes it."
+                    : resuming && windowOpen(item.Task) ? $"Stopped on the usage limit. Deskbar resumes it once the limit resets at {when}, and opens its window again."
                     : resuming ? $"Stopped on the usage limit. Deskbar resumes it once the limit resets at {when}."
                     : $"Stopped on the usage limit, which resets at {when}.");
                 tasks.SetStatusLine(item.Task.Id, status)
@@ -834,6 +896,9 @@ public sealed class ClaudeSessions : IDisposable
         ledger = ledger.Record(session.Id, at);
         lastIssued = at;
         inFlight = session.Id;
+        // Task 2eeb5589: a restart closes the window of Deskbar's on the session, so whether one was open is asked now,
+        // on the UI thread before the stop, and a restart that worked opens it again (Reopen).
+        var hadWindow = resume.StopFirst.HasValue && WindowOpenOn(resume.TaskId);
         resumeCall.Disposable = OffThread(async () =>
             {
                 // Read here, on `background`, for the reason given in Heard.
@@ -851,6 +916,7 @@ public sealed class ClaudeSessions : IDisposable
                 {
                     // The queue is freed BEFORE the answer is acted on, so nothing Answered does can leave it stuck.
                     Settled(session.Id);
+                    if (answer.Stopped && answer.Result.IsSuccess && hadWindow) reopen = reopen.SetItem(session.Id, (resume.TaskId, scheduler.Now));
                     if (answer.Stopped) Answered(resume.TaskId, session.Id, answer.CutOff, answer.Result, resume.AfterLimit);
                     else trace?.Invoke($"claude sessions: restart of {session.Id} not made, its stop failed: {answer.Result.Error}");
                     Drain();
@@ -905,8 +971,9 @@ public sealed class ClaudeSessions : IDisposable
                 && !SessionKeeper.GivenUp(t)
                 && !SessionKeeper.LeftAlone(t)
                 && LatestSession(t).Map(s => s.Id == resume.Session.Id).GetValueOrDefault(false)
-                // A restart: still no window on it, and still stopped on the limit (Petre may have typed in it since).
-                && (resume.StopFirst.HasNoValue || (!windowOpen(t) && LimitedUntil(resume.Session).HasValue)))
+                // A restart: its window still not in front (task 2eeb5589), and still stopped on the limit (Petre may have
+                // typed in it since).
+                && (resume.StopFirst.HasNoValue || (!windowInFront(t) && LimitedUntil(resume.Session).HasValue)))
             .GetValueOrDefault(false)
         && (resume.StopFirst.HasValue
             ? lastLive.All(agent => agent.SessionId != resume.Session.Id || !agent.Busy)

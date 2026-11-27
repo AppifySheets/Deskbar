@@ -284,6 +284,29 @@ public sealed class ClaudeTaskActions : IDisposable
     }
 
     /// <summary>
+    /// Whether the window Deskbar opened on the task's session is the one in <paramref name="front"/> (task 2eeb5589):
+    /// Petre is in it, maybe typing, so a usage-limit restart, which closes it, waits until he has left it.
+    /// </summary>
+    public static bool WindowInFront(WorkspaceManager manager, TaskItem task, WindowHandle front)
+    {
+        var title = ClaudeStart.AttachTitle(task.Title);
+        return manager.KnownWindows.Any(w => w.Handle == front && Titled(manager, w, title));
+    }
+
+    /// <summary>
+    /// Opens the window on a task's background session again after a usage-limit restart closed it (task 2eeb5589,
+    /// ClaudeSessions.Reopen): the same window a click opens (AttachTo), on the task's workspace, without switching to it.
+    /// A launch that fails is said in the task's thread only, never in a message box as a click's is: nobody clicked,
+    /// the restart may come overnight, and a modal box shown inside ClaudeSessions' poll would pump the dispatcher and
+    /// let the next poll run inside this one.
+    /// </summary>
+    public void Reopen(TaskItem task, ClaudeAgent agent)
+    {
+        var current = Current(task.Id).GetValueOrDefault(task);
+        AttachTo(ClaudeStart.AttachTitle(current.Title), current.WorkspaceId, agent, e => Say(current.Id, e));
+    }
+
+    /// <summary>
     /// The task a window is on, when it is a window Deskbar opened on a task's session: the open task whose
     /// <see cref="ClaudeStart.AttachTitle"/> the window carries, by the same rule Attach finds it by. The App selects
     /// that task whenever the window comes to the front (task 4846fde1, Petre: "active claude terminal window should
