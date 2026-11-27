@@ -119,8 +119,9 @@
            ToolTip="Drag to change the panel's width"/>
     <Border x:Name="Board" Background="#FF1E1F24">
         <DockPanel>
-            <!-- The Inbox's header and its footer (task 740a2231, TasksWindow.Inbox.cs), filled in code and shown only while
-                 the Inbox is the view: the header takes the toolbar's place, the footer holds the view switch. -->
+            <!-- The Inbox's header and its footer (task 740a2231, TasksWindow.Inbox.cs), filled in code: the header shows
+                 only while the Inbox is the view and takes the toolbar's place; the footer holds the view switch
+                 (Inbox, List, Matrix, Stats, and Manager) and is the panel's foot in every view (PaintInboxChrome). -->
             <Border x:Name="InboxHeader" DockPanel.Dock="Top" Visibility="Collapsed"/>
             <Border x:Name="InboxFooter" DockPanel.Dock="Bottom" Visibility="Collapsed"/>
             <!-- The toolbar, the approved mockup's three rows, top to bottom (tasks panel plan, Task 7):
