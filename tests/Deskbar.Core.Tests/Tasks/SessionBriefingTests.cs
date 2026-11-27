@@ -194,7 +194,7 @@ public sealed class SessionBriefingTests
     {
         var text = SessionBriefing.Start(Start(), Task("Tasks board"), []);
 
-        Assert.Contains("While your pull request is open, keep it on top of its base without being asked", text);
+        Assert.Contains("While your pull request is open, unless your prompt line says Deskbar watches it, keep it on top of its base without being asked", text);
         Assert.Contains("watch the base until it is merged or closed, and as soon as the base moves or it conflicts, rebase it onto the latest base", text);
         // Task 59d0aac1: a repository whose CLAUDE.md runs no CI or rebases only before the merge wins over this rule.
         Assert.Contains("Where the repository's CLAUDE.md says otherwise (no CI, rebasing only before the merge), it wins.", text);
@@ -251,6 +251,34 @@ public sealed class SessionBriefingTests
         Assert.Contains("Tasks board", text);
         Assert.Contains(Sid, text);
         Assert.DoesNotContain(Dashes, d => text.Contains(d));
+    }
+
+    // Deskbar task c8e6967d (spec 2026-11-27-repo-watcher-design.md): the prompt line says Deskbar watches the pull request,
+    // so the session drops its own loop; when the watch lapses (gh down) the line stays silent and the briefing's fallback applies.
+    [Fact]
+    public void PromptSaysWatchedWhenWatched()
+    {
+        var text = SessionBriefing.Prompt(Sid, Task("Tasks board"), Maybe<TaskItem>.None, watched: true);
+
+        Assert.Single(text.Trim().Split('\n'));
+        Assert.Contains("Deskbar watches your pull request", text);
+        Assert.Contains("do not run your own watch loop", text);
+    }
+
+    [Fact]
+    public void PromptSilentWhenNotWatched()
+    {
+        Assert.DoesNotContain("watches your pull request", SessionBriefing.Prompt(Sid, Task("Tasks board"), Maybe<TaskItem>.None));
+    }
+
+    [Fact]
+    public void BriefingNamesTheWatchException()
+    {
+        var text = SessionBriefing.Start(Start(), Task("Tasks board"), []);
+
+        Assert.Contains("unless your prompt line says Deskbar watches it", text);
+        Assert.Contains("push on its nudge", text);
+        Assert.Contains("do not loop on them; the deploy check stays yours", text);
     }
 
     // 2026-11-23: a prompt leaves a Done task Done, so its reminder tells the session how to reopen it when the message is
