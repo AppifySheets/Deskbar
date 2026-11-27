@@ -101,7 +101,7 @@ namespace Deskbar.App;
 // docked at (TasksPanel.DockedWidth; View has why that one), and shows the Matrix only when the setting asks for it AND
 // it is allowed. That width changes only when the panel docks (the grip's drag end, another screen, a scale change),
 // whose pulse makes the view again, so every line redraws once then and never during a drag.
-public sealed class TasksBoard : IDisposable
+public sealed partial class TasksBoard : IDisposable
 {
     // How long a line just closed stays, struck through with Undo: the bar's own window, so the two agree.
     static readonly TimeSpan UndoWindow = FloatingBar.UndoWindow;
@@ -398,7 +398,10 @@ public sealed class TasksBoard : IDisposable
             {
                 dockedWidth = width;
                 Refresh();
-            }));
+            }),
+            // Petre's touches on the panel, which hold the lines still while a thread is open (task 106bc422,
+            // TasksBoard.LineHold.cs).
+            WatchTouches());
     }
 
     // How many tasks the link picker lists under its box (task links): enough to find one by a word or two, few enough
@@ -526,7 +529,7 @@ public sealed class TasksBoard : IDisposable
         window.ShowProblem(null);
         lineProblem = null;
         window.PaintSelection(selection.Current);
-        window.Present(View());
+        window.Present(Drawn(View()));
         window.Open();
         panel.Show(PanelState.Width);
         Remember(open: true);
@@ -634,7 +637,8 @@ public sealed class TasksBoard : IDisposable
     /// <summary>Redraws an open window from the board as it is now; the window skips it when nothing it shows changed.</summary>
     internal void Refresh()
     {
-        if (window.IsOpen) window.Present(View());
+        // Drawn records the arrangement handed over, which a held list keeps next (task 106bc422, TasksBoard.LineHold.cs).
+        if (window.IsOpen) window.Present(Drawn(View()));
         RefreshTaskWindows();
     }
 
@@ -1068,9 +1072,9 @@ public sealed class TasksBoard : IDisposable
         return Report(back, id);
     }
 
-    public Result Reopen(Guid id) => Report(tasks.Reopen(id), id);
+    public Result Reopen(Guid id) => Report(Moving(() => tasks.Reopen(id)), id);
 
-    public Result SetStatus(Guid id, TaskStatus status) => Report(tasks.SetStatus(id, status), id);
+    public Result SetStatus(Guid id, TaskStatus status) => Report(Moving(() => tasks.SetStatus(id, status)), id);
 
     public Result Rename(Guid id, string title) => Report(tasks.Rename(id, title), id);
 
@@ -1090,30 +1094,30 @@ public sealed class TasksBoard : IDisposable
     /// <summary>Ruling 62: Petre settles any comment from its button (or brings a settled one back); kept either way.</summary>
     public Result SettleComment(Guid comment, bool settle) => Report(tasks.SettleComment(comment, settle), TaskOfComment(comment));
 
-    public Result MoveTo(Guid id, Maybe<Guid> workspace) => Report(tasks.MoveTo(id, workspace), id);
+    public Result MoveTo(Guid id, Maybe<Guid> workspace) => Report(Moving(() => tasks.MoveTo(id, workspace)), id);
 
     /// <summary>
     /// The "Assign to" menu (Ruling 57): hands the task to Petre or to Claude. Only here and in `task assign`, never on
     /// the bar. Nothing else about the task changes, so its line keeps its place.
     /// </summary>
-    public Result Assign(Guid id, Assignee who) => Report(tasks.Assign(id, who), id);
+    public Result Assign(Guid id, Assignee who) => Report(Moving(() => tasks.Assign(id, who)), id);
 
     /// <summary>A toggle on a line: the flag on or off; the task goes to the top of the quadrant it lands in.</summary>
-    public Result SetFlag(Guid id, TaskFlag flag, bool on) => Report(tasks.SetFlag(id, flag, on), id);
+    public Result SetFlag(Guid id, TaskFlag flag, bool on) => Report(Moving(() => tasks.SetFlag(id, flag, on)), id);
 
     // SNOOZE (task 6da8d7eb; TaskSnooze.cs has the four lengths): the line's snooze button and its "⋯" menu. The end is
     // worked out on the LOCAL clock, so "Tomorrow" and "Monday" mean 09:00 where Petre is; the service stores it as an
     // instant. A refusal (a task waiting on him, a closed one) shows on the problem line like any other.
     public Result Snooze(Guid id, SnoozeChoice choice) =>
-        Report(tasks.Snooze(id, TaskSnooze.Until(choice, now().ToLocalTime(), TimeZoneInfo.Local.GetUtcOffset)), id);
+        Report(Moving(() => tasks.Snooze(id, TaskSnooze.Until(choice, now().ToLocalTime(), TimeZoneInfo.Local.GetUtcOffset))), id);
 
     // "Wake now" on a recurring task between runs RUNS it (task 0b78269e, spec "Wake now"): ending the sleep alone would
     // leave a task awake with nothing working on it, which is not what the words promise. RecurringRunner.RunNow starts the
     // run quietly and moves the task on exactly as a due run does. Any other snoozed task just wakes.
     public Result Wake(Guid id) =>
         runNow is { } run && tasks.Board.Tasks.Any(t => t.Id == id && t.IsBetweenRuns)
-            ? Report(run(id), id)
-            : Report(tasks.Wake(id), id);
+            ? Report(Moving(() => run(id)), id)
+            : Report(Moving(() => tasks.Wake(id)), id);
 
     /// <summary>
     /// The "Repeat" submenu's one entry point (task 0b78269e): <paramref name="words"/> are what `task repeat &lt;id&gt;`
@@ -1157,14 +1161,14 @@ public sealed class TasksBoard : IDisposable
     }
 
     /// <summary>A drop: the task goes to that place in that quadrant, taking its flags (TaskBoard.Place).</summary>
-    public Result Place(Guid id, Quadrant quadrant, TaskPlace place) => Report(tasks.Place(id, quadrant, place), id);
+    public Result Place(Guid id, Quadrant quadrant, TaskPlace place) => Report(Moving(() => tasks.Place(id, quadrant, place)), id);
 
     /// <summary>
     /// The "Goal" menu: links the task to an open goal, or (none) unlinks it, through GoalService.LinkTask. Flags, rank
     /// and status stay as they are, so the line does not move.
     /// </summary>
     public Result SetGoal(Guid id, Maybe<Guid> goal) =>
-        Report(goals is { } service ? service.LinkTask(id, goal) : Result.Failure("Goals are not available"), id);
+        Report(Moving(() => goals is { } service ? service.LinkTask(id, goal) : Result.Failure("Goals are not available")), id);
 
     public Result Delete(Guid id)
     {
@@ -1396,6 +1400,10 @@ public sealed class TasksBoard : IDisposable
             .Select(c => new TaskCellView(c.Quadrant, TaskViews.GroupName(TaskViews.KindOf(c.Quadrant)),
                 c.Tasks.Select(Row).Select(row => WithLinedSubtasks(row, cellIds)).ToArray()))
             .ToArray();
+        // THE LINES HOLD STILL while Petre is at an open thread (task 106bc422, TasksBoard.LineHold.cs): the last drawn
+        // arrangement, each line with its content as it is now, until he folds the thread, leaves the panel alone or asks
+        // for another list.
+        var (heldGroups, heldCells) = Held(groups, cells, HoldShape(shown, foundById.HasValue), whole);
         var (menuGoals, filterGoals) = showsGoals ? GoalChoices(goalBoard) : NoGoalChoices;
         // THE PANEL'S WIDTH DECIDES TWO THINGS (Task 8; spec "Lines at panel width", "The Matrix"): slim lines below 850
         // DIP, and the List / Matrix switch only from 780. It is the width the panel DOCKED at (TasksPanel.DockedWidth,
@@ -1406,7 +1414,7 @@ public sealed class TasksBoard : IDisposable
         var width = dockedWidth.GetValueOrDefault(PanelState.Width);
         var matrixAllowed = TasksPanelLayout.MatrixAllowed(width);
         // The view carries the CHOICE (where), not the resolved filter, so the toolbar can tick its "Current workspace" checkbox.
-        return new TasksView(filters, WorkspaceFilterLabel(shown), where, places, groups, EmptyText(), addTarget)
+        return new TasksView(filters, WorkspaceFilterLabel(shown), where, places, heldGroups, EmptyText(), addTarget)
         {
             // The manager's open question (task 61e4d143, ManagerQuestion), whatever the filters: it is not a task, and it
             // has priority. Only while there is a manager to open; the Stats view leaves it out (TasksWindow draws it).
@@ -1418,7 +1426,7 @@ public sealed class TasksBoard : IDisposable
             Matrix = manager.State.TasksMatrix && matrixAllowed && foundById.HasNoValue,
             MatrixAllowed = matrixAllowed,
             Slim = TasksPanelLayout.Slim(width),
-            Cells = cells,
+            Cells = heldCells,
             ShowsGoals = showsGoals,
             Goals = menuGoals,
             GoalFilterChoices = filterGoals,
@@ -1502,6 +1510,8 @@ public sealed class TasksBoard : IDisposable
     {
         if (!pendingCloses.Remove(id, out var pending)) return;
         pending.Timer.Dispose();
+        // His own close: its line leaves at the end of the undo window even while the list holds still (task 106bc422).
+        letGo.Add(id);
         Refresh();
     }
 

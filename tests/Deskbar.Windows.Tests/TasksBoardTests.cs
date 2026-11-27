@@ -7559,4 +7559,160 @@ public class TasksBoardTests
 
         Assert.Null(t.Window.LinkBox);
     });
+    // THE LINES HOLD STILL WHILE PETRE IS AT AN OPEN THREAD (task 106bc422, TasksBoard.LineHold.cs; Petre: "task i'm
+    // interacting with shouldn't randomly close and jump to another one, when i'm on the tasks list. wait for me to be idle
+    // or when I have collapsed the details for it to update"). A press on the panel stands for his touch; the fake timers
+    // stand for the idle timer (two ticks: the first finds the touch and re-arms, the second finds the panel untouched).
+    static void TouchPanel(TasksWindow window) =>
+        window.RaiseEvent(new MouseButtonEventArgs(Mouse.PrimaryDevice, 0, MouseButton.Left) { RoutedEvent = UIElement.PreviewMouseDownEvent });
+
+    // The case in the trace that started it: the task whose thread he had open was closed by its session (task
+    // duplicate-of), and the line went, every line under it moving up a place.
+    [Fact]
+    public void A_task_closed_under_its_open_thread_keeps_its_line_until_the_thread_is_folded() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var first = t.Tasks.AddNote("Dishwasher tablets", Maybe<Guid>.None).Value.Id;
+        var read = t.Tasks.AddNote("Close a task without stopping its session", Maybe<Guid>.None).Value.Id;
+        var last = t.Tasks.AddNote("Old errand", Maybe<Guid>.None).Value.Id;
+        t.Controller.Show();
+        t.Controller.Pick(read);
+        TouchPanel(t.Window);
+        var before = t.Window.Keys.ToArray();
+
+        Assert.True(t.Tasks.Close(read).IsSuccess);
+
+        Assert.Equal(before, t.Window.Keys);
+        Assert.Contains(read, t.Window.Keys);
+
+        // Folding the thread is his "when I have collapsed the details": the list is drawn as the board has it.
+        t.Controller.ToggleThread(read);
+
+        Assert.DoesNotContain(read, t.Window.Keys);
+        Assert.Contains(first, t.Window.Keys);
+        Assert.Contains(last, t.Window.Keys);
+    });
+
+    // A task stepping into Waiting on you would jump to the top; while he is at a thread it keeps its place, its new
+    // question drawn in it, and the list moves once the panel has gone untouched for the idle time.
+    [Fact]
+    public void A_line_that_would_move_keeps_its_place_until_the_panel_goes_idle() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var reading = t.Tasks.Create("Tasks redesign", t.Gepha, Session("s1")).Value.Id;
+        var asking = t.Tasks.AddNote("Store screenshots", Maybe<Guid>.None).Value.Id;
+        t.Controller.Show();
+        t.Controller.Pick(reading);
+        TouchPanel(t.Window);
+        var before = t.Window.Keys.ToArray();
+
+        Assert.True(t.Tasks.Ask(asking, "Which screenshots?").IsSuccess);
+
+        Assert.Equal(before, t.Window.Keys);
+        Assert.DoesNotContain("Waiting on you", t.Window.Headers);
+
+        t.Timers.FireAll();
+        Assert.Equal(before, t.Window.Keys);
+
+        t.Timers.FireAll();
+        Assert.Equal("Waiting on you", t.Window.Headers[0]);
+        Assert.Equal(asking, t.Window.Keys[0]);
+    });
+
+    // Nobody at the panel (no touch), or no thread open: the list redraws as it always did.
+    [Fact]
+    public void Without_a_touch_or_an_open_thread_the_list_moves_at_once() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var reading = t.Tasks.Create("Tasks redesign", t.Gepha, Session("s1")).Value.Id;
+        var asking = t.Tasks.AddNote("Store screenshots", Maybe<Guid>.None).Value.Id;
+        var other = t.Tasks.AddNote("Old errand", Maybe<Guid>.None).Value.Id;
+        t.Controller.Show();
+        t.Controller.Pick(reading);
+
+        Assert.True(t.Tasks.Ask(asking, "Which screenshots?").IsSuccess);
+        Assert.Equal(asking, t.Window.Keys[0]);
+
+        t.Controller.ToggleThread(reading);
+        TouchPanel(t.Window);
+        Assert.True(t.Tasks.Ask(other, "Still needed?").IsSuccess);
+        Assert.Contains(other, t.Window.Keys.Take(2));
+    });
+
+    // A task a session adds waits while he is at a thread; one he adds himself shows at once (it is picked and glows), and
+    // the hold gives way to it.
+    [Fact]
+    public void A_new_task_waits_while_held_but_his_own_note_shows_at_once() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var reading = t.Tasks.AddNote("Dishwasher tablets", Maybe<Guid>.None).Value.Id;
+        t.Controller.Show();
+        t.Controller.Pick(reading);
+        TouchPanel(t.Window);
+
+        var fromSession = t.Tasks.AddNote("Noted by a session", Maybe<Guid>.None).Value.Id;
+        Assert.DoesNotContain(fromSession, t.Window.Keys);
+
+        Assert.True(t.Controller.AddNote("Mine", Maybe<Guid>.None).IsSuccess);
+        var mine = t.Tasks.Board.Tasks.Single(x => x.Title == "Mine").Id;
+        Assert.Contains(mine, t.Window.Keys);
+        Assert.Contains(fromSession, t.Window.Keys);
+    });
+
+    // A filter is another list: the hold is of the list he was looking at, so it lets go.
+    [Fact]
+    public void A_filter_change_lets_the_held_list_go() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var reading = t.Tasks.AddNote("Dishwasher tablets", Maybe<Guid>.None).Value.Id;
+        t.Controller.Show();
+        t.Controller.Pick(reading);
+        TouchPanel(t.Window);
+        var fromSession = t.Tasks.AddNote("Noted by a session", Maybe<Guid>.None).Value.Id;
+        Assert.DoesNotContain(fromSession, t.Window.Keys);
+
+        t.Controller.Filter(TaskFilter.Backlog);
+
+        Assert.Contains(fromSession, t.Window.Keys);
+    });
+    // A task he closes himself leaves at the end of its undo window, as it always did, while the list still holds for the
+    // thread he has open: that move is his own.
+    [Fact]
+    public void His_own_close_still_leaves_a_held_list_after_the_undo_window() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var reading = t.Tasks.AddNote("Dishwasher tablets", Maybe<Guid>.None).Value.Id;
+        var closing = t.Tasks.AddNote("Old errand", Maybe<Guid>.None).Value.Id;
+        t.Controller.Show();
+        t.Controller.Pick(reading);
+        TouchPanel(t.Window);
+        var fromSession = t.Tasks.AddNote("Noted by a session", Maybe<Guid>.None).Value.Id;
+
+        Assert.True(t.Controller.Close(closing).IsSuccess);
+        Assert.Contains(closing, t.Window.Keys);
+
+        // The undo window ends (and the idle timer ticks once, finding the touch, so the list still holds).
+        t.Timers.FireAll();
+
+        Assert.DoesNotContain(closing, t.Window.Keys);
+        Assert.DoesNotContain(fromSession, t.Window.Keys);
+        Assert.Contains(reading, t.Window.Keys);
+    });
+    // His own move on another line (here a flag toggle, which takes the task to another quadrant) is drawn at once while
+    // the list holds for the thread he has open: a drop or a toggle that stayed put would look like it failed (review).
+    [Fact]
+    public void His_own_move_on_a_line_redraws_a_held_list() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var reading = t.Tasks.AddNote("Dishwasher tablets", Maybe<Guid>.None).Value.Id;
+        var flagged = t.Tasks.AddNote("Old errand", Maybe<Guid>.None).Value.Id;
+        t.Controller.Show();
+        t.Controller.Pick(reading);
+        TouchPanel(t.Window);
+
+        Assert.True(t.Controller.SetFlag(flagged, TaskFlag.Important, true).IsSuccess);
+
+        Assert.Contains(t.Window.Headers, h => h.StartsWith("II", StringComparison.Ordinal));
+        Assert.Equal(flagged, t.Window.Keys[0]);
+    });
 }

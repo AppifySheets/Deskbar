@@ -1827,3 +1827,10 @@ TB1. Start a Debug build from a worktree (with `DESKBAR_APPDATA` set to a scratc
 TB2. With a `Deskbar-<x.y.z>-win-x64.exe` in `%LOCALAPPDATA%\Programs\Deskbar`, the line under it is "Restart into Deskbar <x.y.z>": clicking it starts that release, which takes over the bar against the REAL profile (no scratch `DESKBAR_APPDATA` carried over) and, from Process Explorer, with its own folder as its working directory. Do this one only when Petre has asked to go back to his release.
 TB3. Check for updates… in a test build asks to restart into the installed release instead of saying it is the latest version. With no release installed, the line under the marking is missing and Check for updates… offers the releases page.
 TB4. A release (single-file exe) and the Store copy show no test-build line and their usual tooltip.
+
+The list holds still while you are in a thread ([Deskbar task 106bc422](https://deskbar.app/task#106bc422-eb9b-46ea-9ea3-6dbc3a0ab9fe)). Two throwaway notes, A and B, on one workspace, the tasks panel open.
+
+LH1. Open A's comments and keep moving the pointer over the panel. From a terminal run `deskbar.cmd task close <B>`: B's line stays where it was, drawn closed, and A does not move. Close A's comments: B leaves.
+LH2. Reopen B (`deskbar.cmd task reopen <B>`), start Claude on it and tell its session to ask you something with `task ask`. While it works, open A's comments and keep touching the panel: when the question comes, B keeps its place with the question under its title. Leave the panel alone for one to two minutes: B moves to Waiting on you.
+LH3. Open A's comments, touch the panel, then `deskbar.cmd task add -` a note: it does not show yet. Type a note in the panel's **+ Add** box and press Enter: both notes show.
+LH4. With no comments open, run `deskbar.cmd task close <A>`: A's line leaves at once, as before.
