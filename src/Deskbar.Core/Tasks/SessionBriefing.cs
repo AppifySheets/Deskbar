@@ -305,7 +305,7 @@ public static class SessionBriefing
     /// The one line a session reads with each prompt: its task, or that the user closed it (join it to reopen it, or
     /// make a new task for other work), or that it has none yet.
     /// </summary>
-    public static string Prompt(string sessionId, Maybe<TaskItem> own, Maybe<TaskItem> closed, Func<string, string>? expand = null) =>
+    public static string Prompt(string sessionId, Maybe<TaskItem> own, Maybe<TaskItem> closed, Func<string, string>? expand = null, bool watched = false) =>
         // Ruling 49: a prompt never settles a question (a /loop or scheduled check-in is not the user answering), so while
         // the task waits the reminder keeps it open and tells the session how to resolve it.
         own is { HasValue: true, Value: { Status: TaskStatus.WaitingOnYou } waiting }
@@ -315,7 +315,7 @@ public static class SessionBriefing
         : own is { HasValue: true, Value: { Status: TaskStatus.Done } done }
             ? $"Deskbar: your task is {Describe(done, expand ?? Same)}. If this message gives you more work on it, run {Shim} task join {done.Id.ToString()[..8]} --session {sessionId} to put it back in progress; if it only asks about the finished work, leave it done.\n"
         : own.HasValue
-            ? $"Deskbar: your task is {Describe(own.Value, expand ?? Same)}. Keep its status line current: {Shim} task status-line - --session {sessionId}, the line on stdin (a heredoc).{SubtaskHint(own.Value, sessionId)}\n"
+            ? $"Deskbar: your task is {Describe(own.Value, expand ?? Same)}. Keep its status line current: {Shim} task status-line - --session {sessionId}, the line on stdin (a heredoc).{SubtaskHint(own.Value, sessionId)}{(watched ? WatchedHint : "")}\n"
         // The user closed the task while the session was still live on it (task 327e3cd0). As for a Done task, the session
         // tells a message that carries on with the work from one about something else: `task join` reopens its own closed
         // task (TaskBoard.Join), and only other work needs a new task. It used to say every prompt needed a new task, and
@@ -323,6 +323,13 @@ public static class SessionBriefing
         : closed.HasValue
             ? $"Deskbar: the user closed your task {closed.Value.Id.ToString()[..8]} \"{Cut(closed.Value.Title)}\". If this message carries on with that work, run {Shim} task join {closed.Value.Id.ToString()[..8]} --session {sessionId} to reopen it; if it is about something else, run {Shim} task new - --session {sessionId} with the title on stdin (a heredoc).\n"
         : $"Deskbar: this session has no task yet. Once you know what you are working on, run {Shim} task join <id> --session {sessionId} with an id from {Shim} task list, or {Shim} task new - --session {sessionId} with the title on stdin (a heredoc).\n";
+
+    // DESKBAR WATCHES THE PULL REQUEST (Deskbar task c8e6967d, spec docs/superpowers/specs/2026-11-27-repo-watcher-design.md):
+    // appended to the prompt line of an in-progress task while TaskService.IsWatched says Deskbar's poll of its repository
+    // succeeded in the last five minutes. It is the session's cue to stop its own watch loop; when gh fails the cue goes
+    // away with the watch and the briefing's "unless your prompt line says" fallback applies again.
+    const string WatchedHint =
+        " Deskbar watches your pull request and nudges you when its base moves, it conflicts or its merge's runs finish: do not run your own watch loop, and stop one that runs.";
 
     static string Same(string markdown) => markdown;
 
@@ -539,7 +546,7 @@ public static class SessionBriefing
         // describes: the running build is the truth there and a report changes nothing, so its order ends at the release.
         // The room for it came from the ask line above, the done line and the rebase line below, and the "lean" line's
         // last sentence, which repeated what the ask and comment lines say; every rule they stated is still stated.
-        $"After the merge, finish in this order: released (if the repository has a release step), deployed, done. Deployed: the running app's own evidence, usually its log, shows the new version; report it with {Shim} task deployed - --session {sessionId}, the evidence on stdin, or \"nothing to deploy\" for a change nothing runs (docs, a skill, a library). In Deskbar's own repository done follows the release. Never mark done before deployed. When a person deploys, or only they can see the evidence, ask (\"Redeploy X\"), check on a schedule, and once it shows: task answered, task deployed, task done. Do not ask the user to test it: put what to try in the status line; they close the task once it works.",
+        $"After the merge, finish in this order: released (if the repository has a release step), deployed, done. Deployed: the running app's own evidence shows the new version; report it with {Shim} task deployed - --session {sessionId}, the evidence on stdin, or \"nothing to deploy\" for a change nothing runs. In Deskbar's own repository done follows the release. Deskbar nudges you with your merge commit's runs: do not loop on them; the deploy check stays yours. Never mark done before deployed. When a person deploys, or only they can see the evidence, ask (\"Redeploy X\"), check on a schedule, and once it shows: task answered, task deployed, task done. Do not ask the user to test it: put what to try in the status line; they close the task once it works.",
         // AN OPEN PULL REQUEST STAYS ON TOP OF ITS BASE (task 6e4dc116, Petre: "still conflicting; you should keep rebasing
         // open prs", then "make that a deskbar level change"). Other sessions merge all day, so a pull request waiting on
         // the user falls behind its base or starts to conflict while it waits, and the merge he comes to do is blocked or
@@ -554,7 +561,7 @@ public static class SessionBriefing
         // THE REPOSITORY'S OWN RULES WIN (task 59d0aac1). Some repositories run no CI on pull requests and rebase only
         // right before the merge (iam.ge's CLAUDE.md since 2026-11-08), and this line contradicted them with nothing to
         // say which wins. It now ends by saying: the repository's CLAUDE.md, where a session already looks for its rules.
-        "While your pull request is open, keep it on top of its base without being asked: watch the base until it is merged or closed, and as soon as the base moves or it conflicts, rebase it onto the latest base, resolve any conflict and push it straight away with --force-with-lease. A quick build may come before the push, a test run never does: let CI run the tests on what you pushed, and run them locally only when CI fails. If the base moves again while CI runs, rebase and push again at once. Where the repository's CLAUDE.md says otherwise (no CI, rebasing only before the merge), it wins.",
+        "While your pull request is open, unless your prompt line says Deskbar watches it, keep it on top of its base without being asked: watch the base until it is merged or closed, and as soon as the base moves or it conflicts, rebase it onto the latest base, resolve any conflict and push it straight away with --force-with-lease. When it does, push on its nudge. A quick build may come before the push, a test run never does: let CI run the tests on what you pushed, and run them locally only when CI fails. If the base moves again while CI runs, rebase and push again at once. Where the repository's CLAUDE.md says otherwise (no CI, rebasing only before the merge), it wins.",
         $"  {Shim} task answered --session {sessionId}   (when the user's reply or you settle your question; run it straight away; it also settles, that is folds away, your comments written since you asked)",
         $"  {Shim} task comment-settle <comment-id> --session {sessionId}   (one of your comments that no longer matters)",
         "A message from the user never resolves your question by itself: you do, with task answered. Never leave a question open once it is resolved.",
@@ -578,7 +585,7 @@ public static class SessionBriefing
         // Petre: "can we also add a review step at the end by a smarter model?". A review reads the diff, not the
         // session, so it costs a fraction of the work it checks. It finds faults in the change; it does not rescue
         // a wrong approach, which is why a plan gets the same look before the code is written.
-        "Before you open a pull request, have a subagent on the strongest model you can use review the diff for bugs, and fix what it confirms. Have it read any plan the work needed before you write the code.",
+        "Before you open a pull request, have a subagent on the strongest model you can use review the diff for bugs, and fix what it confirms.",
         // TASK LINKS (docs/superpowers/specs/2026-11-25-task-links-design.md; Petre: "when working on a task, claude should
         // examine what's related to it"). Task 64cb52ab asked for a button that a merged PR had shipped that morning; the
         // session only found out because Petre said "see if something like this has already been done". So every session
@@ -586,7 +593,7 @@ public static class SessionBriefing
         $"Before you start on a task, look through {Shim} task list and {Shim} task list --closed for tasks about the same or related work, and read what their sessions did. Link what you find:",
         $"  {Shim} task relate <id> --session {sessionId}   (a session on either task reads the link; task unrelate <id> removes it)",
         $"  {Shim} task duplicate-of <id> --session {sessionId}   (your task is the same work as task <id>, done or under way: it closes as its duplicate and you do not redo it)",
-        "Keep the task lean: say what needs the user, and nothing else. The title is a few words naming the work. The status line is one short phrase, under about 60 characters, saying where it stands. Comments are rare: only for what needs the user's attention or a result they must know (a decision made for them, a blocker, what a release shipped), in one or two short lines, with no progress logs, measurements, spike notes or findings dumps.",
+        "Keep the task lean: say what needs the user, and nothing else. The title is a few words naming the work. The status line is one short phrase, under about 60 characters, saying where it stands. Comments are rare: only for what needs the user's attention or a result they must know, with no progress logs, measurements, spike notes or findings dumps.",
         "Never close or delete a task, and leave the user's own notes alone unless they ask.",
     ];
 

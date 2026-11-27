@@ -345,7 +345,9 @@ public sealed partial class RemoteControl
         service.NudgedTurn(sessionId, hook.Prompt.Map(SessionBriefing.OnlyStopNudge).GetValueOrDefault(false));
         if (hook.Prompt.Map(SessionBriefing.FromTheUser).GetValueOrDefault(true)) service.Prompted(sessionId);
         var own = service.Board.TaskOf(sessionId);
-        return SessionBriefing.Prompt(sessionId, own, own.HasValue ? Maybe<TaskItem>.None : service.Board.ClosedTaskOf(sessionId), service.ExpandImages);
+        return SessionBriefing.Prompt(sessionId, own, own.HasValue ? Maybe<TaskItem>.None : service.Board.ClosedTaskOf(sessionId), service.ExpandImages,
+            // Deskbar task c8e6967d: the session hears that Deskbar watches its pull request (and stops its own loop).
+            own.HasValue && service.IsWatched(own.Value));
     }
 
     // SessionEnd. Three cases:
