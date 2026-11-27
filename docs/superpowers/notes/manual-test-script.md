@@ -1547,11 +1547,17 @@ UC5. "Check for updates…" from the tray finds the newest release whatever the 
 (Task 3c40dec9.) Claude sessions on, in a workspace whose tasks know exactly one folder.
 
 AS1. Type a note into the bar's box. After the important and urgent toggles there is a play button, "Add and start
-     Claude". Press it: the note is added and glows, the box empties and the keyboard goes back to the window you
-     were typing in, and within a few seconds a Claude window opens on the task, as "Start Claude on this" opens one.
-AS2. Type another note and press Ctrl+Enter instead: the same. Plain Enter only adds.
+     Claude". Press it: the note is added, the box empties and the keyboard goes back to the window you were typing
+     in. No Claude window opens and the desktop does not change (task 7b17a573): within a few seconds a silent
+     notification from the tray icon says "Claude started" with the task's title, and the task shows in the tasks
+     panel's Claude block.
+AS2. Type another note and press Ctrl+Enter instead: the same. Plain Enter only adds (and selects the new note).
 AS3. The tasks panel, + Add: the same play button sits after the toggles, before the workspace chip, and Ctrl+Enter
-     does the same. The box closes once the note is added.
+     does the same. The box closes once the note is added, and the panel stays on the task and thread you had open.
+AS3a. Click the "Claude started" notification: the task's workspace comes to the front with its Claude window, as a
+     double-click on the task's line does.
+AS3b. Make a start fail (a workspace whose one folder is untrusted): Ctrl+Enter still tells you at once, with the
+     trust offer, and no "Claude started" notification shows.
 AS4. In a workspace whose tasks know several folders (or none), the button adds the note and opens the folder pick
      list at the pointer, as "Start Claude on this" does. Esc on the list leaves a plain note.
 AS5a. (Task 3a872301.) Type `/` in the bar's box on a workspace whose tasks know this repo. A list opens under the box
