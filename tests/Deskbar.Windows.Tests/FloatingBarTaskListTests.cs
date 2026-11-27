@@ -344,14 +344,9 @@ public class FloatingBarTaskListTests
 
         CloseFromMenu(t, line);
 
-        // Task 37cd7081: its session is still live (it is waiting on Petre), so the tick offers to stop Claude first.
-        Assert.Equal(TaskStatus.WaitingOnYou, t.Tasks.Board.Tasks.Single().Status);
-        var stop = Assert.IsAssignableFrom<ContextMenu>(t.Bar.StopClaudeMenu);
-        var item = stop.Items.OfType<MenuItem>().Single(i => i.Header is TextBlock { Text: TaskViews.StopClaudeAndClose });
-        item.RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
-        stop.IsOpen = false;
-        PumpBar(t);
-
+        // Task 3cdd0a52: its session is still live, but the task waits on Petre, so Claude is not working on it and the
+        // close goes through at once, with no "Stop Claude and close" menu (TaskBoard.ClaudeStillWorking).
+        Assert.Null(t.Bar.StopClaudeMenu);
         Assert.Equal(TaskStatus.Closed, t.Tasks.Board.Tasks.Single().Status);
         var closing = t.Lines.Single();
         Assert.True(Closing(closing));
@@ -366,6 +361,27 @@ public class FloatingBarTaskListTests
         Assert.Equal(Orange, ((SolidColorBrush)EdgeOf(again).BorderBrush).Color);
         Assert.DoesNotContain(Inside(again).OfType<FrameworkElement>(), e => Equals(e.Tag, "task-window-icon"));
         Assert.False(HasButtonNamed(again, "Tick off"));
+    });
+
+    // Task 37cd7081, kept by task 3cdd0a52: a task Claude is still working on (in progress, a live session) does not close
+    // from the bar's Close; it opens "Stop Claude and close", whose one item closes it.
+    [Fact]
+    public void Closing_a_task_claude_works_on_offers_to_stop_it() => StaThread.Run(() =>
+    {
+        using var t = Build(sessionWindow: _ => Maybe.From((nint)0x4242));
+        // Assigned to Petre, so the in-progress task is drawn on the bar at all.
+        var task = t.Tasks.Create("Testing the release", t.Gepha, Session("s1")).Value;
+        t.Tasks.Assign(task.Id, Assignee.Me);
+        CloseFromMenu(t, t.Lines.Single());
+
+        Assert.Equal(TaskStatus.InProgress, t.Tasks.Board.Tasks.Single().Status);
+        var stop = Assert.IsAssignableFrom<ContextMenu>(t.Bar.StopClaudeMenu);
+        var item = stop.Items.OfType<MenuItem>().Single(i => i.Header is TextBlock { Text: TaskViews.StopClaudeAndClose });
+        item.RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+        stop.IsOpen = false;
+        PumpBar(t);
+
+        Assert.Equal(TaskStatus.Closed, t.Tasks.Board.Tasks.Single().Status);
     });
 
     // Petre, 2026-11-23: "i can't currently see statuses". A Done task's line carries the green tick in front of its title

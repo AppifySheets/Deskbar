@@ -228,8 +228,8 @@ public static class TaskViews
     /// Whether Claude is at work on the task (task 93fa0b9b, see the header): it is open, not Done and not waiting on
     /// Petre, and a session is live on it. Such a task is drawn in the pinned Claude working block, not its quadrant.
     /// </summary>
-    public static bool AtWork(TaskItem task) =>
-        task.Status != TaskStatus.WaitingOnYou && TaskBoard.ClaudeStillWorking(task);
+    // ClaudeStillWorking leaves a waiting task out itself since task 3cdd0a52, so the two are one test.
+    public static bool AtWork(TaskItem task) => TaskBoard.ClaudeStillWorking(task);
 
     // The pinned Claude working block: each quadrant's tasks Claude is at work on, I to IV, each quadrant in its manual
     // order (TaskBoard.Group), so the block keeps Petre's priorities.

@@ -734,6 +734,10 @@ S15. Claude still at it (task 37cd7081). Start Claude on a task and, while it wo
     `$ts task close <id>` on a working task is refused and names `--stop-claude`; with it, the task closes and the
     session stops. A Done task and a plain note still close at once on their tick. On a task whose session runs in
     VS Code, Stop Claude and close closes the task, the window stays open, and the thread says so.
+S15a. A waiting task closes at once (task 3cdd0a52). Take a Claude task waiting on you whose session is still live (it
+    asked you to merge or to install an update). Its tick tooltip says "Tick off: closes Claude's task". Tick it on the
+    bar or in the panel: it closes at once with Undo, and no "Stop Claude and close" menu opens. Within a few minutes
+    `claude agents` no longer lists its background session (the keeper stops a closed task's session).
 S16. The Subtasks checkbox (task 173ef268). Give a note three subtasks and ask a question on one of them with
     `$ts task ask` from its session (or set it Waiting). In the tasks panel the toolbar's "Subtasks" box is ticked and
     the subtasks are under the parent. Untick it: the two plain subtasks go, the parent still says "· 3 subtasks", the
