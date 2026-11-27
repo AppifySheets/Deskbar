@@ -327,7 +327,7 @@ internal sealed class ChatStreamPanel : StackPanel
         if (message.Text.Trim().Length > 0)
         {
             var document = MarkdownBlocks.Render(message.Text, deps.OpenLink);
-            document.FontSize = InboxLook.ChatText;
+            InboxLook.Reading(document, InboxLook.ChatText);
             document.Foreground = InboxLook.Ink;
             var body = new RichTextBox
             {
