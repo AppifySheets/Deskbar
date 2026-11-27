@@ -101,6 +101,13 @@ public sealed record ClaudeHookEvent(string Event, string SessionId, string Fold
     /// </summary>
     public Maybe<string> Prompt { get; init; }
 
+    /// <summary>
+    /// A Stop hook's last_assistant_message: the text of Claude's final message in the turn (Claude Code 2.1.47 on), or
+    /// none. Read for the manager only (task 2c5de076, ManagerQuestion.AfterStop): its answer's first line goes on the
+    /// manager line. Claude Code's docs advise this field over the transcript, which may not hold the last reply yet.
+    /// </summary>
+    public Maybe<string> LastMessage { get; init; }
+
     public static Result<ClaudeHookEvent> Parse(string json, string? entrypoint, string? attended, string? job = null)
     {
         try
@@ -130,6 +137,7 @@ public sealed record ClaudeHookEvent(string Event, string SessionId, string Fold
                     ? Tasks.DialogQuestion.From(asked)
                     : Maybe<string>.None,
                 Prompt = Text(root, "prompt"),
+                LastMessage = Text(root, "last_assistant_message"),
             };
         }
         catch (JsonException e)

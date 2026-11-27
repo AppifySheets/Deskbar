@@ -52,7 +52,9 @@ public partial class FloatingBar
     // And the manager's window while the manager has a question open for you (task f171bca6, Petre picked "glow when it
     // asks"): the manager line on the bar and in the panel is the question, and its window's icon glows with it, as an
     // asking task's session does. Unlike a task's ask, activating the window does not clear it: the question is
-    // answered by replying to it, which clears the line (ManagerQuestion.AfterPrompt), and the glow with it.
+    // answered by replying to it, which clears the line (ManagerQuestion.AfterPrompt), and the glow with it. The same line
+    // carries the manager's unread answer to the user's message (task 2c5de076), and that one does go when the window is
+    // activated (ManagerQuestion.Seen, wired in the App), since looking at the window is reading the answer.
     internal bool Glows(WindowRow row) =>
         row.Asks || row.WantsAttention || (ManagerAsks?.Invoke() is not null && IsManagerWindow(row));
 

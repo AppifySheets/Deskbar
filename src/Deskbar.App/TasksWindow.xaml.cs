@@ -630,7 +630,8 @@ public partial class TasksWindow : Window
             $"{view.ShowsSubtasks}",
             // The manager's question (task 61e4d143): asked, replaced or cleared redraws its line. Its time too, so the same
             // text asked again counts its age from the new ask; the age itself is rewritten once a minute (RefreshAges).
-            $"{view.ManagerAsks?.Question}{view.ManagerAsks?.AskedAt}",
+            // An answer in place of a question (task 2c5de076) redraws it too, even with the same text.
+            $"{view.ManagerAsks?.Question}{view.ManagerAsks?.AskedAt}{view.ManagerAsks?.Answered}",
             string.Join('|', view.Places.Select(p => $"{p.IsGroup}{p.Workspace}{p.Name}{(p.Colour as SolidColorBrush)?.Color}")),
             view.EmptyText,
             $"{renaming}{editingComment}{linking}{subtaskUnder}{string.Join(",", settledOpen.Order())}|{string.Join(",", earlierOpen.Order())}|{string.Join(",", longOpen.Order())}",

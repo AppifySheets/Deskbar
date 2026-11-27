@@ -159,8 +159,10 @@ public sealed class ManagerActions : IDisposable
             return Result.Success();
         }
         pending = true;
-        // The click is the user looking: whatever a wake brought is read from here on (the dot goes).
+        // The click is the user looking: whatever a wake brought is read from here on (the dot goes), and so is the
+        // manager's answer to their message (task 2c5de076, ManagerQuestion.Seen: the line goes; a question stays).
         if (manager.State.Manager is { Unread: true } unread) manager.SetManagerSession(unread with { Unread = false });
+        ManagerQuestion.Seen(Maybe.From(manager.State.Manager)).Tap(manager.SetManagerSession);
         // The day is read once, at the click, so a click just before midnight stores the day it was decided on.
         var day = today();
         opening.Disposable = OnScheduler(sessions.ListNow)

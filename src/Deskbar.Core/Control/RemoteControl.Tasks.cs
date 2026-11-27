@@ -741,4 +741,12 @@ public sealed record TaskSessionCommands(
     /// same reason as Transcript; the default accepts every folder, so a copy or a test that sets none is not blocked.
     /// </summary>
     public Func<string, bool> FolderExists { get; init; } = _ => true;
+
+    /// <summary>
+    /// Whether the manager's terminal window is the window in front right now (ManagerSession.IsWindow on the foreground
+    /// window, in the app). Read when the manager's turn ends (task 2c5de076, ManagerQuestion.AfterStop): a reply the user
+    /// watched being written in that window needs no line asking them to come and read it. An init property for the same
+    /// reason as Transcript; the default says no, so every reply to the user gets its line.
+    /// </summary>
+    public Func<bool> ManagerInFront { get; init; } = () => false;
 }

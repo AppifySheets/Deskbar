@@ -54,6 +54,8 @@ public partial class FloatingBar
             Foreground = ManagerLook.TitleInk,
         };
         text.Inlines.Add(new Run("Manager") { FontWeight = FontWeights.SemiBold });
+        // An answer says so (task 2c5de076); a question keeps the line as it was, "Manager" and the question.
+        if (ask.Answered) text.Inlines.Add(new Run(" answered") { FontWeight = FontWeights.SemiBold });
         text.Inlines.Add(new Run(TaskDetailSeparator) { Foreground = ManagerLook.QuestionInk });
         // One line of the question: the line wraps to two at most and the tooltip carries all of it.
         text.Inlines.Add(new Run(ask.Question.ReplaceLineEndings(" ")) { Foreground = ManagerLook.QuestionInk });
@@ -77,14 +79,14 @@ public partial class FloatingBar
             Margin = new Thickness(2, 0, 0, 0),
             Child = face,
         };
-        var button = TaskButton("Manager asks", edge, () => OpenManager?.Invoke(), $"{ManagerLook.Tip}\n\n{ask.Question}", TaskClickIgnored);
+        var button = TaskButton($"Manager {ask.Verb}", edge, () => OpenManager?.Invoke(), $"{ask.Tip}\n\n{ask.Question}", TaskClickIgnored);
         button.Template = TaskLineTemplate;
         button.HorizontalContentAlignment = HorizontalAlignment.Stretch;
         button.HorizontalAlignment = HorizontalAlignment.Stretch;
         button.VerticalAlignment = VerticalAlignment.Top;
         // The 1 DIP under it that parts two task lines, and the group gap above the first task line follows it anyway.
         button.Margin = new Thickness(0, 0, 0, 1);
-        AutomationProperties.SetName(button, "Manager asks: " + ask.Question);
+        AutomationProperties.SetName(button, $"Manager {ask.Verb}: {ask.Question}");
         return button;
     }
 

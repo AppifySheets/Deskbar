@@ -659,6 +659,10 @@ themselves again.
 When the manager needs a decision from you, its question shows as a violet line at the top of the bar's task list and
 of the tasks panel, above every task's question. Click it to open the manager; your reply clears it.
 
+When the manager answers a message of yours while its window is not in front, the same violet line says "Manager
+answered" with the first line of the answer, in the bar's task list and at the top of the Inbox. Opening the manager,
+bringing its window forward or writing to it again clears it. Its replies to Deskbar's own wakes leave no line.
+
 The manager starts with Claude Code's Remote Control on, so it shows up as "Deskbar manager" in the Claude app on your
 phone and you can talk to it from there, with the keyboard's microphone if you like. It is the only one: the sessions
 Deskbar starts on tasks keep Remote Control off, whatever your Claude Code settings say, so the phone's list is not

@@ -61,6 +61,9 @@ public sealed partial class RemoteControl
         ControlArguments.ParseClaudeHook(rest)
             .Bind(request => ClaudeHookEvent.Parse(request.Json!, request.Entrypoint, request.Attended, request.Job).Map(hook => (request, hook)))
             .Tap(found => QuestionsSettledBy(found.hook))
+            // The manager's turn ending may be its answer to the user, which then asks for the user's attention
+            // (ManagerStopped). Beside the Stop arm below, not in place of it, so a Stop from the manager is answered as before.
+            .Tap(found => ManagerStopped(found.hook, found.request.From))
             .Match(found => Answer(found.hook, found.request.From), ControlReply.Fail);
 
     // CLAUDE-WAIT: a session's comment waiter registering (plan docs/superpowers/plans/2026-11-24-comment-wakes-session.md,
@@ -171,13 +174,26 @@ public sealed partial class RemoteControl
         return Quiet;
     }
 
-    // A prompt reached the manager (see TaskEvent): when it is the user's reply to the stored manager while its question is
-    // open, the question is cleared; a Deskbar wake, another session in the folder or no question changes nothing.
+    // A prompt reached the manager (see TaskEvent): when it is the user's message to the stored manager, its question and
+    // any unread answer are cleared and the turn is marked as a reply to the user (task 2c5de076, ManagerStopped reads
+    // that when it ends); a Deskbar wake marks the turn as no reply; another session in the folder changes nothing.
     ControlReply ManagerPrompted(ClaudeHookEvent hook)
     {
         ManagerQuestion.AfterPrompt(Maybe.From(manager.State.Manager), hook.SessionId, hook.Prompt)
             .Tap(manager.SetManagerSession);
         return Quiet;
+    }
+
+    // The manager's turn ended (task 2c5de076): when the turn answered the user's message, the reply's first line goes on
+    // the manager line, asking the user to come and read it (ManagerQuestion.AfterStop has the rules: only a turn that
+    // began with the user's message, only today's manager). Any other hook, or a Stop from another folder, changes nothing.
+    // Without the task service (the tasks feature never set up) there is no clock to stamp the answer with, and no manager.
+    void ManagerStopped(ClaudeHookEvent hook, string? from)
+    {
+        if (hook.Event != "Stop" || tasks is not { } service || !IsManagerFolder(Folder(from) ?? Folder(hook.Folder))) return;
+        ManagerQuestion.AfterStop(Maybe.From(manager.State.Manager), hook.SessionId, hook.LastMessage,
+                taskSessions?.ManagerInFront() ?? false, service.Now)
+            .Tap(manager.SetManagerSession);
     }
 
     // The folder is already normalised (Folder), the same way the task forms read it (RemoteControl.Tasks).

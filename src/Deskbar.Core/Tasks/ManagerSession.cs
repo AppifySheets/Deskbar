@@ -24,19 +24,31 @@ namespace Deskbar.Core.Tasks;
 /// "Waiting on you"; null while it has nothing open.</item>
 /// <item><paramref name="AskedAt"/>: when it asked, for the line's age.</item>
 /// </list>
+/// And the manager's answer to the user's message (task 2c5de076, ManagerQuestion.AfterStop), optional for the same reason:
+/// <list type="bullet">
+/// <item><paramref name="Replying"/>: the user's message reached the manager and its turn has not ended yet, so the
+/// turn's end is an answer to the user and not to one of Deskbar's wakes.</item>
+/// <item><paramref name="Answer"/>: the answer's first line, shown as the manager line until the user opens the manager,
+/// brings its window to the front or writes to it again; null while there is nothing unread.</item>
+/// <item><paramref name="AnsweredAt"/>: when the turn ended, for the line's age.</item>
+/// </list>
 /// A new manager (StartNew, Claim) is a new record, so a new day's manager starts without yesterday's question.
 /// </summary>
 public sealed record ManagerRecord(string SessionId, DateOnly Day, DateTimeOffset? Since = null, bool Unread = false,
-    IReadOnlyList<Guid>? HandedBack = null, string? Question = null, DateTimeOffset? AskedAt = null)
+    IReadOnlyList<Guid>? HandedBack = null, string? Question = null, DateTimeOffset? AskedAt = null,
+    bool Replying = false, string? Answer = null, DateTimeOffset? AnsweredAt = null)
 {
     // A record compares by its list's CONTENTS, not the list's reference, so a record loaded from state.json equals the
     // one saved, and ManagerWaker can tell a changed record from the same one to skip a needless save.
     public bool Equals(ManagerRecord? other) =>
         other is not null && SessionId == other.SessionId && Day == other.Day && Since == other.Since
         && Unread == other.Unread && (HandedBack ?? []).SequenceEqual(other.HandedBack ?? [])
-        && Question == other.Question && AskedAt == other.AskedAt;
+        && Question == other.Question && AskedAt == other.AskedAt
+        && Replying == other.Replying && Answer == other.Answer && AnsweredAt == other.AnsweredAt;
 
-    public override int GetHashCode() => HashCode.Combine(SessionId, Day, Since, Unread, (HandedBack ?? []).Count, Question, AskedAt);
+    public override int GetHashCode() =>
+        HashCode.Combine(HashCode.Combine(SessionId, Day, Since, Unread, (HandedBack ?? []).Count, Question, AskedAt),
+            Replying, Answer, AnsweredAt);
 }
 
 /// <summary>What a click on the manager button should do.</summary>
@@ -241,7 +253,11 @@ public static class ManagerSession
         "  no list of what waits on the user, no merge reminders, no \"needs you now\".",
         "Report only what the bar cannot show: sessions that collide or do the same work, work stuck on another task or person,",
         "  one decision that blocks several tasks, a session that stopped twice. If there is none, say so in one line.",
-        "Answer in full only when the user asks you directly, and then answer what they asked.",
+        // Task 2c5de076: the user asked that the manager's answer ask for their attention in the Inbox. Deskbar does that
+        // itself when the turn ends (ManagerQuestion.AfterStop), showing the reply's first line; the manager only needs
+        // to know the line exists, so that its first line carries the answer. Kept to the one line it replaced: the tests
+        // cap the briefing under 40 and it is at the cap.
+        "Answer in full only when the user asks you directly. Your reply's first line shows in their Inbox: make it the answer.",
         "Name a task by its title and short id, so the user can find it.");
 
     /// <summary>

@@ -1053,13 +1053,24 @@ public partial class App : Application
     // Before ClaudeTaskActions exists (a pipe command in the first moments of a start) there is nothing to start with.
     const string ClaudeActionsNotReady = "Claude sessions are not ready yet; try again in a moment.";
 
-    // The manager's open question as the bar and the panel draw it (task 61e4d143), or null while it has none. A question
-    // saved without its time (only a hand-edited state.json can) counts as asked when the manager last looked, else at the
-    // manager's start day: a FIXED time, since the bar's shape key holds it and "now" would repaint the list every pass.
-    internal static ManagerAsk? ManagerAskOf(Core.Tasks.ManagerRecord? record) =>
-        record is { Question: { } question }
-            ? new ManagerAsk(question, record.AskedAt ?? record.Since ?? new DateTimeOffset(record.Day.ToDateTime(TimeOnly.MinValue)))
-            : null;
+    // The manager's open question as the bar and the panel draw it (task 61e4d143), else its unread answer to the user's
+    // message (task 2c5de076), or null while it has neither. A question or answer saved without its time (only a
+    // hand-edited state.json can) counts as asked when the manager last looked, else at the manager's start day: a FIXED
+    // time, since the bar's shape key holds it and "now" would repaint the list every pass.
+    internal static ManagerAsk? ManagerAskOf(Core.Tasks.ManagerRecord? record) => record switch
+    {
+        { Question: { } question } => new ManagerAsk(question, record.AskedAt ?? FixedTimeOf(record)),
+        { Answer: { } answer } => new ManagerAsk(answer, record.AnsweredAt ?? FixedTimeOf(record), Answered: true),
+        _ => null,
+    };
+
+    static DateTimeOffset FixedTimeOf(Core.Tasks.ManagerRecord record) =>
+        record.Since ?? new DateTimeOffset(record.Day.ToDateTime(TimeOnly.MinValue));
+
+    // Whether a window is the manager's terminal, by the one rule the icon, ring, glow and pin share (ManagerSession.IsWindow),
+    // read from the window list the app already keeps. A window the list does not know is not the manager's.
+    bool ManagerWindowAt(WindowHandle window) =>
+        manager?.KnownWindows.Any(w => w.Handle == window && Core.Tasks.ManagerSession.IsWindow(w.ProcessPath, w.Title)) ?? false;
 
     // The VS Code window a Claude session works in, from the session's folder, by the rule the control pipe's `open`
     // and `attention` use to find a caller's window (RemoteControl.CallerOf, EditorFolder.Best), each window offering its
@@ -1976,6 +1987,9 @@ public partial class App : Application
                 Transcript = session => claudeSessions?.TranscriptOf(session) ?? Maybe<string>.None,
                 // `task repeat` refuses a folder that is not there (recurring tasks spec, task 0b78269e).
                 FolderExists = Directory.Exists,
+                // The manager's reply asks for the user's attention unless its window was in front as the turn ended
+                // (task 2c5de076, ManagerQuestion.AfterStop). Read on the UI thread, where pipe requests run.
+                ManagerInFront = () => ManagerWindowAt(new WindowHandle(NativeMethods.GetForegroundWindow())),
             },
             // `claude-wait`, the comment waiter registering, and SessionEnd forgetting a session's inbox (a comment wakes
             // its session).
@@ -2565,6 +2579,13 @@ public partial class App : Application
             // The same stream tells the bar's Start and tray buttons which shell flyout is open, so a click
             // on Start while the Start menu is up closes it rather than opening it again (FloatingBar.Shell.cs).
             monitor.ForegroundChanged.Subscribe(floatingBar.NoteForeground);
+
+            // The manager's window coming to the front is the user reading its answer (task 2c5de076): the manager line
+            // that asked them to come and read it goes, as a click on the Manager button takes it (ManagerQuestion.Seen).
+            // An open question stays, since only a reply settles that.
+            monitor.ForegroundChanged
+                .Where(hwnd => manager.State.Manager is { Answer: not null } && ManagerWindowAt(new WindowHandle(hwnd)))
+                .Subscribe(_ => Core.Tasks.ManagerQuestion.Seen(Maybe.From(manager.State.Manager)).Tap(manager.SetManagerSession));
 
             // The task of the Claude window in front is the selected one (task 4846fde1, Petre: "active claude terminal
             // window should highlight the current task in deskbar"). Bringing forward a terminal Deskbar opened on a
