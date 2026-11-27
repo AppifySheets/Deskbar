@@ -48,6 +48,15 @@ public partial class TasksWindow
     // The same margin ApplyTranscript uses for "at its end".
     const double PageEndMargin = 24;
 
+    // Whether a scroller at `offset` counts as at its end. Within PageEndMargin of the end, but never more than half of what
+    // the page can scroll: a page that scrolls by only a few DIP (a chat that went missing leaves little more than the
+    // comments) would otherwise count as at its end even at its very top, so the owner who had scrolled to the top was
+    // sent to the bottom once the chat came back (main went red on the test of that case when the comment box's hint line
+    // went and gave the page 17 DIP more room, task bc27a308). A page that cannot scroll at all is at its end, so a
+    // short chat keeps following its newest.
+    internal static bool AtPageEnd(double offset, double scrollable) =>
+        offset >= scrollable - Math.Min(PageEndMargin, scrollable / 2);
+
     internal const string InboxPageBackText = "Back";
     internal const string NotDoneYetText = "Not done yet…";
     internal const string CloseTaskPageText = "Close task";
@@ -280,7 +289,7 @@ public partial class TasksWindow
         PagePlace? hold = null;
         if (pageScrolledFor == row.Id)
             hold = pageHold is { } held && held.Task == row.Id ? held
-                : pageScroller is { } was ? new PagePlace(row.Id, was.VerticalOffset >= was.ScrollableHeight - PageEndMargin, was.VerticalOffset)
+                : pageScroller is { } was ? new PagePlace(row.Id, AtPageEnd(was.VerticalOffset, was.ScrollableHeight), was.VerticalOffset)
                 : null;
         var line = view.Inbox!.Lines.FirstOrDefault(l => l.Id == row.Id);
         var mark = line?.Mark ?? MarkOfRow(row);
@@ -352,7 +361,7 @@ public partial class TasksWindow
         {
             if (e.VerticalChange >= 0 || (e.ExtentHeightChange >= 0 && e.ViewportHeightChange <= 0)) return;
             var before = e.VerticalOffset - e.VerticalChange;
-            var wasAtEnd = before >= e.ExtentHeight - e.ExtentHeightChange - (e.ViewportHeight - e.ViewportHeightChange) - PageEndMargin;
+            var wasAtEnd = AtPageEnd(before, e.ExtentHeight - e.ExtentHeightChange - (e.ViewportHeight - e.ViewportHeightChange));
             pageHold = new PagePlace(task, wasAtEnd, before);
             return;
         }

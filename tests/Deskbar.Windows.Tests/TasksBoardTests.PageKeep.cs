@@ -18,7 +18,7 @@ public partial class TasksBoardTests
 
     // A task with a session, a transcript of 30 messages (the fake), and comments with pictures, on a page. The source of the
     // transcript can be switched off (Gone) and on again, as it is on the owner's PC when its path is not found for a moment.
-    static (Board T, Guid Id, SourceSwitch Source, string Root) PictureChat()
+    static (Board T, Guid Id, SourceSwitch Source, string Root) PictureChat(double? height = null)
     {
         var root = ScratchRoot();
         var fake = new FakeTranscript();
@@ -36,6 +36,15 @@ public partial class TasksBoardTests
             t.Tasks.Comment(id, Maybe<string>.None, TaskImages.Join($"Comment {i} " + string.Join(" ", Enumerable.Repeat("more words", 8)), [picture]));
         }
         t.Controller.Show();
+        // A height of its own, so the page's room does not depend on the screen the tests run on (the panel sizes
+        // itself to the work area, which differs between this machine's hidden desktop and CI's runner).
+        if (height is { } h)
+        {
+            t.Window.SizeToContent = SizeToContent.Manual;
+            t.Window.MaxHeight = double.PositiveInfinity;
+            t.Window.Height = h;
+            t.Window.UpdateLayout();
+        }
         ChooseInbox(t);
         t.Window.UpdateLayout();
         t.Controller.ShowTask(id);
@@ -169,10 +178,14 @@ public partial class TasksBoardTests
     });
 
     // The restore never fights him: once he has scrolled himself, a chat that goes and comes back leaves him where he is.
-    [Fact]
-    public void After_the_owner_scrolls_himself_the_page_is_not_pulled_back() => StaThread.Run(() =>
+    // At 700 DIP the page without its chat scrolls by only 8 DIP, inside the 24 DIP "at its end" margin; that height is
+    // CI's, where this test went red (task bc27a308), so it is pinned here as well as the default.
+    [Theory]
+    [InlineData(null)]
+    [InlineData(700.0)]
+    public void After_the_owner_scrolls_himself_the_page_is_not_pulled_back(double? height) => StaThread.Run(() =>
     {
-        var (t, id, source, root) = PictureChat();
+        var (t, id, source, root) = PictureChat(height);
         using var _t = t;
         try
         {
