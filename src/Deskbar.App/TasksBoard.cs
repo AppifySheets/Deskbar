@@ -1012,6 +1012,10 @@ public sealed class TasksBoard : IDisposable
     public Result Close(Guid id, bool stopClaude = false, bool anyway = false)
     {
         if (tasks.Board.Tasks.FirstOrDefault(t => t.Id == id) is not { IsOpen: true } task) return Report(tasks.Close(id), id);
+        // OPEN SUBTASKS FIRST (task 452487b4): neither menu below gets past them ("Stop Claude and close" and "Close anyway"
+        // are both refused for a parent with an open subtask), so the refusal, naming the subtask, comes straight away on
+        // the line instead of a menu whose every item is then refused. The board's own Close checks them first too.
+        if (tasks.Board.OpenSubtaskCount(id) > 0) return Report(tasks.Close(id), id);
         if (!stopClaude && TaskBoard.ClaudeStillWorking(task))
         {
             window.OpenStopClaudeMenu(id);
