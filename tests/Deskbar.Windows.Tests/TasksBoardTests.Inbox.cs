@@ -801,10 +801,10 @@ public partial class TasksBoardTests
         Assert.Equal(extent, offset, 1);
     });
 
-    // A short page starts at the top (task 5ee182cf, which replaced "a chat read from the bottom up"): the chat sits right
-    // under the header, the empty room under it, and the comment box, docked below the scroller, still at the bottom edge.
+    // A short page reads like a chat from the bottom up (task 6da6758f, which undid task 5ee182cf's top start): the chat's
+    // end sits right above the comment box, docked below the scroller at the bottom edge, and the empty room is above it.
     [Fact]
-    public void A_short_page_starts_at_the_top_with_the_box_at_the_bottom() => StaThread.Run(() =>
+    public void A_short_page_sits_at_the_bottom_above_the_box() => StaThread.Run(() =>
     {
         using var t = Build(width: 460);
         var k = InboxTasks(t);
@@ -817,11 +817,14 @@ public partial class TasksBoardTests
         Assert.Equal(0, scroller.ScrollableHeight, 1);
         Assert.True(scroller.ViewportHeight > 200);
         var body = (FrameworkElement)scroller.Content;
-        Assert.Equal(VerticalAlignment.Top, body.VerticalAlignment);
-        // Its own top margin is all that stands between the scroller's top and the body (bottom-aligned, it was hundreds).
-        var top = body.TranslatePoint(new Point(0, 0), scroller).Y;
-        Assert.Equal(body.Margin.Top, top, 1);
+        Assert.Equal(VerticalAlignment.Bottom, body.VerticalAlignment);
         Assert.True(body.ActualHeight < scroller.ViewportHeight - 40, $"body {body.ActualHeight} of {scroller.ViewportHeight}: not short");
+        // Its own bottom margin is all that stands between the body's end and the view's (top-aligned, it was hundreds),
+        // and the empty room is above it.
+        var end = body.TranslatePoint(new Point(0, body.ActualHeight), scroller).Y;
+        Assert.Equal(scroller.ViewportHeight - body.Margin.Bottom, end, 1);
+        // At least the 40 DIP the shortness check leaves, less the 10 DIP bottom margin.
+        Assert.True(body.TranslatePoint(new Point(0, 0), scroller).Y > 20, "the body starts at the top: no room above it");
         var box = t.Window.CommentBoxOf(k.Done)!;
         var boxTop = box.TranslatePoint(new Point(0, 0), scroller).Y;
         Assert.True(boxTop >= scroller.ViewportHeight - 1, $"box starts at {boxTop}, the view ends at {scroller.ViewportHeight}");
