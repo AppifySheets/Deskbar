@@ -814,7 +814,8 @@ public partial class TasksWindow : Window
         statsSwitch = Flat(new TextBlock { Text = "Stats", Foreground = Ink, FontSize = 11 }, "Stats", () => Actions?.ShowStats?.Invoke(), new Thickness(8, 2, 8, 2));
         statsSwitch.ToolTip = "Added, finished and open tasks per day, each task a link";
         statsSwitch.Margin = new Thickness(4, 0, 10, 0);
-        ToolbarEnd.Children.Add(InboxSwitch()); // task 740a2231, TasksWindow.Inbox.cs
+        // No Inbox chip here: the Inbox is reached from the panel's foot, drawn in every view (TasksWindow.Inbox.cs,
+        // PaintInboxChrome), so this end is main's List, Matrix, Stats, "+ Add" and ×.
         ToolbarEnd.Children.Add(listSwitch);
         ToolbarEnd.Children.Add(matrixSwitch);
         ToolbarEnd.Children.Add(statsSwitch);

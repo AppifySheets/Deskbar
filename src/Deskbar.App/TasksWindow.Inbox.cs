@@ -22,7 +22,7 @@ namespace Deskbar.App;
 //                    the toolbar draws (DrawFilters), moved into the sheet while the Inbox shows and back when it goes.
 //               Then the manager's violet line, the add box and the problem line, all as today, then the lines.
 //               Leaving the Inbox puts every one of these back as it was, so List, Matrix and Stats are drawn exactly as
-//               before.
+//               before, but for the footer: that one stays, as the panel's foot in every view (PaintInboxChrome).
 //   THE LINES   the chosen tab's lines under captions (TasksWindow.InboxLine.cs), drawn into the List's own panel (Rows),
 //               so the drag, the click guard and the scroll work on them as they do on the List's. While the search box
 //               has text, a search by id found a task, or Closed or Snoozed is the status filter, the tabs do not apply: one
@@ -42,6 +42,9 @@ public partial class TasksWindow
     internal UIElement? InboxHeaderShown => InboxHeader.Child;
 
     internal UIElement? InboxFooterShown => InboxFooter.Child;
+
+    /// <summary>For the tests: whether the foot (the view switch row) is on show, in whatever view.</summary>
+    internal bool InboxFooterOnShow => InboxFooter.Visibility == Visibility.Visible && InboxFooter.Child is not null;
 
     /// <summary>For the tests: whether the chip rows are in the Filter sheet (Inbox) or in the toolbar (every other view).</summary>
     internal bool FiltersInSheet => ReferenceEquals(Filters.Parent, inboxSheet);
@@ -92,7 +95,7 @@ public partial class TasksWindow
         if (latest is not null) Present(latest);
     }
 
-    // The frame for this view, both ways (see the header). Called on every draw that is not Stats', after the draw has set
+    // The frame for this view, both ways (see the header). Called on every draw, Stats' included, after the draw has set
     // the search row and the chip rows for List, Matrix and Stats, so this has the last word while the Inbox shows.
     void PaintInboxChrome(TasksView view)
     {
@@ -100,7 +103,16 @@ public partial class TasksWindow
         Background = on ? InboxLook.Background : ListBoardFill;
         Board.Background = Background;
         InboxHeader.Visibility = on ? Visibility.Visible : Visibility.Collapsed;
-        InboxFooter.Visibility = on ? Visibility.Visible : Visibility.Collapsed;
+        // THE FOOT IS THE SAME IN EVERY VIEW (the owner, of the Inbox's "Inbox | List | Stats" row: "put this on the bottom
+        // of the list as well"). The one control, InboxFooterOf, at the bottom of List, Matrix and Stats too, with the view
+        // on show on its pill; its clicks are the Inbox's own. It is also now the List's one way into the Inbox: the
+        // toolbar's Inbox chip this PR had added is gone, so the Inbox has one entry and the toolbar is main's again
+        // (List, Matrix, Stats, "+ Add", ×). That is why the foot shows for everyone, the Inbox never picked included: the
+        // Inbox is opt in (TasksPanelState.Inbox), and someone who has never picked it can only find it here. Only a
+        // window with no controller that can show the Inbox (Actions.ShowInbox unset: the tests' bare windows) draws no
+        // foot outside the Inbox, as it drew no Inbox chip. An open Inbox page still hides it (DrawInboxPage).
+        var foot = on || Actions?.ShowInbox is not null;
+        InboxFooter.Visibility = foot ? Visibility.Visible : Visibility.Collapsed;
         TitleLine.Visibility = on ? Visibility.Collapsed : Visibility.Visible;
         filtersHome ??= Filters.Parent as Panel;
         if (on && Filters.Parent == filtersHome)
@@ -124,7 +136,8 @@ public partial class TasksWindow
         if (!on)
         {
             InboxHeader.Child = null;
-            InboxFooter.Child = null;
+            // The Inbox draws its own foot in DrawInbox; every other view gets it here.
+            InboxFooter.Child = foot ? InboxFooterOf(view) : null;
             EmptyText.Foreground = HeaderInk;
             inboxFollowed = null;
             inboxRevealPending = null;
@@ -379,6 +392,8 @@ public partial class TasksWindow
     // --- the footer ----------------------------------------------------------------------------------------------------
 
     // The view switch, Inbox, List, Matrix (from 780 DIP, as the toolbar's), Stats, and the Manager button at the right end.
+    // The panel's foot in every view (PaintInboxChrome), the view on show on its pill: the same buttons calling the same
+    // actions wherever it is drawn, so a click on List from the Inbox's foot and from the List's own foot are one thing.
     UIElement InboxFooterOf(TasksView view)
     {
         var dock = new DockPanel { LastChildFill = false };
@@ -387,11 +402,17 @@ public partial class TasksWindow
         manager.ToolTip = "Open the manager session";
         DockPanel.SetDock(manager, Dock.Right);
         dock.Children.Add(manager);
+        // Which view is on show: Stats lies over the others, the Inbox is drawn only while chosen, the Matrix only while
+        // the switch says so and the panel is wide enough (view.Matrix is already both).
+        var shown = view.Stats is not null ? "Stats" : view.Inbox is not null ? "Inbox" : view.Matrix ? "Matrix" : "List";
         var views = new StackPanel { Orientation = Orientation.Horizontal };
-        views.Children.Add(ViewButton("inbox", "Inbox", true, () => Actions?.ShowInbox?.Invoke(true)));
-        views.Children.Add(ViewButton("list", "List", false, () => Actions?.ShowMatrix(false)));
-        if (view.MatrixAllowed) views.Children.Add(ViewButton("grid", "Matrix", false, () => Actions?.ShowMatrix(true)));
-        if (Actions?.ShowStats is { } stats) views.Children.Add(ViewButton("stats", "Stats", false, stats));
+        var inbox = ViewButton("inbox", "Inbox", shown == "Inbox", () => Actions?.ShowInbox?.Invoke(true));
+        // The toolbar's Inbox chip used to carry this; the foot is now the Inbox's one entry, so it says what it opens.
+        inbox.ToolTip = "The tasks in tabs: what needs you, what Claude has, your notes, and all of them";
+        views.Children.Add(inbox);
+        views.Children.Add(ViewButton("list", "List", shown == "List", () => Actions?.ShowMatrix(false)));
+        if (view.MatrixAllowed) views.Children.Add(ViewButton("grid", "Matrix", shown == "Matrix", () => Actions?.ShowMatrix(true)));
+        if (Actions?.ShowStats is { } stats) views.Children.Add(ViewButton("stats", "Stats", shown == "Stats", stats));
         DockPanel.SetDock(views, Dock.Left);
         dock.Children.Add(views);
         return new Border
@@ -410,18 +431,6 @@ public partial class TasksWindow
             name, press, new Thickness(7, 4, 7, 4), on ? InboxLook.Raised : Brushes.Transparent, 7);
         button.Margin = new Thickness(0, 0, 2, 0);
         AutomationProperties.SetItemStatus(button, on ? "checked" : "unchecked");
-        return button;
-    }
-
-    /// <summary>
-    /// The toolbar's Inbox switch, before List (BuildToolbarEnd), so List, Matrix and Stats lead back to the Inbox. None
-    /// without a controller that can show it.
-    /// </summary>
-    Button InboxSwitch()
-    {
-        var button = Flat(new TextBlock { Text = "Inbox", Foreground = Ink, FontSize = 11 }, "Inbox", () => Actions?.ShowInbox?.Invoke(true), new Thickness(8, 2, 8, 2));
-        button.ToolTip = "The tasks in three tabs: what needs you, what Claude has, your notes";
-        button.Margin = new Thickness(0, 0, 4, 0);
         return button;
     }
 

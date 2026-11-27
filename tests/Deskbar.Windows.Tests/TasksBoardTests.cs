@@ -3504,7 +3504,12 @@ public partial class TasksBoardTests
         Enumerable.Range(1, 2).ToList().ForEach(_ => t.Tasks.Comment(id, Maybe<string>.None, Long(14)));
         Enumerable.Range(1, 3).ToList().ForEach(i => t.Tasks.Comment(id, Maybe<string>.None, $"short {i}"));
         t.Controller.Show();
+        // The rig's screen is 700 px tall, and the thread's cap follows the list's height: with the panel's foot (the view
+        // switch row, in every view since the Inbox) the three short comments overflow it by about 15 DIP, and the
+        // premise "fits until the fold opens" would not hold. The foot is not what this test is about, so it steps aside
+        // (after the toggle's redraw, which paints it back; the unfold's redraw does too, and that half holds either way).
         t.Controller.ToggleThread(id);
+        t.Window.InboxFooter.Visibility = Visibility.Collapsed;
         t.Window.UpdateLayout();
         Assert.Equal(0, ThreadScroller(t, id).ScrollableHeight, 1);
 
@@ -5668,14 +5673,14 @@ public partial class TasksBoardTests
         using var t = Build(width: TasksPanelLayout.MatrixFrom);
         t.Tasks.AddNote("a", t.Gepha);
         t.Controller.Show();
-        Assert.Equal(Visibility.Visible, ButtonNamed(t.Window, "Matrix").Visibility);
+        Assert.Equal(Visibility.Visible, ButtonNamed(t.Window.Toolbar, "Matrix").Visibility);
         Click(ButtonNamed(t.Window, "Matrix"));
         Assert.True(t.Window.MatrixShown);
 
         t.Window.Actions!.ResizePanel(TasksPanelLayout.MatrixFrom - 1);
         Assert.False(t.Window.MatrixShown);
-        Assert.Equal(Visibility.Collapsed, ButtonNamed(t.Window, "Matrix").Visibility);
-        Assert.Equal(Visibility.Collapsed, ButtonNamed(t.Window, "List").Visibility);
+        Assert.Equal(Visibility.Collapsed, ButtonNamed(t.Window.Toolbar, "Matrix").Visibility);
+        Assert.Equal(Visibility.Collapsed, ButtonNamed(t.Window.Toolbar, "List").Visibility);
         Assert.True(t.Harness.Manager.State.TasksMatrix);
 
         // Reopened narrow, still the List.
@@ -5685,7 +5690,7 @@ public partial class TasksBoardTests
 
         t.Window.Actions!.ResizePanel(TasksPanelLayout.MatrixFrom);
         Assert.True(t.Window.MatrixShown);
-        Assert.Equal(Visibility.Visible, ButtonNamed(t.Window, "Matrix").Visibility);
+        Assert.Equal(Visibility.Visible, ButtonNamed(t.Window.Toolbar, "Matrix").Visibility);
     });
 
     // A session Claude is working in right now (`workingOf`: the task's live sessions the latest `claude agents --json`
@@ -5742,7 +5747,7 @@ public partial class TasksBoardTests
         t.Controller.Show();
 
         Assert.False(t.Window.MatrixShown);
-        Assert.Equal(Visibility.Collapsed, ButtonNamed(t.Window, "Matrix").Visibility);
+        Assert.Equal(Visibility.Collapsed, ButtonNamed(t.Window.Toolbar, "Matrix").Visibility);
         Assert.True(t.Harness.Manager.State.TasksMatrix);
     });
 
@@ -7357,12 +7362,12 @@ public partial class TasksBoardTests
         using var t = Build(width: TasksPanelLayout.MatrixFrom - 1);
         t.Tasks.AddNote("a", t.Gepha);
         t.Controller.Show();
-        Assert.Equal(Visibility.Collapsed, ButtonNamed(t.Window, "List").Visibility);
-        Assert.Equal(Visibility.Visible, ButtonNamed(t.Window, "Stats").Visibility);
+        Assert.Equal(Visibility.Collapsed, ButtonNamed(t.Window.Toolbar, "List").Visibility);
+        Assert.Equal(Visibility.Visible, ButtonNamed(t.Window.Toolbar, "Stats").Visibility);
 
         t.Controller.ShowStats();
-        Assert.Equal(Visibility.Visible, ButtonNamed(t.Window, "List").Visibility);
-        Assert.Equal(Visibility.Collapsed, ButtonNamed(t.Window, "Matrix").Visibility);
+        Assert.Equal(Visibility.Visible, ButtonNamed(t.Window.Toolbar, "List").Visibility);
+        Assert.Equal(Visibility.Collapsed, ButtonNamed(t.Window.Toolbar, "Matrix").Visibility);
     });
 
     // A fresh open starts on the List again: Stats is not remembered.

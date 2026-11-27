@@ -146,7 +146,9 @@ public partial class TasksBoardTests
         var keys = t.Window.Keys.ToArray();
         var chips = t.Window.FilterLabels.ToArray();
         Assert.True(t.Window.ToolbarTitleShown);
-        Assert.True(HasButtonNamed(t.Window, "Inbox"));
+        // The Inbox's one entry is the panel's foot; the toolbar is main's again, with no Inbox chip.
+        Assert.True(HasButtonNamed(t.Window.InboxFooterShown!, "Inbox"));
+        Assert.False(HasButtonNamed(t.Window.Toolbar, "Inbox"));
 
         ChooseInbox(t);
         var footer = t.Window.InboxFooterShown!;
@@ -157,12 +159,46 @@ public partial class TasksBoardTests
 
         Click(ButtonNamed(footer, "List"));
         Assert.Null(t.Window.InboxShown);
-        Assert.Null(t.Window.InboxFooterShown);
         Assert.True(t.Window.ToolbarTitleShown);
         Assert.False(t.Window.FiltersInSheet);
         Assert.Equal(headers, t.Window.Headers);
         Assert.Equal(keys, t.Window.Keys);
         Assert.Equal(chips, t.Window.FilterLabels);
+    });
+
+    // The owner, of the Inbox's foot: "put this on the bottom of the list as well". The same row is the panel's foot in
+    // List, Matrix and Stats, the view on show on its pill, and its clicks do what the Inbox's foot does.
+    [Fact]
+    public void The_inbox_foot_is_the_panels_foot_in_every_view() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        InboxTasks(t);
+        t.Controller.Show();
+        static string On(UIElement foot) =>
+            AutomationProperties.GetName(Inside(foot).OfType<Button>().Single(b => AutomationProperties.GetItemStatus(b) == "checked"));
+
+        Assert.True(t.Window.InboxFooterOnShow);
+        Assert.Equal("List", On(t.Window.InboxFooterShown!));
+        Assert.True(HasButtonNamed(t.Window.InboxFooterShown!, "Manager"));
+
+        Click(ButtonNamed(t.Window.InboxFooterShown!, "Matrix"));
+        Assert.True(t.Window.MatrixShown);
+        Assert.Equal("Matrix", On(t.Window.InboxFooterShown!));
+
+        Click(ButtonNamed(t.Window.InboxFooterShown!, "Stats"));
+        Assert.True(t.Window.StatsShown);
+        Assert.Equal("Stats", On(t.Window.InboxFooterShown!));
+
+        Click(ButtonNamed(t.Window.InboxFooterShown!, "Inbox"));
+        Assert.NotNull(t.Window.InboxShown);
+        Assert.True(t.Harness.Manager.State.TasksPanel!.Inbox);
+        Assert.Equal("Inbox", On(t.Window.InboxFooterShown!));
+
+        Click(ButtonNamed(t.Window.InboxFooterShown!, "List"));
+        Assert.Null(t.Window.InboxShown);
+        Assert.False(t.Window.MatrixShown);
+        Assert.False(t.Harness.Manager.State.TasksPanel!.Inbox);
+        Assert.Equal("List", On(t.Window.InboxFooterShown!));
     });
 
     [Fact]
@@ -813,7 +849,9 @@ public partial class TasksBoardTests
         static IReadOnlyList<Color> Fills(DependencyObject scope) =>
             Inside(scope).OfType<Border>().Select(b => b.Background).OfType<SolidColorBrush>().Select(b => b.Color).ToArray();
         var inbox = Color.FromRgb(0x1F, 0x25, 0x31);
-        Assert.DoesNotContain(inbox, Fills(t.Window));
+        // The List's lines and thread, not the whole window: the panel's foot (the Inbox's view switch, in every view) wears
+        // the Inbox's colours on its pill by design.
+        Assert.DoesNotContain(inbox, Fills(t.Window.Rows));
         t.Controller.ToggleThread(k.Asking);
 
         ChooseInbox(t);
