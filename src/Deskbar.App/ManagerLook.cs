@@ -39,7 +39,21 @@ internal static class ManagerLook
 
     /// <summary>The line's tooltip on both surfaces.</summary>
     internal const string Tip = "The manager asks you this. Click to open the manager and answer it there; your reply clears the line.";
+
+    /// <summary>The line's tooltip on both surfaces while it carries the manager's answer (task 2c5de076).</summary>
+    internal const string AnswerTip = "The manager answered your message. Click to open the manager and read it; opening it clears the line.";
 }
 
-/// <summary>The manager's open question as the bar and the panel draw it (ManagerRecord.Question and AskedAt).</summary>
-internal sealed record ManagerAsk(string Question, DateTimeOffset AskedAt);
+/// <summary>
+/// What the manager line shows, as the bar and the panel draw it: the manager's open question (ManagerRecord.Question and
+/// AskedAt), or, while it has none, its unread answer to the user's message (Answer and AnsweredAt, task 2c5de076), with
+/// <paramref name="Answered"/> set. The question and the answer share the line because both ask for the same window.
+/// </summary>
+internal sealed record ManagerAsk(string Question, DateTimeOffset AskedAt, bool Answered = false)
+{
+    /// <summary>The line's title: "Manager asks" or "Manager answered".</summary>
+    internal string Verb => Answered ? "answered" : "asks";
+
+    /// <summary>The line's tooltip, before the text itself.</summary>
+    internal string Tip => Answered ? ManagerLook.AnswerTip : ManagerLook.Tip;
+}

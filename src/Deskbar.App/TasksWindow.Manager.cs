@@ -15,7 +15,7 @@ namespace Deskbar.App;
 public partial class TasksWindow
 {
     // The age on the manager line, rewritten with the other ages (RefreshAges); none while no line shows.
-    (TextBlock Text, DateTimeOffset AskedAt)? managerAge;
+    (TextBlock Text, DateTimeOffset AskedAt, bool Answered)? managerAge;
 
     void DrawManagerLine(ManagerAsk? ask)
     {
@@ -29,7 +29,7 @@ public partial class TasksWindow
         var now = Now();
         var title = new TextBlock { FontSize = 12, Foreground = ManagerLook.TitleInk, Margin = new Thickness(2, 0, 8, 0), VerticalAlignment = VerticalAlignment.Center };
         title.Inlines.Add(new Run("Manager") { FontWeight = FontWeights.Bold });
-        title.Inlines.Add(new Run(" asks"));
+        title.Inlines.Add(new Run(" " + ask.Verb));
         var chip = new Border
         {
             Tag = "manager-chip",
@@ -50,9 +50,9 @@ public partial class TasksWindow
             Foreground = HeaderInk,
             VerticalAlignment = VerticalAlignment.Center,
             Margin = new Thickness(6, 0, 0, 0),
-            ToolTip = AskedTip(now, ask.AskedAt),
+            ToolTip = AskedTip(now, ask.AskedAt, ask.Answered),
         };
-        managerAge = (age, ask.AskedAt);
+        managerAge = (age, ask.AskedAt, ask.Answered);
         // The whole question, wrapped: it is the point of the line, and there is only ever one.
         var question = new TextBlock
         {
@@ -103,9 +103,9 @@ public partial class TasksWindow
             Margin = new Thickness(6, 3, 6, 0),
             Focusable = false,
             Cursor = System.Windows.Input.Cursors.Hand,
-            ToolTip = ManagerLook.Tip,
+            ToolTip = ask.Tip,
         };
-        AutomationProperties.SetName(button, "Manager asks: " + ask.Question);
+        AutomationProperties.SetName(button, $"Manager {ask.Verb}: {ask.Question}");
         // The panel's click guard (ClickIgnored): a redraw that just moved the lines distrusts a click for half a second.
         button.Click += (_, e) =>
         {
@@ -116,16 +116,16 @@ public partial class TasksWindow
         return button;
     }
 
-    // The age's tooltip, as a task line's (AgeTip) but "Asked" rather than "Added".
-    static string AskedTip(DateTimeOffset now, DateTimeOffset asked) =>
-        // TaskAge.Words says "Added 2 hours ago"; the manager asked, so its first word is swapped.
-        $"Asked{TaskAge.Words(now - asked)["Added".Length..]}\n{asked.ToLocalTime():dddd d MMMM yyyy, HH:mm}";
+    // The age's tooltip, as a task line's (AgeTip) but "Asked" (or "Answered", task 2c5de076) rather than "Added".
+    static string AskedTip(DateTimeOffset now, DateTimeOffset asked, bool answered = false) =>
+        // TaskAge.Words says "Added 2 hours ago"; the manager asked or answered, so its first word is swapped.
+        $"{(answered ? "Answered" : "Asked")}{TaskAge.Words(now - asked)["Added".Length..]}\n{asked.ToLocalTime():dddd d MMMM yyyy, HH:mm}";
 
     // RefreshAges' share for the manager line.
     void RefreshManagerAge(DateTimeOffset now)
     {
         if (managerAge is not { } shown) return;
         shown.Text.Text = TaskAge.Format(now - shown.AskedAt);
-        shown.Text.ToolTip = AskedTip(now, shown.AskedAt);
+        shown.Text.ToolTip = AskedTip(now, shown.AskedAt, shown.Answered);
     }
 }

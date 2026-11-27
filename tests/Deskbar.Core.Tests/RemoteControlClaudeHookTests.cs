@@ -1364,11 +1364,14 @@ public class RemoteControlClaudeHookTests
     const string ManagerDir = @"C:\State\manager";
 
     // A hook run from the manager's own folder, against a control that knows where that is.
-    string ManagerHook(WorkspaceManager manager, string hookEvent, string session = "mgr", string source = "startup", string extra = "") =>
+    // `inFront`: whether the manager's window is the one in front (task 2c5de076, TaskSessionCommands.ManagerInFront).
+    string ManagerHook(WorkspaceManager manager, string hookEvent, string session = "mgr", string source = "startup", string extra = "",
+        bool inFront = false) =>
         new RemoteControl(manager, tasks: tasks, longPath: LongPath,
                 taskSessions: new TaskSessionCommands(_ => Result.Success(), _ => [], (_, _, _) => Result.Success(), (_, _) => Result.Success())
                 {
                     ManagerFolder = ManagerDir,
+                    ManagerInFront = () => inFront,
                 })
             .Execute(["claude-hook", "--entry", "claude-vscode", "--attended", "1", "--from", ManagerDir,
                 "--json", HookOf(hookEvent, session, source, extra)]).Output;
@@ -1420,6 +1423,65 @@ public class RemoteControlClaudeHookTests
         ManagerHook(manager, "UserPromptSubmit", extra: ",\"prompt\":\"Deskbar wake. Since your last look:\"");
 
         Assert.Equal("Which first?", manager.State.Manager!.Question);
+    }
+
+    // --- the manager's answer to the user asks for their attention (task 2c5de076, ManagerQuestion.AfterStop) ---
+
+    static WorkspaceManager WithManager(WorkspaceManager manager)
+    {
+        manager.SetManagerSession(new ManagerRecord("mgr", new DateOnly(2026, 11, 27)));
+        return manager;
+    }
+
+    const string Reply = ",\"last_assistant_message\":\"No, nothing reached the Inbox.\\nHere is why...\"";
+
+    [Fact]
+    public void Manager_reply_to_the_users_message_goes_on_the_manager_line()
+    {
+        var manager = WithManager(Started());
+
+        ManagerHook(manager, "UserPromptSubmit", extra: ",\"prompt\":\"does the inbox show your answer?\"");
+        var answer = ManagerHook(manager, "Stop", extra: Reply);
+
+        Assert.Equal("", answer);
+        Assert.Equal("No, nothing reached the Inbox.", manager.State.Manager!.Answer);
+        Assert.NotNull(manager.State.Manager.AnsweredAt);
+        Assert.False(manager.State.Manager.Replying);
+    }
+
+    [Fact]
+    public void Manager_reply_to_a_deskbar_wake_asks_for_nothing()
+    {
+        var manager = WithManager(Started());
+
+        ManagerHook(manager, "UserPromptSubmit", extra: ",\"prompt\":\"Deskbar wake. Since your last look:\"");
+        ManagerHook(manager, "Stop", extra: Reply);
+
+        Assert.Null(manager.State.Manager!.Answer);
+    }
+
+    [Fact]
+    public void Manager_reply_written_with_its_window_in_front_asks_for_nothing()
+    {
+        var manager = WithManager(Started());
+
+        ManagerHook(manager, "UserPromptSubmit", extra: ",\"prompt\":\"and now?\"");
+        ManagerHook(manager, "Stop", extra: Reply, inFront: true);
+
+        Assert.Null(manager.State.Manager!.Answer);
+        Assert.False(manager.State.Manager.Replying);
+    }
+
+    [Fact]
+    public void Stop_from_another_session_in_the_manager_folder_asks_for_nothing()
+    {
+        var manager = WithManager(Started());
+
+        ManagerHook(manager, "UserPromptSubmit", extra: ",\"prompt\":\"and now?\"");
+        ManagerHook(manager, "Stop", session: "someone-else", extra: Reply);
+
+        Assert.Null(manager.State.Manager!.Answer);
+        Assert.True(manager.State.Manager.Replying);
     }
 
     [Fact]

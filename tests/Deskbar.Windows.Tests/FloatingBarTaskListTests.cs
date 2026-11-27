@@ -3242,6 +3242,22 @@ public partial class FloatingBarTaskListTests
         Assert.Equal(1, opened);
     });
 
+    // The manager's answer to the user's message takes the same line (task 2c5de076), saying it answered.
+    [Fact]
+    public void Manager_line_shows_the_answer_and_a_click_opens_the_manager() => StaThread.Run(() =>
+    {
+        var opened = 0;
+        using var t = Build(openManager: () => opened++, managerAsks: () => new ManagerAsk("No, nothing reached it.", Start, Answered: true));
+        t.Tasks.AddNote("A note", t.Gepha);
+
+        var line = Inside(t.Bar).OfType<Border>().Single(b => Equals(b.Tag, "manager-line"));
+        var text = Inside(line).OfType<TextBlock>().Single(b => Equals(b.Tag, "manager-line-text"));
+        Assert.StartsWith("Manager answered", string.Concat(text.Inlines.OfType<Run>().Select(r => r.Text)));
+
+        Click(ButtonNamed(t.Bar, "Manager answered: No, nothing reached it."));
+        Assert.Equal(1, opened);
+    });
+
     [Fact]
     public void No_manager_line_when_the_manager_asks_nothing() => StaThread.Run(() =>
     {
