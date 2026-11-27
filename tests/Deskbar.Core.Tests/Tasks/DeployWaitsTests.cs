@@ -112,12 +112,23 @@ public sealed class DeployWaitsTests
         Assert.Empty(Step(Waiting(session: Ended("s1")), asked.AddHours(1)).Nudge);
     }
 
+    // Review finding: a stop-then-resume delivery, a VS Code reload or a snooze takes the session off the list for a poll.
+    // Forgetting the slot then would nudge the same slot again once the session is back.
     [Fact]
-    public void A_task_no_longer_waiting_is_forgotten()
+    public void A_session_off_the_list_for_a_poll_is_not_nudged_twice_for_one_slot()
     {
         var first = Step(Waiting(), asked.AddMinutes(15));
-        var answered = Waiting() with { Status = TaskStatus.InProgress, Question = Maybe<string>.None };
-        Assert.Empty(Step(answered, asked.AddMinutes(16), first.Nudged).Nudged);
+        var gone = Step(Waiting(session: Ended("s1")), asked.AddMinutes(16), first.Nudged);
+        Assert.Empty(gone.Nudge);
+        Assert.Empty(Step(Waiting(), asked.AddMinutes(17), gone.Nudged).Nudge);
+    }
+
+    [Fact]
+    public void A_closed_task_is_forgotten()
+    {
+        var first = Step(Waiting(), asked.AddMinutes(15));
+        var closed = Waiting() with { Status = TaskStatus.Closed, Question = Maybe<string>.None };
+        Assert.Empty(Step(closed, asked.AddMinutes(16), first.Nudged).Nudged);
     }
 
     // The check is Deskbar's, not the user replying: read as a reply it would set aside the question it checks.

@@ -90,9 +90,12 @@ public static class DeployWaits
             .Where(x => x.Slot is { } slot && slot >= started && (!nudged.TryGetValue(x.Task.Id, out var last) || slot > last))
             .Select(x => (x.Task.Id, Slot: x.Slot!.Value))
             .ToArray();
-        // Only the tasks still waiting keep their memory, so a task that stopped waiting and waits again later starts clean;
-        // a new question on the same task gets new slots, all later than the old ones, so it needs no reset.
-        var keep = waiting.Select(t => t.Id).ToHashSet();
+        // Every OPEN task keeps its memory, waiting or not (review finding): a task drops out of WaitsOnDeploy for a poll
+        // whenever its session leaves Claude Code's list (a stop-then-resume delivery of this very check, a VS Code reload,
+        // a snooze), and forgetting its slot then would nudge the same slot again once the session is back. A new question
+        // on the same task gets new slots, all later than the old ones, so the memory needs no reset; only closed or
+        // deleted tasks are dropped, so the map does not grow.
+        var keep = board.Tasks.Where(t => t.IsOpen).Select(t => t.Id).ToHashSet();
         var next = nudged
             .RemoveRange(nudged.Keys.Where(id => !keep.Contains(id)).ToArray())
             .SetItems(due.Select(x => KeyValuePair.Create(x.Id, x.Slot)));
