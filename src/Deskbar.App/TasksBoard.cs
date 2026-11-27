@@ -256,7 +256,8 @@ public sealed partial class TasksBoard : IDisposable
         Func<TaskItem, int>? workingOf = null, Func<TaskItem, Result>? stopClaudeAndClose = null, Func<bool>? knowsActivity = null,
         Func<TaskItem, bool>? opensSession = null,
         Func<Maybe<Guid>, Maybe<Guid>, Task<IReadOnlyList<SkillChoice>>>? workspaceSkills = null,
-        Func<TaskItem, Action<string>, ContextMenu?>? pickFolder = null, Func<Guid, Result>? runNow = null)
+        Func<TaskItem, Action<string>, ContextMenu?>? pickFolder = null, Func<Guid, Result>? runNow = null,
+        Func<Guid, Task<IReadOnlyList<SkillChoice>>>? taskSkills = null)
     {
         this.pickFolder = pickFolder;
         this.runNow = runNow;
@@ -319,6 +320,8 @@ public sealed partial class TasksBoard : IDisposable
             StartClaude = startClaude,
             // The add box's "/" list of Claude Code skills (task 3a872301, SkillCompletion): none, no list.
             WorkspaceSkills = workspaceSkills,
+            // A comment box's "/" list of Claude Code skills (task 29bdd158, SkillCompletion): none, no list.
+            TaskSkills = taskSkills,
             // The add box's Start Claude button (task 3c40dec9): none, as StartClaude, while Claude cannot be started.
             AddNoteAndStartClaude = startClaude is { } start
                 ? (title, workspace, quadrant, describe) => AddNoteAndStartClaude(start, title, workspace, quadrant, describe)
@@ -2145,6 +2148,12 @@ internal sealed record TasksWindowActions(
     /// workspace (under a parent) would start in. None, typing "/" lists nothing.
     /// </summary>
     public Func<Maybe<Guid>, Maybe<Guid>, Task<IReadOnlyList<SkillChoice>>>? WorkspaceSkills { get; init; }
+
+    /// <summary>
+    /// A comment box's "/" list (task 29bdd158, SkillCompletion), in the panel's threads and a task's own window: the
+    /// Claude Code skills of the folder the task's comments reach (its latest session's). None, typing "/" lists nothing.
+    /// </summary>
+    public Func<Guid, Task<IReadOnlyList<SkillChoice>>>? TaskSkills { get; init; }
 
     /// <summary>
     /// The add box's Start Claude button and Ctrl+Enter (task 3c40dec9): AddNote's note, then "Start Claude on this" on

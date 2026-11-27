@@ -118,6 +118,29 @@ public sealed class CommentWakeTests
         Assert.Contains("Read each image path above with your Read tool.", text);
     }
 
+    // Task 29bdd158: a comment that opens with a skill Claude Code lists where the session runs asks the session to run it
+    // with its Skill tool, the rest of the comment being the arguments. The opening stays Deskbar's (DeliveredByDeskbar).
+    [Fact]
+    public void A_comment_opening_with_a_known_skill_asks_the_session_to_run_it()
+    {
+        var text = SessionBriefing.Commented(Task(TaskStatus.InProgress), "/iam-logs mails 14 and 15", skill: Maybe.From("iam-logs"));
+
+        Assert.StartsWith("Deskbar: the user commented on your task d4ea6cbe", text);
+        Assert.Contains("/iam-logs mails 14 and 15", text);
+        Assert.Contains("run it now with your Skill tool (skill \"iam-logs\")", text);
+        Assert.True(SessionBriefing.DeliveredByDeskbar(text));
+        Assert.DoesNotContain("—", text);
+    }
+
+    // No skill named (CommentWaker found none it knows), no request: the comment goes as plain words.
+    [Fact]
+    public void A_comment_without_a_known_skill_asks_for_none()
+    {
+        var text = SessionBriefing.Commented(Task(TaskStatus.InProgress), "/etc/hosts is wrong");
+
+        Assert.DoesNotContain("Skill tool", text);
+    }
+
     // A comment on a finished task may be a question about it or more work; the session decides, as for a prompt.
     [Fact]
     public void A_done_task_carries_the_done_rule()

@@ -173,12 +173,24 @@ public static class SessionBriefing
     // `byManager` (manager session design): the comment is the manager's, so it is not the user's words. Only what follows
     // ManagerSession.QuoteMarker is the user's, quoted verbatim, and counts as the user's own comment (it can settle a
     // question). The rest is a request: do the routine part, and ask the user for anything that needs their approval.
-    public static string Commented(TaskItem task, string expandedMarkdown, bool byManager = false) =>
+    //
+    // `skill` (task 29bdd158, "add /skills support to comments"): the Claude Code skill the comment opens with, set only
+    // when Claude Code listed it in the folder of one of the task's sessions (CommentWaker decides, from SkillCatalog), so a
+    // comment such as "/etc/hosts is wrong" or "/logout does nothing" is never read as a skill. The message cannot simply
+    // open with "/skill", as a task's first message does (ClaudeStart.FirstMessage): it opens with Deskbar's own words,
+    // which the prompt hook needs (DeliveredByDeskbar), and on the inbox road it arrives as a Stop hook's reason, where
+    // Claude Code runs no slash command at all. So the session is told to run the skill with its Skill tool, which works on
+    // both roads alike.
+    public static string Commented(TaskItem task, string expandedMarkdown, bool byManager = false, Maybe<string> skill = default) =>
         (byManager
             ? $"{ManagerCommentOpening}{task.Id.ToString()[..8]} \"{Cut(task.Title)}\":\n\n{expandedMarkdown.Trim()}\n\n"
               + $"Only the words after \"{ManagerSession.QuoteMarker}\" are the user's; take those as the user's own comment, so they can settle your question. "
               + $"Everything else is the manager's request, not the user's word: do the routine part, and for anything that needs the user's approval (a merge, anything destructive, a design choice) ask the user with {Shim} task ask.\n"
             : $"{UserCommentOpening}{task.Id.ToString()[..8]} \"{Cut(task.Title)}\":\n\n{expandedMarkdown.Trim()}\n")
+        + skill.Map(name =>
+                $"\nThe comment opens with /{name}, one of your Claude Code skills: run it now with your Skill tool (skill \"{name}\"), "
+                + $"passing the rest of the comment after /{name} as its arguments, just as if the user had typed it in your terminal.\n")
+            .GetValueOrDefault("")
         // An expanded image line is `![image](<C:\...>)` (TaskImages.Expand); its angle brackets are how it is told apart.
         + (System.Text.RegularExpressions.Regex.IsMatch(expandedMarkdown, @"!\[[^\]\n]*\]\(<[^>\n]+>\)")
             ? "\nRead each image path above with your Read tool.\n" : "")

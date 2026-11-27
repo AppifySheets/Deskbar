@@ -114,6 +114,8 @@ public partial class TasksWindow
             // A kept thread's scroller, frame and line (task ee9bd3fc, TasksWindow.ThreadCap.cs), so its scroll is read
             // at the next draw and ScrollToSelected can show it with its line.
             Since(cappedThreads),
+            // A kept thread's comment box keeps its "/" list of skills too (task 29bdd158), so Esc still finds it.
+            Since(commentSkills),
         ];
         var gridsBefore = fullGrids.Count;
         var elements = draw();
