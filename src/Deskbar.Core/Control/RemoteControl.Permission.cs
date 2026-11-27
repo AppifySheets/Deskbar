@@ -13,14 +13,21 @@ namespace Deskbar.Core.Control;
 // and never calls Deskbar again, so the one-client pipe is held for a moment only.
 //
 // THE REPLY IS THE CODE OR NOTHING. Nothing is the safe answer: the script then prints nothing, and a PermissionRequest
-// hook that prints nothing leaves Claude Code's own terminal dialog (in a background session the dialog is drawn while
-// the hook waits, and stays when it gives up: the spike's run B5 and the probe for Q1). So every case that is not a
-// question Deskbar can show on a page answers nothing, in the same order the plan lists them:
+// hook that prints nothing leaves Claude Code's own terminal dialog (the dialog is drawn while the hook waits, and stays
+// when it gives up: the spike's run B5 and the probe for Q1 for a background session, the probe of 2026-11-27 for an
+// interactive one, TranscriptMark). So every case that is not a question Deskbar can show on a page answers nothing, in
+// the same order the plan lists them:
 //
 //   * no desk or no task service in this copy, the setting off (AppState.ClaudePermissionsInEffect, which needs the
 //     task hooks too), or the Inbox look off (TasksPanelState.Inbox: no page to put the card on);
-//   * a session that is not a BACKGROUND one (the PM's ruling Q3: a terminal or VS Code session has its own dialog in
-//     front of the user), or a headless run (`claude -p`, the SDK: nobody to ask, and -p's own rule applies);
+//   * a headless run (`claude -p`, the SDK: nobody to ask, and -p's own rule applies). A session in a terminal or in
+//     VS Code IS shown since task 6306d261 (Petre, 2026-11-27: "Yes, all sessions"). That overturns the PM's ruling Q3,
+//     which kept the card to background sessions because the others have their own dialog in front of the user; the
+//     point is not having to leave the chat. A terminal session's dialog stays drawn beside the card the whole time
+//     (measured 2026-11-27). For VS Code that is the hooks reference's word, not a measurement: a call that reaches the
+//     SDK's canUseTool runs the hooks "alongside your host, and whichever decides first applies" (manual step PA3). As
+//     `claude agents` lists only background sessions, such a card is watched through the session's transcript instead
+//     (TranscriptMark, PermissionDesk.Settle);
 //   * Claude Code's own dialogs, AskUserQuestion and ExitPlanMode (ruling Q8: their answer needs the user's choice);
 //   * the manager session (it has no task), a session with no open task (unknown, or its task closed);
 //   * JSON that is not a PermissionRequest, a missing or refused slot (PermissionDesk.Register).
@@ -50,12 +57,16 @@ public sealed partial class RemoteControl
         // no longer waits on the old one either. Their slots go, so a click can never reach a hook that stopped waiting.
         desk.Forget(asked.SessionId);
         return manager.State is { ClaudePermissionsInEffect: true, TasksPanel.Inbox: true }
-            && hook is { Background: true, Headless: false }
+            && hook is { Headless: false }
             && !asked.IsDialog
             && request.Slot is { Length: > 0 } slot
             && !IsManagerFolder(Folder(request.From) ?? Folder(hook.Folder))
             && service.Board.TaskOf(asked.SessionId).HasValue
-                ? desk.Register(slot, asked).Match(code => Said(code + "\r\n"), _ => Quiet)
+                // A background session is watched through `claude agents` (listed); any other through where its
+                // transcript stands now, which grows only once the question is answered (TranscriptMark).
+                ? desk.Register(slot, asked, listed: hook.Background,
+                        mark: hook.Background ? null : TranscriptMark.Take(TranscriptMark.For(hook.Transcript, asked.AgentId)).GetValueOrDefault())
+                    .Match(code => Said(code + "\r\n"), _ => Quiet)
                 : Quiet;
     }
 

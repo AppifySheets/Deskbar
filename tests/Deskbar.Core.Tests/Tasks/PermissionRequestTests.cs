@@ -14,6 +14,15 @@ public class PermissionRequestTests
          "permission_suggestions":[{"type":"addDirectories","directories":["C:\\repos\\proj1"],"destination":"session"}]}
         """;
 
+    // A subagent's question carries agent_id (task 6306d261): kept when it is a plain id, since it becomes part of the
+    // file name of the subagent's transcript; dropped when it is anything else, and absent in the main session.
+    [Theory]
+    [InlineData("""{"session_id":"s","hook_event_name":"PermissionRequest","tool_name":"Bash","agent_id":"ab0cec219bcff63f2"}""", "ab0cec219bcff63f2")]
+    [InlineData("""{"session_id":"s","hook_event_name":"PermissionRequest","tool_name":"Bash","agent_id":"..\\..\\x"}""", null)]
+    [InlineData("""{"session_id":"s","hook_event_name":"PermissionRequest","tool_name":"Bash"}""", null)]
+    public void A_subagents_id_is_kept_only_when_it_is_a_plain_id(string json, string? expected) =>
+        Assert.Equal(expected, PermissionRequest.Parse(json).Value.AgentId.GetValueOrDefault());
+
     [Fact]
     public void A_shell_command_is_read_with_every_field_in_order()
     {

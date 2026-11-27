@@ -8,8 +8,8 @@ using Deskbar.Core.Tasks;
 namespace Deskbar.App;
 
 // THE PERMISSION CARD (Allow / Deny from a task's page; the picked mockup's .perm, notes\mockups\2026-11-26-tasks-redesign-
-// round2). While a background session of the page's task waits on a permission question (PermissionDesk), the page shows
-// one card per question, the oldest first, DOCKED AT THE PAGE'S BOTTOM (DrawInboxPage's one-line hook), so it is in view
+// round2). While a session of the page's task waits on a permission question (PermissionDesk), the page shows one card
+// per question (any session since task 6306d261: a terminal or VS Code one too, not only a background one), the oldest first, DOCKED AT THE PAGE'S BOTTOM (DrawInboxPage's one-line hook), so it is in view
 // whatever the thread's scroll. The same drawing serves the panel's page and a task window's page (the window draws
 // through a TasksWindow of its own, TasksWindow.InboxWindow.cs, with the same actions).
 //

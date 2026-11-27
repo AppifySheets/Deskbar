@@ -14,8 +14,8 @@ namespace Deskbar.App;
 public partial class ManageWindow
 {
     internal const string ClaudePermissionsWarning =
-        "Adds a PermissionRequest hook to ~/.claude/settings.json. A background session's permission questions then show " +
-        "on its task's page in the Inbox view, with Allow and Deny; its terminal can still answer them. If you have " +
+        "Adds a PermissionRequest hook to ~/.claude/settings.json. A session's permission questions then show on its " +
+        "task's page in the Inbox view, with Allow and Deny; its own terminal or VS Code can still answer them. If you have " +
         "PermissionRequest hooks of your own, Claude Code runs them too and takes whichever answers first.";
 
     void ShowClaudePermissions()

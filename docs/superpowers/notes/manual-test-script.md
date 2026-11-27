@@ -1869,3 +1869,12 @@ RW2. Make the pull request conflict with its base (change the same line on the b
 RW3. Merge the pull request: the session is nudged that it merged and that Deskbar follows the runs on its merge commit, and the session starts no loop of its own.
 RW4. Let the merge commit's runs finish green: the session is nudged with the runs' names and conclusions. Make one run fail instead (re-run on a repository whose workflow fails): the session is nudged with the run's link, and on a day the manager is open it is woken with a "Failed runs on merge commits" line.
 RW5. Sign `gh` out (`gh auth logout`) and wait six minutes: a new prompt in the task's session no longer says Deskbar watches its pull request, and the session watches for itself with its own Monitor. Sign in again: within about a minute of the next poll the prompt line says Deskbar watches again.
+
+## Permission cards for every session
+
+The Allow / Deny card comes from any session, not only a background one ([Deskbar task 6306d261](https://deskbar.app/task#6306d261-cdee-4830-b077-2b44ee656a86)). "Answer Claude's permission questions in Deskbar" ticked on Manage → Settings, the Inbox view on, a throwaway note with a Claude session in Claude Code's default permission mode.
+
+PA1. In a plain terminal, `claude` in a scratch folder, joined to the note; ask it to run `mkdir pa1`. The terminal shows its own dialog at once, and the note's page shows the card with the command. Click **Allow**: the folder is made and the terminal's dialog closes.
+PA2. Same again with `mkdir pa2`, but answer **Yes** in the terminal: the folder is made, and the card leaves the page within about five seconds, while the session is still working.
+PA3. Same in a VS Code Claude tab with `mkdir pa3`: the card shows beside VS Code's own prompt; **Deny** refuses the command and the session says so.
+PA4. A background session (`claude --bg`) still behaves as before: card, Allow, and answering in the attached terminal takes the card off.

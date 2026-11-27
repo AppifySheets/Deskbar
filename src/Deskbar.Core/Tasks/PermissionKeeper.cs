@@ -13,8 +13,10 @@ namespace Deskbar.Core.Tasks;
 //   * a read of `claude agents --json` no longer shows the question's session as "blocked" (its state while a
 //     permission prompt waits, measured in the spike: "status":"waiting","waitingFor":"permission prompt",
 //     "state":"blocked"): the user answered in the terminal, or the session went. Only questions older than the read
-//     count (ListLag), because a list read before a question arrived cannot show it;
-//   * every `expireEvery` the questions held past PermissionDesk.HeldFor go;
+//     count (ListLag), because a list read before a question arrived cannot show it. That list holds background sessions only, so it judges only their questions (PermissionDesk.Pending.Listed);
+//   * every `expireEvery` the questions held past PermissionDesk.HeldFor go, and so do those of terminal and VS Code
+//     sessions whose transcript went on past the question (PermissionDesk.Settle, TranscriptMark): the user answered in
+//     the session's own dialog. That look costs a file-size check per question while nothing has been written;
 //   * Dispose (Deskbar exits): every question is released.
 //
 // The session's own hook events (Stop, UserPromptSubmit, SessionEnd) forget its questions too; that is in
@@ -41,7 +43,11 @@ public sealed class PermissionKeeper : IDisposable
         subscriptions.Add(shown.DistinctUntilChanged().ObserveOn(scheduler).Where(on => !on).Subscribe(_ => desk.ReleaseAll()));
         subscriptions.Add(lists.ObserveOn(scheduler).Subscribe(list =>
             desk.Keep(session => list.Any(a => a.SessionId == session && a.State.GetValueOrDefault("") == Blocked), now() - ListLag)));
-        subscriptions.Add(Observable.Interval(ExpireEvery, scheduler).Subscribe(_ => desk.Expire()));
+        subscriptions.Add(Observable.Interval(ExpireEvery, scheduler).Subscribe(_ =>
+        {
+            desk.Expire();
+            desk.Settle();
+        }));
     }
 
     public void Dispose()

@@ -296,4 +296,30 @@ public sealed class PermissionDeskTests : IDisposable
             Assert.Equal("PermissionRequest", parsed.RootElement.GetProperty("hookSpecificOutput").GetProperty("hookEventName").GetString());
         }
     }
+
+    // A terminal or VS Code session is not in `claude agents`, so the list never judges its question (task 6306d261);
+    // its transcript does, through Settle. A background question carries no mark, so Settle leaves it to the list.
+    [Fact]
+    public void An_unlisted_question_is_judged_by_its_transcript_not_by_the_session_list()
+    {
+        var desk = Desk();
+        Directory.CreateDirectory(box);
+        var transcript = Path.Combine(box, "t.jsonl");
+        File.WriteAllText(transcript, "{\"type\":\"user\"}\n");
+        var mark = TranscriptMark.Take(transcript).Value;
+        desk.Register(Slot("req-1-1"), Request("terminal"), listed: false, mark: mark);
+        desk.Register(Slot("req-2-2"), Request("background"));
+        clock += TimeSpan.FromMinutes(1);
+
+        Assert.True(desk.Keep(_ => false, seenBefore: clock));
+        Assert.Equal("terminal", desk.All.Single().Request.SessionId);
+
+        Assert.False(desk.Settle());
+        File.AppendAllText(transcript, "{\"type\":\"ai-title\"}\n");
+        Assert.False(desk.Settle());
+        File.AppendAllText(transcript, "{\"type\":\"assistant\"}\n");
+        Assert.True(desk.Settle());
+        Assert.Empty(desk.All);
+        Assert.False(Directory.Exists(Path.Combine(box, "req-1-1")));
+    }
 }

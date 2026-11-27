@@ -41,7 +41,10 @@ namespace Deskbar.Core.Tasks;
 //     click the script would no longer read);
 //   * Forget: the session ended, or the next event shows the question was settled elsewhere (in the terminal);
 //   * Register: a newer question of the same session arrived, so the older one was settled (one card per session);
-//   * Keep: the session list says the session no longer waits on a permission prompt;
+//   * Keep: the session list says the session no longer waits on a permission prompt (a BACKGROUND session's question
+//     only: `claude agents` lists nothing else, see TranscriptMark);
+//   * Settle: the transcript of a session in a terminal or VS Code shows the conversation went on past the question
+//     (TranscriptMark: the tool ran or was refused, measured 2026-11-27);
 //   * ReleaseAll: Deskbar exits, or the setting is turned off;
 //   * Sweep: Deskbar starts, with nothing in memory.
 public sealed class PermissionDesk(string folder, Func<DateTimeOffset> now)
@@ -53,6 +56,8 @@ public sealed class PermissionDesk(string folder, Func<DateTimeOffset> now)
     /// How long the hook script waits for an answer before it gives up and prints nothing. Long, because the terminal is
     /// never blocked by the wait: probe Q1 (a spike's probe, 2026-11-26) saw a background session's own dialog
     /// already drawn 4 s into the hook's wait, and closed with "Allowed by PermissionRequest hook" once the hook answered.
+    /// An interactive terminal session behaves the same (measured 2026-11-27, TranscriptMark): its dialog is drawn the
+    /// moment the hook starts, and answering it there runs the tool at once while the hook sleeps on.
     /// So the terminal is always a parallel way to answer, and the card can stay as long as a person might take to look.
     /// </summary>
     public static readonly TimeSpan ScriptWait = TimeSpan.FromMinutes(10);
@@ -79,8 +84,15 @@ public sealed class PermissionDesk(string folder, Func<DateTimeOffset> now)
     /// <summary>A slot's name as the script makes it: req-%RANDOM%-%RANDOM%, each number 0 to 32767.</summary>
     public static readonly Regex SlotName = new(@"^req-\d{1,5}-\d{1,5}$", RegexOptions.Compiled);
 
-    /// <summary>One question on show: its slot, the request, when it arrived and until when it is offered.</summary>
-    public sealed record Pending(string Slot, PermissionRequest Request, DateTimeOffset Arrived, DateTimeOffset Until);
+    /// <summary>
+    /// One question on show: its slot, the request, when it arrived and until when it is offered. <c>Listed</c>: the
+    /// session is a background one, which `claude agents` lists, so the list says when it stops waiting (Keep).
+    /// <c>Mark</c>: where a terminal or VS Code session's transcript stood when it asked, which says when it moved on
+    /// (Settle); null for a background session, and for one whose transcript could not be found, whose question then goes
+    /// only with its session's next event, a newer question or its expiry.
+    /// </summary>
+    public sealed record Pending(string Slot, PermissionRequest Request, DateTimeOffset Arrived, DateTimeOffset Until,
+        bool Listed = true, TranscriptMark? Mark = null);
 
     readonly List<(Pending Pending, string Code)> held = [];
 
@@ -104,9 +116,10 @@ public sealed class PermissionDesk(string folder, Func<DateTimeOffset> now)
     /// A question registered under the script's slot, and the code the script must see in its answer. Refused for a
     /// slot name the script would not make, a slot that is not a folder in the desk's folder, one already registered, or
     /// one holding anything at all (a file planted before the question was asked). Every older question of the same
-    /// session is taken off first and its slot deleted (one card per session, the header's L5).
+    /// session is taken off first and its slot deleted (one card per session, the header's L5). <paramref name="listed"/>
+    /// and <paramref name="mark"/> say how the question is watched (Pending).
     /// </summary>
-    public Result<string> Register(string slot, PermissionRequest request) =>
+    public Result<string> Register(string slot, PermissionRequest request, bool listed = true, TranscriptMark? mark = null) =>
         Result.SuccessIf(SlotName.IsMatch(slot ?? ""), $"\"{slot}\" is not a permission slot")
             .Ensure(() => held.All(h => h.Pending.Slot != slot), $"The slot {slot} is already registered")
             .Bind(() => Result.Try(() => Directory.Exists(SlotPath(slot!)) && !Directory.EnumerateFileSystemEntries(SlotPath(slot!)).Any(),
@@ -117,7 +130,7 @@ public sealed class PermissionDesk(string folder, Func<DateTimeOffset> now)
                 Drop(h => h.Request.SessionId == request.SessionId);
                 var code = RandomNumberGenerator.GetHexString(32, lowercase: true);
                 var at = now();
-                held.Add((new Pending(slot!, request, at, at + HeldFor), code));
+                held.Add((new Pending(slot!, request, at, at + HeldFor, listed, listed ? null : mark), code));
                 Changed?.Invoke();
                 return code;
             });
@@ -161,7 +174,13 @@ public sealed class PermissionDesk(string folder, Func<DateTimeOffset> now)
     /// count, because a question newer than the read may not show in it yet. True when any went.
     /// </summary>
     public bool Keep(Func<string, bool> stillAsking, DateTimeOffset seenBefore) =>
-        Drop(h => h.Arrived < seenBefore && !stillAsking(h.Request.SessionId));
+        Drop(h => h.Listed && h.Arrived < seenBefore && !stillAsking(h.Request.SessionId));
+
+    /// <summary>
+    /// The questions of terminal and VS Code sessions whose transcript went on past the question taken off: the user
+    /// answered in the session's own dialog (TranscriptMark). True when any went.
+    /// </summary>
+    public bool Settle() => Drop(h => h.Mark is { } mark && mark.MovedOn());
 
     /// <summary>Every question taken off and its slot deleted: Deskbar exits, or the setting went off.</summary>
     public bool ReleaseAll() => Drop(_ => true);
