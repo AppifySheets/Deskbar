@@ -2040,7 +2040,16 @@ public partial class App : Application
             managerFolder: Core.Tasks.ManagerSession.FolderIn(AppPaths.NewStateDir),
             // Every resume first retires the session's comment waiter, which can outlive the session's process and
             // swallow the next comment (task daeaa26c, CommentInbox.Retire).
-            retireWaiter: commentInbox.Retire);
+            retireWaiter: commentInbox.Retire,
+            // Task 2eeb5589: a session stopped on a usage limit is restarted once the limit resets even with its window
+            // open, which the restart closes, so not while Petre is at that window: it is in front AND there was keyboard
+            // or mouse input in the last two minutes. A window merely left in front of an idle machine (he walked away
+            // after reading the limit's message) does not hold the restart back, or the session would wait for him as it
+            // did before this task. The window is opened again on the woken session. claudeActions is built below; a
+            // restart cannot answer before.
+            windowInFront: task => new InputActivity().SinceLastInput() < TimeSpan.FromMinutes(2)
+                && ClaudeTaskActions.WindowInFront(manager, task, new WindowHandle(NativeMethods.GetForegroundWindow())),
+            reopenWindow: (task, agent) => claudeActions?.Reopen(task, agent));
 
         // Petre's comment on a task reaches its Claude session, waking it if idle (CommentWaker; plan
         // docs/superpowers/plans/2026-11-24-comment-wakes-session.md). It reads the sessions' list ClaudeSessions keeps,
