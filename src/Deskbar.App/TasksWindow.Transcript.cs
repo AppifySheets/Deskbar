@@ -152,7 +152,8 @@ public partial class TasksWindow
     }
 
     // A RUN OF ONE AUTHOR'S BUBBLES NAMES THE AUTHOR ONCE (task 85218923, ChatThread.Grouped), in the stream as in the plain
-    // thread. In the stream two comments are one run only when nothing of the session's sits between them, so the comments
+    // thread. In the stream two comments are one run only when no message or marker of the session's sits between them (a
+    // run of steps may: task ac1ebd57), so the comments
     // are grouped stretch by stretch, in the order the stream shows them (ClaudeChatStream.Build, as Apply places them). A
     // comment and a session message never share a run; the session's messages are grouped by the stream itself
     // (ChatStreamPanel.Unnamed). Decided when the page is drawn: a session item that a later poll slips between two
@@ -169,10 +170,12 @@ public partial class TasksWindow
             foreach (var comment in ChatThread.Grouped(stretch)) grouped[comment.Id] = comment;
             stretch.Clear();
         }
+        // A run of steps does not end a stretch (task ac1ebd57, as ChatStreamPanel.Unnamed): folded it is one dim line,
+        // and two comments of Petre's with only Claude's steps between them read as one run.
         foreach (var entry in entries)
         {
             if (entry.IsComment && byKey.TryGetValue(entry.Key, out var comment)) stretch.Add(comment);
-            else Close();
+            else if (entry.Item is not ChatSteps) Close();
         }
         Close();
         return shown.Select(c => grouped.GetValueOrDefault(c.Id, c)).ToList();

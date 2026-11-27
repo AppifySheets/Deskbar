@@ -190,10 +190,16 @@ internal sealed class ChatStreamPanel : StackPanel
 
     // A RUN OF ONE AUTHOR'S MESSAGES NAMES THE AUTHOR ONCE, under its last (task 85218923, the rule ChatThread.Grouped keeps
     // for the comments): the keys of the session's messages whose next entry is a message of the same role on the same day.
-    // A run of steps, a marker or a comment between them ends the run (TasksWindow.GroupedInStream groups the comments). A
-    // message that a new one joins loses its name in place (ChatThread.NameAuthor), so nothing is re-created for it.
+    // A marker or a comment between them ends the run (TasksWindow.GroupedInStream groups the comments); a run of STEPS does
+    // not (task ac1ebd57, "make these more compact"): folded, it is one dim line, and Claude's answer after its own steps
+    // is the same author still talking, so "Claude · 11:13" is not written twice around it. A message that a new one joins
+    // loses its name in place (ChatThread.NameAuthor), so nothing is re-created for it.
     internal static HashSet<string> Unnamed(IReadOnlyList<StreamEntry> entries) =>
-        entries.Zip(entries.Skip(1))
+        Joined(entries.Where(e => e.Item is not ChatSteps).ToList());
+
+    // Unnamed's pairs, on the entries with the runs of steps taken out.
+    static HashSet<string> Joined(IReadOnlyList<StreamEntry> talk) =>
+        talk.Zip(talk.Skip(1))
             .Where(p => p.First.Item is ChatMessage a && p.Second.Item is ChatMessage b && a.Role == b.Role
                 && p.First.At.ToLocalTime().Date == p.Second.At.ToLocalTime().Date)
             .Select(p => p.First.Key)
