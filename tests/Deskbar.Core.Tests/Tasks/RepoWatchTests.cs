@@ -170,10 +170,67 @@ public sealed class RepoWatchTests
     {
         var (board, _) = Board(Pr1);
         var task = board.Tasks.Single();
-        var state = RepoWatchState.Empty with { LastSuccess = new Dictionary<string, DateTimeOffset> { [Repository] = Now } };
+        var state = RepoWatchState.Empty with
+        {
+            LastSuccess = new Dictionary<string, DateTimeOffset> { [Repository] = Now },
+            Seen = new Dictionary<string, PullRequestState> { [Pr1.Key] = PullRequestState.Open },
+        };
 
         Assert.True(RepoWatch.Watched(state, task, Now.AddMinutes(5)));
         Assert.False(RepoWatch.Watched(state, task, Now.AddMinutes(5).AddSeconds(1)));
         Assert.False(RepoWatch.Watched(RepoWatchState.Empty, task, Now));
+    }
+
+    // Review finding on task c8e6967d: a link Seen Merged that nothing follows has no watcher, so the prompt must not say so.
+    [Fact]
+    public void MergedAndNotFollowedIsNotWatched()
+    {
+        var (board, ids) = Board(Pr1);
+        var task = board.Tasks.Single();
+        var merged = RepoWatchState.Empty with
+        {
+            LastSuccess = new Dictionary<string, DateTimeOffset> { [Repository] = Now },
+            Seen = new Dictionary<string, PullRequestState> { [Pr1.Key] = PullRequestState.Merged },
+        };
+
+        Assert.False(RepoWatch.Watched(merged, task, Now));
+        Assert.True(RepoWatch.Watched(merged with { Following = [new FollowedMerge(ids[0], Pr1, "merge1", Now)] }, task, Now));
+    }
+
+    // Review finding on task c8e6967d: a link seen for the first time only records the head, whatever an older head says.
+    [Fact]
+    public void LinkSeenFirstTimeIsNotNudgedForABaseMove()
+    {
+        var (board, _) = Board(Pr1, Pr2);
+        var first = Poll(RepoWatchState.Empty, board, Open(Pr1, "h1")).State;
+
+        var step = Poll(first, board, Open(Pr1, "h1"), Open(Pr2, "h2"));
+
+        Assert.Empty(step.Nudges);
+        Assert.Equal("h2", step.State.Heads["appifysheets/deskbar:main"]);
+    }
+
+    // Review finding on task c8e6967d: Heads follows merged pull requests too, so it does not go stale while none is open.
+    [Fact]
+    public void MergedFactUpdatesTheBaseHead()
+    {
+        var (board, _) = Board(Pr1);
+        var seen = Poll(RepoWatchState.Empty, board, Open(Pr1, "h1")).State;
+
+        var step = Poll(seen, board, Merged(Pr1));
+
+        Assert.Equal("h2", step.State.Heads["appifysheets/deskbar:main"]);
+    }
+
+    // Review finding on task c8e6967d: the rebase a base-move nudge asks for covers the conflict at that head.
+    [Fact]
+    public void ConflictAtTheHeadOfABaseMoveNudgeIsNotToldAgain()
+    {
+        var (board, _) = Board(Pr1);
+        var first = Poll(RepoWatchState.Empty, board, Open(Pr1, "h1")).State;
+        var moved = Poll(first, board, Open(Pr1, "h2", Mergeable.Unknown));
+        Assert.Contains("moved to h2", Assert.Single(moved.Nudges).Text);
+
+        Assert.Empty(Poll(moved.State, board, Open(Pr1, "h2", Mergeable.Conflicting)).Nudges);
     }
 }

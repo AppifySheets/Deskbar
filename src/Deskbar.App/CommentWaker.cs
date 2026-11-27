@@ -104,6 +104,9 @@ sealed class CommentWaker : IDisposable
         var watched = tasks.WatchNudges.Select(nudge => new Delivery(nudge.TaskId, "a watch nudge", task => SessionBriefing.WatchNudge(task, nudge.Text))
         {
             Quiet = true,
+            // Review finding (task c8e6967d): dropped when the task turned Done or was closed while this waited behind
+            // another delivery. A nudge reaching a finished task resumes its session for nothing.
+            StillDue = () => tasks.Board.Tasks.Any(t => t.Id == nudge.TaskId && t is { IsOpen: true } && t.Status != Deskbar.Core.Tasks.TaskStatus.Done),
         });
         subscription = comments.Merge(reevaluations).Merge(stalled).Merge(regenerations).Merge(deploys).Merge(watched)
             .Where(_ => enabled())

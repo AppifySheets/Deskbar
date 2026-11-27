@@ -108,6 +108,31 @@ public class SetAsideStopHookTests
         Assert.False(SessionBriefing.DeliveredByDeskbar("Deskbar: your task panel looks off"));
     }
 
+    // Review finding on task c8e6967d: Deskbar's watch nudge, delivered by a resume, is the prompt of the turn it starts. It
+    // is Deskbar's, not Petre replying, so a waiting task's question stays in place and no note is written.
+    [Fact]
+    public void A_watch_nudge_is_not_the_user_replying()
+    {
+        var manager = Asked();
+        var nudge = SessionBriefing.WatchNudge(tasks.Board.Tasks.Single(), "Deskbar #7 conflicts with main: rebase it.");
+        Assert.True(SessionBriefing.DeliveredByDeskbar(nudge));
+        Assert.False(SessionBriefing.FromTheUser(nudge));
+        // It may share a waiter's wake with a Stop nudge without making the turn a plain Stop nudge turn.
+        Assert.False(SessionBriefing.OnlyStopNudge(SessionBriefing.SetAsideNudge(Question) + nudge));
+        var threadBefore = tasks.Board.Tasks.Single().Comments.Count;
+
+        clock = clock.AddMinutes(1);
+        Hooked(manager, "UserPromptSubmit", $",\"prompt\":{System.Text.Json.JsonSerializer.Serialize(nudge)}");
+        clock = clock.AddMinutes(1);
+        tasks.Stalled(S1Works, S1Works);
+
+        var task = tasks.Board.Tasks.Single();
+        Assert.Equal(TaskStatus.WaitingOnYou, task.Status);
+        Assert.Equal(Question, task.Question.Value);
+        Assert.True(task.QuestionSetAside.HasNoValue);
+        Assert.Equal(threadBefore, task.Comments.Count);
+    }
+
     // Task 3dd07539: the Reevaluate message shows the session what Deskbar shows (status, question, status line, pull
     // requests) and names the command for each thing that can be stale.
     [Fact]

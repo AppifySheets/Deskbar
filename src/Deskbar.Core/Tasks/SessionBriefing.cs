@@ -80,8 +80,14 @@ public static class SessionBriefing
     /// </summary>
     public static bool OnlyStopNudge(string prompt) =>
         IsStopNudge(prompt)
-        && !new[] { ManagerCommentOpening, UserCommentOpening, ReevaluateOpening, StalledOpening, DeployOpening }
+        && !new[] { ManagerCommentOpening, UserCommentOpening, ReevaluateOpening, StalledOpening, DeployOpening, WatchNudgeOpening }
             .Any(opening => prompt.Contains(opening, StringComparison.Ordinal));
+
+    // The first words of Deskbar's repository watch nudge (WatchNudge). Review finding on Deskbar task c8e6967d: the nudge
+    // rides a comment's roads, so on CommentWaker's Resume and StopThenResume roads it BECOMES the prompt, the prompt hook
+    // calls Prompted, and without this opening in DeliveredByDeskbar and OnlyStopNudge the nudge counted as Petre replying
+    // and set a waiting task's question aside (RepliedTasks.SetAside). Named so the two lists and the text cannot drift.
+    const string WatchNudgeOpening = "Deskbar's watch, about your task ";
 
     // The first words of a comment delivered to a session (Commented), named so the prompt hook can tell Deskbar's own
     // deliveries from Petre typing (DeliveredByDeskbar).
@@ -108,6 +114,9 @@ public static class SessionBriefing
             || text.StartsWith(DeployOpening, StringComparison.Ordinal)
             // The stalled task's ask (task 8710ac09) is Deskbar's, not the user replying.
             || text.StartsWith(StalledOpening, StringComparison.Ordinal)
+            // Deskbar's repository watch nudge (task c8e6967d, review finding): delivered by a resume it is the prompt, and
+            // counted as a reply it would set aside the question of a task waiting on the user.
+            || text.StartsWith(WatchNudgeOpening, StringComparison.Ordinal)
             // A Stop nudge the waiter delivered (task 8710ac09). It arrives wrapped in Claude Code's own notice, which
             // DeliveredByClaudeCode already catches; this holds even if that wrapping changes.
             || IsStopNudge(text)
@@ -253,7 +262,7 @@ public static class SessionBriefing
     /// last line says it is not the user's word, so it never settles a question the way a comment from the user does.
     /// </summary>
     public static string WatchNudge(TaskItem task, string text) =>
-        $"Deskbar's watch, about your task {task.Id.ToString()[..8]}: {text}\n"
+        $"{WatchNudgeOpening}{task.Id.ToString()[..8]}: {text}\n"
         + "This is Deskbar, not the user: it settles no question and needs no comment back. Act on it, then go on.\n";
 
     const string RegenerateOpening = "Deskbar: your task ";
@@ -319,7 +328,9 @@ public static class SessionBriefing
         // Ruling 49: a prompt never settles a question (a /loop or scheduled check-in is not the user answering), so while
         // the task waits the reminder keeps it open and tells the session how to resolve it.
         own is { HasValue: true, Value: { Status: TaskStatus.WaitingOnYou } waiting }
-            ? $"Deskbar: your question \"{Cut(waiting.Question.GetValueOrDefault(waiting.Title))}\" is still open, and your task waits on the user. If this message answers it, or the question no longer matters, run {Shim} task answered --session {sessionId}\n"
+            ? $"Deskbar: your question \"{Cut(waiting.Question.GetValueOrDefault(waiting.Title))}\" is still open, and your task waits on the user. If this message answers it, or the question no longer matters, run {Shim} task answered --session {sessionId}{(watched ? WatchedHint : "")}\n"
+        // Review finding (task c8e6967d): the waiting branch carries the hint too. A task whose pull request waits to be
+        // merged is the usual waiting task, and without the hint its session never learns Deskbar watches and keeps its loop.
         // A prompt leaves a Done task Done (RemoteControl.Prompted): a question about finished work must not reopen it.
         // When the message is more work on it, the session reopens it itself; Join moves Done back to In progress.
         : own is { HasValue: true, Value: { Status: TaskStatus.Done } done }
@@ -556,7 +567,7 @@ public static class SessionBriefing
         // describes: the running build is the truth there and a report changes nothing, so its order ends at the release.
         // The room for it came from the ask line above, the done line and the rebase line below, and the "lean" line's
         // last sentence, which repeated what the ask and comment lines say; every rule they stated is still stated.
-        $"After the merge, finish in this order: released (if the repository has a release step), deployed, done. Deployed: the running app's own evidence shows the new version; report it with {Shim} task deployed - --session {sessionId}, the evidence on stdin, or \"nothing to deploy\" for a change nothing runs (docs, a library). In Deskbar's own repository done follows the release. Deskbar nudges you when your merge commit's runs finish. Never mark done before deployed. When a person deploys, or only they can see the evidence, ask (\"Redeploy X\"), check on a schedule, and once it shows: task answered, task deployed, task done. Do not ask the user to test it: put what to try in the status line; they close the task once it works.",
+        $"After the merge, finish in this order: released (if the repository has a release step), deployed, done. Deployed: the running app's own evidence shows the new version; report it with {Shim} task deployed - --session {sessionId}, the evidence on stdin, or \"nothing to deploy\" for a change nothing runs (docs, a library). In Deskbar's own repository done follows the release. When Deskbar watches, it nudges you when your merge commit's runs finish. Never mark done before deployed. When a person deploys, or only they can see the evidence, ask (\"Redeploy X\"), check on a schedule, and once it shows: task answered, task deployed, task done. Do not ask the user to test it: put what to try in the status line; they close the task once it works.",
         // AN OPEN PULL REQUEST STAYS ON TOP OF ITS BASE (task 6e4dc116, Petre: "still conflicting; you should keep rebasing
         // open prs", then "make that a deskbar level change"). Other sessions merge all day, so a pull request waiting on
         // the user falls behind its base or starts to conflict while it waits, and the merge he comes to do is blocked or
