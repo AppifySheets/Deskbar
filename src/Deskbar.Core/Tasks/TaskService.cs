@@ -124,7 +124,16 @@ public sealed class TaskService(ITaskStore store, Func<DateTimeOffset> now, Func
     public Result AddPullRequest(Guid id, PullRequestLink link) => ApplyIfChanged(Board.AddPullRequest(id, link, now()));
 
     // A deploy pull request for the task (task 1565789d, `task pr <url> --deploy`); one it already lists saves nothing.
-    public Result AddDeployPullRequest(Guid id, PullRequestLink link) => ApplyIfChanged(Board.AddDeployPullRequest(id, link, now()));
+    // REVIEW FINDING: a link moved over from the task's own pull requests whose end the session already heard (the minute
+    // poll saw it merged or closed, or a settled question told it and marked it seen merged, SettleQuestion) is kept as
+    // told at once, so the next poll does not tell the same merge a second time as a deploy merge.
+    public Result AddDeployPullRequest(Guid id, PullRequestLink link)
+    {
+        var heard = Board.Tasks.Any(t => t.Id == id && t.PullRequests.Any(p => p.Key == link.Key))
+            && watch.Seen.TryGetValue(link.Key, out var seen) && seen != PullRequestState.Open;
+        return ApplyIfChanged(Board.AddDeployPullRequest(id, link, now())
+            .Map(board => heard ? board.DeployPullRequestsEnded(id, [link.Key]) : board));
+    }
 
     // A deploy seen running (task 8470d176, phase 2: `task deployed` and "Mark deployed"); reporting it again saves and
     // pulses nothing (TaskBoard.MarkDeployed returns the same board).

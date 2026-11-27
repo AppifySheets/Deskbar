@@ -168,9 +168,10 @@ public sealed class DeployPullRequestTests : IDisposable
         Assert.Same(added, added.AddDeployPullRequest(made.Task.Id, Deploy, Now).Value);
     }
 
-    // A question that links the deploy pull request goes on to ask for the redeploy, so the merge must not settle it.
+    // A question that links the deploy pull request goes on to ask for the redeploy, so no merge may settle it: neither
+    // the deploy one's nor (review finding) a code pull request's linked beside it.
     [Fact]
-    public void A_question_settles_on_its_own_pull_requests_not_on_the_deploy_one()
+    public void A_question_linking_a_deploy_pull_request_never_settles_by_itself()
     {
         var (board, id) = WithDeploy();
         board = board.Ask(id, $"Merge [stacks #309]({StacksUrl}), then press Pull and redeploy in Portainer", Now, Maybe<(string, Guid)>.None).Value;
@@ -178,7 +179,47 @@ public sealed class DeployPullRequestTests : IDisposable
         Assert.Empty(AskedPullRequests.Watched(board));
 
         board = board.Ask(id, $"Merge [personalized-health #579]({Code.Url}) and [stacks #309]({StacksUrl})", Now, Maybe<(string, Guid)>.None).Value;
+        Assert.Empty(AskedPullRequests.Watched(board));
+
+        board = board.Ask(id, $"Merge [personalized-health #579]({Code.Url})", Now, Maybe<(string, Guid)>.None).Value;
         Assert.Equal([Code], AskedPullRequests.Watched(board).Single().Links);
+    }
+
+    // The deploy-merged nudge says `task deployed`, so a task whose only pull request is its deploy one can report it.
+    [Fact]
+    public void A_task_with_only_a_deploy_pull_request_can_report_its_deploy()
+    {
+        var (board, id) = WithDeploy();
+
+        var reported = board.MarkDeployed(id, "2026.11.27.5 in the portal logs", Now);
+
+        Assert.True(reported.IsSuccess, reported.IsFailure ? reported.Error : "");
+        Assert.Equal([Deploy.Key], reported.Value.Tasks.Single().Deployed.Select(d => d.Key));
+    }
+
+    // `task pr <url>` after `--deploy` leaves it on the deploy list only.
+    [Fact]
+    public void A_deploy_pull_request_is_not_added_again_as_the_task_s_own()
+    {
+        var (board, id) = WithDeploy();
+
+        Assert.Same(board, board.AddPullRequest(id, Deploy, Now).Value);
+    }
+
+    // Moved over from the task's own pull requests after the poll already told its merge: not told a second time.
+    [Fact]
+    public void A_merge_already_told_as_the_task_s_own_is_not_told_again_as_a_deploy_merge()
+    {
+        var service = new TaskService(new MemoryTaskStore(), () => Now);
+        var id = service.Create("Cycle tracker", Maybe<Guid>.None, new TaskSession("s1", @"C:\repos\iam.ge", Now, Maybe<DateTimeOffset>.None)).Value.Id;
+        Assert.True(service.AddPullRequest(id, Deploy).IsSuccess);
+        service.Watched(RepoWatch.Poll(service.Watch, service.Board, Stacks, [Facts(PullRequestState.Open)], Now));
+        service.Watched(RepoWatch.Poll(service.Watch, service.Board, Stacks, [Facts(PullRequestState.Merged)], Now));
+
+        Assert.True(service.AddDeployPullRequest(id, Deploy).IsSuccess);
+
+        Assert.Equal([Deploy.Key], service.Board.Tasks.Single().DeployPullRequestsEnded);
+        Assert.False(RepoWatch.InFlight(service.Board, service.Watch).ContainsKey(Stacks));
     }
 
     // --- the file ------------------------------------------------------------------------------------------------------
