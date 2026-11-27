@@ -1235,6 +1235,27 @@ public partial class App : Application
         reportWindow.Show();
     }
 
+    // `deskbar.cmd report <text>|-` (RemoteControl.Report.cs, task c28ed674): the same report, written by the caller
+    // (the manager session, usually) and sent at once. The dump is composed here for ReportProblem's reason: this is the
+    // moment the user said something went wrong.
+    //
+    // A window of its own, NOT the one-at-a-time `reportWindow`: the user may be halfway through typing a report of
+    // their own, and bringing that one forward would neither send the caller's text nor leave the user's alone. This one
+    // shows the send and its outcome, and the user closes it.
+    Result<string> SendReport(string text) => Result.Try(() =>
+    {
+        var dump = Result.Try(() => DebugDump.Compose(floatingBar, manager!, screenStrips))
+            .Match(composed => composed, error => $"(the debug dump could not be written: {error})\n");
+        // Shown WITHOUT taking focus (review of task c28ed674): the user is often typing to the manager in its terminal,
+        // where Esc interrupts Claude, and the window is topmost with Esc on Cancel. A window that took the keyboard
+        // would close on that Esc, and closing cancels the send before anything is saved, so the report would be lost.
+        var window = new ReportWindow(dump, ReportService.Live()) { ShowActivated = false };
+        window.Show();
+        var id = window.SendNow(text);
+        ClickTrace.Write($"report: {id[..8]} sent from the command line ({text.Length} characters)");
+        return id;
+    }, e => $"The report window could not be opened: {e.Message}");
+
     // Split out for #110's failure path, which has no ReleaseInfo to name a page with: a check that
     // could not be made knows nothing about any release, and the releases page is still the way
     // through. Internal since tiling: the bar's free-tier "Tile windows (Deskbar Pro)" opens the Store page
@@ -1966,7 +1987,9 @@ public partial class App : Application
                 ? Result.Success().Tap(statsBoard.ShowStats)
                 : Result.Failure("The tasks panel is not available in this mode."),
             // `bookmark open|open-all` and `bookmark list`'s running flag: the opener the chips use (built above).
-            bookmarks: bookmarkOpener);
+            bookmarks: bookmarkOpener,
+            // `report` (task c28ed674): Report a problem… filled in by the caller and sent at once (SendReport).
+            fileReport: SendReport);
         // A Deskbar that just started holds no permission question, so no slot left from before can be answered: each is
         // deleted before the pipe serves, and its hook script, if still waiting, ends printing nothing (PermissionDesk).
         PermissionDesk.Sweep();

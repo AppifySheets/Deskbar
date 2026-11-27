@@ -141,7 +141,11 @@ public static class ControlArguments
     // arguments alone. So any of them that does not name a folder gets the client's, which is the folder of the shell
     // that ran deskbar.cmd. Every other command goes through untouched. For `claude-hook`, the hook scripts pass
     // CLAUDE_PROJECT_DIR as --from when Claude Code set it; otherwise the folder the hook was started in is the session's.
-    static readonly string[] AboutTheCaller = ["open", "attention", "task", ClaudeHookVerb, ClaudeWaitVerb, ClaudePermissionVerb];
+    // `report` (task c28ed674) is told the caller's folder for `task`'s reason: a report from the manager session's folder
+    // is marked as the manager's (RemoteControl.Report.cs), so it takes the same always-last rule below.
+    static readonly string[] AboutTheCaller = ["open", "attention", "task", "report", ClaudeHookVerb, ClaudeWaitVerb, ClaudePermissionVerb];
+
+    static readonly string[] CallerAlwaysLast = ["task", "report"];
 
     //
     // `task` ALWAYS gets the client's folder, last, even when the caller typed a --from of its own (final review, item 4):
@@ -150,7 +154,7 @@ public static class ControlArguments
     // --from given is used as it is: the hooks pass CLAUDE_PROJECT_DIR that way.
     public static IReadOnlyList<string> WithCallerFolder(IReadOnlyList<string> args, string callerFolder) =>
         args.Count > 0 && AboutTheCaller.Contains(args[0], StringComparer.OrdinalIgnoreCase)
-        && (args[0].Equals("task", StringComparison.OrdinalIgnoreCase) || !args.Contains("--from"))
+        && (CallerAlwaysLast.Contains(args[0], StringComparer.OrdinalIgnoreCase) || !args.Contains("--from"))
             ? [.. args, "--from", callerFolder]
             : args;
 
@@ -226,11 +230,21 @@ public static class ControlArguments
     static bool IsTextForm(IReadOnlyList<string> args) =>
         args.Count > 2 && (IsForm(args, "task", TextVerbs) || IsForm(args, "goal", GoalTextVerbs));
 
+    // `report <text>|-` (task c28ed674): a verb with no noun in front, so its text is the first word after it rather than
+    // the second. The report is the user's words, or an agent's summary of them, and is exactly the kind of text that
+    // carries quotes and & (a pasted error, a title).
+    static bool IsReportForm(IReadOnlyList<string> args) =>
+        args.Count > 1 && args[0].Equals("report", StringComparison.OrdinalIgnoreCase);
+
+    // Where a text form's words start: after `report`, or after `task <verb>` and `goal <verb>`; null for any other command.
+    static int? TextFrom(IReadOnlyList<string> args) => IsReportForm(args) ? 1 : IsTextForm(args) ? 2 : null;
+
     static bool IsForm(IReadOnlyList<string> args, string noun, string[] verbs) =>
         args[0].Equals(noun, StringComparison.OrdinalIgnoreCase) && verbs.Contains(args[1], StringComparer.OrdinalIgnoreCase);
 
     public static IReadOnlyList<string> WithTextInput(IReadOnlyList<string> args, Func<string> readInput) =>
-        IsTextForm(args) && Enumerable.Range(2, args.Count - 2).Where(i => args[i] == "-" && !TakesValue(args[i - 1])).ToList() is [var at, ..]
+        TextFrom(args) is { } from
+        && Enumerable.Range(from, args.Count - from).Where(i => args[i] == "-" && !TakesValue(args[i - 1])).ToList() is [var at, ..]
             ? [.. args.Take(at), readInput().TrimEnd(LineBreaks), .. args.Skip(at + 1)]
             : args;
 
@@ -263,8 +277,11 @@ public static class ControlArguments
     //
     // A task's free text (a question, a comment, a status line, a title) goes the same way (review of PR B, M-4): it is
     // the session's words, so it is written as its length. A comment's task id stays, since it is no one's words.
+    // A report's text (task c28ed674) goes as its length too: every word but `--from` and its folder, so a text that
+    // starts with `--` (a pasted "--foo is not a valid option") is hidden as well.
     public static string ForTrace(IReadOnlyList<string> args) =>
-        IsTextForm(args) ? string.Join(' ', TextForTrace(args))
+        IsReportForm(args) ? string.Join(' ', args.Select((word, i) => i > 0 && word != "--from" && args[i - 1] != "--from" ? $"({word.Length} characters)" : word))
+        : IsTextForm(args) ? string.Join(' ', TextForTrace(args))
         : !IsClaudeHook(args)
             ? string.Join(' ', args)
             : ParseClaudeHook(args.Skip(1).ToList()) is { IsSuccess: true, Value.Json: { } json }

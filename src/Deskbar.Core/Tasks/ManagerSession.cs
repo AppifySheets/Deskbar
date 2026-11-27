@@ -137,7 +137,8 @@ public static class ManagerSession
     // The start command's arguments, in the order and forms the probe notes measured:
     //  * --permission-mode dontAsk: a session defaults to auto mode, which runs everything; under dontAsk a command
     //    with no allow rule is denied without a prompt.
-    //  * --allowedTools: only the shim's `task` verbs, by its FULL path with forward slashes. The short `deskbar.cmd`
+    //  * --allowedTools: only the shim's `task` verbs and its `report` (task c28ed674; two rules after one flag, which
+    //    takes a list), by its FULL path with forward slashes. The short `deskbar.cmd`
     //    form matches but is not on Git Bash's PATH, and a `$APPDATA` spelling hits a permission prompt.
     //  * --disallowedTools: no file, web, agent or timer tools; PowerShell too, because a Bash rule does not cover it
     //    and the manager would otherwise run anything through it. The timers (ScheduleWakeup, CronCreate, CronDelete,
@@ -159,7 +160,7 @@ public static class ManagerSession
         "--bg", "--model", "fable", "-n", Name, "--remote-control", Name, "--strict-mcp-config",
         "--permission-mode", "dontAsk",
         "--append-system-prompt-file", briefingPath,
-        "--allowedTools", $"Bash({shimPath.Replace('\\', '/')} task:*)",
+        "--allowedTools", $"Bash({shimPath.Replace('\\', '/')} task:*)", $"Bash({shimPath.Replace('\\', '/')} report:*)",
         "--disallowedTools", .. DisallowedTools,
         "--", FirstMessage
     ];
@@ -214,10 +215,15 @@ public static class ManagerSession
         "Free text always goes on stdin with - in its place, never quoted on the command line.",
         "Refused: close, delete, and setting a task to done or closed. The shim answers:",
         $"  {Refusal}",
-        $"Editing or settling a comment is refused too: {CommentRefusal}",
-        "When that happens, tell the user and leave the task alone.",
-        $"When you quote the user in a comment, start it with the exact marker \"{QuoteMarker}\" and copy their words unchanged.",
-        "Never paraphrase into a quote.",
+        // Two pairs of lines joined into one each (task c28ed674), to make room for the report lines under the 40 line cap.
+        $"Editing or settling a comment is refused too: {CommentRefusal} When that happens, tell the user and leave the task alone.",
+        $"When you quote the user in a comment, start it with the exact marker \"{QuoteMarker}\" and copy their words unchanged. Never paraphrase into a quote.",
+        // Task c28ed674, "let the manager session submit a bug report to deskbar": a problem with Deskbar itself goes to
+        // Deskbar's developers through `report` (RemoteControl.Report.cs), the twin of Report a problem…, which the user
+        // may not be at the screen to fill in. Only when asked, because the report carries a debug dump that lists every
+        // window title on the user's screens. The window it opens shows the reference, so the manager does not wait on it.
+        $"When the user asks you to report a problem with Deskbar itself to its developers: {shim} report - with what happened",
+        "  on stdin, in the user's words, then what you saw. It sends at once with a debug dump; a window on their screen shows the result.",
         "Do not take a task of your own: never join one.",
         "Never use Monitor, loop, scheduled wakeups, subagents, file reading or transcript reading.",
         "You act when the user messages you, or when a message starts with \"Deskbar wake.\" (event wakes, ManagerWakes).",

@@ -20,6 +20,18 @@ If the report cannot be sent (no connection, for example), the whole report is s
 
 The report travels over https to `report.deskbar.app`, a small relay whose code is in the repository's [relay folder](https://github.com/AppifySheets/Deskbar/tree/main/relay). The relay holds the key that files the report, and the app holds none.
 
+## From the manager or a script
+
+The [manager session](claude-sessions.md#the-manager-session) can send a report for you: tell it what went wrong, from the desk or from the Claude app on your phone. A script can do the same with `deskbar.cmd report -`, the text on stdin:
+
+```bash
+"$APPDATA/Deskbar/deskbar.cmd" report - <<'EOF'
+The bar went blank after switching workspaces.
+EOF
+```
+
+The report window opens already filled in and sending, with the debug dump of that moment, and shows the reference number or the saved copy as it does after Send. There is no contact question, since whoever sent it is not at the window to answer. The report ends with a line saying it came from the manager or from the command line, so whoever reads it knows the words may be a summary.
+
 ## Settings
 
 There is nothing to set up. The debug dump box and the contact line are chosen per report, in the window itself. **Report a problem…** is also on the Deskbar Pro tab in Manage.

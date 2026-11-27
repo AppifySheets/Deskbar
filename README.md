@@ -733,7 +733,8 @@ More in [Updates](docs/features/updates.md).
 
 **Report a problem…** on the tray menu and the bar's menu opens a small window: say what happened,
 paste screenshots with Ctrl+V (Win+Shift+S works well) or drop image files on it, up to five, and
-press Send. Nobody needs an account or a sign-in.
+press Send. Nobody needs an account or a sign-in. The manager session sends one for you when you
+ask it to, and `deskbar.cmd report -` does it from a script.
 
 More in [Reporting a problem](docs/features/reporting-a-problem.md).
 
