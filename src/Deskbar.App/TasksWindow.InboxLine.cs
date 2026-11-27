@@ -108,7 +108,9 @@ public partial class TasksWindow
             HorizontalAlignment = HorizontalAlignment.Stretch,
             Focusable = false,
             Cursor = Cursors.Hand,
-            ToolTip = row.Title,
+            // No tooltip on the line itself: it only repeated the title the line already shows in bold (Petre, task
+            // e0c4fb3f, "that hover text seems redundant"). A title cut at two lines reads whole on the task's page, one
+            // click away. The parts inside the line (mark tile, time, chip, small marks) keep their own tips.
         };
         AutomationProperties.SetName(button, row.Title);
         AutomationProperties.SetItemStatus(button, InboxMarks.WordsOf(line.Mark));
@@ -180,7 +182,7 @@ public partial class TasksWindow
     static FrameworkElement Centred(UIElement part) =>
         new Grid { Children = { part }, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
 
-    // The title: two rows at most, ending in "…" when it needs more (the whole title is the line's tooltip).
+    // The title: two rows at most, ending in "…" when it needs more (the task's page, a click away, shows it whole).
     TextBlock InboxTitle(TaskRowView row, bool needsYou)
     {
         var title = new TextBlock

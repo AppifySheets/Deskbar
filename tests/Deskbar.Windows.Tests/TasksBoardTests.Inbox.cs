@@ -602,6 +602,22 @@ public partial class TasksBoardTests
         finally { System.IO.Directory.Delete(root, true); }
     });
 
+    // Task e0c4fb3f ("that hover text seems redundant"): hovering an Inbox line shows no tooltip of its own, since the
+    // line already shows the title. The line's name for screen readers is still the title.
+    [Fact]
+    public void An_inbox_line_has_no_tooltip_repeating_its_title() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var k = InboxTasks(t);
+        t.Controller.Show();
+        ChooseInbox(t);
+        t.Window.ChooseInboxTab(InboxTab.All);
+
+        var line = LineOf(t.Window, k.Asking);
+        Assert.Null(line.ToolTip);
+        Assert.False(string.IsNullOrEmpty(AutomationProperties.GetName(line)));
+    });
+
     // The thread's row of buttons shows all of them on the page, at any width: no List line stands above it.
     [Fact]
     public void The_pages_thread_row_has_every_button_at_the_narrowest_width() => StaThread.Run(() =>
