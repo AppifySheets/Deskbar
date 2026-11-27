@@ -641,10 +641,10 @@ with a comment. It does not repeat what the bar already shows, such as a task's 
 it tells you only what no single task shows, like two sessions doing the same work or one decision holding up several
 tasks. A dot on the Manager button means a session stopped again after its nudge; opening the manager clears it.
 
-A deploy wakes it too. When a session reports its change deployed (`task deployed`, or you use Mark deployed), other
-tasks whose pull request in the same repository has merged but is not reported deployed may be in that deploy as well.
-The manager comments on each of them with what was deployed, and their sessions check and report it themselves. It
-does not tell you about it.
+A reported deploy reaches the other sessions without the manager. When a session reports its change deployed (`task
+deployed`, or you use Mark deployed), other tasks whose pull request in the same repository has merged but is not
+reported deployed may be in that deploy as well. Deskbar writes a line in each one's thread and tells its Claude
+session at once, and the session checks whether its own change runs and reports it itself.
 
 When the manager needs a decision from you, its question shows as a violet line at the top of the bar's task list and
 of the tasks panel, above every task's question. Click it to open the manager; your reply clears it.

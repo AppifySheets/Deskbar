@@ -1318,11 +1318,11 @@ MW3. Leave a question unanswered for two hours on a day the manager is open: the
      dot appears (task 6a87df67).
 MW4. On a day the manager was never opened, nothing wakes it and no dot appears, whatever is handed back.
 MW5. While you are typing to the manager (a turn in progress), no wake lands in the middle; it comes after the turn.
-MW6. (Task 43765c61.) On a day the manager is open, have two Claude tasks with merged pull requests in one other
-     repository (not Deskbar), neither reported deployed. When one session reports `task deployed`, within about half an
-     hour the other task's thread gets one manager comment naming that deploy and its evidence, its session wakes and
-     checks, and it reports `task deployed` if its change is in it. No dot on the Manager button, and the manager says
-     nothing about it to you. A task whose pull request is still open, or is in a different repository, gets no comment.
+MW6. (Task 43765c61; no manager needed.) Have two Claude tasks, not Done, with merged pull requests in one repository,
+     neither reported deployed. When one session reports `task deployed`, the other task's thread at once gets a
+     Deskbar line naming the repository and the reporting task, its session wakes, checks, and reports `task deployed`
+     if its change runs. A task whose pull request is still open, is in a different repository, or is Done gets
+     nothing, and a "nothing to deploy" report tells nobody.
 
 The manager's question line (task 61e4d143, docs/superpowers/specs/2026-11-25-manager-question-line-design.md):
 

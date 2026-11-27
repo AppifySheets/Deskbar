@@ -124,7 +124,26 @@ public sealed class TaskService(ITaskStore store, Func<DateTimeOffset> now, Func
 
     // A deploy seen running (task 8470d176, phase 2: `task deployed` and "Mark deployed"); reporting it again saves and
     // pulses nothing (TaskBoard.MarkDeployed returns the same board).
-    public Result MarkDeployed(Guid id, string note) => ApplyIfChanged(Board.MarkDeployed(id, note, now()));
+    //
+    // The report also reaches the sessions waiting on a deploy of the same repository (task 43765c61, DeployNotices):
+    // each such task gets a Deskbar line in its thread and is announced on DeployNoticed, which the app's CommentWaker
+    // hands to its Claude session on the roads a comment takes. Worked out here, where the report lands, against the
+    // board before and after it and GitHub's answers (arrivals), so no poll and no stored state is needed.
+    public Result MarkDeployed(Guid id, string note)
+    {
+        var before = Board;
+        return ApplyIfChanged(Board.MarkDeployed(id, note, now()))
+            .Tap(() => DeployNotices.For(before, Board, id, arrivals).ToList().ForEach(notice =>
+            {
+                Note(notice.TaskId, DeployNotices.ThreadLine(notice));
+                deployNoticed.OnNext(notice);
+            }));
+    }
+
+    readonly Subject<DeployNotice> deployNoticed = new();
+
+    /// <summary>A waiting task told about a deploy another task reported (MarkDeployed), after its thread line is saved.</summary>
+    public IObservable<DeployNotice> DeployNoticed => deployNoticed;
 
     /// <summary>The note "Mark deployed" on a line's menu records (TaskService.MarkDeployed).</summary>
     public const string MarkedByHand = "Marked deployed by hand";
@@ -240,12 +259,6 @@ public sealed class TaskService(ITaskStore store, Func<DateTimeOffset> now, Func
     ImmutableHashSet<string> unreachable = ImmutableHashSet<string>.Empty;
     // Whether the watch's last look failed for everything it asked: a machine that cannot ask GitHub (RunningChanges.Of).
     bool blind;
-
-    /// <summary>
-    /// What GitHub said about the recorded pull requests so far, keyed by PullRequestLink.Key; empty until the watch has
-    /// spoken. The manager's deploy wakes read it to tell a merged pull request from an open one (ManagerWakes.Plan).
-    /// </summary>
-    public IReadOnlyDictionary<string, PullRequestArrival> PullRequestStates => arrivals;
 
     /// <summary>Where a task's change stands against the running build (RunningChanges.Of); None until the watch has spoken.</summary>
     public TaskDelivery DeliveryOf(TaskItem task) =>

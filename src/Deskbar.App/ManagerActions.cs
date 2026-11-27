@@ -57,9 +57,7 @@ namespace Deskbar.App;
 // of the sessions poll (ClaudeSessions.Live, every 15 seconds), the App wires it.
 //
 //   * ManagerWakes.Plan (Core, pure) decides from the stored record, the board, the list and the time whether to wake the
-//     manager and with what message: a hand-back (task 6a87df67 dropped the question wakes), or a deploy reported that
-//     other tasks' merged pull requests in the same repository wait on (task 43765c61; GitHub's states come from
-//     TaskService.PullRequestStates, which the running-change watch fills), at most once per 30
+//     manager and with what message: a hand-back only (task 6a87df67 dropped the question wakes), at most once per 30
 //     minutes, only today's manager and never while it is busy.
 //   * The message goes by the roads a comment takes to a task's session (CommentWake.PlanFor): into the manager's inbox
 //     when it runs (its waiter wakes it), a BARE resume with the message when it does not run, stop then resume when its
@@ -245,7 +243,7 @@ public sealed class ManagerActions : IDisposable
     public void Tick(IReadOnlyCollection<ClaudeAgent> listed)
     {
         if (pending || tasks is null || inbox is null || !manager.State.ClaudeTasksInEffect || manager.State.Manager is not { } record) return;
-        switch (ManagerWakes.Plan(record, tasks.Board, listed, today(), scheduler.Now, tasks.PullRequestStates))
+        switch (ManagerWakes.Plan(record, tasks.Board, listed, today(), scheduler.Now))
         {
             case ManagerWake.Nothing(var kept) when kept != record:
                 manager.SetManagerSession(kept);

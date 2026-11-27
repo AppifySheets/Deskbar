@@ -80,7 +80,7 @@ public static class SessionBriefing
     /// </summary>
     public static bool OnlyStopNudge(string prompt) =>
         IsStopNudge(prompt)
-        && !new[] { ManagerCommentOpening, UserCommentOpening, ReevaluateOpening, StalledOpening }
+        && !new[] { ManagerCommentOpening, UserCommentOpening, ReevaluateOpening, StalledOpening, DeployOpening }
             .Any(opening => prompt.Contains(opening, StringComparison.Ordinal));
 
     // The first words of a comment delivered to a session (Commented), named so the prompt hook can tell Deskbar's own
@@ -103,6 +103,9 @@ public static class SessionBriefing
         && (text.StartsWith(ManagerCommentOpening, StringComparison.Ordinal)
             || text.StartsWith(UserCommentOpening, StringComparison.Ordinal)
             || text.StartsWith(ReevaluateOpening, StringComparison.Ordinal)
+            // A deploy another task reported (task 43765c61, DeployNotice) is Deskbar's too: counted as a reply it would
+            // set aside the very "redeploy" question the session is asked to settle.
+            || text.StartsWith(DeployOpening, StringComparison.Ordinal)
             // The stalled task's ask (task 8710ac09) is Deskbar's, not the user replying.
             || text.StartsWith(StalledOpening, StringComparison.Ordinal)
             // A Stop nudge the waiter delivered (task 8710ac09). It arrives wrapped in Claude Code's own notice, which
@@ -203,6 +206,25 @@ public static class SessionBriefing
 
     // How much of the question the Reevaluate message quotes: enough to recognise it, short enough not to bury the steps.
     const int QuestionLength = 300;
+
+    const string DeployOpening = "Deskbar: another task reported a deploy your task may be in, for your task ";
+
+    /// <summary>
+    /// What a waiting task's session reads when another task reports a deploy of a repository its merged pull request
+    /// belongs to (task 43765c61, DeployNotices): check whether its own change is in that deploy and, if it is, report
+    /// it and finish. Delivered on a comment's roads (the app's CommentWaker), so an idle or ended session gets it too.
+    /// </summary>
+    // The session, not Deskbar, decides: a deploy of one service does not prove another service of the same repository
+    // went out, so it checks its own app's evidence. The steps follow the briefing's order (merged, released, deployed,
+    // done) and settle a question that waited on that very deploy. "Say nothing" when it is not in: a wasted look must
+    // not turn into a comment or a question for the user.
+    public static string DeployNotice(TaskItem task, DeployNotice notice) =>
+        $"{DeployOpening}{task.Id.ToString()[..8]} \"{Cut(task.Title)}\".\n\n"
+        + $"Task {notice.ReporterId.ToString()[..8]} \"{Cut(notice.ReporterTitle)}\" reported {string.Join(", ", notice.Repositories)} deployed: \"{Cut(notice.Evidence, QuestionLength)}\".\n"
+        + "A deploy ships what merged before it, so your merged change may be in it. Check where your change runs (the app's logs, health page or deploy output), not from memory, then:\n"
+        + $"- if it runs: {Shim} task deployed - --session <your session id> with the evidence; if your question waited on that deploy, {Shim} task answered --session <your session id>; then finish as your briefing says (done once nothing waits on the user)\n"
+        // No "then stop": a session that is mid-work reads this at its next turn's waiter and must go on with that work.
+        + "- if it does not run yet: change nothing and go on with what you were doing; do not comment or ask about this message\n";
 
     const string StalledOpening = "Deskbar: no session has worked on your task ";
 

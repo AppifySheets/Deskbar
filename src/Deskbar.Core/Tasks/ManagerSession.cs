@@ -226,9 +226,7 @@ public static class ManagerSession
         "  If its status line says the next move is the user's, tell it to run task ask with that move.",
         "  Otherwise tell it to finish (a merged change once it is deployed) with task done, or carry on with the work.",
         "- A task marked AGAIN gets no comment: its session stopped twice, so name it to the user in one line.",
-        // Task 43765c61: a deploy wake carries its own instruction (ManagerWakes.Message), so this one line covers it and
-        // the briefing stays under the tests' 40 line cap.
-        "- Do what the wake's own lines say. Run the overview only if the wake does not tell you enough.",
+        "- Run the overview only if the wake does not tell you enough.",
         // Task 6a87df67: the user, on the manager listing every merge and question after each wake: "manager doesn't have
         // to tell me each merge and needs you now", "tasks do it themselves already on the bar". Every task already shows
         // its own question, pull request and status line on the bar and in the tasks panel, so a manager that lists them

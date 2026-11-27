@@ -87,7 +87,17 @@ sealed class CommentWaker : IDisposable
             // or the session asked or answered meanwhile, while this waited behind another delivery.
             StillDue = () => tasks.IsRegenerating(taskId),
         });
-        subscription = comments.Merge(reevaluations).Merge(stalled).Merge(regenerations)
+        // A DEPLOY ANOTHER TASK REPORTED (task 43765c61, DeployNotices) rides them too: the session of a task whose merged
+        // pull request may be in that deploy is asked to check and report it (SessionBriefing.DeployNotice). Deskbar
+        // already wrote why in the thread (TaskService.MarkDeployed); a task no session can be reached on just keeps that line.
+        var deploys = tasks.DeployNoticed.Select(notice => new Delivery(notice.TaskId, "a deploy notice",
+            task => SessionBriefing.DeployNotice(task, notice))
+        {
+            Unsent = "No session of this task could be reached to tell it about that deploy.",
+            // Dropped when the task finished or was closed while this waited behind another delivery.
+            StillDue = () => tasks.Board.Tasks.Any(t => t.Id == notice.TaskId && t.Status is not (Core.Tasks.TaskStatus.Done or Core.Tasks.TaskStatus.Closed)),
+        });
+        subscription = comments.Merge(reevaluations).Merge(stalled).Merge(regenerations).Merge(deploys)
             .Where(_ => enabled())
             .Select(delivery => live.Take(1).SelectMany(listed => Observable.FromAsync(() => Deliver(delivery, listed)))
                 // One delivery that throws must not end the waker for the rest of the run (final review, I5): it is traced,

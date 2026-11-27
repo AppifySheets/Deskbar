@@ -312,6 +312,34 @@ public sealed class TaskServiceTests
         Assert.Contains(traced, line => line.Contains("taken back"));
     }
 
+    // Task 43765c61: a deploy reported reaches the task waiting on the same repository's deploy, with a Deskbar line in
+    // its thread, and the reporter itself is not told.
+    [Fact]
+    public void A_deploy_report_notes_and_announces_the_waiting_task()
+    {
+        var s = NewService();
+        var reporting = s.Create("Activity chips", ws, Session("s1", clock)).Value.Id;
+        var waiting = s.Create("Portal accounts", ws, Session("s2", clock)).Value.Id;
+        var mine = new PullRequestLink("AppifySheets", "portal", 301);
+        var theirs = new PullRequestLink("AppifySheets", "portal", 302);
+        s.AddPullRequest(reporting, mine);
+        s.AddPullRequest(waiting, theirs);
+        s.Arrived(new RunningBuild("AppifySheets", "Deskbar", "2.6.70", "0123456789abcdef0123456789abcdef01234567"),
+            new Dictionary<string, PullRequestArrival>
+            {
+                [mine.Key] = new(PullRequestState.Merged, false),
+                [theirs.Key] = new(PullRequestState.Merged, false),
+            });
+        var noticed = new List<DeployNotice>();
+        using var _ = s.DeployNoticed.Subscribe(noticed.Add);
+
+        Assert.True(s.MarkDeployed(reporting, "2026.11.27.23 in the portal log").IsSuccess);
+
+        Assert.Equal(waiting, Assert.Single(noticed).TaskId);
+        Assert.Contains("was reported deployed by \"Activity chips\"", s.Board.Tasks.Single(t => t.Id == waiting).Comments.Last().Markdown);
+        Assert.Empty(s.Board.Tasks.Single(t => t.Id == reporting).Comments);
+    }
+
     // Task 8710ac09: the session answers the ask with the status line it already had ("still waiting on CI"). The board
     // does not change, but the answer is heard, so the task stays with Claude.
     [Fact]
