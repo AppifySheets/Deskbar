@@ -133,6 +133,10 @@ sealed class CommentWaker : IDisposable
         {
             Quiet = true,
             StillDue = () => tasks.StillWaitsOnDeployCheck(taskId),
+            // Review finding: a terminal or VS Code session whose waiter has lapsed only gets the inbox, nobody reads it
+            // until the user types there, and every slot would add one more identical check (up to 12 a day). Skipped
+            // instead; the next slot tries again, and the user sees the question meanwhile.
+            NotIntoLapsedInbox = true,
         });
         subscription = comments.Merge(reevaluations).Merge(stalled).Merge(regenerations).Merge(deploys).Merge(watched).Merge(deployChecks)
             .Where(_ => enabled())
@@ -162,6 +166,9 @@ sealed class CommentWaker : IDisposable
         public Func<bool>? StillDue { get; init; }
         // Quiet: when no session can take it, write no thread line (a watch nudge, task c8e6967d).
         public bool Quiet { get; init; }
+        // NotIntoLapsedInbox: dropped, not appended, when the plan is the inbox of a session whose waiter has lapsed (the
+        // deploy check, task 6a4104c0, which comes back on a schedule and would pile up there).
+        public bool NotIntoLapsedInbox { get; init; }
     }
 
     async Task<System.Reactive.Unit> Deliver(Delivery delivery, IReadOnlyCollection<ClaudeAgent> listed)
@@ -191,6 +198,9 @@ sealed class CommentWaker : IDisposable
             inbox.Lapsed(sessionId) || task.Sessions.Any(session => session.Id == sessionId && endedOnApiError(session));
         switch (CommentWake.Plan(task, listed.ToList(), hasTranscript, Lapsed))
         {
+            case WakePlan.Inbox(var sessionId) when delivery.NotIntoLapsedInbox && Lapsed(sessionId):
+                trace?.Invoke($"comment waker: {delivery.What} on {taskId} skipped, session {sessionId} only has a lapsed inbox");
+                break;
             case WakePlan.Inbox(var sessionId):
                 Into(taskId, sessionId, message);
                 break;

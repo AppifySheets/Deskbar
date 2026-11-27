@@ -270,7 +270,9 @@ public static class SessionBriefing
         + (task.Question.HasValue ? $"Your question: \"{Cut(task.Question.Value, QuestionLength)}\"\n" : "")
         + "The user may have deployed since you asked, and nothing tells you when. Check now where your change runs (the app's logs, health page or deploy output), not from memory, then:\n"
         + $"- if it runs: {Shim} task answered --session <your session id>, then {Shim} task deployed - --session <your session id> with the evidence, then finish as your briefing says\n"
-        + $"- if your change needs no deploy after all: {Shim} task deployed - --session <your session id> with \"nothing to deploy\" and why\n"
+        // Answered first here too (review finding): a "nothing to deploy" report alone leaves the question standing, and
+        // with no merged change left unreported nothing would ever check it again.
+        + $"- if your change needs no deploy after all: {Shim} task answered --session <your session id>, then {Shim} task deployed - --session <your session id> with \"nothing to deploy\" and why, then finish as your briefing says\n"
         + "- if it does not run yet: change nothing on the task, do not comment or ask again, and end your turn. Deskbar checks back later, less often each time.\n"
         + "This is Deskbar, not the user: it settles no question by itself.\n";
 
