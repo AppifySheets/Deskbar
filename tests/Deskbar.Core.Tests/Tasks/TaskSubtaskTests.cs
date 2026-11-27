@@ -291,7 +291,7 @@ public class TaskSubtaskTests
 
         var refused = board.Close(parent, clock);
 
-        Assert.Equal("Close its 2 open subtasks first", refused.Error);
+        Assert.Equal("Close its 2 open subtasks first: \"Child\" and 1 more", refused.Error);
         Assert.True(Get(board, parent).IsOpen);
     }
 
@@ -299,8 +299,14 @@ public class TaskSubtaskTests
     public void The_refusal_counts_the_one_subtask_still_open()
     {
         var board = Family().Close(sibling, clock).Value;
-        Assert.Equal("Close its open subtask first", board.Close(parent, clock).Error);
+        Assert.Equal("Close its open subtask first: \"Child\"", board.Close(parent, clock).Error);
     }
+
+    // Task 452487b4: the refusal quotes the first line of the open subtask's title, cut so it stays short.
+    [Fact]
+    public void The_refusal_cuts_a_long_subtask_title_to_its_first_line() =>
+        Assert.Equal("Close its open subtask first: \"Partners.Api: add ImediL as a client_id…\"",
+            TaskViews.CloseSubtasksFirst(["Partners.Api: add ImediL as a client_id and its docs\nsecond line"]));
 
     [Fact]
     public void A_parent_closes_once_every_subtask_is_closed()
@@ -317,7 +323,7 @@ public class TaskSubtaskTests
     // "Stop Claude and close" (task 37cd7081) gets past a live session only, never past open subtasks.
     [Fact]
     public void Stopping_claude_never_closes_a_parent_with_open_subtasks() =>
-        Assert.Equal(TaskViews.CloseSubtasksFirst(2), Family().Close(parent, clock, stoppingClaude: true).Error);
+        Assert.Equal(TaskViews.CloseSubtasksFirst(["Child", "Sibling"]), Family().Close(parent, clock, stoppingClaude: true).Error);
 
     [Fact]
     public void A_subtask_closes_while_its_parent_is_open() =>

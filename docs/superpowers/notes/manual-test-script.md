@@ -773,6 +773,11 @@ S18. A subtask on a line of its own moves out as a plain task (task 7378433e). G
     subtask. Drag it between two other lines: it is a plain task there, without the arrow. In the tasks panel, ask a
     question on a subtask of a plain note so it sits in Waiting on you, and drag it between two lines: it stays in
     Waiting on you and is a plain task.
+S19. An open thread takes in its subtask (task 452487b4). In the tasks panel, with the Subtasks box ticked, give a
+    task a subtask and put both in Waiting on you (`$ts task ask` on each). The subtask's line sits right under the
+    parent's. Comment on the parent until its open thread scrolls. Open the parent's thread: the subtask's line leaves
+    the list and shows once, under the thread's row of buttons, and stays there while the comments scroll. Tick the parent: the orange line under its title reads `Close its open subtask first: "<subtask title>"`.
+    Close the parent's thread: the subtask's own line is back under the parent.
 
 ## Goals
 

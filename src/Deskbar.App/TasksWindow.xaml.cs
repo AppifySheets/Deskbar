@@ -2220,16 +2220,19 @@ public partial class TasksWindow : Window
         // Each is a full line (task 249a1e8a, Line with inThreadOf) whose click opens or folds that subtask's own thread
         // right under it, in place (task 0eb943d8). One with a line of its own elsewhere in the view keeps the short
         // entry, which goes to that line: drawing the line twice would draw its thread twice too.
+        // Gathered in a stack of their own, which a capped thread puts in its head (below), the rest in the body as before.
+        var subtasks = new StackPanel();
         row.Subtasks.ToList().ForEach(sub =>
         {
             if (sub is { HasLine: false, Row: { } subRow })
             {
                 closing[subRow.Id] = subRow.Closing;
-                panel.Children.Add(Line(subRow, inThreadOf: row.Id));
-                if (subRow.Expanded) panel.Children.Add(Thread(subRow, inParent: true));
+                subtasks.Children.Add(Line(subRow, inThreadOf: row.Id));
+                if (subRow.Expanded) subtasks.Children.Add(Thread(subRow, inParent: true));
             }
-            else panel.Children.Add(SubtaskEntry(sub, row.Id));
+            else subtasks.Children.Add(SubtaskEntry(sub, row.Id));
         });
+        if (subtasks.Children.Count > 0 && under is null) panel.Children.Add(subtasks);
         // TASK LINKS (docs/superpowers/specs/2026-11-25-task-links-design.md): what the task duplicates, its duplicates and
         // its related tasks, each a button that shows that task, then the link picker while "Duplicate of…" or "Related
         // to…" has it open on this task.
@@ -2274,6 +2277,12 @@ public partial class TasksWindow : Window
         };
         // Capped under its line (TasksWindow.ThreadCap.cs), or the head, the body and the box in one plain stack, as a
         // thread always was before the cap.
+        // A CAPPED THREAD KEEPS ITS SUBTASKS IN SIGHT (task 452487b4). Its body scrolls and opens at the latest comment,
+        // so subtasks drawn in the body sat above that, out of sight in a long conversation: Petre's parent with ten
+        // comments refused its tick with "Close its open subtask first" and he asked "where is it?". So in a capped
+        // thread they sit in the head, under the row of buttons, in a shelf of their own no taller than half the thread
+        // (SubtaskShelf), so a subtask opened in place there cannot crowd out the comments and the box.
+        if (subtasks.Children.Count > 0 && under is not null) head.Children.Add(SubtaskShelf(subtasks, frame));
         frame.Child = under is not null
             ? CappedThread(row.Id, frame, under, head, panel, box, shown.Select(c => (Guid?)c.Id).LastOrDefault())
             : new StackPanel { Children = { head, panel, box } };
@@ -3005,7 +3014,9 @@ public partial class TasksWindow : Window
         if (renaming is not null || selectedId.HasNoValue) return false;
         var id = selectedId.Value;
         // Not from a box being typed in (the add box, the search box, the subtask box in a thread): F2 there is the box's.
-        if (!Keys.Contains(id) || closing.GetValueOrDefault(id) || AddBoxShown && AddBox.IsKeyboardFocusWithin || SearchBox.IsKeyboardFocusWithin
+        // Any line on show, a subtask's in its parent's open thread included (task 452487b4: an open thread takes in the
+        // subtasks nested under it, so a selected subtask can have no top-level line).
+        if (RowFor(id) is null || closing.GetValueOrDefault(id) || AddBoxShown && AddBox.IsKeyboardFocusWithin || SearchBox.IsKeyboardFocusWithin
             || subtaskBox?.IsKeyboardFocusWithin == true) return false;
         BeginRename(id);
         return true;

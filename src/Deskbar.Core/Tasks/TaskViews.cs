@@ -432,6 +432,30 @@ public static class TaskViews
         return cells.Select(c => c with { Tasks = c.Tasks.Where(t => !Folds(t)).ToArray() }).ToArray();
     }
 
+    // A SUBTASK UNDER AN OPEN THREAD MOVES INTO IT (task 452487b4). A subtask nested under its parent is drawn on its own
+    // line right under the parent's line, but the parent's open thread is drawn there too, between the two: so with the
+    // thread open the subtask's line sat below the whole thread, under its comments and comment box, out of sight. Petre
+    // met "Close its open subtask first" on such a parent and asked "it doesn't have a subtask, does it?", then "where is
+    // it?". While the parent's thread is open its nested subtasks leave the list and the thread draws them, as full lines
+    // in its head (TasksWindow.SubtaskShelf), the way it already draws a folded one (task 249a1e8a); closing the thread
+    // gives them their lines back.
+    // Still shown once (task 0eb943d8): DrawnUnderParents, taken after this, no longer counts them.
+
+    /// <summary>
+    /// The List's groups with every subtask nested under a parent whose thread is open (<paramref name="openThreads"/>)
+    /// left out, so that thread lists it instead of a line below the thread. Other lines are untouched, and so is a
+    /// group, since a nested subtask shares its parent's group (UnderParents moves it there).
+    /// </summary>
+    public static IReadOnlyList<TaskGroup> IntoOpenThreads(IReadOnlyList<TaskGroup> groups, IReadOnlySet<Guid> nested,
+        IReadOnlySet<Guid> openThreads) =>
+        groups.Select(g => g with
+            {
+                Tasks = g.Tasks.Where(t => !(nested.Contains(t.Id) && t.ParentId.HasValue && t.ParentId.Value != t.Id
+                    && openThreads.Contains(t.ParentId.Value))).ToArray(),
+            })
+            .Where(g => g.Tasks.Count > 0)
+            .ToArray();
+
     /// <summary>
     /// The subtasks the List draws on a line of their own right under their parent: those <see cref="UnderParents"/>
     /// nested (<paramref name="nested"/>) that are still in <paramref name="listed"/> after any folding. A parent's open
@@ -527,6 +551,28 @@ public static class TaskViews
     /// </summary>
     public static string CloseSubtasksFirst(int open) =>
         open == 1 ? "Close its open subtask first" : $"Close its {open} open subtasks first";
+
+    // How much of a subtask's title the refusal quotes, so the line under the parent's title stays one or two lines.
+    const int RefusalTitle = 40;
+
+    /// <summary>
+    /// Close's refusal on a parent, naming its open subtasks (task 452487b4, Petre on a screenshot of the refusal with
+    /// the subtask out of sight: "it doesn't have a subtask, does it?", then "where is it?"): the count's words followed
+    /// by the first subtask's title in quotes, cut at <see cref="RefusalTitle"/>, and "and N more" past the first.
+    /// The tick's tooltip keeps the count alone (<see cref="CloseSubtasksFirst(int)"/>), since a tooltip is a hint.
+    /// </summary>
+    public static string CloseSubtasksFirst(IReadOnlyList<string> openTitles) =>
+        openTitles.Count == 0 ? ""
+        : $"{CloseSubtasksFirst(openTitles.Count)}: \"{Cut(FirstLineOf(openTitles[0]), RefusalTitle)}\""
+          + (openTitles.Count > 1 ? $" and {openTitles.Count - 1} more" : "");
+
+    // A title's first line, trimmed: a pasted title can run to several lines.
+    static string FirstLineOf(string title) => title.Split('\n', 2)[0].Trim();
+
+    // The text cut to `max` characters with an ellipsis, whole when it fits.
+    // Never between the two halves of a surrogate pair (an emoji), which would leave half a character before the "…".
+    static string Cut(string text, int max) =>
+        text.Length <= max ? text : text[..(char.IsHighSurrogate(text[max - 1]) ? max - 1 : max)].TrimEnd() + "…";
 
     /// <summary>
     /// Why a task Claude is still working on will not close (TaskBoard.Close, task 37cd7081): the bar's message, the
