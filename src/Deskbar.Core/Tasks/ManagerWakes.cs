@@ -19,7 +19,7 @@ public abstract record ManagerWake
 // turn and the user asked for the manager to be light (24 tasks went to "waiting on you" in half a day; one wake each
 // would be about 25 turns a day). So:
 //
-//   * THE ONE TRIGGER: a Claude task handed back to the user since the last wake (StalledTasks: its session went quiet
+//   * THE FIRST TRIGGER: a Claude task handed back to the user since the last wake (StalledTasks: its session went quiet
 //     for 15 minutes without `task ask` or `task done`). The manager nudges that session, which no task can do for itself.
 //   * QUESTIONS ARE NOT CARRIED (task 6a87df67). Step 2 also woke on a question two hours old and listed new questions
 //     alongside; the manager then repeated them to the user, who said "manager doesn't have to tell me each merge and
@@ -33,6 +33,18 @@ public abstract record ManagerWake
 //     batch waits, Since does not move, and the next idle tick takes everything that piled up.
 //   * A task reported as handed back once today is marked "do not nudge again" the second time, so a session that
 //     stops again after a nudge goes to the user instead of round another loop (ManagerRecord.HandedBack).
+//   * THE SECOND TRIGGER: A DEPLOY REPORTED (task 43765c61; the user: "when a session learns that its PR has been
+//     deployed, it should notify the manager and the manager should notify all sessions waiting for the deployment").
+//     The session's `task deployed` (or the user's "Mark deployed") already lands in TaskItem.Deployed with its time and
+//     evidence, so that report IS the notice to the manager: the session runs nothing new. A deploy ships everything
+//     merged before it, so other tasks whose pull request in the SAME repository is merged (GitHub's word, from the
+//     running-change watch) but not reported deployed may be in it too. Those are the waiting sessions, and Deskbar
+//     lists them in the wake rather than leave the manager to search the board (it pays for every line it reads). Only
+//     tasks with a Claude session are listed, since the comment is what wakes the session, and a deploy with no such
+//     task wakes nothing. The manager comments each one; the session checks its own app's evidence and reports
+//     `task deployed` itself, because a deploy of one service does not prove another service of the repository was
+//     redeployed. No dot: this is sessions' business, not the user's (task 6a87df67, "manager doesn't have to tell
+//     me each merge"). It shares the gap and the busy rule with the hand-backs: a batch waits, nothing is lost.
 //
 // A PURE FUNCTION: the record, the board, the listed sessions, the day and the time come in; nothing is read or written.
 // ManagerWaker (in the app) runs it on every sessions poll and delivers the message.
@@ -47,8 +59,12 @@ public static class ManagerWakes
     /// </summary>
     public const string Prefix = "Deskbar wake.";
 
+    /// <param name="pullRequests">
+    /// What GitHub said about the recorded pull requests, keyed by PullRequestLink.Key (TaskService.PullRequestStates):
+    /// a waiting task's pull request counts only once it is known to be merged.
+    /// </param>
     public static ManagerWake Plan(ManagerRecord record, TaskBoard board, IReadOnlyCollection<ClaudeAgent> listed,
-        DateOnly today, DateTimeOffset now)
+        DateOnly today, DateTimeOffset now, IReadOnlyDictionary<string, PullRequestArrival> pullRequests)
     {
         // Yesterday's manager is not woken: a new day's manager starts only when the user opens it.
         if (record.Day != today) return new ManagerWake.Nothing(record);
@@ -63,11 +79,13 @@ public static class ManagerWakes
             .Where(t => t.HandedBack.HasValue && t.HandedBack.Value > since && t.Assignee.IsMe)
             .ToList();
 
-        if (handedBack.Count == 0) return new ManagerWake.Nothing(record);
+        var deploys = Deploys(board, open, since, pullRequests);
+
+        if (handedBack.Count == 0 && deploys.Count == 0) return new ManagerWake.Nothing(record);
 
         var before = record.HandedBack ?? [];
         return new ManagerWake.Wake(
-            Message(handedBack, before),
+            Message(handedBack, before, deploys),
             record with
             {
                 Since = now,
@@ -77,9 +95,44 @@ public static class ManagerWakes
             });
     }
 
+    /// <summary>
+    /// One repository with a deploy reported since the last wake (THE SECOND TRIGGER above): the latest report among them
+    /// (the task that made it and its evidence), and the other open tasks with a session whose merged pull request in
+    /// that repository has no deploy report yet.
+    /// </summary>
+    sealed record RepositoryDeploy(string Repository, TaskItem Reporter, string Evidence, IReadOnlyList<TaskItem> Waiting);
+
+    // The repositories with a deploy reported after `since` that some other task waits on. Every task on the board can
+    // report (a session marks done right after its report, and the user may close it at once), but only open, unsnoozed
+    // ones wait. Repositories are compared by PullRequestLink.Key's "owner/repo" part, already lower case.
+    static IReadOnlyList<RepositoryDeploy> Deploys(TaskBoard board, IReadOnlyList<TaskItem> open, DateTimeOffset since,
+        IReadOnlyDictionary<string, PullRequestArrival> pullRequests) =>
+        board.Tasks
+            .SelectMany(task => task.Deployed.Where(d => d.At > since).Select(d => (Task: task, Report: d)))
+            .GroupBy(r => RepositoryOf(r.Report.Key))
+            .Select(reports => (Repository: reports.Key, Latest: reports.MaxBy(r => r.Report.At)))
+            .Select(r => new RepositoryDeploy(
+                r.Repository,
+                r.Latest.Task,
+                r.Latest.Report.Note,
+                open.Where(t => t.Id != r.Latest.Task.Id && t.Sessions.Count > 0 && WaitsOn(t, r.Repository, pullRequests)).ToList()))
+            .Where(d => d.Waiting.Count > 0)
+            .OrderBy(d => d.Repository, StringComparer.Ordinal)
+            .ToList();
+
+    // A pull request of `repository` that GitHub says is merged and the task has not reported deployed.
+    static bool WaitsOn(TaskItem task, string repository, IReadOnlyDictionary<string, PullRequestArrival> pullRequests) =>
+        task.PullRequests.Any(p => RepositoryOf(p.Key) == repository
+            && task.Deployed.All(d => d.Key != p.Key)
+            && pullRequests.TryGetValue(p.Key, out var arrival) && arrival.State == PullRequestState.Merged);
+
+    // "owner/repo" from a PullRequestLink.Key ("owner/repo#12").
+    static string RepositoryOf(string key) => key.LastIndexOf('#') is var hash and > 0 ? key[..hash] : key;
+
     // The wake's text: what happened, one line per task, then one line pointing at the briefing's wake rules
-    // (ManagerSession.Briefing), which say what to do with it. Kept short: the manager pays for every character.
-    static string Message(IReadOnlyList<TaskItem> handedBack, IReadOnlyList<Guid> nudgedBefore) =>
+    // (ManagerSession.Briefing), which say what to do with it. Kept short: the manager pays for every character. The
+    // deploy section carries its own instruction, so the briefing that every manager turn reads does not grow for it.
+    static string Message(IReadOnlyList<TaskItem> handedBack, IReadOnlyList<Guid> nudgedBefore, IReadOnlyList<RepositoryDeploy> deploys) =>
         string.Join("\n", new[]
             {
                 new[] { $"{Prefix} Since your last look:" },
@@ -87,6 +140,18 @@ public static class ManagerWakes
                     handedBack.Select(t => nudgedBefore.Contains(t.Id)
                         ? $"{Name(t)}: handed back AGAIN today. Do not nudge; list it for the user."
                         : $"{Name(t)}: status line \"{Cut(t.StatusLine, 100)}\"")),
+                Section("Deployed (a deploy ships what merged before it, so the tasks under it may be in it too):",
+                    deploys.SelectMany(d => new[]
+                        {
+                            $"{d.Repository}, reported by {Name(d.Reporter)}: \"{Cut(d.Evidence, 120)}\". Waiting on a deploy of it:",
+                        }.Concat(d.Waiting.Select(t => $"  {Name(t)}")))),
+                deploys.Count > 0
+                    ? new[]
+                    {
+                        "Comment each waiting task once: what was deployed, with that evidence, and that it should check whether",
+                        "  its own change is in it and, if so, report task deployed; otherwise carry on. Tell the user nothing about it.",
+                    }
+                    : [],
                 new[] { "Handle it as your briefing says for a Deskbar wake, then stop." },
             }.SelectMany(lines => lines));
 

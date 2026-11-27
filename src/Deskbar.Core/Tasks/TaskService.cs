@@ -236,6 +236,12 @@ public sealed class TaskService(ITaskStore store, Func<DateTimeOffset> now, Func
     // Whether the watch's last look failed for everything it asked: a machine that cannot ask GitHub (RunningChanges.Of).
     bool blind;
 
+    /// <summary>
+    /// What GitHub said about the recorded pull requests so far, keyed by PullRequestLink.Key; empty until the watch has
+    /// spoken. The manager's deploy wakes read it to tell a merged pull request from an open one (ManagerWakes.Plan).
+    /// </summary>
+    public IReadOnlyDictionary<string, PullRequestArrival> PullRequestStates => arrivals;
+
     /// <summary>Where a task's change stands against the running build (RunningChanges.Of); None until the watch has spoken.</summary>
     public TaskDelivery DeliveryOf(TaskItem task) =>
         runningBuild.Map(build => RunningChanges.Of(task, build, arrivals, unreachable, blind)).GetValueOrDefault(TaskDelivery.None);
