@@ -21,6 +21,21 @@ public sealed class RepoWatchFollowTests
     static FollowStep Follow(IReadOnlyList<RunFacts> runs, TimeSpan after) =>
         RepoWatch.Follow(Following, Merge, runs, Since + after);
 
+    // Review finding on task c8e6967d: a follow whose runs look keeps failing still ends after three hours.
+    [Fact]
+    public void GiveUpEndsTheFollowAfterThreeHoursAndNotBefore()
+    {
+        var early = RepoWatch.GiveUp(Following, Merge, Since.AddHours(3).AddSeconds(-1));
+        Assert.Single(early.State.Following);
+        Assert.Empty(early.Nudges);
+        Assert.Empty(early.Red);
+
+        var late = RepoWatch.GiveUp(Following, Merge, Since.AddHours(3));
+        Assert.Empty(late.State.Following);
+        Assert.Contains("after 3 hours", Assert.Single(late.Nudges).Text);
+        Assert.Equal(TaskId, late.Nudges[0].TaskId);
+    }
+
     [Fact]
     public void RedRunEndsFollowAndReportsIt()
     {

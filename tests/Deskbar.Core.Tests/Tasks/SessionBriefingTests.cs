@@ -277,7 +277,20 @@ public sealed class SessionBriefingTests
         var text = SessionBriefing.Start(Start(), Task("Tasks board"), []);
 
         Assert.Contains("unless your prompt line says Deskbar watches it", text);
-        Assert.Contains("Deskbar nudges you when your merge commit's runs finish", text);
+        Assert.Contains("When Deskbar watches, it nudges you when your merge commit's runs finish", text);
+    }
+
+    // Review finding on task c8e6967d: a task waiting on the user (its pull request waiting to be merged) reads the hint too.
+    [Fact]
+    public void PromptOfAWaitingTaskSaysWatchedToo()
+    {
+        var waiting = Task("Tasks board", TaskStatus.WaitingOnYou) with { Question = "Merge it?" };
+
+        var watched = SessionBriefing.Prompt(Sid, waiting, Maybe<TaskItem>.None, watched: true);
+
+        Assert.Single(watched.Trim().Split('\n'));
+        Assert.Contains("do not run your own watch loop", watched);
+        Assert.DoesNotContain("watches your pull request", SessionBriefing.Prompt(Sid, waiting, Maybe<TaskItem>.None));
     }
 
     // 2026-11-23: a prompt leaves a Done task Done, so its reminder tells the session how to reopen it when the message is

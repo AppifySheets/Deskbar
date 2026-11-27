@@ -59,9 +59,15 @@ public static class RepoWatch
     /// when gh is missing or signed out the last success ages past five minutes, this turns false and the session
     /// watches for itself again: the fallback of the spec's "The sessions".
     /// </summary>
+    // REVIEW FINDING (Deskbar task c8e6967d): a link counts only when something is actually watching it, which is a link
+    // last Seen Open (Poll nudges it) or one being followed after its merge (Follow nudges it). A link Seen Merged and not
+    // followed (first seen already merged, or its follow ended) has nothing watching it, yet used to count, so the prompt
+    // line told the session "Deskbar watches" and to drop its own loop while nobody watched.
     public static bool Watched(RepoWatchState state, TaskItem task, DateTimeOffset now) =>
-        FlightLinks(task, state).Any(link =>
-            state.LastSuccess.TryGetValue(RepositoryOf(link), out var at) && now - at <= TimeSpan.FromMinutes(5));
+        FlightLinks(task, state)
+            .Where(link => state.Seen.TryGetValue(link.Key, out var seen) && seen == PullRequestState.Open
+                || state.Following.Any(m => m.TaskId == task.Id && m.Link.Key == link.Key))
+            .Any(link => state.LastSuccess.TryGetValue(RepositoryOf(link), out var at) && now - at <= TimeSpan.FromMinutes(5));
 
     /// <summary>
     /// One poll of one repository: what gh said (<paramref name="facts"/>, one per pull request asked about) against what
@@ -81,11 +87,10 @@ public static class RepoWatch
         IEnumerable<string> Texts(PullFacts f, TaskItem task)
         {
             var label = f.Link.Label;
-            // BASE MOVED: a head other than the one seen last. A head first seen is only recorded (nothing was seen to
-            // move, so the first poll after a start nudges nobody). A snoozed task is spared: its stopped session would
-            // otherwise be resumed every time main moves.
-            if (f.State == PullRequestState.Open && f.BaseHead.Length > 0 && !task.IsSnoozed
-                && state.Heads.TryGetValue(HeadKey(f.Link, f.BaseRef), out var old) && old != f.BaseHead)
+            // BASE MOVED: a head other than the one seen last (BaseMoved). A head first seen is only recorded (nothing was
+            // seen to move, so the first poll after a start nudges nobody). A snoozed task is spared: its stopped session
+            // would otherwise be resumed every time main moves.
+            if (BaseMoved(f) && !task.IsSnoozed)
                 yield return $"The base {f.BaseRef} of {label} moved to {f.BaseHead[..Math.Min(7, f.BaseHead.Length)]}: rebase and push it now, by the repository's own rules.";
             // CONFLICTING: once per base head, snoozed tasks too (a conflict is the one thing worth resuming for).
             // UNKNOWN is neither a conflict nor a clear: GitHub is still computing, so nothing fires here.
@@ -97,6 +102,15 @@ public static class RepoWatch
             if (IsNewMerge(f))
                 yield return $"{label} merged. Deskbar follows the runs on its merge commit and nudges you with the result; you need not wait on them in a loop.";
         }
+
+        // REVIEW FINDING (Deskbar task c8e6967d): the move is judged only for a link whose PREVIOUS look saw it Open. Heads
+        // is per base branch and used to be fed by open pull requests only and never pruned, so a link seen for the first
+        // time (or back after a merged or closed spell) was compared against a head another pull request, or its own
+        // older self, had left behind, and got a "base moved" nudge for a move it never saw. Such a link only records.
+        bool BaseMoved(PullFacts f) =>
+            f.State == PullRequestState.Open && f.BaseHead.Length > 0
+            && state.Seen.TryGetValue(f.Link.Key, out var seen) && seen == PullRequestState.Open
+            && state.Heads.TryGetValue(HeadKey(f.Link, f.BaseRef), out var old) && old != f.BaseHead;
 
         bool IsNewMerge(PullFacts f) =>
             f.State == PullRequestState.Merged && f.MergeCommit.HasValue
@@ -116,13 +130,21 @@ public static class RepoWatch
         // A clear (Mergeable) forgets the conflict nudge so a later conflict at the same head is told again; Unknown
         // leaves the memory exactly as it was.
         var cleared = open.Where(f => f.Mergeable == Mergeable.Mergeable).Select(f => f.Link.Key).ToHashSet();
+        // A base-move nudge asks the session to rebase, which answers a conflict at that head too, so the conflict is
+        // recorded as told at that head as well (review finding): otherwise GitHub reporting the conflict a poll later, at
+        // the same head, would nudge the session a second time for the one rebase it was just told to do.
+        var moveTold = open.Where(f => BaseMoved(f) && tasksOf(f.Link).Any(t => !t.IsSnoozed))
+            .Select(f => KeyValuePair.Create(f.Link.Key, f.BaseHead));
         var nextState = state with
         {
             Seen = Updated(state.Seen, facts.Select(f => KeyValuePair.Create(f.Link.Key, f.State))),
-            Heads = Updated(state.Heads, open.Where(f => f.BaseHead.Length > 0)
+            // Every fact that carries a base head updates it, merged and closed ones too (review finding): a head fed by
+            // open pull requests alone went stale while none was open and nudged the next one that appeared.
+            Heads = Updated(state.Heads, facts.Where(f => f.BaseHead.Length > 0)
                 .Select(f => KeyValuePair.Create(HeadKey(f.Link, f.BaseRef), f.BaseHead))),
             ConflictNudged = Updated(state.ConflictNudged.Where(kv => !cleared.Contains(kv.Key)).ToDictionary(),
-                open.Where(f => f.Mergeable == Mergeable.Conflicting).Select(f => KeyValuePair.Create(f.Link.Key, f.BaseHead))),
+                open.Where(f => f.Mergeable == Mergeable.Conflicting).Select(f => KeyValuePair.Create(f.Link.Key, f.BaseHead))
+                    .Concat(moveTold)),
             Following = [.. state.Following, .. newMerges],
             LastSuccess = Updated(state.LastSuccess, [KeyValuePair.Create(repository.ToLowerInvariant(), now)]),
         };
@@ -156,8 +178,7 @@ public static class RepoWatch
     public static FollowStep Follow(RepoWatchState state, FollowedMerge merge, IReadOnlyList<RunFacts> runs, DateTimeOffset now)
     {
         var label = merge.Link.Label;
-        FollowStep Ends(string text, params RedRun[] red) =>
-            new(state with { Following = state.Following.Where(m => m != merge).ToArray() }, [new WatchNudge(merge.TaskId, text)], red);
+        FollowStep Ends(string text, params RedRun[] red) => EndsFollow(state, merge, text, red);
 
         // A failed run ends the follow at once, even while others still run: the session must look now, and the manager
         // hears of it too (RedRun). Only the first red run is reported, so one broken merge is one message.
@@ -173,10 +194,32 @@ public static class RepoWatch
         if (runs.Count == 0 && now - merge.Since >= NoRunsAfter)
             return Ends($"{label} merged and no workflow runs started on its merge commit; carry on as the briefing says.");
         // Runs that never finish must not be followed forever.
-        if (now - merge.Since >= GiveUpAfter)
-            return Ends($"Deskbar stopped following the runs on the merge commit of {label} after 3 hours; check them yourself.");
-        return new FollowStep(state, [], []);
+        return GiveUp(state, merge, now);
     }
+
+    // The end of a follow: the merge leaves Following and the session gets one nudge (and the red runs, if any).
+    static FollowStep EndsFollow(RepoWatchState state, FollowedMerge merge, string text, params RedRun[] red) =>
+        new(Unfollowed(state, merge), [new WatchNudge(merge.TaskId, text)], red);
+
+    static RepoWatchState Unfollowed(RepoWatchState state, FollowedMerge merge) =>
+        state with { Following = state.Following.Where(m => m != merge).ToArray() };
+
+    /// <summary>
+    /// The three-hour limit of a follow: after it the follow ends with the nudge that tells the session to check the runs
+    /// itself; before it nothing changes. Review finding (Deskbar task c8e6967d): a runs look that kept FAILING (gh signed
+    /// out, the commit gone) never reached <see cref="Follow"/>, so its limit never came and the merge was looked at, and
+    /// failed, every minute for ever. The poll calls this on a failed look, so the limit holds whatever gh says.
+    /// </summary>
+    public static FollowStep GiveUp(RepoWatchState state, FollowedMerge merge, DateTimeOffset now) =>
+        now - merge.Since >= GiveUpAfter
+            ? EndsFollow(state, merge, $"Deskbar stopped following the runs on the merge commit of {merge.Link.Label} after 3 hours; check them yourself.")
+            : new FollowStep(state, [], []);
+
+    /// <summary>
+    /// Ends a follow silently, no nudge: its task is no longer open or is Done, so there is nobody to tell (review finding,
+    /// Deskbar task c8e6967d: a follow nudge used to reach a Done or Closed task and resume its session for nothing).
+    /// </summary>
+    public static FollowStep Drop(RepoWatchState state, FollowedMerge merge) => new(Unfollowed(state, merge), [], []);
 
     static string Describe(string conclusion) => conclusion == "cancelled" ? "cancelled, a newer run took over" : conclusion;
 

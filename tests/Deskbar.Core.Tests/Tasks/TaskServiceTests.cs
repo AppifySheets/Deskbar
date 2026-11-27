@@ -336,8 +336,13 @@ public sealed class TaskServiceTests
     {
         var s = NewService();
         var task = s.Create("Watch", ws, Session("s1", clock)).Value;
-        s.AddPullRequest(task.Id, new PullRequestLink("O", "R", 1));
-        var state = RepoWatchState.Empty with { LastSuccess = new Dictionary<string, DateTimeOffset> { ["o/r"] = clock } };
+        var link = new PullRequestLink("O", "R", 1);
+        s.AddPullRequest(task.Id, link);
+        var state = RepoWatchState.Empty with
+        {
+            LastSuccess = new Dictionary<string, DateTimeOffset> { ["o/r"] = clock },
+            Seen = new Dictionary<string, PullRequestState> { [link.Key] = PullRequestState.Open },
+        };
 
         s.Watched(new RepoWatchStep(state, []));
         Assert.True(s.IsWatched(s.Board.Tasks.Single()));

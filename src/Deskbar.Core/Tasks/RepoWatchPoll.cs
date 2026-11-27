@@ -86,7 +86,14 @@ public sealed class RepoWatchPoll : IDisposable
                 () => looking = false);
     }
 
-    // One look per repository with a task in flight; each answer is applied on `scheduler` before the next look starts.
+    // One look per repository with a task in flight. The LOOKS run one after another (Concat waits for each look to
+    // finish before it starts the next), but the answers are applied through ObserveOn(scheduler), which only queues them:
+    // Concat does not wait for that hop, so the next look may start before the previous answer has been applied. That is
+    // harmless, since each answer is applied against whatever TaskService holds when its turn on `scheduler` comes.
+    // Review finding (Deskbar task c8e6967d): this comment used to say each answer was applied before the next look began.
+    //
+    // A Poll that throws for one repository is traced and the tick goes on with the rest (the same review finding): an
+    // exception inside the Select would otherwise end the whole observable and skip every repository after it.
     IObservable<Unit> Repositories() =>
         Observable.Defer(() => RepoWatch.InFlight(tasks.Board, tasks.Watch).ToObservable()
             .Select(group => Looked(group.Key, () => lookRepository(group.Key, [.. group.Value.Select(x => x.Link).DistinctBy(l => l.Key)]))
@@ -95,28 +102,59 @@ public sealed class RepoWatchPoll : IDisposable
             .ObserveOn(scheduler)
             .Select(x =>
             {
-                x.Answer
-                    .Tap(facts => tasks.Watched(RepoWatch.Poll(tasks.Watch, tasks.Board, x.Repository, facts, scheduler.Now)))
-                    .Tap(() => failing.Remove(x.Repository))
-                    .TapError(error => Failed(x.Repository, error));
+                try
+                {
+                    x.Answer
+                        .Tap(facts => tasks.Watched(RepoWatch.Poll(tasks.Watch, tasks.Board, x.Repository, facts, scheduler.Now)))
+                        .Tap(() => failing.Remove(x.Repository))
+                        .TapError(error => Failed(x.Repository, error));
+                }
+                catch (Exception e)
+                {
+                    trace?.Invoke($"repo watch: applying the look at {x.Repository} threw: {e.Message}");
+                }
                 return Unit.Default;
             }));
 
-    // One look per followed merge, on the memory as it stands after the repositories' answers.
+    // One look per followed merge, on the memory as it stands after the repositories' answers. A merge whose task is no
+    // longer open or is Done is dropped first, with no look and no nudge (RepoWatch.Drop). A look that FAILS still runs
+    // the three-hour limit (RepoWatch.GiveUp), so a follow whose runs cannot be read does not go on for ever. A merge that
+    // throws is traced and the rest still get their look, as for the repositories.
     IObservable<Unit> Merges() =>
-        tasks.Watch.Following.ToObservable()
-            .Select(merge => Looked(merge.Link.Key, () => lookRuns(merge.Link, merge.MergeCommit))
-                .Select(answer => (Merge: merge, Answer: answer)))
-            .Concat()
-            .ObserveOn(scheduler)
-            .Select(x =>
-            {
-                x.Answer
-                    .Tap(runs => tasks.Followed(RepoWatch.Follow(tasks.Watch, x.Merge, runs, scheduler.Now)))
-                    .Tap(() => failing.Remove(x.Merge.Link.Key))
-                    .TapError(error => Failed(x.Merge.Link.Key, error));
-                return Unit.Default;
-            });
+        Observable.Defer(() =>
+        {
+            Following().Where(m => !IsLive(m.TaskId)).ToList().ForEach(m => tasks.Followed(RepoWatch.Drop(tasks.Watch, m)));
+            return Following().ToObservable()
+                .Select(merge => Looked(merge.Link.Key, () => lookRuns(merge.Link, merge.MergeCommit))
+                    .Select(answer => (Merge: merge, Answer: answer)))
+                .Concat()
+                .ObserveOn(scheduler)
+                .Select(x =>
+                {
+                    try
+                    {
+                        x.Answer
+                            .Tap(runs => tasks.Followed(RepoWatch.Follow(tasks.Watch, x.Merge, runs, scheduler.Now)))
+                            .Tap(() => failing.Remove(x.Merge.Link.Key))
+                            .TapError(error =>
+                            {
+                                Failed(x.Merge.Link.Key, error);
+                                tasks.Followed(RepoWatch.GiveUp(tasks.Watch, x.Merge, scheduler.Now));
+                            });
+                    }
+                    catch (Exception e)
+                    {
+                        trace?.Invoke($"repo watch: applying the look at {x.Merge.Link.Key} threw: {e.Message}");
+                    }
+                    return Unit.Default;
+                });
+        });
+
+    IReadOnlyList<FollowedMerge> Following() => tasks.Watch.Following;
+
+    // Whether the task of a followed merge can still be told anything: it is open and not Done.
+    bool IsLive(Guid taskId) =>
+        tasks.Board.Tasks.Any(t => t.Id == taskId && t is { IsOpen: true } && t.Status != TaskStatus.Done);
 
     // Starts one gh look off the UI thread. A fault `look` did not turn into a Result would otherwise end the whole tick
     // and leave `looking` set (RunningChangeWatch's header), so it becomes a failed look here.
