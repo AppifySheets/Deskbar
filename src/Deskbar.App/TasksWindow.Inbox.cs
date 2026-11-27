@@ -127,6 +127,7 @@ public partial class TasksWindow
             InboxFooter.Child = null;
             EmptyText.Foreground = HeaderInk;
             inboxFollowed = null;
+            inboxRevealPending = null;
             LeaveInboxPage();
         }
     }
@@ -182,6 +183,7 @@ public partial class TasksWindow
         PaintAddPlace();
         PaintInboxSelection();
         ApplyInboxGlow();
+        ApplyInboxReveal(); // a terminal in front that switched the tab (TasksWindow.InboxPage.cs, InboxFollowsSelection)
         DrawInboxPage(view);
     }
 
