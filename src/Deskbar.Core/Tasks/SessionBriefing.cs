@@ -80,7 +80,7 @@ public static class SessionBriefing
     /// </summary>
     public static bool OnlyStopNudge(string prompt) =>
         IsStopNudge(prompt)
-        && !new[] { ManagerCommentOpening, UserCommentOpening, ReevaluateOpening, StalledOpening, DeployOpening, WatchNudgeOpening }
+        && !new[] { ManagerCommentOpening, UserCommentOpening, ReevaluateOpening, StalledOpening, DeployOpening, WatchNudgeOpening, DeployCheckOpening }
             .Any(opening => prompt.Contains(opening, StringComparison.Ordinal));
 
     // The first words of Deskbar's repository watch nudge (WatchNudge). Review finding on Deskbar task c8e6967d: the nudge
@@ -117,6 +117,9 @@ public static class SessionBriefing
             // Deskbar's repository watch nudge (task c8e6967d, review finding): delivered by a resume it is the prompt, and
             // counted as a reply it would set aside the question of a task waiting on the user.
             || text.StartsWith(WatchNudgeOpening, StringComparison.Ordinal)
+            // The deploy check (task 6a4104c0): counted as a reply it would set aside the very question it asks the
+            // session to check, and the session would then be asked to write it afresh after every check.
+            || text.StartsWith(DeployCheckOpening, StringComparison.Ordinal)
             // A Stop nudge the waiter delivered (task 8710ac09). It arrives wrapped in Claude Code's own notice, which
             // DeliveredByClaudeCode already catches; this holds even if that wrapping changes.
             || IsStopNudge(text)
@@ -248,6 +251,28 @@ public static class SessionBriefing
         + "- if it does not run yet: change nothing and go on with what you were doing; do not comment or ask about this message\n";
 
     const string StalledOpening = "Deskbar: no session has worked on your task ";
+
+    // The first words of the deploy check (DeployCheck), named so DeliveredByDeskbar and OnlyStopNudge cannot drift from it.
+    // Not "Deskbar: your task ", which RegenerateOpening already starts with.
+    const string DeployCheckOpening = "Deskbar, checking on the deploy your task waits on: ";
+
+    /// <summary>
+    /// What a session reads when its task waits on the user for a deploy and a check is due (task 6a4104c0, DeployWaits):
+    /// look whether the new version runs and, if it does, settle the question, report the deploy and finish. Delivered
+    /// on a comment's roads (the app's CommentWaker), quietly: it leaves no thread line, since it comes back on a schedule.
+    /// </summary>
+    // The session checks the evidence itself, as DeployNotice asks: Deskbar cannot see the app's servers. "Change nothing"
+    // when it does not run yet: a status line or a question asked again for every check would fill the task with noise,
+    // and a new question would restart the schedule from its first 15 minutes. It must not be read as the user's reply,
+    // or it would set aside the very question it checks (DeliveredByDeskbar).
+    public static string DeployCheck(TaskItem task) =>
+        $"{DeployCheckOpening}{task.Id.ToString()[..8]} \"{Cut(task.Title)}\".\n\n"
+        + (task.Question.HasValue ? $"Your question: \"{Cut(task.Question.Value, QuestionLength)}\"\n" : "")
+        + "The user may have deployed since you asked, and nothing tells you when. Check now where your change runs (the app's logs, health page or deploy output), not from memory, then:\n"
+        + $"- if it runs: {Shim} task answered --session <your session id>, then {Shim} task deployed - --session <your session id> with the evidence, then finish as your briefing says\n"
+        + $"- if your change needs no deploy after all: {Shim} task deployed - --session <your session id> with \"nothing to deploy\" and why\n"
+        + "- if it does not run yet: change nothing on the task, do not comment or ask again, and end your turn. Deskbar checks back later, less often each time.\n"
+        + "This is Deskbar, not the user: it settles no question by itself.\n";
 
     /// <summary>
     /// What a session reads when its task has been quiet for StalledTasks.After (task 8710ac09, StalledTasks' header):
@@ -575,11 +600,13 @@ public static class SessionBriefing
         // as complete, the second as a footnote, and "another app" did not say another than what. So they are one line
         // that gives the order, says done never comes before deployed, names the way out for a change nothing runs, and
         // spells out the case where a person makes the deploy (iam.ge: Petre presses redeploy in Portainer), which is an
-        // ask and a check on a schedule. Deskbar's own repository is the exception the first source in RunningChanges
+        // ask and a check. The check used to be the session's own "on a schedule", and a session that set none sat on its
+        // question for an hour after the user had deployed (task 6a4104c0); Deskbar now wakes it (DeployWaits), so the
+        // line says that instead. Deskbar's own repository is the exception the first source in RunningChanges
         // describes: the running build is the truth there and a report changes nothing, so its order ends at the release.
         // The room for it came from the ask line above, the done line and the rebase line below, and the "lean" line's
         // last sentence, which repeated what the ask and comment lines say; every rule they stated is still stated.
-        $"After the merge, finish in this order: released (if the repository has a release step), deployed, done. Deployed: the running app's own evidence shows the new version; report it with {Shim} task deployed - --session {sessionId}, the evidence on stdin, or \"nothing to deploy\" for a change nothing runs (docs, a library). In Deskbar's own repository done follows the release. When Deskbar watches, it nudges you when your merge commit's runs finish. Never mark done before deployed. When a person deploys, or only they can see the evidence, ask (\"Redeploy X\"), check on a schedule, and once it shows: task answered, task deployed, task done. Do not ask the user to test it: put what to try in the status line; they close the task once it works.",
+        $"After the merge, finish in this order: released (if the repository has a release step), deployed, done. Deployed: the running app's own evidence shows the new version; report it with {Shim} task deployed - --session {sessionId}, the evidence on stdin, or \"nothing to deploy\" for a change nothing runs (docs, a library). In Deskbar's own repository done follows the release. When Deskbar watches, it nudges you when your merge commit's runs finish. Never mark done before deployed. When a person deploys or only they see the evidence, ask (\"Redeploy X\"); Deskbar wakes you to check; once it shows: task answered, task deployed, task done. Do not ask the user to test it: put what to try in the status line; they close the task once it works.",
         // AN OPEN PULL REQUEST STAYS ON TOP OF ITS BASE (task 6e4dc116, Petre: "still conflicting; you should keep rebasing
         // open prs", then "make that a deskbar level change"). Other sessions merge all day, so a pull request waiting on
         // the user falls behind its base or starts to conflict while it waits, and the merge he comes to do is blocked or

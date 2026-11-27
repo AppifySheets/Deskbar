@@ -124,7 +124,17 @@ sealed class CommentWaker : IDisposable
             // another delivery. A nudge reaching a finished task resumes its session for nothing.
             StillDue = () => tasks.Board.Tasks.Any(t => t.Id == nudge.TaskId && t is { IsOpen: true } && t.Status != Deskbar.Core.Tasks.TaskStatus.Done),
         });
-        subscription = comments.Merge(reevaluations).Merge(stalled).Merge(regenerations).Merge(deploys).Merge(watched)
+        // A QUESTION WAITING ON A DEPLOY (task 6a4104c0, DeployWaits) rides them too: on a schedule that backs off from 15
+        // minutes to 2 hours, the idle session of a task waiting on the user for a deploy is woken to check whether its
+        // change runs yet (SessionBriefing.DeployCheck). Quiet like the watch's nudges, since it comes back on a schedule
+        // and a line per check would fill the thread. Dropped when the question was answered or the deploy reported while
+        // it waited behind another delivery.
+        var deployChecks = tasks.DeployChecks.Select(taskId => new Delivery(taskId, "a deploy check", SessionBriefing.DeployCheck)
+        {
+            Quiet = true,
+            StillDue = () => tasks.StillWaitsOnDeployCheck(taskId),
+        });
+        subscription = comments.Merge(reevaluations).Merge(stalled).Merge(regenerations).Merge(deploys).Merge(watched).Merge(deployChecks)
             .Where(_ => enabled())
             .Select(delivery => live.Take(1).SelectMany(listed => Observable.FromAsync(() => Deliver(delivery, listed)))
                 // One delivery that throws must not end the waker for the rest of the run (final review, I5): it is traced,
