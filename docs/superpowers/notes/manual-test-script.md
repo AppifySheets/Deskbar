@@ -1887,3 +1887,14 @@ CC1. In the tasks panel's thread, point at the inline code: the pointer is a han
 CC2. Click the fenced block: both lines paste, as written. Click "Pull and redeploy": the words paste without the quote marks.
 CC3. The same in the Inbox chat and in the task's own window. A link in the comment still opens on a click, and dragging from the plain text beside the code still selects text.
 CC4. A task line's question or status line with code in it: a click picks the task, as before, and copies nothing.
+
+## Claude Code's dialogs ask through the task
+
+Every dialog a session stops on becomes its task's question ([Deskbar task b310a649](https://deskbar.app/task#b310a649-1748-4bfe-b062-88378aa7e808)). Sessions keep their tasks, "Answer Claude's permission questions in Deskbar" off, a throwaway note joined by a `claude` session in a scratch folder, in Claude Code's default permission mode.
+
+SP1. Ask the session to run `mkdir sp1` and leave the dialog alone. After about six seconds the note moves to Waiting on you with "Allow Bash in the session: mkdir sp1". Answer Yes in the terminal: within about five seconds the note is back in progress.
+SP2. Same with `mkdir sp2`, but answer at once: the note never leaves in progress.
+SP3. `/plan`, ask for a small plan, and leave the approval dialog: "Approve the plan in the session: " and the plan's first line. Reject it with Esc: the question goes within about five seconds.
+SP4. Ask the session to use AskUserQuestion, then press Esc on the dialog (step 68a): the question goes within about five seconds.
+SP5. `task ask` something on the note from the session, then trigger a permission dialog: the asked question stays, and stays after the dialog is answered.
+SP6. The same as SP1 in a VS Code Claude tab: the question names the tool, and answering in VS Code clears it.
