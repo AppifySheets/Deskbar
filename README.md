@@ -335,7 +335,9 @@ There are three ways to add one:
 Only `http` and `https` links are accepted, and adding the same thing twice is refused.
 
 A click on a chip switches to its workspace and opens it there, so a link opens in a browser window on that
-desktop and a program's window lands in that workspace. Nothing opens on its own: switching to a workspace
+desktop and a program's window lands in that workspace. A link opens as a tab in the workspace's browser window
+when it has one; when it has none, Deskbar opens a new window of your default browser and puts it in that
+workspace, rather than leaving the link to a browser window on another desktop. Nothing opens on its own: switching to a workspace
 starts none of its bookmarks. A program or app chip is hidden while it has a window open anywhere, and comes
 back when the window closes. A program that lives only in the tray has no window, so its chip stays and a click
 starts it. A link chip is never hidden, since Deskbar sees windows and not tabs. Once you open a link, its

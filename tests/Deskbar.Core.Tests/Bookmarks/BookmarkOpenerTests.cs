@@ -300,4 +300,178 @@ public sealed class BookmarkOpenerTests
         Assert.False(opener.IsRunning(link));
         Assert.False(opener.IsLinkOpen(link));
     }
+
+    // --- A link whose workspace has no browser window opens in a new one there (Deskbar-reports #9) ------------------
+
+    const string Chrome = @"C:\Program Files\Google\Chrome\Application\chrome.exe";
+
+    // The opener the app builds: the default browser is known and can be started with arguments of Deskbar's own.
+    BookmarkOpener WithBrowser(Maybe<string> defaultBrowser) =>
+        new(manager, new BookmarkStarts(
+            Program: (_, _, _) => Result.Success<int?>(null),
+            App: _ => Result.Success(),
+            Link: url => { calls.Add($"link {url}"); return Result.Success(); },
+            Browser: launch =>
+            {
+                calls.Add($"browser {launch.Program} {string.Join(" ", launch.Arguments)}");
+                return refused.Contains(launch.Program) ? Result.Failure<int?>("no browser") : Result.Success<int?>(null);
+            },
+            DefaultBrowser: () => defaultBrowser), () => appIds);
+
+    // A Chrome window that is already open on a desktop, as the window list would report it.
+    void ChromeWindowOn(Guid desktop, int handle, string? commandLine = null)
+    {
+        var window = new WindowHandle(handle);
+        desktops.WindowPlacements[window] = desktop;
+        monitor.Subject.OnNext(new WindowEvent(WindowEventKind.Appeared,
+            new WindowInfo(window, 900, "chrome", Chrome, "Inbox - Google Chrome", commandLine)));
+    }
+
+    [Fact]
+    public void A_link_in_a_workspace_without_a_browser_window_opens_a_new_window_placed_there()
+    {
+        // The report: Chrome's only window is in another workspace (Home, the one in front).
+        ChromeWindowOn(home.DesktopId!.Value, 0x700);
+        var link = Added(work, Link("https://hr.local/"));
+
+        Assert.True(WithBrowser(Chrome).Open(work.Id, link.Id).IsSuccess);
+        Assert.Equal([$"browser {Chrome} --new-window https://hr.local/"], calls);
+
+        // The browser makes the window on whichever desktop it believes is in front, here still Home; the expectation
+        // puts it in the bookmark's workspace all the same.
+        var opened = new WindowHandle(0x701);
+        desktops.WindowPlacements[opened] = home.DesktopId!.Value;
+        monitor.Subject.OnNext(new WindowEvent(WindowEventKind.Appeared,
+            new WindowInfo(opened, 900, "chrome", Chrome, "HR - Google Chrome", null)));
+
+        Assert.Equal(work.DesktopId, desktops.WindowPlacements[opened]);
+        // The window that was already open stays where it was.
+        Assert.Equal(home.DesktopId, desktops.WindowPlacements[new WindowHandle(0x700)]);
+    }
+
+    [Fact]
+    public void A_link_in_a_workspace_with_a_browser_window_opens_as_a_tab_as_before()
+    {
+        ChromeWindowOn(work.DesktopId!.Value, 0x710);
+        var link = Added(work, Link("https://hr.local/"));
+
+        Assert.True(WithBrowser(Chrome).Open(work.Id, link.Id).IsSuccess);
+
+        Assert.Equal(["link https://hr.local/"], calls);
+    }
+
+    [Fact]
+    public void An_app_window_of_the_browser_is_not_somewhere_for_the_link()
+    {
+        // A PWA shares chrome.exe but takes no links, so the workspace still has no window for this one.
+        ChromeWindowOn(home.DesktopId!.Value, 0x721);
+        ChromeWindowOn(work.DesktopId!.Value, 0x720, commandLine: "chrome.exe --app-id=abcdef");
+        var link = Added(work, Link("https://hr.local/"));
+
+        WithBrowser(Chrome).Open(work.Id, link.Id);
+
+        Assert.Equal([$"browser {Chrome} --new-window https://hr.local/"], calls);
+    }
+
+    [Fact]
+    public void A_browser_with_no_window_anywhere_starts_cold_through_the_shell()
+    {
+        // Nothing to race with: the browser opens its first window after the switch. And no expectation, so a session it
+        // restores is not pulled into this workspace.
+        var link = Added(work, Link("https://hr.local/"));
+
+        WithBrowser(Chrome).Open(work.Id, link.Id);
+
+        Assert.Equal(["link https://hr.local/"], calls);
+        var restored = new WindowHandle(0x730);
+        desktops.WindowPlacements[restored] = home.DesktopId!.Value;
+        monitor.Subject.OnNext(new WindowEvent(WindowEventKind.Appeared,
+            new WindowInfo(restored, 900, "chrome", Chrome, "Restored - Google Chrome", null)));
+        Assert.Equal(home.DesktopId, desktops.WindowPlacements[restored]);
+    }
+
+    [Fact]
+    public void An_app_window_appearing_first_does_not_take_the_links_place()
+    {
+        ChromeWindowOn(home.DesktopId!.Value, 0x740);
+        var link = Added(work, Link("https://hr.local/"));
+        WithBrowser(Chrome).Open(work.Id, link.Id);
+
+        // A PWA of the same browser shows up first (an App chip opened in the same breath, say), then the link's window.
+        var pwa = new WindowHandle(0x741);
+        desktops.WindowPlacements[pwa] = home.DesktopId!.Value;
+        monitor.Subject.OnNext(new WindowEvent(WindowEventKind.Appeared,
+            new WindowInfo(pwa, 900, "chrome", Chrome, "Some PWA", "chrome.exe --app-id=abcdef")));
+        var opened = new WindowHandle(0x742);
+        desktops.WindowPlacements[opened] = home.DesktopId!.Value;
+        monitor.Subject.OnNext(new WindowEvent(WindowEventKind.Appeared,
+            new WindowInfo(opened, 900, "chrome", Chrome, "HR - Google Chrome", null)));
+
+        Assert.Equal(home.DesktopId, desktops.WindowPlacements[pwa]);
+        Assert.Equal(work.DesktopId, desktops.WindowPlacements[opened]);
+    }
+
+    [Fact]
+    public void Open_all_puts_every_link_in_one_new_window()
+    {
+        ChromeWindowOn(home.DesktopId!.Value, 0x750);
+        Added(work, Link("https://a.local/"));
+        Added(work, Link("https://b.local/"));
+
+        Assert.True(WithBrowser(Chrome).OpenAll(work.Id).IsSuccess);
+
+        Assert.Equal([$"browser {Chrome} --new-window https://a.local/ https://b.local/"], calls);
+    }
+
+    [Fact]
+    public void Open_all_names_every_link_when_the_one_window_fails()
+    {
+        ChromeWindowOn(home.DesktopId!.Value, 0x760);
+        var a = Added(work, Link("https://a.local/"));
+        var b = Added(work, Link("https://b.local/"));
+        refused.Add(Chrome);
+
+        var result = WithBrowser(Chrome).OpenAll(work.Id);
+
+        Assert.Equal($"{a.Name}: no browser{Environment.NewLine}{b.Name}: no browser", result.Error);
+        Assert.Single(calls);
+    }
+
+    [Fact]
+    public void Without_a_known_default_browser_the_link_opens_as_before()
+    {
+        var link = Added(work, Link("https://hr.local/"));
+
+        WithBrowser(Maybe<string>.None).Open(work.Id, link.Id);
+
+        Assert.Equal(["link https://hr.local/"], calls);
+    }
+
+    [Fact]
+    public void A_default_browser_not_known_to_take_new_window_opens_the_link_as_before()
+    {
+        var link = Added(work, Link("https://hr.local/"));
+
+        WithBrowser(@"C:\Apps\SomeBrowser\somebrowser.exe").Open(work.Id, link.Id);
+
+        Assert.Equal(["link https://hr.local/"], calls);
+    }
+
+    [Fact]
+    public void A_failed_new_window_start_names_the_bookmark_and_withdraws_the_expectation()
+    {
+        ChromeWindowOn(home.DesktopId!.Value, 0x770);
+        var link = Added(work, Link("https://hr.local/"));
+        refused.Add(Chrome);
+
+        var result = WithBrowser(Chrome).Open(work.Id, link.Id);
+        Assert.Equal($"{link.Name}: no browser", result.Error);
+
+        // Nothing is waiting for the window any more: the next Chrome window stays where it opens.
+        var later = new WindowHandle(0x771);
+        desktops.WindowPlacements[later] = home.DesktopId!.Value;
+        monitor.Subject.OnNext(new WindowEvent(WindowEventKind.Appeared,
+            new WindowInfo(later, 900, "chrome", Chrome, "Later - Google Chrome", null)));
+        Assert.Equal(home.DesktopId, desktops.WindowPlacements[later]);
+    }
 }

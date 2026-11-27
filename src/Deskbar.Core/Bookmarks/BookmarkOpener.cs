@@ -16,10 +16,16 @@ namespace Deskbar.Core.Bookmarks;
 //   App      (AppUserModelID) a packaged app, started through the shell.
 //   Link     (url) opened through ProgramStarter the way `deskbar.cmd open` does (ruling P14), not through
 //            App.OpenUrl, so the same code path serves the bar and the pipe.
+//   Browser  (program launch) starts the default browser itself, for a link that must open in a NEW window
+//            (StartLink); the app hands ProgramStarter.Start. Null (the tests that do not ask about it) means every
+//            link opens through Link.
+//   DefaultBrowser  the exe the user's https association opens, or nothing when it cannot be read. Null as above.
 public sealed record BookmarkStarts(
     Func<string, string, string?, Result<int?>> Program,
     Func<string, Result> App,
-    Func<string, Result> Link);
+    Func<string, Result> Link,
+    Func<ProgramLaunch, Result<int?>>? Browser = null,
+    Func<Maybe<string>>? DefaultBrowser = null);
 
 // OPENING A BOOKMARK, and "Open all". Everything here runs only from an explicit call: switching to a workspace
 // opens nothing ("no launching" stands; a bookmark is a button, never an autostart).
@@ -113,7 +119,16 @@ public sealed class BookmarkOpener
             var switched = showing.Count == 0 || IsCurrent(workspaceId) ? Result.Success() : manager.Switch(workspaceId);
             if (switched.IsFailure) return Result.Failure<IReadOnlyList<Bookmark>>(switched.Error);
 
-            var outcomes = showing.Select(b => (Bookmark: b, Outcome: Start(workspaceId, b))).ToList();
+            // The links go together when they need a new window (StartLink): one window with every link as a tab, started
+            // once, its outcome given to each link by name. Otherwise each bookmark starts on its own, in order.
+            var links = showing.Where(b => b.Kind == BookmarkKind.Link).ToList();
+            var together = links.Count > 1
+                ? NewWindow(workspaceId).Map(browser => StartInNewWindow(workspaceId, browser, links))
+                : Maybe<Result>.None;
+            var outcomes = showing.Select(b => (Bookmark: b,
+                Outcome: b.Kind == BookmarkKind.Link && together.HasValue
+                    ? together.Value.MapError(e => Named(b, e))
+                    : Start(workspaceId, b))).ToList();
             var failures = outcomes.Where(o => o.Outcome.IsFailure).Select(o => o.Outcome.Error).ToList();
             return failures.Count > 0
                 ? Result.Failure<IReadOnlyList<Bookmark>>(string.Join(Environment.NewLine, failures))
@@ -163,10 +178,91 @@ public sealed class BookmarkOpener
     // The watch begins BEFORE the link is handed to the browser, not after: the start goes through the shell, which can
     // pump this thread's messages, and the browser's foreground change could otherwise be delivered before anyone
     // listens. A start that fails ends the watch at once, so nothing is noted for a link that never opened.
-    Result StartLink(Guid workspaceId, Bookmark bookmark)
+    //
+    // WHERE THE LINK GOES (Deskbar-reports #9: "bookmark in ჰრ opened a browser window / chrome in Distribution").
+    // Handed to the shell, a link goes wherever the browser decides. Chromium means to pick a window on the desktop in
+    // front (its docs/windows_virtual_desktop_handling.md), asking Windows which desktop that is when the link arrives,
+    // and a click from another workspace has only just asked for the switch. The report's dump shows Chrome's one
+    // window on Distribution, in front, with ჰრ (the chip's workspace, which had no browser window at all) as the
+    // workspace the user had just left. Why Chrome chose that window was not measured: the reporter's trace was off,
+    // and the machine was a remote session on Windows Server, where either the timing or Chrome's own desktop check
+    // could be what failed. The answer below holds for both.
+    //
+    // So when the default browser has a window that would take the link (LinkWindowWatch.Receives: a plain window of
+    // the default browser, not a PWA) somewhere, but none in the bookmark's workspace, the link opens in a NEW window of
+    // the default browser (NewWindow, StartInNewWindow), and an expectation puts the browser's next plain window in
+    // this workspace whichever desktop it appeared on. That holds however late the switch lands and whatever the
+    // browser believes is in front. It is how `deskbar.cmd open` treats a session in a background workspace
+    // (RemoteControl.InNewWindow), with two differences that matter on a click (code review): the expectation refuses
+    // an app window of the same exe, and it is never tied to the started process's id.
+    //
+    // Everywhere else the link opens through the shell, as before:
+    //   * the workspace has such a window: the link opens as a tab in it, which is what the chip has always done there;
+    //     a new window each time would be the wrong answer for the common case;
+    //   * the browser has no such window anywhere (not running, say): it starts cold, after the switch, so its window
+    //     opens here anyway, and a cold start restoring a whole session must not have those windows herded into this
+    //     workspace by an expectation;
+    //   * the default browser is not known to take `--new-window` (LinkWindowWatch.IsBrowser: Chromium or Firefox), or
+    //     cannot be read.
+    Result StartLink(Guid workspaceId, Bookmark bookmark) =>
+        NewWindow(workspaceId) is { HasValue: true } browser
+            ? StartInNewWindow(workspaceId, browser.Value, [bookmark])
+            : StartThroughShell(workspaceId, bookmark);
+
+    Result StartThroughShell(Guid workspaceId, Bookmark bookmark)
     {
         var watch = WatchFor(workspaceId, bookmark);
         return starts.Link(bookmark.Target).TapError(_ => watch.Dispose());
+    }
+
+    // How to start the default browser in a new window, when a link for this workspace should open in one (see
+    // StartLink). Nothing when the app handed no way to start it (the tests that do not ask about it).
+    Maybe<(string Exe, Func<ProgramLaunch, Result<int?>> Launch)> NewWindow(Guid workspaceId) =>
+        starts.Browser is { } launch
+            ? (starts.DefaultBrowser?.Invoke() ?? Maybe<string>.None)
+                .Where(exe => LinkWindowWatch.IsBrowser(Path.GetFileNameWithoutExtension(exe)))
+                .Where(exe => LinkWindowsOf(exe) is { Count: > 0 } windows
+                              && !windows.Any(w => manager.WorkspaceOf(w.Handle).Map(on => on.Id == workspaceId).GetValueOrDefault(false)))
+                .Map(exe => (exe, launch))
+            : Maybe<(string, Func<ProgramLaunch, Result<int?>>)>.None;
+
+    // The open windows that would take a link opened through the shell: plain windows (not PWAs) of the default
+    // browser. The process name is checked first, so the app-id read is asked only of browser windows, and the desktop
+    // lookup (cross-process COM, cached by the placement cache) only of these. KnownWindows is a copy, so a message
+    // pumped during either call cannot change what is being walked.
+    IReadOnlyList<WindowInfo> LinkWindowsOf(string browserExe) =>
+        manager.KnownWindows
+            .Where(w => LinkWindowWatch.IsBrowser(w.ProcessName))
+            .Where(w => LinkWindowWatch.Receives(w.ProcessName, DetailsOf(w), Maybe.From(browserExe)))
+            .ToList();
+
+    BrowserWindowDetails DetailsOf(WindowInfo window) =>
+        new(window.ProcessPath, windowAppId(window.Handle), window.CommandLine);
+
+    // One new window holding every link given, as tabs (Chromium and Firefox open each extra address as a tab of the
+    // new window), so "Open all" opens one window, not one per link. Every link's watch looks for that one window.
+    //
+    // The expectation takes the first NEW window of the browser's exe that is not an app window: a PWA started in the
+    // same breath (an App chip opened by the same "Open all") must not take the link's place. It lives as long as an
+    // app start's (AppExpectationLifetime), not a program's 30 s, so a browser that never opens the window does not
+    // leave a window the user opens by hand later to be pulled in here. Registered before the start, withdrawn if the
+    // start fails, as StartIn does; never given the process id, which on a direct start is the short-lived chrome.exe
+    // that hands the request to the copy already running.
+    Result StartInNewWindow(Guid workspaceId, (string Exe, Func<ProgramLaunch, Result<int?>> Launch) browser, IReadOnlyList<Bookmark> links)
+    {
+        var watches = links.Select(link => WatchFor(workspaceId, link)).ToList();
+        var name = Path.GetFileNameWithoutExtension(browser.Exe);
+        var expectation = manager.ExpectAppWindow($"{name} new window for {links.Count} link(s)",
+            window => string.Equals(window.ProcessName, name, StringComparison.OrdinalIgnoreCase)
+                      && !LinkWindowWatch.IsAppWindow(DetailsOf(window)),
+            workspaceId);
+        return browser.Launch(new ProgramLaunch(browser.Exe, ["--new-window", .. links.Select(link => link.Target)], null))
+            .Bind(_ => Result.Success())
+            .TapError(_ =>
+            {
+                manager.CancelExpectation(expectation);
+                watches.ForEach(watch => watch.Dispose());
+            });
     }
 
     // Notes the window the link went into, if the watch finds one and the bookmark still exists by then (it can be

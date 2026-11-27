@@ -1818,7 +1818,11 @@ public partial class App : Application
                 Program: (exe, arguments, folder) => Deskbar.Windows.Processes.DetachedLauncher.StartVerbatim(exe, arguments, folder ?? Path.GetDirectoryName(exe))
                     .MapError(error => $"Could not start {Path.GetFileName(exe)}: {error}"),
                 App: appId => Deskbar.Windows.Shell.ShellTaskbarPins.LaunchApp(appId, appId),
-                Link: url => ProgramStarter.Start(new ProgramLaunch(url, [], null))),
+                Link: url => ProgramStarter.Start(new ProgramLaunch(url, [], null)),
+                // A link whose workspace has no browser window opens in a new window of the default browser, placed
+                // in that workspace (BookmarkOpener.StartLink, Deskbar-reports #9).
+                Browser: ProgramStarter.Start,
+                DefaultBrowser: DefaultBrowser.Exe),
             () => floatingBar?.OpenAppIds ?? new HashSet<string>(),
             LinkWindowSource.For(monitor, desktops, Dispatcher, ClickTrace.On ? ClickTrace.Write : null),
             // A new window's AppUserModelID, so an App bookmark that remembers a screen knows its window when it appears
