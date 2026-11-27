@@ -2607,7 +2607,7 @@ public partial class TasksWindow : Window
         // A one-line Deskbar event carries its time at its end ("Resumed. · 09:08"); a longer one has it on a line below.
         var timeInBody = isEvent && split.Images.Count == 0 && ChatThread.TimeFitsInline(split.Text);
         var document = MarkdownBlocks.Render(timeInBody ? $"{split.Text.Trim()} · {comment.Time}" : split.Text, LinkOpener(taskId));
-        document.FontSize = isEvent ? 10.5 : 11.5;
+        document.FontSize = FullBubbles ? (isEvent ? InboxLook.ChatSmall : InboxLook.ChatText) : (isEvent ? 10.5 : 11.5);
         // The question waiting on Petre (task 968c2216) reads as it did on the line: orange, semibold.
         document.Foreground = isEvent ? HeaderInk : comment.AsksNow ? Orange : Ink;
         if (comment.AsksNow) document.FontWeight = FontWeights.SemiBold;

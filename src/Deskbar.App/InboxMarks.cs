@@ -231,6 +231,10 @@ internal static class InboxLook
     // edge and its caption), and a brown fill beside it is the orange-on-brown mix the redesign set out to remove.
     internal static readonly Brush AskFill = Frozen(0x16, 0x1A, 0x22);
 
+    // The owner asked for bigger chat text on build 5: reading text on the Inbox chat page, and its small grey text.
+    internal const double ChatText = 13.5;
+    internal const double ChatSmall = 11.5;
+
     static Brush Frozen(byte r, byte g, byte b)
     {
         var brush = new SolidColorBrush(Color.FromRgb(r, g, b));

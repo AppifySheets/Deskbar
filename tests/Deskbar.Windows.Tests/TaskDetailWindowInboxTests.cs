@@ -259,10 +259,10 @@ public partial class TaskDetailWindowInboxTests
         static string TextOf(RichTextBox b) => new System.Windows.Documents.TextRange(b.Document.ContentStart, b.Document.ContentEnd).Text;
         var boxes = Inside(window).OfType<RichTextBox>().Where(b => b.IsReadOnly).ToList();
         var long14 = boxes.First(b => TextOf(b).Contains("Line 14 of"));
-        Assert.Equal(FullBubble.GuardHeight(11.5), long14.MaxHeight);
+        Assert.Equal(FullBubble.GuardHeight(InboxLook.ChatText), long14.MaxHeight);
         Assert.True(long14.ExtentHeight < long14.MaxHeight);
         var monster = boxes.First(b => TextOf(b).Contains("Monster 80 of"));
-        Assert.Equal(FullBubble.GuardHeight(11.5), monster.MaxHeight);
+        Assert.Equal(FullBubble.GuardHeight(InboxLook.ChatText), monster.MaxHeight);
         Assert.DoesNotContain(Inside(window).OfType<FrameworkElement>(), e => AutomationProperties.GetName(e) is "Resize comment" or "Show more" && e.Visibility == Visibility.Visible);
 
         // Only the monster has a visible "Show all" (the other comment is under the guard, so its button is collapsed).
