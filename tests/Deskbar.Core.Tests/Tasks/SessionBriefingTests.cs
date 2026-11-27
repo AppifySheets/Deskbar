@@ -104,7 +104,8 @@ public sealed class SessionBriefingTests
         var text = SessionBriefing.Start(Start(), Task("Tasks board"), []);
 
         Assert.Contains("Merge [PR 512](https://github.com/owner/repo/pull/512): CI is green", text);
-        Assert.Contains("when the next move is the user's (a pull request to merge, something to try live before it merges, a deploy, a decision)", text);
+        // Task a87891ca: a deploy is no longer among the asks; it is a hand-over (`task ask - --deploy`, below).
+        Assert.Contains("when the next move is the user's (a pull request to merge, something to try live before it merges, a decision)", text);
         Assert.Contains("not while a pull request of yours waits to be merged", text);
         // Task 59d0aac1: the ask's follow-up stops at answered; what comes after the merge is the one ordered rule.
         Assert.Contains($"Once they have done it, run deskbar.cmd task answered --session {Sid})", text);
@@ -140,7 +141,7 @@ public sealed class SessionBriefingTests
         Assert.Contains("After the merge, finish in this order: released (if the repository has a release step), deployed, done.", text);
         Assert.Contains("Never mark done before deployed.", text);
         Assert.Contains("\"nothing to deploy\" for a change nothing runs", text);
-        Assert.Contains("When a person deploys or only they see the evidence, ask (\"Redeploy X\"); Deskbar wakes you to check; once it shows: task answered, task deployed, task done.", text);
+        Assert.Contains("When a person deploys or only they see the evidence: task ask - --deploy (\"Redeploy X\"); Deskbar wakes you to check; once it shows: task deployed, task done.", text);
         Assert.Contains("In Deskbar's own repository done follows the release.", text);
         // A task with no pull request (research, an answer) still has a rule for done; a merged change waits for the order.
         Assert.Contains("(when the work is finished and nothing waits on the user, so not while a pull request of yours waits to be merged; for a merged change, after the order above;", text);
@@ -154,8 +155,10 @@ public sealed class SessionBriefingTests
         Assert.Contains("the work is finished and deployed (or has nothing to deploy)", SessionBriefing.StalledNudge(Task("Tasks board")));
         Assert.Contains("not reported deployed", SessionBriefing.Reevaluate(Task("Tasks board")));
         Assert.Contains("if the work is finished and deployed", SessionBriefing.Regenerate(Task("Tasks board")));
-        // A deploy a person makes is the user's next move, an ask, in the stalled nudge as in the briefing.
-        Assert.Contains("(a pull request to merge, something to try, a deploy, a decision): run", SessionBriefing.StalledNudge(Task("Tasks board")));
+        // A deploy a person makes is the user's next move, a hand-over (task a87891ca), in the stalled nudge as in the briefing.
+        Assert.Contains("(a pull request to merge, something to try, a decision): run", SessionBriefing.StalledNudge(Task("Tasks board")));
+        Assert.Contains("task ask - --deploy --session <your session id>", SessionBriefing.StalledNudge(Task("Tasks board")));
+        Assert.Contains("task ask - --deploy", SessionBriefing.Reevaluate(Task("Tasks board")));
     }
 
     // Task 8710ac09: both Stop nudges say they come from Deskbar and are recognised in the prompt a waiter's wake starts,

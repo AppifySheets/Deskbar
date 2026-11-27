@@ -105,8 +105,9 @@ internal static class TaskStatusMarks
     // The chip's word. "Waiting" rather than "Waiting on you": the column is narrow, and the line's orange tint and its
     // group's caption already say on whom.
     // A Done task's change not running yet: "Merged", or "PR open" while one of its pull requests is still open.
-    static string ChipText(TaskStatus status, DeliveryStage delivery = DeliveryStage.None) =>
-        status == TaskStatus.WaitingOnYou ? "Waiting"
+    // A deploy hand-over (task a87891ca, awaitsDeploy): "Deploy", on the Waiting chip outlined, as a merged Done chip is.
+    static string ChipText(TaskStatus status, DeliveryStage delivery = DeliveryStage.None, bool awaitsDeploy = false) =>
+        status == TaskStatus.WaitingOnYou ? awaitsDeploy ? "Deploy" : "Waiting"
         : Shipping(status, delivery) ? ShippingWord(delivery)
         : TaskViews.StatusName(status);
 
@@ -132,14 +133,16 @@ internal static class TaskStatusMarks
     /// <remarks>
     /// A Done task whose change is not running yet (task 8470d176, <paramref name="delivery"/> Open or Merged) gets the
     /// Done chip OUTLINED, with "Merged" (or "PR open" while a pull request is still open) in place of "Done", the way the
-    /// tick turns into a ring; the filled Done chip once it runs.
+    /// tick turns into a ring; the filled Done chip once it runs. A task waiting on a deploy hand-over (task a87891ca,
+    /// <paramref name="awaitsDeploy"/>) gets the Waiting chip outlined the same way, with "Deploy": merged, not running,
+    /// and the next move his (mockup https://claude.ai/artifact/BVJ6WrgNAoeBso1GJ2S5CV).
     /// </remarks>
-    internal static FrameworkElement? Chip(TaskStatus status, DeliveryStage delivery = DeliveryStage.None) =>
+    internal static FrameworkElement? Chip(TaskStatus status, DeliveryStage delivery = DeliveryStage.None, bool awaitsDeploy = false) =>
         ChipColours.TryGetValue(status, out var colours)
             ? new Border
             {
                 Tag = ChipTag,
-                Background = Shipping(status, delivery) ? Brushes.Transparent : colours.Fill ?? Brushes.Transparent,
+                Background = Shipping(status, delivery) || (awaitsDeploy && status == TaskStatus.WaitingOnYou) ? Brushes.Transparent : colours.Fill ?? Brushes.Transparent,
                 BorderBrush = colours.Edge,
                 BorderThickness = new Thickness(1),
                 CornerRadius = new CornerRadius(8),
@@ -149,7 +152,7 @@ internal static class TaskStatusMarks
                 IsHitTestVisible = false,
                 // Trimmed rather than cut at the chip's edge when its column is narrower than the word (the tasks panel's
                 // resizable status column, task 3df2d28f); the line's tooltip names the status in full.
-                Child = new TextBlock { Text = ChipText(status, delivery), FontSize = 10, Foreground = colours.Ink, TextTrimming = TextTrimming.CharacterEllipsis },
+                Child = new TextBlock { Text = ChipText(status, delivery, awaitsDeploy), FontSize = 10, Foreground = colours.Ink, TextTrimming = TextTrimming.CharacterEllipsis },
             }
             : null;
 }

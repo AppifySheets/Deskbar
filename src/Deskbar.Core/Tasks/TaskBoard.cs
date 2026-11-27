@@ -218,7 +218,9 @@ public sealed record TaskBoard(IReadOnlyList<TaskItem> Tasks)
     /// Refused with a blank note (the note is the claim's evidence, and a report without one says nothing) and on a task
     /// with no recorded pull request (there is nothing a deploy could be of). When every one is reported already it
     /// returns this same board, so a session reporting twice saves nothing. Only Deployed and UpdatedAt change: the line
-    /// keeps its status and place, and Raised does not move, since a deploy asks nothing of Petre. Any status takes it,
+    /// keeps its status and place, and Raised does not move, since a deploy asks nothing of Petre. The one exception is a
+    /// task waiting on a deploy hand-over (TaskItem.AwaitsDeploy, task a87891ca): the report settles it (HandOverSettled),
+    /// even when every pull request was already reported. Any status takes it,
     /// as AddPullRequest does: a deploy often follows a task Petre has already closed, and the record stays true.
     /// </summary>
     public Result<TaskBoard> MarkDeployed(Guid id, string note, DateTimeOffset now) =>
@@ -228,13 +230,35 @@ public sealed record TaskBoard(IReadOnlyList<TaskItem> Tasks)
             // had none, or `task pr --deploy` moved it over) would otherwise be refused.
             .Bind(text => Lookup(id).Bind(task => task.PullRequests.Concat(task.DeployPullRequests).ToArray() is not { Length: > 0 } recorded
                 ? Result.Failure<TaskBoard>(NoPullRequestToDeploy)
-                : recorded.Where(p => task.Deployed.All(d => d.Key != p.Key)).DistinctBy(p => p.Key).ToArray() is { Length: > 0 } fresh
-                    ? Replaced(task with
+                : recorded.Where(p => task.Deployed.All(d => d.Key != p.Key)).DistinctBy(p => p.Key).ToArray() is var fresh
+                  && (fresh.Length > 0 || task.AwaitsDeploy || HandOverAside(task))
+                    ? Replaced(HandOverSettled(task with
                     {
                         Deployed = [.. task.Deployed, .. fresh.Select(p => new DeployedPullRequest(p.Key, now, text.Trim()))],
                         UpdatedAt = now,
-                    })
+                    }, now))
                     : Result.Success(this)));
+
+    // A DEPLOY REPORT SETTLES A DEPLOY HAND-OVER (task a87891ca, TaskItem.QuestionIsDeploy). The hand-over asked the user
+    // for exactly this deploy, so once it is reported (by the session, or by the user's own "Mark deployed") nothing waits
+    // on him: the task goes back to In progress and to Claude, as SettleQuestion does after a merge, and the session
+    // finishes with `task done`. A report on a task waiting on a plain question changes only the deploy record, as
+    // before: that question may be about something else. The hand-over's question comment is settled with it, the way a
+    // merge settles a merge ask; no Deskbar line is added, since the deploy record already says what happened.
+    //
+    // A hand-over SET ASIDE while the session works after the user's reply ("redeployed, check it") is settled too
+    // (review finding): the session verifies and reports, as its briefing says, without a `task answered`, and the
+    // set-aside question would otherwise come back (RepliedTasks.Restore) on a deploy already recorded.
+    static bool HandOverAside(TaskItem task) =>
+        task is { IsOpen: true, Status: TaskStatus.InProgress, QuestionIsDeploy: true, QuestionSetAside.HasValue: true };
+
+    static TaskItem HandOverSettled(TaskItem task, DateTimeOffset now) =>
+        HandOverAside(task) ? task with { QuestionSetAside = Maybe<string>.None }
+        : !task.AwaitsDeploy ? task : task with
+        {
+            Status = TaskStatus.InProgress, Question = Maybe<string>.None, Assignee = Assignee.Claude,
+            Comments = task.Comments.Select(c => c.Asks && c.Settled.HasNoValue ? c with { Settled = now } : c).ToArray(),
+        };
 
     /// <summary>
     /// A session needs a decision: the task waits on Petre, shows the question and moves to the top.
@@ -255,14 +279,18 @@ public sealed record TaskBoard(IReadOnlyList<TaskItem> Tasks)
     // that gives none leaves the question with none, even one that repeats a question already open with buttons, since
     // the latest ask is what the session offers now. They are checked first, so a bad list refuses the whole ask and
     // nothing is stored, not even the question. Every other way the question goes takes the options with it (OptionsKept).
+    //
+    // A DEPLOY HAND-OVER (task a87891ca, <paramref name="deploy"/>, `task ask - --deploy`) is asked the same way and only
+    // marked (TaskItem.QuestionIsDeploy), like the options: each ask says afresh whether it is one, so a later plain
+    // question never inherits the mark, and a hand-over asked again after being set aside keeps it only if the ask says so.
     public Result<TaskBoard> Ask(Guid id, string question, DateTimeOffset now, Maybe<(string By, Guid CommentId)> written = default,
-        IReadOnlyList<string>? options = null) =>
+        IReadOnlyList<string>? options = null, bool deploy = false) =>
         AnswerOptions.Check(options).Bind(given => CleanText(question, "An ask needs a question").Bind(q =>
             ChangeOpen(id, t => WithQuestionComment(t, IsSetAside(t, q.Trim())
                 // The session asks again the very question Deskbar set aside (task 8bd18246): the question never stopped
                 // holding, so it comes back as it was (Restored) rather than as a new one on top of the block.
-                ? Restored(t, now) with { QuestionOptions = given }
-                : t with { Status = TaskStatus.WaitingOnYou, Question = q.Trim(), QuestionOptions = given, Raised = now, UpdatedAt = now, Assignee = Assignee.Me, WaitingSince = now, Pin = TopPin(TaskStatus.WaitingOnYou, id) },
+                ? Restored(t, now) with { QuestionOptions = given, QuestionIsDeploy = deploy }
+                : t with { Status = TaskStatus.WaitingOnYou, Question = q.Trim(), QuestionOptions = given, QuestionIsDeploy = deploy, Raised = now, UpdatedAt = now, Assignee = Assignee.Me, WaitingSince = now, Pin = TopPin(TaskStatus.WaitingOnYou, id) },
                 q.Trim(), written, now))));
 
     /// <summary>Why an answer button does nothing once its options are no longer the open question's (see <see cref="OptionText"/>).</summary>
@@ -1637,7 +1665,14 @@ public sealed record TaskBoard(IReadOnlyList<TaskItem> Tasks)
     // change has to remember them. Only Ask sets them, together with the question, so a new question never inherits the
     // last one's. A task without options comes back as this same instance.
     static TaskItem OptionsKept(TaskItem task) =>
-        task.Question.HasNoValue && task.QuestionOptions.Count > 0 ? task with { QuestionOptions = [] } : task;
+        HandOverKept(task.Question.HasNoValue && task.QuestionOptions.Count > 0 ? task with { QuestionOptions = [] } : task);
+
+    // THE DEPLOY HAND-OVER MARK (TaskItem.QuestionIsDeploy, task a87891ca) lives as long as its question, here for the
+    // same reason as the options above, with one difference: it survives the question being SET ASIDE (RepliedTasks),
+    // because the set-aside question comes back as it was (Restored), still a hand-over. Only a task with neither a
+    // question nor a set-aside one drops it. A task without the mark comes back as this same instance.
+    static TaskItem HandOverKept(TaskItem task) =>
+        task.QuestionIsDeploy && task.Question.HasNoValue && task.QuestionSetAside.HasNoValue ? task with { QuestionIsDeploy = false } : task;
 
     // The handed-back mark (StalledTasks) means "Deskbar gave this to Petre because it went quiet". Once anything else
     // moves the assignee or the status (an ask, done, close, a status by hand, a session joining), that is no longer why

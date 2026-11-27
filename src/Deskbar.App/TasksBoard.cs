@@ -1607,6 +1607,8 @@ public sealed partial class TasksBoard : IDisposable
         Description = task.Description,
         // The answers the open question offers (TaskItem.QuestionOptions), for the buttons under it; empty for none.
         QuestionOptions = task.QuestionOptions,
+        // Whether it waits on a deploy hand-over rather than a question (task a87891ca): the mark, the header and the chip.
+        AwaitsDeploy = task.AwaitsDeploy,
         Important = task.Important,
         Urgent = task.Urgent,
         SnoozedUntil = task.SnoozedUntil.Map(until => (DateTimeOffset?)until).GetValueOrDefault(),
@@ -1939,6 +1941,9 @@ internal sealed record TaskRowView(Guid Id, string Title, string Detail, TaskSta
     /// <see cref="TasksBoard.AnswerWithOption"/>, which refuses a click on a list that is no longer the task's.
     /// </summary>
     public IReadOnlyList<string> QuestionOptions { get; init; } = [];
+
+    /// <summary>Whether the task waits on the user for a deploy hand-over, not a question (TaskItem.AwaitsDeploy, task a87891ca).</summary>
+    public bool AwaitsDeploy { get; init; }
 
     /// <summary>The task's two flags (Task 12), drawn as the line's toggles.</summary>
     public bool Important { get; init; }

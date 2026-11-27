@@ -1919,3 +1919,12 @@ PW1. Have the session write five comments, then `task ask` and `task answered` a
 PW2. Keep the page open and have the session settle one more comment (`task comment-settle <id>`): it dims where it is, and nothing above it disappears.
 PW3. Back to the List and open the same note's thread: there the settled comments fold behind "N settled comments" and only the latest three show, as before.
 PW4. Open the page of a task with one or two comments: the chat starts right under the header, the empty room is under it, and the comment box is at the bottom edge. Add comments until it is taller than the page: it scrolls and stays at the newest.
+
+## A deploy hand-over is not a question
+
+A session whose change is merged and built, with only your deploy left, hands it over with `task ask - --deploy` ([Deskbar task a87891ca](https://deskbar.app/task#a87891ca-2dea-422a-b40e-a3a534144380)). A throwaway note joined by a session, with any merged pull request registered on it (`task pr <url> --session <id>`).
+
+DH1. From the session, `task ask - --deploy` with "Redeploy the test stack". The note goes to the top of Waiting on you with the waiting-for-deploy mark, not the speech bubble, and the List's chip says "Deploy", outlined.
+DH2. `task deployed -` with "seen in the logs" from the session: the note leaves Waiting on you and goes back to in progress at once, with no `task answered`.
+DH3. A plain `task ask` whose text says "redeploy": the command's reply carries a `handOverHint`.
+DH4. Ask with `--deploy`, reply in the comment box so the question is set aside, and let the session stop: its nudge names `task ask - --deploy`, and a question restored without a new ask still shows the deploy mark.

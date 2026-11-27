@@ -379,7 +379,7 @@ public partial class TasksWindow
     static InboxMark MarkOfRow(TaskRowView row) =>
         row.Status == TaskStatus.Closed ? InboxMark.Closed
         : row.SnoozedUntil is not null ? InboxMark.Snoozed
-        : DeployWait.Waits(row.Status, row.Delivery.Shipping, row.QuestionOptions.Count) ? InboxMark.WaitsForDeploy
+        : DeployWait.Waits(row.Status, row.Delivery.Shipping, row.QuestionOptions.Count, row.AwaitsDeploy) ? InboxMark.WaitsForDeploy
         : row.Status == TaskStatus.WaitingOnYou ? InboxMark.Asks
         : row.Status == TaskStatus.Done ? row.Delivery.Shipping ? InboxMark.FinishedNotRunning : InboxMark.Finished
         : !row.Claudes ? InboxMark.Note

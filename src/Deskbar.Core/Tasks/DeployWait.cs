@@ -25,8 +25,11 @@ namespace Deskbar.Core.Tasks;
 public static class DeployWait
 {
     /// <summary>Whether a task shows as waiting for its deploy rather than asking a question (see the header).</summary>
-    public static bool Waits(TaskStatus status, bool merged, int answerOptions) =>
-        status == TaskStatus.WaitingOnYou && merged && answerOptions == 0;
+    // THE SESSION CAN SAY SO (task a87891ca, `task ask - --deploy`, TaskItem.QuestionIsDeploy): a hand-over the session
+    // marked waits for the deploy whatever Deskbar has measured, since the session knows its change is merged and built
+    // even while Deskbar is still asking GitHub or its pull request is not recorded. Unmarked asks are read as above.
+    public static bool Waits(TaskStatus status, bool merged, int answerOptions, bool handOver = false) =>
+        status == TaskStatus.WaitingOnYou && (handOver || (merged && answerOptions == 0));
 
     /// <summary>
     /// Whether the change is built, as far as the task's deploy pull requests tell: none when the task has none, true once

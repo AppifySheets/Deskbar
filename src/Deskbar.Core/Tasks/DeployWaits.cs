@@ -13,8 +13,9 @@ namespace Deskbar.Core.Tasks;
 // tell the session to "check on a schedule", in one clause of a long bullet. The user picked the fix: Deskbar wakes the
 // session to check, rather than trusting each session to remember.
 //
-// WHO IS WOKEN. An open task waiting on the user (Waiting on you) whose question mentions a deploy ("Redeploy the portal",
-// the briefing's own example; "deploy" matches redeploy, deployed and deploying too), that DeployNotices.WaitingOn says
+// WHO IS WOKEN. An open task waiting on the user (Waiting on you) whose question is a deploy hand-over (`task ask
+// --deploy`, task a87891ca) or mentions a deploy ("Redeploy the portal"; "deploy" matches redeploy, deployed and
+// deploying too), that DeployNotices.WaitingOn says
 // still waits on one (a session, not Done, Closed, snoozed or between runs, and a pull request outside this build's
 // repository that GitHub says is merged with no deploy reported), with a LIVE session and none of its sessions busy. Both
 // halves are needed: the question alone would wake a task whose change is reported already, and the merged pull request
@@ -70,7 +71,9 @@ public static class DeployWaits
     public static bool WaitsOnDeploy(TaskItem task, IReadOnlyDictionary<string, PullRequestArrival> pullRequests,
         Func<PullRequestLink, bool> selfChecked) =>
         task is { IsOpen: true, Status: TaskStatus.WaitingOnYou, Question.HasValue: true }
-        && task.Question.Value.Contains("deploy", StringComparison.OrdinalIgnoreCase)
+        // A deploy hand-over (`task ask --deploy`, task a87891ca) says so itself; the word stays for sessions that ask a
+        // deploy as a plain question (an older briefing, or one asked together with a merge).
+        && (task.QuestionIsDeploy || task.Question.Value.Contains("deploy", StringComparison.OrdinalIgnoreCase))
         && task.Sessions.Any(s => s.IsLive)
         && DeployNotices.WaitingOn(task,
             task.PullRequests.Select(p => DeployNotices.RepositoryOf(p.Key)).Distinct().ToList(),
