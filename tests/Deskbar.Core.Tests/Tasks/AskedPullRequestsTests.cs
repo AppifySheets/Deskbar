@@ -432,6 +432,7 @@ public sealed class AskedPullRequestsTests
     [InlineData("Review and merge [Deskbar #504](" + Url504 + "), the tailnet policy")]
     [InlineData("Mark it ready and merge " + Url504)]
     [InlineData("merge " + Url504 + " once you have read it")]
+    [InlineData("Merge [Deskbar #504](" + Url504 + "?tab=files): CI is green")]
     public void A_question_opening_with_merge_and_linking_a_pull_request_asks_a_merge(string question) =>
         Assert.True(AskedPullRequests.AsksMerge(question));
 
@@ -444,6 +445,9 @@ public sealed class AskedPullRequestsTests
     [InlineData("Merge the branch locally and try it")]
     [InlineData("Merge [the mockup](https://claude.ai/artifact/x) into the plan")]
     [InlineData("Start a session on task 18758102: releases are blocked since [Deskbar #504](" + Url504 + ")")]
+    [InlineData("Merge conflicts on [Deskbar #504](" + Url504 + "): keep mine or theirs?")]
+    [InlineData("Merge or close [Deskbar #504](" + Url504 + ")? It is superseded")]
+    [InlineData("Should I squash and merge [Deskbar #504](" + Url504 + ")?")]
     public void Any_other_question_does_not_ask_a_merge(string question) =>
         Assert.False(AskedPullRequests.AsksMerge(question));
 
