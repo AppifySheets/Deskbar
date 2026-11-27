@@ -2137,7 +2137,9 @@ public partial class FloatingBar
             : languageTarget != 0 && OnCurrentDesktop(languageTarget) ? languageTarget : 0;
         taskAddHere = manager.CurrentWorkspaceId;
         // A subtask box keeps its parent's workspace, empty or not (final review, finding 2): the subtask lands with its parent.
-        // A workspace picked by hand stays too; any other target is the workspace in front, text in the box or not (task 701c71a8).
+        // A workspace picked by hand stays too, but only for a note still in the box; any other target is the workspace
+        // in front, text in the box or not (task 701c71a8). ChooseTaskTarget sets its pick after this call, so it lands.
+        ForgetPickOnEmptyBox();
         if (TaskAddTargetFollowsFront) taskAddTarget = taskAddHere;
         taskTyping = true;
         PaintTaskChips();
@@ -2173,7 +2175,14 @@ public partial class FloatingBar
             PaintTaskChips();
             if (handBack) GiveTaskKeyboardBack();
         }
-        else taskReturnTo = 0;
+        else
+        {
+            taskReturnTo = 0;
+            // A click elsewhere with nothing in the box drops a pick made for it, so the idle box follows the workspace
+            // in front again instead of filing a note typed hours later on another desktop to the old pick (review of
+            // task 701c71a8, finding 1).
+            ForgetPickOnEmptyBox();
+        }
         PaintAddRow();
         UpdateFade();
     }
@@ -2210,6 +2219,13 @@ public partial class FloatingBar
     // Whether the add box's target is only the default and so follows the workspace in front: nothing was picked from
     // the chip's menu for this note, and it is not a subtask (a subtask lands with its parent; final review, finding 2).
     bool TaskAddTargetFollowsFront => !taskAddTargetPicked && taskAddParent.HasNoValue;
+
+    // A pick belongs to the note it was made for. With no text, no pasted picture and no subtask parent there is no such
+    // note any more, so the pick is dropped and the target goes back to following the workspace in front.
+    void ForgetPickOnEmptyBox()
+    {
+        if (taskAddBox?.Text.Length is null or 0 && taskAddImages.Count == 0 && taskAddParent.HasNoValue) taskAddTargetPicked = false;
+    }
 
     // The window noted when the box opened gets the foreground back, the way the language switcher hands it back
     // (HandForegroundTo), so Petre's next keystrokes land where he was typing rather than in a bar with nothing to
