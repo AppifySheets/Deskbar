@@ -338,6 +338,25 @@ public sealed class TaskServiceTests
         Assert.Equal(waiting, Assert.Single(noticed).TaskId);
         Assert.Contains("was reported deployed by \"Activity chips\"", s.Board.Tasks.Single(t => t.Id == waiting).Comments.Last().Markdown);
         Assert.Empty(s.Board.Tasks.Single(t => t.Id == reporting).Comments);
+        Assert.True(s.StillWaitsOnDeploy(noticed[0]));
+
+        // A third task confirms the same deploy ten minutes later: the waiting task was told within the hour, so it is not
+        // told again, and once it reports the deploy itself it no longer waits.
+        var confirming = s.Create("Portal search", ws, Session("s3", clock)).Value.Id;
+        var third = new PullRequestLink("AppifySheets", "portal", 303);
+        s.AddPullRequest(confirming, third);
+        s.Arrived(new RunningBuild("AppifySheets", "Deskbar", "2.6.70", "0123456789abcdef0123456789abcdef01234567"),
+            new Dictionary<string, PullRequestArrival>
+            {
+                [mine.Key] = new(PullRequestState.Merged, false),
+                [theirs.Key] = new(PullRequestState.Merged, false),
+                [third.Key] = new(PullRequestState.Merged, false),
+            });
+        clock = clock.AddMinutes(10);
+        Assert.True(s.MarkDeployed(confirming, "same deploy").IsSuccess);
+        Assert.Single(noticed);
+        Assert.True(s.MarkDeployed(waiting, "mine runs too").IsSuccess);
+        Assert.False(s.StillWaitsOnDeploy(noticed[0]));
     }
 
     // Task 8710ac09: the session answers the ask with the status line it already had ("still waiting on CI"). The board

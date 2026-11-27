@@ -94,8 +94,8 @@ sealed class CommentWaker : IDisposable
             task => SessionBriefing.DeployNotice(task, notice))
         {
             Unsent = "No session of this task could be reached to tell it about that deploy.",
-            // Dropped when the task finished or was closed while this waited behind another delivery.
-            StillDue = () => tasks.Board.Tasks.Any(t => t.Id == notice.TaskId && t.Status is not (Core.Tasks.TaskStatus.Done or Core.Tasks.TaskStatus.Closed)),
+            // Dropped when the task reported the deploy, finished or was put aside while this waited behind another delivery.
+            StillDue = () => tasks.StillWaitsOnDeploy(notice),
         });
         subscription = comments.Merge(reevaluations).Merge(stalled).Merge(regenerations).Merge(deploys)
             .Where(_ => enabled())

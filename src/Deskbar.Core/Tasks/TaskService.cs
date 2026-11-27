@@ -133,17 +133,39 @@ public sealed class TaskService(ITaskStore store, Func<DateTimeOffset> now, Func
     {
         var before = Board;
         return ApplyIfChanged(Board.MarkDeployed(id, note, now()))
-            .Tap(() => DeployNotices.For(before, Board, id, arrivals).ToList().ForEach(notice =>
+            .Tap(() =>
             {
-                Note(notice.TaskId, DeployNotices.ThreadLine(notice));
-                deployNoticed.OnNext(notice);
-            }));
+                var at = now();
+                DeployNotices.NotToldRecently(DeployNotices.For(before, Board, id, arrivals, SelfChecked), deployTold, at).ToList().ForEach(notice =>
+                {
+                    deployTold = notice.Repositories.Aggregate(deployTold, (told, repository) => told.SetItem((notice.TaskId, repository), at));
+                    Note(notice.TaskId, DeployNotices.ThreadLine(notice));
+                    deployNoticed.OnNext(notice);
+                });
+            });
     }
+
+    // When each task was last told about each repository's deploy (DeployNotices.Quiet). In memory only: a deploy
+    // report needs the running Deskbar (it arrives through its pipe or its menu), so a restart loses nothing worth
+    // keeping beyond, at worst, one repeated notice.
+    ImmutableDictionary<(Guid Task, string Repository), DateTimeOffset> deployTold =
+        ImmutableDictionary<(Guid Task, string Repository), DateTimeOffset>.Empty;
+
+    // A pull request of the repository this build comes from: decided by the running build, never by a report.
+    bool SelfChecked(PullRequestLink link) => runningBuild.HasValue && runningBuild.Value.Builds(link);
 
     readonly Subject<DeployNotice> deployNoticed = new();
 
     /// <summary>A waiting task told about a deploy another task reported (MarkDeployed), after its thread line is saved.</summary>
     public IObservable<DeployNotice> DeployNoticed => deployNoticed;
+
+    /// <summary>
+    /// Whether the noticed task still waits on a deploy of one of the notice's repositories (DeployNotices.WaitingOn): the
+    /// app's CommentWaker asks just before delivery, so a notice that waited in its queue is dropped once moot.
+    /// </summary>
+    public bool StillWaitsOnDeploy(DeployNotice notice) =>
+        Board.Tasks.FirstOrDefault(t => t.Id == notice.TaskId) is { } task
+        && DeployNotices.WaitingOn(task, notice.Repositories, arrivals, SelfChecked).Count > 0;
 
     /// <summary>The note "Mark deployed" on a line's menu records (TaskService.MarkDeployed).</summary>
     public const string MarkedByHand = "Marked deployed by hand";

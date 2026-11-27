@@ -32,13 +32,16 @@ public sealed class DeployNoticesTests
     static IReadOnlyDictionary<string, PullRequestArrival> Merged(params PullRequestLink[] links) =>
         links.ToDictionary(l => l.Key, _ => new PullRequestArrival(PullRequestState.Merged, false));
 
+    // No pull request here belongs to the build Deskbar runs, unless a test says otherwise.
+    static bool NotSelf(PullRequestLink link) => false;
+
     // The board before the report and after it, where the reporter's pull requests were stamped by TaskBoard.MarkDeployed.
     static IReadOnlyList<DeployNotice> Report(TaskItem reportingTask, TaskItem other, IReadOnlyDictionary<string, PullRequestArrival> states,
         string note = Evidence)
     {
         var before = new TaskBoard([reportingTask, other]);
         var after = before.MarkDeployed(reporter, note, t0).Value;
-        return DeployNotices.For(before, after, reporter, states);
+        return DeployNotices.For(before, after, reporter, states, NotSelf);
     }
 
     [Fact]
@@ -96,7 +99,7 @@ public sealed class DeployNoticesTests
     {
         var board = new TaskBoard([Reporter(), Waiting(portal2)]).MarkDeployed(reporter, Evidence, t0).Value;
         var again = board.MarkDeployed(reporter, "again", t0.AddMinutes(5)).Value;
-        Assert.Empty(DeployNotices.For(board, again, reporter, Merged(portal1, portal2)));
+        Assert.Empty(DeployNotices.For(board, again, reporter, Merged(portal1, portal2), NotSelf));
     }
 
     // One report stamps every pull request of the task: a waiting task is told once, with the repositories it waits on.
@@ -106,6 +109,55 @@ public sealed class DeployNoticesTests
         var both = Task(id1, "Portal accounts", TaskStatus.InProgress, portal2, new PullRequestLink("AppifySheets", "api", 8));
         var notice = Assert.Single(Report(Reporter(portal1, api1), both, Merged(portal1, portal2, api1, new PullRequestLink("AppifySheets", "api", 8))));
         Assert.Equal(["appifysheets/api", "appifysheets/portal"], notice.Repositories);
+    }
+
+    // An open pull request stamped beside a merged one cannot have shipped, so its repository's tasks are not told.
+    [Fact]
+    public void A_stamped_pull_request_that_is_not_merged_makes_no_deploy()
+    {
+        var api2 = new PullRequestLink("AppifySheets", "api", 8);
+        var states = new Dictionary<string, PullRequestArrival>
+        {
+            [portal1.Key] = new(PullRequestState.Merged, false),
+            [api1.Key] = new(PullRequestState.Open, false),
+            [api2.Key] = new(PullRequestState.Merged, false),
+        };
+        Assert.Empty(Report(Reporter(portal1, api1), Task(id1, "Api keys", TaskStatus.InProgress, api2), states));
+    }
+
+    // Deskbar's own pull requests are decided by the running build, never by a report: they neither make a deploy nor wait
+    // on one, or one report would wake every open Deskbar task and each of their reports the rest.
+    [Fact]
+    public void The_running_builds_repository_neither_deploys_nor_waits()
+    {
+        var mine = new PullRequestLink("AppifySheets", "Deskbar", 654);
+        var theirs = new PullRequestLink("AppifySheets", "Deskbar", 655);
+        bool deskbar(PullRequestLink link) => link.Repo == "Deskbar";
+        var before = new TaskBoard([Reporter(mine), Task(id1, "Bar blink", TaskStatus.InProgress, theirs)]);
+        var after = before.MarkDeployed(reporter, "2.6.62 runs", t0).Value;
+        Assert.Empty(DeployNotices.For(before, after, reporter, Merged(mine, theirs), deskbar));
+        Assert.Empty(DeployNotices.WaitingOn(after.Tasks.Single(t => t.Id == id1), ["appifysheets/deskbar"], Merged(theirs), deskbar));
+    }
+
+    // One deploy confirmed by several tasks in turn tells each waiting task once an hour per repository.
+    [Fact]
+    public void A_task_told_within_the_hour_is_not_told_again()
+    {
+        var notice = new DeployNotice(id1, ["appifysheets/api", "appifysheets/portal"], reporter, "Activity chips", Evidence);
+        var told = new Dictionary<(Guid, string), DateTimeOffset> { [(id1, "appifysheets/portal")] = t0 };
+        Assert.Equal(["appifysheets/api"], Assert.Single(DeployNotices.NotToldRecently([notice], told, t0.AddMinutes(59))).Repositories);
+        Assert.Equal(2, Assert.Single(DeployNotices.NotToldRecently([notice], told, t0.AddMinutes(60))).Repositories.Count);
+        var onlyPortal = notice with { Repositories = ["appifysheets/portal"] };
+        Assert.Empty(DeployNotices.NotToldRecently([onlyPortal], told, t0.AddMinutes(10)));
+    }
+
+    // Asked again at delivery: a task that reported the deploy meanwhile no longer waits.
+    [Fact]
+    public void A_task_that_reported_meanwhile_no_longer_waits()
+    {
+        var reported = Waiting(portal2) with { Deployed = [new DeployedPullRequest(portal2.Key, t0, "seen")] };
+        Assert.Equal(["appifysheets/portal"], DeployNotices.WaitingOn(Waiting(portal2), ["appifysheets/portal"], Merged(portal2), NotSelf));
+        Assert.Empty(DeployNotices.WaitingOn(reported, ["appifysheets/portal"], Merged(portal2), NotSelf));
     }
 
     [Fact]
