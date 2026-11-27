@@ -48,11 +48,16 @@ public static class AskedPullRequests
     /// <summary>
     /// The open tasks waiting on Petre whose question links at least one pull request, with those links: what the watch
     /// asks GitHub about. A snoozed task counts too, since it still waits and settling it is still right.
+    /// The task's own DEPLOY pull requests are left out (task 1565789d, TaskItem.DeployPullRequests): a question that links
+    /// one goes on to ask for the deploy that follows its merge ("merge stacks #309, then press Pull and redeploy"), so its
+    /// merge must not settle the question and take the redeploy off Petre's list. RepoWatch tells the session of that merge
+    /// instead, and the session answers the question once the new version runs.
     /// </summary>
     public static IReadOnlyList<(TaskItem Task, IReadOnlyList<PullRequestLink> Links)> Watched(TaskBoard board) =>
         board.Tasks
             .Where(t => t.IsOpen && t.Status == TaskStatus.WaitingOnYou && t.Question.HasValue)
-            .Select(t => (Task: t, Links: In(t.Question.Value)))
+            .Select(t => (Task: t, Links: (IReadOnlyList<PullRequestLink>)In(t.Question.Value)
+                .Where(l => t.DeployPullRequests.All(d => d.Key != l.Key)).ToArray()))
             .Where(x => x.Links.Count > 0)
             .ToArray();
 

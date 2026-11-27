@@ -24,6 +24,7 @@ namespace Deskbar.Core.Control;
 //   task order <id> top|end|<n>
 //   task assign <id> me|claude
 //   task pr <id> <url>                       (task e7aa49b1: a pull request on the task, found by its number in search)
+//   task pr <id> <url> --deploy              (task 1565789d: the task's deploy pull request, watched for its merge)
 //   task describe <id> <markdown>|-          (Ruling 58: his own description under the title)
 //   task comment-edit <comment-id> <markdown>|-   (his own comment only; a session's is refused)
 //   task goal <id> <goal-id>|none     (the goals planner; needs the goal service, RemoteControl.Goals.cs)
@@ -122,7 +123,7 @@ public sealed partial class RemoteControl
             ["ask", var question] when byManager => ManagerAsked(ManagerQuestion.Ask(Maybe.From(manager.State.Manager), question, service.Now)),
             ["answered"] when byManager => ManagerAsked(ManagerQuestion.Answered(Maybe.From(manager.State.Manager))),
             // A session's form typed without its --session: it cannot know whose task is meant.
-            ["done"] or ["answered"] or ["join", _] or ["new", _] or ["status-line", _] or ["ask", _] or ["later", _] or ["subtask", ..] or ["pr", _]
+            ["done"] or ["answered"] or ["join", _] or ["new", _] or ["status-line", _] or ["ask", _] or ["later", _] or ["subtask", ..] or ["pr", _] or ["pr", _, "--deploy"]
                 or ["duplicate-of", _] or ["relate", _] or ["unrelate", _] or ["deployed", _] =>
                 ControlReply.Fail($"task {args[0]} is a session's form and needs --session <id>"),
             // In the bar's order, the Done tasks' full discs before their hollow rings (task a1debf34, TaskBoard.Pinned).
@@ -179,6 +180,10 @@ public sealed partial class RemoteControl
             // A pull request on a task by hand (task e7aa49b1, TaskPullRequests): the link is read before the task is looked up.
             ["pr", var id, var url] => AskedPullRequests.In(url) is [var link]
                 ? TaskChange(service, id, t => service.AddPullRequest(t.Id, link))
+                : ControlReply.Fail($"'{url}' is not a GitHub pull request link (https://github.com/<owner>/<repo>/pull/<n>)"),
+            // The task's deploy pull request by hand (task 1565789d): the manager's or the user's way to register one.
+            ["pr", var id, var url, "--deploy"] => AskedPullRequests.In(url) is [var link]
+                ? TaskChange(service, id, t => service.AddDeployPullRequest(t.Id, link))
                 : ControlReply.Fail($"'{url}' is not a GitHub pull request link (https://github.com/<owner>/<repo>/pull/<n>)"),
             // A deploy seen running, by the task (task 8470d176, phase 2): the remote twin of "Mark deployed" on a line's
             // menu, and the user's or the manager's way to report one a session could not (TaskBoard.MarkDeployed).
@@ -439,6 +444,9 @@ public sealed partial class RemoteControl
         snoozedUntil = task.SnoozedUntil.HasValue ? (DateTimeOffset?)task.SnoozedUntil.Value : null,
         // The pull requests its sessions opened (task e7aa49b1), as URLs, oldest first.
         pullRequests = task.PullRequests.Select(p => p.Url).ToArray(),
+        // Its deploy pull requests (task 1565789d), as URLs, oldest first, and the keys of those whose end the session was told.
+        deployPullRequests = task.DeployPullRequests.Select(p => p.Url).ToArray(),
+        deployPullRequestsEnded = task.DeployPullRequestsEnded,
         // The deploys reported running (task 8470d176, phase 2; `task deployed`), each as {key, at, note}, oldest first;
         // key is the pull request's owner/repo#number in lower case.
         deployed = task.Deployed.Select(d => new { key = d.Key, at = d.At, note = d.Note }).ToArray(),

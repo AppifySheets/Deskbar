@@ -287,12 +287,36 @@ public sealed partial class RemoteControl
     // learned. Only the session form: the manager's own ask answers through ManagerAsked and carries none.
     public const string OptionsHint = "A short question can offer up to 4 one-click answers: end the text with a line --options, then one answer per line (40 characters each).";
 
-    ControlReply AskedReply(TaskItem task, bool gaveOptions)
+    ControlReply AskedReply(TaskBoard board, TaskItem task, bool gaveOptions)
     {
-        if (gaveOptions) return Success(Describe(task));
+        var deploy = DeployHint(board, task);
+        if (gaveOptions && deploy.HasNoValue) return Success(Describe(task));
         var json = System.Text.Json.JsonSerializer.SerializeToNode(Describe(task), Json)!.AsObject();
-        json["hint"] = OptionsHint;
+        if (!gaveOptions) json["hint"] = OptionsHint;
+        if (deploy.HasValue) json["deployHint"] = deploy.Value;
         return Success(json);
+    }
+
+    // THE ASK'S REPLY ALSO TEACHES THE DEPLOY PULL REQUEST (task 1565789d), for the same reason as the options: the
+    // briefing has no room. The case it is for: an iam.ge session asked Petre to merge personalized-health-stacks #309, a
+    // pull request its release build had opened in the stacks repository, then to redeploy. Nothing had recorded #309 on
+    // the task (the `gh pr create` hook only sees the session's own), so Deskbar never watched it and the session, which
+    // set no check of its own, sat idle after the deploy. So when an ask links a GitHub pull request that is on neither of
+    // the task's lists, and that no other task records as its own work ("merge #600 so I can rebase"), the reply says how
+    // to register it. A registration is the session's call, never a guess from the question's text: a question can link
+    // a pull request it only mentions.
+    static Maybe<string> DeployHint(TaskBoard board, TaskItem task)
+    {
+        var unrecorded = AskedPullRequests.In(task.Question.GetValueOrDefault(""))
+            .Where(l => task.PullRequests.All(p => p.Key != l.Key) && task.DeployPullRequests.All(p => p.Key != l.Key)
+                && !board.Tasks.Any(t => t.Id != task.Id && t.PullRequests.Any(p => p.Key == l.Key)))
+            .ToArray();
+        return unrecorded.Length == 0
+            ? Maybe<string>.None
+            : $"Your question links {string.Join(", ", unrecorded.Select(l => l.Url))}, which your task does not record. "
+              + "If one is a pull request you did not open whose merge comes before a deploy (a release's pull request in a stacks repository), "
+              + "run deskbar.cmd task pr <url> --deploy --session <your session id>: Deskbar then tells you when it is merged, even if it already is. "
+              + "One that is your own work: deskbar.cmd task pr <url> --session <your session id>.";
     }
 
     // Whatever the ask answered, the session hears nothing. A refusal from RequestAttention is the app's concern (it
@@ -425,6 +449,9 @@ public sealed partial class RemoteControl
     //   task family --session <sid>             the family and linked tasks of the session's own task (subtasks spec)
 //   task pr <url> --session <sid>           a pull request the session opened some other way than `gh pr create`, on its
 //                                           own task (task e7aa49b1; the hook records `gh pr create` by itself)
+//   task pr <url> --deploy --session <sid>  a DEPLOY pull request of the session's own task, one it did not open (CI's
+//                                           release pull request in a stacks repository): watched for its merge, which is
+//                                           told to the session once and settles no question (task 1565789d)
     //   task deployed <note> --session <sid>    the session's own task's change was seen running where its app is deployed,
     //                                           the note the evidence (task 8470d176, phase 2; TaskBoard.MarkDeployed)
     //   task duplicate-of <id> --session <sid>  the session's own task closes as a duplicate of <id> (task links spec)
@@ -479,7 +506,7 @@ public sealed partial class RemoteControl
             ["ask", var text] => AnswerOptions.Split(text)
                 .Bind(asked => Own().Bind(t => service.Ask(t.Id, asked.Question, session, asked.Options).Map(() => (t.Id, Gave: asked.Options.Count > 0))))
                 .Tap(_ => Attention(folder))
-                .Match(asked => AskedReply(service.Board.Tasks.First(x => x.Id == asked.Id), asked.Gave), ControlReply.Fail),
+                .Match(asked => AskedReply(service.Board, service.Board.Tasks.First(x => x.Id == asked.Id), asked.Gave), ControlReply.Fail),
             ["done"] => Changed(Own().Bind(t => service.MarkDone(t.Id).Map(() => t))),
             // Ruling 49: the session says its question is settled (the user's reply answered it, or the session settled it
             // itself). Waiting on you goes back to In progress, the question goes and the workspace's blink and glow stop.
@@ -499,6 +526,10 @@ public sealed partial class RemoteControl
             // before the task is touched.
             ["pr", var url] => AskedPullRequests.In(url) is [var link]
                 ? Changed(Own().Bind(t => service.AddPullRequest(t.Id, link).Map(() => t)))
+                : ControlReply.Fail($"'{url}' is not a GitHub pull request link (https://github.com/<owner>/<repo>/pull/<n>)"),
+            // A deploy pull request (task 1565789d, TaskItem.DeployPullRequests), checked the same way.
+            ["pr", var url, "--deploy"] => AskedPullRequests.In(url) is [var link]
+                ? Changed(Own().Bind(t => service.AddDeployPullRequest(t.Id, link).Map(() => t)))
                 : ControlReply.Fail($"'{url}' is not a GitHub pull request link (https://github.com/<owner>/<repo>/pull/<n>)"),
             // A DEPLOY SEEN RUNNING (task 8470d176, phase 2; RunningChanges' header). The session checked the deployed
             // app's logs, health page or deploy output for the version carrying its merge, and the note is what it saw

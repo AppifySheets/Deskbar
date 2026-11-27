@@ -39,17 +39,34 @@ public static class RepoWatch
     // ends flight because Done comes LAST in the briefing's order (merged, released, deployed, done); a snoozed task
     // still counts, its pull request falls behind main all the same.
     static IEnumerable<PullRequestLink> FlightLinks(TaskItem task, RepoWatchState state) =>
-        task is { IsOpen: true, IsClaudes: true, IsBetweenRuns: false } && task.Status != TaskStatus.Done
+        Flying(task)
             ? RunningChanges.Watched(task).Where(l => !(state.Seen.TryGetValue(l.Key, out var seen) && seen == PullRequestState.Closed))
             : [];
 
+    static bool Flying(TaskItem task) =>
+        task is { IsOpen: true, IsClaudes: true, IsBetweenRuns: false } && task.Status != TaskStatus.Done;
+
+    // A TASK'S DEPLOY PULL REQUESTS (task 1565789d, TaskItem.DeployPullRequests) fly on the same terms as its own, until
+    // the session has been told how they ended (DeployPullRequestsEnded, saved on the task). They are asked about in the
+    // same query as the task's own pull requests of that repository, but only one rule applies to them (Poll's DEPLOY
+    // ENDED): no rebase or conflict nudge, since the branch is CI's, and no following of the merge commit's runs, since
+    // what matters after this merge is the deploy, which the session watches. Kept out of FlightLinks, so Covers and
+    // Watched (the prompt line's "Deskbar watches your pull request") still speak of the task's own pull requests only.
+    static IEnumerable<PullRequestLink> DeployFlightLinks(TaskItem task) =>
+        Flying(task)
+            ? task.DeployPullRequests.Where(l => !task.DeployPullRequestsEnded.Contains(l.Key))
+            : [];
+
+    // Whether the link is one of the task's deploy pull requests rather than its own work.
+    static bool IsDeployOf(TaskItem task, PullRequestLink link) => task.DeployPullRequests.Any(p => p.Key == link.Key);
+
     /// <summary>
-    /// The tasks in flight (see FlightLinks), each with its pull request, grouped by "owner/repo" lower case: the
-    /// repositories to ask about, and for each the pull requests to put in one query.
+    /// The tasks in flight (see FlightLinks and DeployFlightLinks), each with its pull request, grouped by "owner/repo"
+    /// lower case: the repositories to ask about, and for each the pull requests to put in one query.
     /// </summary>
     public static IReadOnlyDictionary<string, IReadOnlyList<(TaskItem Task, PullRequestLink Link)>> InFlight(TaskBoard board, RepoWatchState state) =>
         board.Tasks
-            .SelectMany(task => FlightLinks(task, state).Select(link => (Task: task, Link: link)))
+            .SelectMany(task => FlightLinks(task, state).Concat(DeployFlightLinks(task)).DistinctBy(l => l.Key).Select(link => (Task: task, Link: link)))
             .GroupBy(x => RepositoryOf(x.Link))
             .ToDictionary(g => g.Key, g => (IReadOnlyList<(TaskItem Task, PullRequestLink Link)>)g.ToArray());
 
@@ -87,6 +104,18 @@ public static class RepoWatch
     public static RepoWatchStep Poll(RepoWatchState state, TaskBoard board, string repository, IReadOnlyList<PullFacts> facts, DateTimeOffset now)
     {
         var flying = InFlight(board, state).GetValueOrDefault(repository.ToLowerInvariant(), []);
+        // The pull requests this poll sees merged or closed: a task's other deploy pull requests ending in this same poll
+        // are not named as still open in its merge text (DeployOpen).
+        var endingNow = facts.Where(f => f.State != PullRequestState.Open).Select(f => f.Link.Key).ToHashSet();
+        // SEVERAL DEPLOY PULL REQUESTS (task 1565789d, Petre: "it should be able to watch multiple prs actually"). One
+        // release can open one per stack, or open #308 and then replace it with #309. Each is told on its own as it ends,
+        // and a merge names the task's others that have not ended yet, so the session knows whether the deploy still
+        // waits on more. One in another repository ending in the same minute is polled separately and may still be
+        // named; its own nudge follows within the minute.
+        IReadOnlyList<PullRequestLink> DeployOpen(TaskItem task, PullRequestLink merged) =>
+            task.DeployPullRequests
+                .Where(p => p.Key != merged.Key && !task.DeployPullRequestsEnded.Contains(p.Key) && !endingNow.Contains(p.Key))
+                .ToArray();
         var tasksOf = (PullRequestLink link) => flying.Where(x => x.Link.Key == link.Key).Select(x => x.Task).ToArray();
 
         // Why a nudge for each task of a pull request, and only those rules that fire.
@@ -96,6 +125,20 @@ public static class RepoWatch
         IEnumerable<string> Texts(PullFacts f, TaskItem task)
         {
             var label = f.Link.Label;
+            // DEPLOY ENDED (task 1565789d): a deploy pull request is told once, when it is merged or closed, whatever was
+            // seen before. "Whatever was seen" matters: the one that started this, personalized-health-stacks #309, was
+            // merged 14 seconds BEFORE its session asked Petre to merge it and registered after that, so a rule that
+            // waited to see it Open first would have said nothing at all. Being told once is kept on the task
+            // (DeployEnded below), so the next poll and a restart leave it alone. Nothing else is said about it: open,
+            // draft or not, it waits on whoever merges it, which the session's own question names.
+            if (IsDeployOf(task, f.Link))
+            {
+                if (f.State == PullRequestState.Merged)
+                    yield return DeployMergedText(f.Link, DeployOpen(task, f.Link));
+                else if (f.State == PullRequestState.Closed)
+                    yield return $"{label} ({f.Link.Url}), your task's deploy pull request, was closed without merging: find out why and carry on, or ask the user. If a later pull request replaced it, put that one on your task with task pr <url> --deploy unless it is there already.";
+                yield break;
+            }
             // BASE MOVED: a head other than the one seen last (BaseMoved). A head first seen is only recorded (nothing was
             // seen to move, so the first poll after a start nudges nobody). A snoozed task is spared: its stopped session
             // would otherwise be resumed every time main moves.
@@ -132,8 +175,9 @@ public static class RepoWatch
             .ToArray();
 
         var open = facts.Where(f => f.State == PullRequestState.Open).ToArray();
+        // A deploy pull request's merge is not followed (DEPLOY ENDED above): only the tasks it is their own work for.
         var newMerges = facts.Where(IsNewMerge)
-            .SelectMany(f => tasksOf(f.Link).Select(task => new FollowedMerge(task.Id, f.Link, f.MergeCommit.Value, now)))
+            .SelectMany(f => tasksOf(f.Link).Where(task => !IsDeployOf(task, f.Link)).Select(task => new FollowedMerge(task.Id, f.Link, f.MergeCommit.Value, now)))
             .Where(m => !state.Following.Any(o => o.TaskId == m.TaskId && o.Link.Key == m.Link.Key))
             .ToArray();
         // A clear (Mergeable) forgets the conflict nudge so a later conflict at the same head is told again; Unknown
@@ -142,7 +186,7 @@ public static class RepoWatch
         // A base-move nudge asks the session to rebase, which answers a conflict at that head too, so the conflict is
         // recorded as told at that head as well (review finding): otherwise GitHub reporting the conflict a poll later, at
         // the same head, would nudge the session a second time for the one rebase it was just told to do.
-        var moveTold = open.Where(f => BaseMoved(f) && tasksOf(f.Link).Any(t => !t.IsSnoozed))
+        var moveTold = open.Where(f => BaseMoved(f) && tasksOf(f.Link).Any(t => !t.IsSnoozed && !IsDeployOf(t, f.Link)))
             .Select(f => KeyValuePair.Create(f.Link.Key, f.BaseHead));
         var nextState = state with
         {
@@ -157,8 +201,28 @@ public static class RepoWatch
             Following = [.. state.Following, .. newMerges],
             LastSuccess = Updated(state.LastSuccess, [KeyValuePair.Create(repository.ToLowerInvariant(), now)]),
         };
-        return new RepoWatchStep(nextState, nudges);
+        // The deploy pull requests this poll told the end of, per task, for TaskService.Watched to keep on the tasks.
+        var deployEnded = facts
+            .Where(f => f.State != PullRequestState.Open)
+            .SelectMany(f => tasksOf(f.Link).Where(task => IsDeployOf(task, f.Link)).Select(task => new DeployEnd(task.Id, f.Link.Key)))
+            .ToArray();
+        return new RepoWatchStep(nextState, nudges) { DeployEnded = deployEnded };
     }
+
+    /// <summary>
+    /// What the session hears when its task's deploy pull request is merged (task 1565789d). The merge is the step before
+    /// the deploy, not the deploy (on iam.ge Petre still presses "Pull and redeploy" in Portainer after it), so the text
+    /// sends the session to the running version rather than calling anything deployed, and asks it to check on a schedule:
+    /// the session that started this promised to "confirm once the logs show the new version" and set nothing to do so.
+    /// </summary>
+    public static string DeployMergedText(PullRequestLink link, IReadOnlyList<PullRequestLink>? stillOpen = null) =>
+        $"{link.Label} ({link.Url}), your task's deploy pull request, is merged. "
+        + (stillOpen is { Count: > 0 }
+            ? $"Not merged yet: {string.Join(", ", stillOpen.Select(p => $"{p.Label} ({p.Url})"))}; Deskbar tells you as each one ends. "
+            : "")
+        + "The deploy comes next: if a person makes it, "
+        + "make sure your question asks for it; then check the running version on a schedule (a cron or a Monitor, not a promise), "
+        + "and once it shows the new version: task answered, task deployed, task done, as the briefing says.";
 
     /// <summary>
     /// The memory with <paramref name="links"/> seen Merged: a merge TaskService.SettleQuestion told the session itself
@@ -386,8 +450,17 @@ public sealed record RepoWatchState(
         [], new Dictionary<string, DateTimeOffset>());
 }
 
-/// <summary>The memory after a poll and the nudges it produced.</summary>
-public sealed record RepoWatchStep(RepoWatchState State, IReadOnlyList<WatchNudge> Nudges);
+/// <summary>
+/// The memory after a poll and the nudges it produced, and the deploy pull requests whose end those nudges tell (task
+/// 1565789d), which TaskService.Watched keeps on their tasks.
+/// </summary>
+public sealed record RepoWatchStep(RepoWatchState State, IReadOnlyList<WatchNudge> Nudges)
+{
+    public IReadOnlyList<DeployEnd> DeployEnded { get; init; } = [];
+}
+
+/// <summary>A deploy pull request (its PullRequestLink.Key) of a task whose merge or close the session is being told.</summary>
+public sealed record DeployEnd(Guid TaskId, string Key);
 
 /// <summary>A workflow run that failed on a followed merge commit; the manager is told (ManagerWakes) after the session is.</summary>
 public sealed record RedRun(Guid TaskId, string Repository, string Name, string Url, DateTimeOffset At);

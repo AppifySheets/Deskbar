@@ -123,6 +123,9 @@ public sealed class TaskService(ITaskStore store, Func<DateTimeOffset> now, Func
     // A pull request the task's session opened (task e7aa49b1); one it already lists saves and pulses nothing.
     public Result AddPullRequest(Guid id, PullRequestLink link) => ApplyIfChanged(Board.AddPullRequest(id, link, now()));
 
+    // A deploy pull request for the task (task 1565789d, `task pr <url> --deploy`); one it already lists saves nothing.
+    public Result AddDeployPullRequest(Guid id, PullRequestLink link) => ApplyIfChanged(Board.AddDeployPullRequest(id, link, now()));
+
     // A deploy seen running (task 8470d176, phase 2: `task deployed` and "Mark deployed"); reporting it again saves and
     // pulses nothing (TaskBoard.MarkDeployed returns the same board).
     //
@@ -593,6 +596,11 @@ public sealed class TaskService(ITaskStore store, Func<DateTimeOffset> now, Func
     public void Watched(RepoWatchStep step)
     {
         watch = step.State;
+        // The deploy pull requests whose merge or close this step tells (task 1565789d) are kept on their tasks first, and
+        // saved, so neither the next poll nor a restart tells the session the same thing again.
+        CommitIfChanged(step.DeployEnded
+            .GroupBy(e => e.TaskId)
+            .Aggregate(Board, (board, g) => board.DeployPullRequestsEnded(g.Key, g.Select(e => e.Key).ToArray())));
         step.Nudges.ToList().ForEach(watchNudges.OnNext);
     }
 

@@ -177,6 +177,35 @@ public sealed record TaskBoard(IReadOnlyList<TaskItem> Tasks)
             ? this
             : Replaced(task with { PullRequests = [.. task.PullRequests, link], UpdatedAt = now }));
 
+    /// <summary>
+    /// A deploy pull request for this task (task 1565789d, TaskItem.DeployPullRequests): appended once, so the same link
+    /// again returns this same board. One the task already records as its own work (PullRequests) moves over: the session
+    /// says it is the deploy step, and as a code pull request the poll would ask the session to rebase a branch CI owns.
+    /// Like AddPullRequest, only the lists and UpdatedAt change, and a closed task takes it too.
+    /// </summary>
+    public Result<TaskBoard> AddDeployPullRequest(Guid id, PullRequestLink link, DateTimeOffset now) =>
+        Lookup(id).Map(task => task.DeployPullRequests.Any(p => p.Key == link.Key)
+            ? this
+            : Replaced(task with
+            {
+                DeployPullRequests = [.. task.DeployPullRequests, link],
+                PullRequests = task.PullRequests.Where(p => p.Key != link.Key).ToArray(),
+                UpdatedAt = now,
+            }));
+
+    /// <summary>
+    /// The session was told that these deploy pull requests merged or closed (task 1565789d, RepoWatch.Poll): their keys
+    /// are kept on the task so the poll leaves them alone from now on, across restarts too. Keys already kept, or not the
+    /// task's deploy pull requests, change nothing; a task gone from the board is left as it is. UpdatedAt does not move:
+    /// this is Deskbar's bookkeeping, nothing the user did or needs to see.
+    /// </summary>
+    public TaskBoard DeployPullRequestsEnded(Guid id, IReadOnlyList<string> keys) =>
+        Lookup(id) is { IsSuccess: true } found
+        && keys.Where(k => found.Value.DeployPullRequests.Any(p => p.Key == k) && !found.Value.DeployPullRequestsEnded.Contains(k))
+            .Distinct().ToArray() is { Length: > 0 } fresh
+            ? Replaced(found.Value with { DeployPullRequestsEnded = [.. found.Value.DeployPullRequestsEnded, .. fresh] })
+            : this;
+
     /// <summary>Why `task deployed` and "Mark deployed" refuse a task with no recorded pull request.</summary>
     public const string NoPullRequestToDeploy = "task has no pull request recorded; add one with task pr";
 

@@ -336,6 +336,8 @@ public partial class TaskDetailWindow : Window
             r.Delivery.Stage, r.Delivery.Note,
             // The pull requests section (task e7aa49b1): a new one redraws.
             string.Join('\u001e', r.PullRequests.Select(p => p.Key)),
+            // The deploy pull requests section (task 1565789d).
+            string.Join('\u001e', r.DeployPullRequests.Select(p => p.Key)),
             r.ClaudeWorking, r.WorkingCount,
             string.Join('\u001e', r.Comments.Select(c => $"{c.Id}|{c.Author}|{c.When}|{c.Settled}|{c.Editable}|{c.Markdown}")),
             string.Join('\u001e', r.SessionList.Select(s => $"{s.Id}|{s.State}|{s.Joined:O}")),
@@ -647,6 +649,15 @@ public partial class TaskDetailWindow : Window
         {
             side.Children.Add(Section("Pull requests"));
             row.PullRequests.ToList().ForEach(p => side.Children.Add(Rendered($"[{p.Label}]({p.Url})", 12.5)));
+            side.Children.Add(new Border { Height = 12 });
+        }
+
+        // THE TASK'S DEPLOY PULL REQUESTS (task 1565789d): the pull requests whose merge comes before the deploy (a release's
+        // pull request in a stacks repository), apart from the task's own work, drawn the same way.
+        if (row.DeployPullRequests.Count > 0)
+        {
+            side.Children.Add(Section("Deploy pull requests"));
+            row.DeployPullRequests.ToList().ForEach(p => side.Children.Add(Rendered($"[{p.Label}]({p.Url})", 12.5)));
             side.Children.Add(new Border { Height = 12 });
         }
 
