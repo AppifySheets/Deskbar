@@ -2023,7 +2023,10 @@ public partial class TasksBoardTests
         Assert.True(box.IsKeyboardFocused, "the comment box has no keyboard focus");
 
         var source = PresentationSource.FromVisual(box)!;
-        box.RaiseEvent(new KeyEventArgs(Keyboard.PrimaryDevice, source, 0, Key.OemQuestion) { RoutedEvent = Keyboard.PreviewKeyDownEvent });
+        var key = new KeyEventArgs(Keyboard.PrimaryDevice, source, 0, Key.OemQuestion) { RoutedEvent = Keyboard.PreviewKeyDownEvent };
+        box.RaiseEvent(key);
+        // A handled key would type nothing for real, so no handler may swallow "/" (the text is injected apart from it).
+        Assert.False(key.Handled, "a handler swallowed the / key");
         TextCompositionManager.StartComposition(new TextComposition(InputManager.Current, box, "/"));
         t.Window.Dispatcher.Invoke(() => { }, System.Windows.Threading.DispatcherPriority.Background);
 
