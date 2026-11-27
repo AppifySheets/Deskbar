@@ -50,6 +50,10 @@ internal static class InboxMarks
             C("M6.5 5.4a1.6 1.6 0 1 1 2.4 1.4c-.55.32-.9.66-.9 1.2"), Disc(8, 9.9, .85, Ink.Cut)],
         ["done"] = [Ring(8, 8, 6.25), S("M5.2 8.3l1.9 1.9 3.8-4.1")],
         ["doneFill"] = [Disc(8, 8, 7), C("M4.9 8.3l2.1 2.1 4.1-4.5")],
+        // Waiting for his deploy (task 1565789d, DeployWait): the "done" ring and tick, open at the top right with a dot in
+        // the gap, the step still to come. A shape of its own, as every mark needs one (criterion 13: the screen in grey
+        // still tells them apart), where the plain ring in amber had differed from "finished, not running yet" by colour.
+        ["doneWait"] = [S("M14.25 8A6.25 6.25 0 1 1 11.125 2.587"), S("M5.2 8.3l1.9 1.9 3.8-4.1"), Disc(13.4, 3.6, 1.3)],
         ["working"] = [Faint(Frozen(new EllipseGeometry(new Point(8, 8), 6, 6))), S("M8 2a6 6 0 0 1 6 6")],
         ["idle"] = [Ring(8, 8, 6.25), S("M6.4 5.8v4.4M9.6 5.8v4.4")],
         ["stuck"] = [S("M8 2.2l6.3 11H1.7z"), S("M8 6.6v3.1"), Disc(8, 11.5, .7)],
@@ -118,8 +122,9 @@ internal static class InboxMarks
         InboxMark.WentQuiet => "stuck",
         InboxMark.Finished => "doneFill",
         InboxMark.FinishedNotRunning => "done",
-        // Task 1565789d (DeployWait): the same "merged, not running yet" ring, amber below since the deploy is his step.
-        InboxMark.WaitsForDeploy => "done",
+        // Task 1565789d (DeployWait): the "merged, not running yet" ring, open with a dot (doneWait), amber below since the
+        // deploy is his step.
+        InboxMark.WaitsForDeploy => "doneWait",
         InboxMark.Working => "working",
         InboxMark.Idle => "idle",
         InboxMark.UsageLimit => "clock",
