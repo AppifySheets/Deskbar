@@ -200,6 +200,57 @@ public partial class TasksBoardTests
         Assert.Equal([k.Note], DrawnInboxLines(t));
     });
 
+    // The All tab, the row's last card: its count is the other three's added up, and it draws every line of theirs, Needs
+    // you's first, then Claude's, then Notes', under their own captions. F2 reaches any of them (Keys are its lines).
+    [Fact]
+    public void The_all_tab_counts_and_shows_every_line_of_the_other_three() => StaThread.Run(() =>
+    {
+        var selection = new TaskSelection();
+        using var t = Build(selection: selection, workingOf: task => task.Title == "Review the diff" ? 1 : 0);
+        var k = InboxTasks(t);
+        t.Controller.Show();
+        ChooseInbox(t);
+
+        var all = ButtonNamed(t.Window.InboxHeaderShown!, "All");
+        Assert.Equal("All: 5", all.ToolTip);
+        // The last of the four cards in the row.
+        var row = (Grid)all.Parent;
+        Assert.Equal(4, row.ColumnDefinitions.Count);
+        Assert.Equal(3, Grid.GetColumn(all));
+
+        Click(all);
+        Assert.Equal(InboxTab.All, t.Window.InboxTabShown);
+        Assert.Equal([k.Asking, k.Done, k.Working, k.Idle, k.Note], DrawnInboxLines(t));
+        Assert.Equal(["Questions", "Finished", "Working now", "Idle", "Someday"], t.Window.Headers);
+        Assert.Equal([k.Asking, k.Done, k.Working, k.Idle, k.Note], t.Window.Keys);
+
+        selection.Select(k.Note);
+        Assert.True(t.Window.Press(Key.F2, ModifierKeys.None));
+        Assert.NotNull(t.Window.Editor);
+    });
+
+    // On All every line is on show, so a task shown from outside opens its page without leaving All, and a note added
+    // from the panel glows there too.
+    [Fact]
+    public void All_stays_on_show_for_a_task_shown_from_outside_or_just_added() => StaThread.Run(() =>
+    {
+        using var t = Build(workingOf: _ => 1);
+        var k = InboxTasks(t);
+        t.Controller.Show();
+        ChooseInbox(t);
+        t.Window.ChooseInboxTab(InboxTab.All);
+
+        Click(ButtonNamed(t.Window.InboxHeaderShown!, "New"));
+        Assert.True(t.Window.TypeNote("Pay the rent", Key.Enter));
+        var added = t.Tasks.Board.Tasks.Single(x => x.Title == "Pay the rent").Id;
+        Assert.Equal(InboxTab.All, t.Window.InboxTabShown);
+        Assert.True(t.Window.InboxGlowing(added));
+
+        t.Controller.ShowTask(k.Working);
+        Assert.Equal(InboxTab.All, t.Window.InboxTabShown);
+        Assert.Equal(k.Working, t.Window.InboxPageShown);
+    });
+
     // Criterion 4: the line's menu is the List's, every item, from "⋯" and from a right-click.
     [Fact]
     public void The_dots_and_a_right_click_open_the_lists_whole_menu() => StaThread.Run(() =>

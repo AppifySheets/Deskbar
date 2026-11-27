@@ -15,7 +15,8 @@ namespace Deskbar.App;
 //               rows give way to the Inbox's header (InboxHeader), and the view switch moves to a footer (InboxFooter):
 //                 1. "Tasks", then the search button (today's search box, under the header, Ctrl+F too), "+ New" (today's
 //                    add box, under the header) and the panel's ×;
-//                 2. the three tabs, Needs you, Claude and Notes, each with its mark and its count;
+//                 2. the tabs, Needs you, Claude and Notes, then All (the three together), each with its mark and its
+//                    count;
 //                 3. "This workspace | Everywhere" (today's Current workspace checkbox, same memory), and Filter, which
 //                    unfolds a sheet under the header holding today's chip rows, every one of them: the very Filters panel
 //                    the toolbar draws (DrawFilters), moved into the sheet while the Inbox shows and back when it goes.
@@ -188,7 +189,10 @@ public partial class TasksWindow
     {
         InboxTab.NeedsYou => "Nothing needs you.",
         InboxTab.Claude => "Claude is not on any of these.",
-        _ => "No notes here. \"+ New\" writes one.",
+        InboxTab.Notes => "No notes here. \"+ New\" writes one.",
+        // All is empty only when the other three are, which the view's own empty text says first (DrawInbox reads it when
+        // no group has a row); this is for a filter that leaves the groups but none of their lines on show.
+        _ => "Nothing here. \"+ New\" writes a note.",
     };
 
     // --- the header --------------------------------------------------------------------------------------------------
@@ -213,13 +217,17 @@ public partial class TasksWindow
         top.Children.Add(new TextBlock { Text = "Tasks", FontSize = 16, FontWeight = FontWeights.SemiBold, Foreground = InboxLook.Ink, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(2, 0, 0, 0) });
         header.Children.Add(top);
 
-        // 2. The three tabs, equal widths, 6 DIP apart.
+        // 2. The tabs, equal widths, 6 DIP apart: Needs you, Claude, Notes, then All, the one that holds the other three's
+        //    lines together (the owner: "let's add all tasks here as well"). All is last: the first three are where a line
+        //    is sorted to, read left to right by urgency, and All is the sum of them, so it stands at the row's end as a
+        //    total does. Four cards still fit the panel's narrowest width (360 DIP: about 80 DIP a card).
         var tabs = new Grid { Margin = new Thickness(0, 10, 0, 0) };
-        new[] { InboxTab.NeedsYou, InboxTab.Claude, InboxTab.Notes }.Select((tab, i) => (tab, i)).ToList().ForEach(x =>
+        var order = Enum.GetValues<InboxTab>();
+        order.Select((tab, i) => (tab, i)).ToList().ForEach(x =>
         {
             tabs.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
             var button = TabButton(x.tab, inbox.Count(x.tab), inbox.Tabbed);
-            button.Margin = new Thickness(x.i == 0 ? 0 : 3, 0, x.i == 2 ? 0 : 3, 0);
+            button.Margin = new Thickness(x.i == 0 ? 0 : 3, 0, x.i == order.Length - 1 ? 0 : 3, 0);
             Grid.SetColumn(button, x.i);
             tabs.Children.Add(button);
         });
@@ -265,17 +273,15 @@ public partial class TasksWindow
     Button TabButton(InboxTab tab, int count, bool tabbed)
     {
         var chosen = tab == inboxTab && tabbed;
-        var (name, mark, ink) = tab switch
-        {
-            InboxTab.NeedsYou => ("Needs you", "ask", InboxLook.Amber),
-            InboxTab.Claude => ("Claude", "working", InboxLook.Blue),
-            _ => ("Notes", "note", InboxLook.Ink2),
-        };
+        var (name, mark, ink) = TabFace(tab);
         var numbers = Row(InboxMarks.Icon(mark, 18, ink, chosen ? InboxLook.Raised : InboxLook.Surface),
             Text($"{count}", 19, InboxLook.Ink, FontWeights.SemiBold));
         var content = new StackPanel();
         content.Children.Add(numbers);
-        content.Children.Add(Text(name, 12, chosen ? InboxLook.Ink : InboxLook.Ink2, chosen ? FontWeights.SemiBold : FontWeights.Normal, new Thickness(0, 3, 0, 0)));
+        var caption = Text(name, 12, chosen ? InboxLook.Ink : InboxLook.Ink2, chosen ? FontWeights.SemiBold : FontWeights.Normal, new Thickness(0, 3, 0, 0));
+        // Four cards share the row now, so at the narrowest panel a long name ends in "…" rather than spilling out of its card.
+        caption.TextTrimming = TextTrimming.CharacterEllipsis;
+        content.Children.Add(caption);
         var face = new Grid();
         face.Children.Add(new Border
         {
@@ -302,6 +308,17 @@ public partial class TasksWindow
         AutomationProperties.SetItemStatus(button, chosen ? "selected" : "");
         return button;
     }
+
+    // A tab card's name, its mark (an InboxMarks icon) and the mark's colour. Each of the first three wears the mark of what
+    // it mostly holds, in that state's colour. All holds every state, so it wears none of theirs: a plain stack of cards
+    // (InboxMarks' "all") in the quiet ink Notes uses, so it reads as the total and does not compete with Needs you's amber.
+    static (string Name, string Mark, Brush Ink) TabFace(InboxTab tab) => tab switch
+    {
+        InboxTab.NeedsYou => ("Needs you", "ask", InboxLook.Amber),
+        InboxTab.Claude => ("Claude", "working", InboxLook.Blue),
+        InboxTab.Notes => ("Notes", "note", InboxLook.Ink2),
+        _ => ("All", "all", InboxLook.Ink2),
+    };
 
     // A button that is only its content, stretched across it: the tabs' template. Made once per window, since a template
     // belongs to the thread that made it and the tests build windows on several threads.

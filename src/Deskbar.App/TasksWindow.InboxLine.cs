@@ -344,7 +344,7 @@ public partial class TasksWindow
     {
         if (inboxFollowed is not { } id) return;
         if (inboxPage is not null || !inbox.Tabbed || selectedId.HasNoValue || selectedId.Value != id
-            || FollowFilters(view) != inboxFollowedFilters || inbox.TabOf(id) is not { HasValue: true } tab)
+            || FollowFilters(view) != inboxFollowedFilters || inbox.TabToShow(id, inboxTab) is not { HasValue: true } tab)
         {
             inboxFollowed = null;
             return;
@@ -361,7 +361,8 @@ public partial class TasksWindow
         if (latest?.Inbox is not { } inbox) return false;
         inboxJustAdded = id;
         if (inboxPage is not null) return true;
-        if (inbox.Tabbed && inbox.TabOf(id) is { HasValue: true } tab) inboxTab = tab.Value;
+        // TabToShow: on All the line is on show already, so All stays (it holds the line in every tab it moves to).
+        if (inbox.Tabbed && inbox.TabToShow(id, inboxTab) is { HasValue: true } tab) inboxTab = tab.Value;
         inboxFollowed = id;
         inboxFollowedFilters = FollowFilters(latest);
         inboxGlowPending = id;

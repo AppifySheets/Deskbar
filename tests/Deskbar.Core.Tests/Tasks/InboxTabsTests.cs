@@ -110,6 +110,44 @@ public class InboxTabsTests
         Assert.All(Enum.GetValues<InboxTab>(), tab => Assert.Equal(view.In(tab).Count, view.Count(tab)));
     }
 
+    // The All tab (the owner: "let's add all tasks here as well"): every line of the other three, each once, Needs you's
+    // first, then Claude's, then Notes', each in its own tab's order; its count is theirs added up. No line is sorted
+    // INTO All: each line's own tab stays one of the three.
+    [Fact]
+    public void All_holds_the_other_tabs_lines_in_their_order_and_counts_them()
+    {
+        EveryKind();
+        var parent = Note("Parent note");
+        var child = Note("Its subtask");
+        Change(b => b.SetParent(child, parent, clock));
+
+        var view = Inbox(Busy);
+
+        var three = new[] { InboxTab.NeedsYou, InboxTab.Claude, InboxTab.Notes };
+        Assert.Equal(three.SelectMany(tab => view.In(tab)).Select(l => l.Id), view.In(InboxTab.All).Select(l => l.Id));
+        Assert.Equal(three.Sum(tab => view.Count(tab)), view.Count(InboxTab.All));
+        Assert.Equal(Listed(Busy).Count, view.Count(InboxTab.All));
+        Assert.DoesNotContain(view.Lines, l => l.Tab == InboxTab.All);
+        // A subtask still follows its parent in All, as in Notes.
+        var ids = view.In(InboxTab.All).Select(l => l.Id).ToList();
+        Assert.Equal(ids.IndexOf(parent) + 1, ids.IndexOf(child));
+    }
+
+    // The tab a task's line is brought on show in: the tab on show while it holds the line (All always does), else the
+    // line's own tab; none for a task the Inbox has no line for.
+    [Fact]
+    public void The_tab_to_show_a_line_in_keeps_a_tab_that_holds_it()
+    {
+        var k = EveryKind();
+        var view = Inbox(Busy);
+
+        Assert.Equal(InboxTab.Claude, view.TabToShow(k.Working, InboxTab.NeedsYou).Value);
+        Assert.Equal(InboxTab.Claude, view.TabToShow(k.Working, InboxTab.Claude).Value);
+        Assert.Equal(InboxTab.All, view.TabToShow(k.Working, InboxTab.All).Value);
+        Assert.Equal(InboxTab.Notes, view.TabToShow(k.Someday, InboxTab.Claude).Value);
+        Assert.False(view.TabToShow(Guid.NewGuid(), InboxTab.All).HasValue);
+    }
+
     [Fact]
     public void Needs_you_holds_the_questions_then_went_quiet_then_finished()
     {
