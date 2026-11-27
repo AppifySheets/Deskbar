@@ -546,6 +546,7 @@ public sealed class JsonTaskStore(string baseDirectory, Action<string>? trace = 
             writer.WriteEndObject();
         }
     }
+
     // A time written as a string that parses, or absent.
     sealed class TolerantTimeConverter : JsonConverter<DateTimeOffset?>
     {
