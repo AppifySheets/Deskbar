@@ -71,7 +71,7 @@ public partial class TasksWindow
     // The line's Reevaluate icon: Segoe's "Refresh", U+E72C, in both icon fonts, quiet like the line's other buttons.
     Button? ReevaluateButton(TaskRowView row) =>
         ReevaluatesOnLine(row)
-            ? Small(new TextBlock { Text = "", FontFamily = IconFont, FontSize = 12, Foreground = Ink, VerticalAlignment = VerticalAlignment.Center },
+            ? Small(new TextBlock { Text = TaskMenuIcons.Reevaluate, FontFamily = IconFont, FontSize = 12, Foreground = Ink, VerticalAlignment = VerticalAlignment.Center },
                 ReevaluateText, () => Actions?.Reevaluate?.Invoke(row.Id), ReevaluateTip)
             : null;
 
@@ -100,24 +100,24 @@ public partial class TasksWindow
         var live = !row.Closing;
         var slots = new[]
         {
-            IconButton(open, "", "Edit", "Edit the title and the description (F2)", _ => BeginRename(row.Id)),
-            IconButton(open && Actions?.OpenWindow is not null, "", OpenInWindowText, "Read and edit the whole task in a window of its own",
+            IconButton(open, TaskMenuIcons.Edit, "Edit", "Edit the title and the description (F2)", _ => BeginRename(row.Id)),
+            IconButton(open && Actions?.OpenWindow is not null, TaskMenuIcons.OpenInWindow, OpenInWindowText, "Read and edit the whole task in a window of its own",
                 _ => Actions?.OpenWindow?.Invoke(row.Id)),
             // A press while this line's box or picker is already open leaves it alone: starting it again would clear what
             // was typed and the pictures pasted into it (review of this change). The thread's own Add subtask leaves its
             // row while the box is open for the same reason.
-            IconButton(open && Actions?.SubtaskParent is not null, "", FloatingBar.AddSubtaskText, "Add a subtask under this task",
+            IconButton(open && Actions?.SubtaskParent is not null, TaskMenuIcons.AddSubtask, FloatingBar.AddSubtaskText, "Add a subtask under this task",
                 _ =>
                 {
                     if (subtaskUnder != row.Id) BeginSubtaskAdd(row.Id);
                 }),
-            IconButton(live, "", AssignToText, $"Assigned to {row.Assignee.Name}: change who it is on", button => OpenAssignMenu(row.Id, button)),
-            IconButton(live && Actions?.LinkCandidates is not null, "", RelatedToText, "Link a related task", _ =>
+            IconButton(live, TaskMenuIcons.AssignTo, AssignToText, $"Assigned to {row.Assignee.Name}: change who it is on", button => OpenAssignMenu(row.Id, button)),
+            IconButton(live && Actions?.LinkCandidates is not null, TaskMenuIcons.RelatedTo, RelatedToText, "Link a related task", _ =>
             {
                 if (linking is not { Duplicate: false } picking || picking.Task != row.Id) BeginLink(row.Id, duplicate: false);
             }),
-            IconButton(live, "", MoveToText, "Move it to another workspace", button => OpenMoveMenu(row.Id, row.Place.Workspace, button)),
-            IconButton(live, "", DeleteText, "Delete it, after one more click", button => OpenDeleteMenu(row.Id, button)),
+            IconButton(live, TaskMenuIcons.MoveTo, MoveToText, "Move it to another workspace", button => OpenMoveMenu(row.Id, row.Place.Workspace, button)),
+            IconButton(live, TaskMenuIcons.Delete, DeleteText, "Delete it, after one more click", button => OpenDeleteMenu(row.Id, button)),
         };
         // On a slim board with a Reevaluate on show, every line's strip leads with its slot (task 3dd07539, SizeColumns): the
         // icon right after the Claude icon on a Claude line, a gap on the others so their buttons keep one x. Given up last,
@@ -171,7 +171,7 @@ public partial class TasksWindow
 
     // Twelve rays about the centre of a 12 DIP box, every 30 degrees, long and short in turn and a little uneven, so it
     // reads as a hand-drawn spark and not as a gear or a loading wheel. Frozen: one geometry for every line.
-    static readonly Geometry ClaudeSpark = Spark();
+    internal static readonly Geometry ClaudeSpark = Spark();
 
     static Geometry Spark()
     {

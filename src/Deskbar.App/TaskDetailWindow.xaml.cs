@@ -762,11 +762,13 @@ public partial class TaskDetailWindow : Window
         var open = row.Status != TaskStatus.Closed && !row.Closing;
         if (open)
         {
-            menu.Items.Add(Item("Edit", BeginEdit));
-            if (actions.StartClaude is { } start && !row.HasOpenSession) menu.Items.Add(Item(TasksWindow.StartClaudeText, () => Later(() => start(row.Id))));
+            // Every top-level item wears an icon, as on the panel's line menu (TaskMenuIcons, task e3f94ead).
+            menu.Items.Add(Item("Edit", BeginEdit).WithIcon(TaskMenuIcons.Edit));
+            if (actions.StartClaude is { } start && !row.HasOpenSession)
+                menu.Items.Add(Item(TasksWindow.StartClaudeText, () => Later(() => start(row.Id))).WithClaude(hasSession: false));
             menu.Items.Add(new Separator());
         }
-        var status = Item("Status");
+        var status = Item("Status").WithIcon(TaskMenuIcons.Status);
         SettableStatuses.ToList().ForEach(s =>
         {
             var item = Item(TaskViews.StatusName(s), () => actions.SetStatus(row.Id, s));
@@ -775,9 +777,9 @@ public partial class TaskDetailWindow : Window
         });
         menu.Items.Add(status);
         menu.Items.Add(row.Status == TaskStatus.Closed && !row.Closing
-            ? Item("Reopen", () => actions.Reopen(row.Id))
-            : Item("Close", () => actions.Close(row.Id)));
-        var assign = Item("Assign to");
+            ? Item("Reopen", () => actions.Reopen(row.Id)).WithIcon(TaskMenuIcons.Reopen)
+            : Item("Close", () => actions.Close(row.Id)).WithIcon(TaskMenuIcons.Close));
+        var assign = Item("Assign to").WithIcon(TaskMenuIcons.AssignTo);
         new[] { Assignee.Me, Assignee.Claude }.ToList().ForEach(who =>
         {
             var item = Item(who.Name, () => actions.Assign(row.Id, who));
@@ -788,20 +790,20 @@ public partial class TaskDetailWindow : Window
         // Repeat (task 0b78269e, RepeatMenu), as the panel's menu has it; open tasks only.
         if (open && actions.Repeat is { } repeat)
         {
-            var repeats = Item(RepeatMenu.Header(row.RepeatText));
+            var repeats = Item(RepeatMenu.Header(row.RepeatText)).WithIcon(TaskMenuIcons.Repeat);
             // After this menu has closed (Later), as Start Claude and Move to… do: the folder pick opens a menu of its own.
             RepeatMenu.Items(row.Id, row.RepeatText, (task, words) => Later(() => repeat(task, words)), AskRepeat).ForEach(item => repeats.Items.Add(item));
             menu.Items.Add(repeats);
         }
         // The task list's one workspace menu (WorkspaceChipMenu), opened under "⋯" once this menu has closed.
-        menu.Items.Add(Item("Move to…", () => Later(() => OpenMoveMenu(anchor))));
+        menu.Items.Add(Item("Move to…", () => Later(() => OpenMoveMenu(anchor))).WithIcon(TaskMenuIcons.MoveTo));
         menu.Items.Add(new Separator());
         // Where else the task can be seen: its workspace and session (as a double-click on its line goes), the panel.
-        if (open) menu.Items.Add(Item("Go to its workspace", () => actions.Go(row.Id)));
-        if (actions.ShowTask is { } showTask) menu.Items.Add(Item("Show in the tasks panel", () => showTask(row.Id)));
+        if (open) menu.Items.Add(Item("Go to its workspace", () => actions.Go(row.Id)).WithIcon(TaskMenuIcons.GoToWorkspace));
+        if (actions.ShowTask is { } showTask) menu.Items.Add(Item("Show in the tasks panel", () => showTask(row.Id)).WithIcon(TaskMenuIcons.ShowInPanel));
         menu.Items.Add(new Separator());
         // Delete cannot be undone, so it takes a second step, as in the panel. The window closes with the task.
-        var delete = Item("Delete");
+        var delete = Item("Delete").WithIcon(TaskMenuIcons.Delete);
         delete.Items.Add(Item("Delete for good", () => actions.Delete(row.Id)));
         menu.Items.Add(delete);
         Hold(menu);
