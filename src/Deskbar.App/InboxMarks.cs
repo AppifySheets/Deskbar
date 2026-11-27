@@ -245,6 +245,57 @@ internal static class InboxLook
         document.LineHeight = Math.Round(size * 1.5);
         foreach (var block in document.Blocks.Where(b => b != document.Blocks.LastBlock))
             block.Margin = new Thickness(block.Margin.Left, block.Margin.Top, block.Margin.Right, block.Margin.Bottom * 2);
+        foreach (var block in document.Blocks) Emphasise(block, size);
+    }
+
+    // What stands out in reading text (the owner on build 7, with VS Code's chat beside ours: "in vs code there is
+    // highlights of important infos and stuff, and here is 1 big text"). There the body is a soft grey and bold is
+    // white, and code sits on a chip; here the body was as bright as its bold, and the chip's fill was the bubble's own.
+    // So the body takes ReadInk (the callers set it), and bold, headings and code take Strong; code gets a chip that
+    // shows on a bubble, a size smaller since the mono face runs large; list items are parted. All by brightness and
+    // shape, none by hue.
+    internal static readonly Brush ReadInk = Frozen(0xC9, 0xCF, 0xDA);
+    internal static readonly Brush Strong = Frozen(0xFF, 0xFF, 0xFF);
+    internal static readonly Brush CodeChip = Frozen(0x3A, 0x43, 0x55);
+
+    static void Emphasise(System.Windows.Documents.Block block, double size)
+    {
+        if (block is System.Windows.Documents.List list)
+        {
+            list.Padding = new Thickness(22, 0, 0, 0);
+            foreach (var item in list.ListItems)
+                foreach (var inner in item.Blocks)
+                {
+                    if (item != list.ListItems.LastListItem) inner.Margin = new Thickness(0, 0, 0, 4);
+                    Emphasise(inner, size);
+                }
+        }
+        else if (block is System.Windows.Documents.Paragraph paragraph)
+        {
+            if (Equals(paragraph.Tag, MarkdownBlocks.HeadingTag)) paragraph.Foreground = Strong;
+            if (Equals(paragraph.Tag, MarkdownBlocks.CodeBlockTag))
+            {
+                paragraph.Background = Background;
+                paragraph.Foreground = Ink;
+                paragraph.FontSize = size - 1;
+            }
+            else Emphasise(paragraph.Inlines, size);
+        }
+    }
+
+    static void Emphasise(System.Windows.Documents.InlineCollection inlines, double size)
+    {
+        foreach (var inline in inlines)
+        {
+            if (inline is System.Windows.Documents.Run run && Equals(run.Tag, MarkdownBlocks.CodeTag))
+            {
+                run.Background = CodeChip;
+                run.Foreground = Strong;
+                run.FontSize = size - 1;
+            }
+            else if (inline is System.Windows.Documents.Bold bold) bold.Foreground = Strong;
+            if (inline is System.Windows.Documents.Span span) Emphasise(span.Inlines, size);
+        }
     }
 
     static Brush Frozen(byte r, byte g, byte b)
