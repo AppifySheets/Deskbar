@@ -69,7 +69,7 @@ public sealed class CommentWakerTests : IDisposable
             runs.Add(id);
             return Result.Success();
         },
-        knowsSkill: (task, skill) => task.Sessions.Any(session => knownSkills.Contains((session.Folder, skill))));
+        knowsSkill: (task, skill) => Task.FromResult(task.Sessions.Any(session => knownSkills.Contains((session.Folder, skill)))));
 
     // The skills Claude Code listed, by folder (CommentWaker's knowsSkill, task 29bdd158).
     readonly List<(string Folder, string Skill)> knownSkills = [];

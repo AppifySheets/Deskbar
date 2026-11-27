@@ -35,6 +35,8 @@ sealed class CommentWaker : IDisposable
     readonly Func<string, Task<Result>> stop;
     readonly Action<string>? trace;
     readonly Func<Guid, Result>? startRun;
+    // Whether a comment's opening skill is one the task's sessions have (task 29bdd158); none, no comment asks for a skill.
+    readonly Func<TaskItem, string, Task<bool>>? knowsSkill;
     readonly IDisposable subscription;
 
     // startRun: a run of a recurring task between runs, started now (RecurringRunner.RunNow in the App; task 0b78269e,
@@ -42,13 +44,15 @@ sealed class CommentWaker : IDisposable
     // for such a task when none of its sessions is listed, and the comment then starts a fresh run that reads the thread,
     // as "Wake now" does. Without one (tests that do not need it), such a comment starts nothing and the thread says so.
     //
-    // knowsSkill (task 29bdd158, "add /skills support to comments"): whether Claude Code listed a skill in the folder of one
-    // of the task's sessions (SkillCatalog's kept answers, which the comment box's "/" list fills). A comment that opens with
-    // such a skill ("/iam-logs mails 14 and 15") is delivered with the request to run it (SessionBriefing.Commented, skill).
-    // Without one, or for a skill it does not know, the comment goes as plain words, as it always did.
+    // knowsSkill (task 29bdd158, "add /skills support to comments"): whether a skill is one of the repo's own that Claude
+    // Code lists where one of the task's sessions works, the same list the comment box's "/" list shows (SkillCatalog.For).
+    // It is awaited, not read from what happens to be kept, so a comment pasted whole, posted before the list had loaded,
+    // or sent through the pipe is judged the same way (the first ask in a folder takes about 3 s). A comment that opens
+    // with such a skill ("/iam-logs mails 14 and 15") is delivered with the request to run it (SessionBriefing.Commented,
+    // skill). Without one, for any other skill, or when the ask fails, the comment goes as plain words, as it always did.
     public CommentWaker(TaskService tasks, Func<bool> enabled, IObservable<IReadOnlyCollection<ClaudeAgent>> live, Func<TaskSession, bool> hasTranscript,
         Func<TaskSession, bool> endedOnApiError, CommentInbox inbox, Func<Guid, TaskSession, string, Task<Result>> resumeWith, Func<string, Task<Result>> stop,
-        Action<string>? trace = null, Func<Guid, Result>? startRun = null, Func<TaskItem, string, bool>? knowsSkill = null)
+        Action<string>? trace = null, Func<Guid, Result>? startRun = null, Func<TaskItem, string, Task<bool>>? knowsSkill = null)
     {
         this.tasks = tasks;
         this.live = live;
@@ -59,16 +63,20 @@ sealed class CommentWaker : IDisposable
         this.stop = stop;
         this.trace = trace;
         this.startRun = startRun;
+        this.knowsSkill = knowsSkill;
         // One comment at a time, in order, each with the latest list (Take(1) of the replay).
         // Only while sessions keep their tasks (AppState.ClaudeTasksInEffect): otherwise there is no waiter and no list.
         // REEVALUATE (task 3dd07539) rides the same roads: a press of a task's Reevaluate button (TaskService.Reevaluations)
         // is delivered exactly as a comment is, with SessionBriefing.Reevaluate as its message, in the same one-at-a-time
         // queue, so a press and a comment never race each other into one session.
-        // The skill a comment opens with counts only when Claude Code lists it where the task's sessions run (knowsSkill).
+        // The skill a comment opens with counts only when Claude Code lists it as the repo's own where the task's sessions
+        // run (knowsSkill, awaited in Deliver through Compose). Only a comment that opens with "/name" asks at all.
         var comments = tasks.Commented.Select(commented => new Delivery(commented.TaskId, "a comment",
-            task => SessionBriefing.Commented(task, tasks.ExpandImages(commented.Comment.Markdown), commented.Comment.ByManager,
-                ClaudeSkills.SkillOf(commented.Comment.Markdown.TrimStart())
-                    .Where(skill => knowsSkill?.Invoke(task, skill) ?? false))));
+            task => SessionBriefing.Commented(task, tasks.ExpandImages(commented.Comment.Markdown), commented.Comment.ByManager))
+        {
+            Compose = async task => SessionBriefing.Commented(task, tasks.ExpandImages(commented.Comment.Markdown), commented.Comment.ByManager,
+                await KnownSkill(task, commented.Comment.Markdown)),
+        });
         var reevaluations = tasks.Reevaluations.Select(taskId => new Delivery(taskId, "a reevaluate request", SessionBriefing.Reevaluate)
         {
             // CommentWake's own words name a comment, which a press of Reevaluate is not.
@@ -135,8 +143,10 @@ sealed class CommentWaker : IDisposable
     // Unsent, when set, is the thread's line in place of CommentWake's when no session can take it.
     // Undelivered, when set, runs when no session can take it, before the thread's line.
     // StillDue, when set, is asked just before delivery; false drops the delivery without a word.
+    // Compose, when set, makes the words in place of Message where they need an await (a comment's skill, task 29bdd158).
     sealed record Delivery(Guid TaskId, string What, Func<TaskItem, string> Message)
     {
+        public Func<TaskItem, Task<string>>? Compose { get; init; }
         public string? Unsent { get; init; }
         public Action? Undelivered { get; init; }
         public Func<bool>? StillDue { get; init; }
@@ -158,7 +168,7 @@ sealed class CommentWaker : IDisposable
             trace?.Invoke($"comment waker: {delivery.What} on {taskId} dropped, no longer due");
             return System.Reactive.Unit.Default;
         }
-        var message = delivery.Message(task);
+        var message = delivery.Compose is { } compose ? await compose(task) : delivery.Message(task);
         // A WAITER CAN BE GONE WHILE ITS GEN FILE SAYS IT IS ALIVE (task daeaa26c). A turn that ends on an API error, the
         // usage limit above all, runs no Stop hook, so no waiter is started after it, and the one before it may be the
         // very waiter whose comment woke the session for that turn. The gen file still names that waiter, good for a
@@ -206,6 +216,22 @@ sealed class CommentWaker : IDisposable
         catch (Exception e) { result = Result.Failure(e.Message); }
         trace?.Invoke($"comment waker: {session.Id} {(result.IsSuccess ? "resumed with the comment" : $"not resumed ({result.Error}), the comment waits in its inbox")}");
         if (result.IsFailure) Into(taskId, session.Id, message);
+    }
+
+    // The skill a comment opens with, when knowsSkill says the task's sessions have it (task 29bdd158). An ask that throws
+    // counts as no: the comment still goes, as plain words, rather than not at all.
+    async Task<Maybe<string>> KnownSkill(TaskItem task, string markdown)
+    {
+        if (knowsSkill is null || ClaudeSkills.SkillOf(markdown.TrimStart()) is not { HasValue: true } named) return Maybe<string>.None;
+        try
+        {
+            return await knowsSkill(task, named.Value) ? named : Maybe<string>.None;
+        }
+        catch (Exception e)
+        {
+            trace?.Invoke($"comment waker: could not tell whether /{named.Value} is a skill of {task.Id}: {e.Message}");
+            return Maybe<string>.None;
+        }
     }
 
     void Into(Guid taskId, string sessionId, string message) =>

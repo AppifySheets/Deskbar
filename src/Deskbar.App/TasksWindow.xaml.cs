@@ -2814,7 +2814,8 @@ public partial class TasksWindow : Window
         commentSkills[id] = new SkillCompletion(box,
             () => Actions?.TaskSkills is { } skills ? skills(id) : Task.FromResult<IReadOnlyList<SkillChoice>>([]),
             () => Actions?.TaskSkills is not null,
-            new SkillCompletion.Look(Frozen(0xFF, 0x15, 0x16, 0x1A), PickedEdge, Ink, DimInk, SelectedFill));
+            new SkillCompletion.Look(Frozen(0xFF, 0x15, 0x16, 0x1A), PickedEdge, Ink, DimInk, SelectedFill),
+            SkillCompletion.CommentAsking, SkillCompletion.CommentNone);
         box.PreviewKeyDown += (_, e) => e.Handled = PressInComment(id, e.Key, Keyboard.Modifiers) != KeyOutcome.Ignored;
         // Ctrl+V and drops of pictures (TasksWindow.Images.cs). After the handler above, which sets Handled for every key.
         TakePictures(box, id);
