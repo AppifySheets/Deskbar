@@ -99,7 +99,7 @@ public partial class TasksBoardTests
         Func<TaskItem, Action<string>, ContextMenu?>? pickFolder = null, Func<Guid, Result>? runNow = null,
         Func<string, Maybe<string>>? askRepeat = null, Func<string, bool>? folderExists = null,
         Func<TaskSession, Maybe<string>>? transcriptOf = null,
-        Func<Guid, Task<IReadOnlyList<SkillChoice>>>? taskSkills = null)
+        Func<Guid, Task<IReadOnlyList<SkillChoice>>>? taskSkills = null, Action<Guid>? startClaudeInBackground = null)
     {
         var harness = Harness.Build();
         var minutes = 0;
@@ -131,7 +131,7 @@ public partial class TasksBoardTests
         }, undoTimer: timers.Start, now: () => Start.AddHours(1), selection: selection,
             sessionsOf: sessionsOf, startClaude: startClaude, openSession: openSession, sessionsChanged: sessionsChanged,
             workingOf: workingOf, pickFolder: pickFolder, runNow: runNow, transcriptOf: transcriptOf,
-            taskSkills: taskSkills)
+            taskSkills: taskSkills, startClaudeInBackground: startClaudeInBackground)
         {
             // The manager line's click (task 61e4d143); none by default, so no manager line is drawn.
             OpenManager = openManager,
@@ -5136,6 +5136,31 @@ public partial class TasksBoardTests
         Assert.False(HasButtonNamed(plain.Window, TasksWindow.AddAndStartClaudeText));
         Assert.True(plain.Window.TypeNote("Errand", Key.Enter, ModifierKeys.Control));
         Assert.Single(plain.Tasks.Board.Tasks);
+    });
+
+    // Task 7b17a573 (Petre: "only start a task and don't open a terminal. confirm it has started as a mild notification,
+    // don't even take me away from my current thread"): with the App's background start wired, Ctrl+Enter hands the note
+    // to it and not to the line menu's start, and the note is not selected, so the panel stays on the task Petre had
+    // picked rather than scrolling to the new line.
+    [Fact]
+    public void Ctrl_Enter_starts_in_the_background_and_leaves_the_selection_alone() => StaThread.Run(() =>
+    {
+        var clicked = new List<Guid>();
+        var background = new List<Guid>();
+        var selection = new TaskSelection();
+        using var t = Build(selection: selection, startClaude: clicked.Add, startClaudeInBackground: background.Add);
+        var picked = t.Tasks.AddNote("The thread I am reading", t.Gepha).Value.Id;
+        t.Controller.Show();
+        selection.Select(picked);
+
+        Click(ButtonNamed(t.Window, "Add"));
+        Assert.True(t.Window.TypeNote("Fix the build", Key.Enter, ModifierKeys.Control));
+        t.Window.Dispatcher.Invoke(() => { }, System.Windows.Threading.DispatcherPriority.ApplicationIdle);
+
+        var task = t.Tasks.Board.Tasks.Single(x => x.Title == "Fix the build");
+        Assert.Equal([task.Id], background);
+        Assert.Empty(clicked);
+        Assert.Equal(picked, selection.Current.Value);
     });
 
     // Spec, "Task history": the thread lists the task's sessions, newest first, each with when it joined and whether it

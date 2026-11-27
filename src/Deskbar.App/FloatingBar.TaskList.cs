@@ -2311,10 +2311,13 @@ public partial class FloatingBar
                 : taskService.AddNote(title, taskAddTarget, quadrant, taskAddParent))
             .Tap(task =>
             {
-                var starts = startClaude && StartClaude is not null;
+                var starts = startClaude && AddedTaskStarter is not null;
                 EndTyping(clear: true, handBack: !starts);
-                ShowAddedTask(task.Id);
+                // A note handed to Claude is not selected or scrolled to (task 7b17a573, Petre: "don't even take me away
+                // from my current thread"): the selection is shared with the tasks panel, and moving it would scroll the
+                // panel off the thread he has open. The tray's "Claude started" says where it went instead.
                 if (starts) StartAddedTask(task.Id);
+                else ShowAddedTask(task.Id);
             })
             .TapError(err => ClickTrace.Write($"task list: note not added: {err}"));
     }
@@ -2364,9 +2367,13 @@ public partial class FloatingBar
     // Esc went to that app, and a refusal's message box could open behind it (review of task 3c40dec9). So a pick list,
     // when it opens, holds the bar still the way the bar's own menus do, and the Claude window it leads to takes the
     // front; otherwise (one folder started, or a refusal told) the keyboard goes back to where Petre was typing now.
+    //
+    // Since task 7b17a573 the start runs in the background (StartClaudeInBackground, the App's
+    // ClaudeTaskActions.OfferInBackground): no Claude window opens, so with one folder the keyboard goes straight back to
+    // where Petre was, and a silent tray notification says the session started.
     void StartAddedTask(Guid id)
     {
-        if (StartClaude is not { } start) return;
+        if (AddedTaskStarter is not { } start) return;
         Dispatcher.BeginInvoke(() =>
         {
             if (start(id) is { } pick) HoldFadeWhileOpen(pick);
