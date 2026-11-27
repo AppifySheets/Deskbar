@@ -39,6 +39,14 @@ public partial class TasksWindow
     double inboxListOffset;
     ScrollViewer? pageScroller;
     Guid? pageScrolledFor;
+    // WHERE THE OWNER WANTS THE PAGE (see KeepPlace): kept across redraws, cleared only by his own input or by leaving the page.
+    PagePlace? pageHold;
+
+    /// <summary>The place a page was left at: its end (a chat that follows its newest) or an offset from its top.</summary>
+    sealed record PagePlace(Guid Task, bool AtEnd, double Offset);
+
+    // The same margin ApplyTranscript uses for "at its end".
+    const double PageEndMargin = 24;
 
     internal const string InboxPageBackText = "Back";
     internal const string NotDoneYetText = "Not done yet…";
@@ -112,6 +120,7 @@ public partial class TasksWindow
         inboxPageStack.Clear();
         pageScroller = null;
         pageScrolledFor = null;
+        pageHold = null;
         StopTranscript();
         InboxPage.Child = null;
         InboxPage.Visibility = Visibility.Collapsed;
@@ -223,6 +232,13 @@ public partial class TasksWindow
             return;
         }
         var keep = pageScrolledFor == row.Id && pageScroller is { } old ? old.VerticalOffset : (double?)null;
+        // The place to come back to: the one held from before (a redraw that came while the content was short must not
+        // forget it), else where the old scroller is now. A page just opened has none and goes to its end.
+        PagePlace? hold = null;
+        if (pageScrolledFor == row.Id)
+            hold = pageHold is { } held && held.Task == row.Id ? held
+                : pageScroller is { } was ? new PagePlace(row.Id, was.VerticalOffset >= was.ScrollableHeight - PageEndMargin, was.VerticalOffset)
+                : null;
         var line = view.Inbox!.Lines.FirstOrDefault(l => l.Id == row.Id);
         var mark = line?.Mark ?? MarkOfRow(row);
         Scroller.Visibility = Visibility.Collapsed;
@@ -262,10 +278,43 @@ public partial class TasksWindow
         // Opened: at its end, where the newest comments and the comment box are. Redrawn: where it was.
         var scroller = pageScroller;
         pageScrolledFor = row.Id;
+        pageHold = hold;
+        scroller.ScrollChanged += (_, e) => KeepPlace(scroller, e);
+        // His own input ends the hold, so it can never fight his scrolling (a wheel, a click or drag on the bar, a key, a touch).
+        void Release() { if (ReferenceEquals(scroller, pageScroller)) pageHold = null; }
+        scroller.PreviewMouseWheel += (_, _) => Release();
+        scroller.PreviewMouseDown += (_, _) => Release();
+        scroller.PreviewKeyDown += (_, _) => Release();
+        scroller.PreviewTouchDown += (_, _) => Release();
         InboxPage.UpdateLayout();
-        if (keep is { } offset) scroller.ScrollToVerticalOffset(offset);
-        else scroller.ScrollToEnd();
+        if (hold is null) scroller.ScrollToEnd();
+        else scroller.ScrollToVerticalOffset(hold.AtEnd ? scroller.ScrollableHeight : hold.Offset);
         InboxPage.UpdateLayout();
+    }
+
+    // THE PAGE KEEPS ITS PLACE WHILE ITS CONTENT ARRIVES OR GOES (the owner: "the chat scrolls up by itself"). The chat of a
+    // task with a session is a stream that the transcript poll fills in. When the poll's source goes missing for a moment
+    // the stream empties, the scroller pulls its offset up to what still fits, and the content comes back only at a later
+    // poll or redraw, which would then read the pulled-up offset as the owner's. So the place is held in `pageHold`:
+    //   * it is made when a redraw finds none (from the old scroller), or here, when a change of the content pulls the
+    //     offset up on its own (the offset BEFORE the pull, and whether it was at the end);
+    //   * every later layout that gives the content more room puts the offset back toward it, up to what exists;
+    //   * it is cleared only by his own input on the scroller (DrawInboxPage) or by leaving the page. Reaching the place
+    //     does not clear it: a redraw can make the content short again.
+    // A page held at its end stays at its end as the chat grows; one held at an offset is moved only toward that offset, never past it.
+    void KeepPlace(ScrollViewer scroller, ScrollChangedEventArgs e)
+    {
+        if (!ReferenceEquals(e.OriginalSource, scroller) || !ReferenceEquals(scroller, pageScroller) || pageScrolledFor is not { } task) return;
+        if (pageHold is not { } hold)
+        {
+            if (e.VerticalChange >= 0 || (e.ExtentHeightChange >= 0 && e.ViewportHeightChange <= 0)) return;
+            var before = e.VerticalOffset - e.VerticalChange;
+            var wasAtEnd = before >= e.ExtentHeight - e.ExtentHeightChange - (e.ViewportHeight - e.ViewportHeightChange) - PageEndMargin;
+            pageHold = new PagePlace(task, wasAtEnd, before);
+            return;
+        }
+        var wanted = hold.AtEnd ? scroller.ScrollableHeight : Math.Min(hold.Offset, scroller.ScrollableHeight);
+        if (scroller.VerticalOffset < wanted - 0.5) scroller.ScrollToVerticalOffset(wanted);
     }
 
     // The mark a task's page shows when the task has no Inbox line of its own (a subtask opened from its parent's page).
