@@ -8229,12 +8229,30 @@ public partial class FloatingBar : Window
     // `groupId` is the DEPTH the new workspace is created at (#74): the group of the row the menu was
     // invoked on, so a sibling of a grouped row joins the same group, and null on a top-level row
     // exactly as before.
+    //
+    // The dialog also asks for the workspace's folder (NewWorkspaceDialog, task 6edcc65a), offered inside the one repos
+    // folder: the one stored when a workspace was last made with a folder, else the parent most task sessions ran under,
+    // else Visual Studio's own %USERPROFILE%\source\repos.
     void InsertAt(int index, Guid? groupId) =>
-        PromptDialog.Ask("New workspace", "Name:", owner: this)
+        NewWorkspaceDialog.Ask(ReposFolder(), NameTaken, owner: this)
             // Result<Workspace> converts implicitly to Result, which is all Report needs: it only
             // ever shows the ERROR, and the new Workspace has no reader here -- the bar redraws
             // off the pulse that creating it sent.
-            .Tap(fresh => Report(manager.InsertWorkspace(fresh, index, groupId)));
+            .Tap(fresh => Report(manager.InsertWorkspace(fresh.Name, index, groupId, fresh.Folder)));
+
+    string ReposFolder() =>
+        manager.State.ReposFolder ?? WorkspaceFolders.GuessReposFolder(SessionFolders(),
+            System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "source", "repos"));
+
+    // The same test InsertWorkspace makes, asked by the dialog before it makes a folder.
+    bool NameTaken(string name) =>
+        manager.State.Workspaces.Any(w => w.Name.Trim().Equals(name.Trim(), StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>
+    /// Every task session's folder (App wires it to the task board), for the repos folder's guess before one is stored
+    /// (task 6edcc65a). Empty by default, which falls back to %USERPROFILE%\source\repos.
+    /// </summary>
+    public Func<IReadOnlyList<string>> SessionFolders { get; init; } = () => [];
 
     ContextMenu IconMenu(WindowRow row, ContextMenu? into = null)
     {
