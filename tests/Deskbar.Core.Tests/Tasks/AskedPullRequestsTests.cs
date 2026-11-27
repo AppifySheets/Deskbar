@@ -423,4 +423,57 @@ public sealed class AskedPullRequestsTests
         Assert.NotEmpty(watch.Looked);
         Assert.Equal(TaskStatus.WaitingOnYou, watch.Tasks.Board.Tasks.Single().Status);
     }
+    // --- a question that only asks for a merge (task b99e5596: the merge mark, not the "?" bubble) ---------------------
+
+    // The opening, the words before the first link, says merge: first, or after "... and" within a few words.
+    [Theory]
+    [InlineData("Merge [Deskbar #504](" + Url504 + "): CI is green")]
+    [InlineData("**Merge** [Deskbar #504](" + Url504 + ")")]
+    [InlineData("Review and merge [Deskbar #504](" + Url504 + "), the tailnet policy")]
+    [InlineData("Mark it ready and merge " + Url504)]
+    [InlineData("merge " + Url504 + " once you have read it")]
+    public void A_question_opening_with_merge_and_linking_a_pull_request_asks_a_merge(string question) =>
+        Assert.True(AskedPullRequests.AsksMerge(question));
+
+    // A decision first, a deploy, merge said too late or in another sense, or nothing to merge: still a question.
+    [Theory]
+    [InlineData("Answer in the session: should it stay with the person? Then merge [PR 504](" + Url504 + ")")]
+    [InlineData("Redeploy the back office stack in Portainer: [stacks 311](" + Url504 + ") is merged")]
+    [InlineData("Decide whether we should merge the two settings pages, see [Deskbar #504](" + Url504 + ")")]
+    [InlineData("Merged [Deskbar #504](" + Url504 + "); should I release it?")]
+    [InlineData("Merge the branch locally and try it")]
+    [InlineData("Merge [the mockup](https://claude.ai/artifact/x) into the plan")]
+    [InlineData("Start a session on task 18758102: releases are blocked since [Deskbar #504](" + Url504 + ")")]
+    public void Any_other_question_does_not_ask_a_merge(string question) =>
+        Assert.False(AskedPullRequests.AsksMerge(question));
+
+    // On a task: only an open question with no answer buttons and no deploy hand-over; the Inbox marks it ReadyToMerge.
+    [Fact]
+    public void A_task_waiting_only_for_a_merge_wears_the_merge_mark()
+    {
+        var question = $"Merge [Deskbar #504]({Url504}): CI is green";
+        var (board, id) = Waiting(question);
+        var task = board.Tasks.Single();
+        var withOptions = board.Ask(id, question, Asked, default, ["Merge it", "Not yet"]).Value.Tasks.Single();
+        var handOver = board.Ask(id, question, Asked, deploy: true).Value.Tasks.Single();
+        var plain = Waiting("Which colour, blue or green?").Board.Tasks.Single();
+
+        Assert.True(AskedPullRequests.AsksMerge(task));
+        Assert.Equal(InboxMark.ReadyToMerge, InboxTabs.MarkOf(task, _ => false));
+        Assert.Equal(task.WaitingSince.GetValueOrDefault(task.Raised), InboxTabs.SinceOf(task, InboxMark.ReadyToMerge));
+        Assert.Equal(InboxMark.Asks, InboxTabs.MarkOf(withOptions, _ => false));
+        Assert.NotEqual(InboxMark.ReadyToMerge, InboxTabs.MarkOf(handOver, _ => false));
+        Assert.Equal(InboxMark.Asks, InboxTabs.MarkOf(plain, _ => false));
+    }
+
+    // Once the merge settles the question the task is no longer waiting, so the mark goes with it.
+    [Fact]
+    public void A_settled_merge_question_no_longer_asks_a_merge()
+    {
+        var (board, id) = Waiting($"Merge [Deskbar #504]({Url504})");
+        var settled = AskedPullRequests.Settlements(board, new Dictionary<string, PullRequestFacts> { [Key504] = Merged(Asked.AddMinutes(5)) }, Asked.AddMinutes(6));
+        var after = board.SettleQuestion(id, settled.Single().Question, settled.Single().Note, Asked.AddMinutes(6), Guid.NewGuid()).Tasks.Single();
+
+        Assert.False(AskedPullRequests.AsksMerge(after));
+    }
 }

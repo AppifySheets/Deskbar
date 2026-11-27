@@ -12,7 +12,8 @@ namespace Deskbar.App;
 // svg.ic is (base.css): a part is a stroke, a fill (the speech bubble, the full disc), or a "cut", a stroke in the
 // background's colour that carves a sign out of a fill (the "?" in the bubble, the tick in the disc).
 //
-// ONE SHAPE PER STATE, colour second (spec, "A line"; the user is colourblind): a bubble with "?" asks you, a triangle
+// ONE SHAPE PER STATE, colour second (spec, "A line"; the user is colourblind): a bubble with "?" asks you, two joining
+// branches wait only for your merge, a triangle
 // with "!" went quiet, a filled disc with a tick is finished, a ring with a tick is finished but not running here yet, an
 // arc turns while Claude works, a pause sign in a circle is idle, a clock is the usage limit, an empty rounded box is a
 // note, a ticked box is closed, a moon is snoozed, a shield with a keyhole asks permission. A test checks no two marks
@@ -54,6 +55,10 @@ internal static class InboxMarks
         // the gap, the step still to come. A shape of its own, as every mark needs one (criterion 13: the screen in grey
         // still tells them apart), where the plain ring in amber had differed from "finished, not running yet" by colour.
         ["doneWait"] = [S("M14.25 8A6.25 6.25 0 1 1 11.125 2.587"), S("M5.2 8.3l1.9 1.9 3.8-4.1"), Disc(13.4, 3.6, 1.3)],
+        // Waits only for a merge (task b99e5596, InboxMark.ReadyToMerge; the mockup's option A): two branches joining into
+        // one, a node on each. New here: the "pr" glyph below is three nodes and a hooked arrow, and no other mark has a
+        // curve meeting a straight stem, so it is told apart from the "?" bubble in grey too.
+        ["merge"] = [Ring(4.5, 3.5, 1.75), Ring(4.5, 12.5, 1.75), Ring(11.5, 8, 1.75), S("M4.5 5.25v5.5M4.5 5.25c0 2 2.5 2.75 5.25 2.75")],
         ["working"] = [Faint(Frozen(new EllipseGeometry(new Point(8, 8), 6, 6))), S("M8 2a6 6 0 0 1 6 6")],
         ["idle"] = [Ring(8, 8, 6.25), S("M6.4 5.8v4.4M9.6 5.8v4.4")],
         ["stuck"] = [S("M8 2.2l6.3 11H1.7z"), S("M8 6.6v3.1"), Disc(8, 11.5, .7)],
@@ -119,6 +124,7 @@ internal static class InboxMarks
     internal static string IconOf(InboxMark mark) => mark switch
     {
         InboxMark.Asks => "ask",
+        InboxMark.ReadyToMerge => "merge",
         InboxMark.WentQuiet => "stuck",
         InboxMark.Finished => "doneFill",
         InboxMark.FinishedNotRunning => "done",
@@ -138,6 +144,7 @@ internal static class InboxMarks
     internal static string WordsOf(InboxMark mark) => mark switch
     {
         InboxMark.Asks => "Asks you",
+        InboxMark.ReadyToMerge => "Ready to merge",
         InboxMark.WentQuiet => "Went quiet",
         InboxMark.Finished => "Finished",
         InboxMark.FinishedNotRunning => "Finished, not running yet",
@@ -154,7 +161,7 @@ internal static class InboxMarks
     /// <summary>The mark's colour: amber needs you, blue is Claude at work, a light grey is finished, the rest quiet.</summary>
     internal static Brush InkOf(InboxMark mark) => mark switch
     {
-        InboxMark.Asks or InboxMark.WentQuiet or InboxMark.AsksPermission or InboxMark.WaitsForDeploy => InboxLook.Amber,
+        InboxMark.Asks or InboxMark.ReadyToMerge or InboxMark.WentQuiet or InboxMark.AsksPermission or InboxMark.WaitsForDeploy => InboxLook.Amber,
         InboxMark.Finished or InboxMark.FinishedNotRunning => InboxLook.DoneInk,
         InboxMark.Working => InboxLook.Blue,
         _ => InboxLook.Ink3,

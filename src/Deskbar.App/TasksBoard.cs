@@ -1609,6 +1609,8 @@ public sealed partial class TasksBoard : IDisposable
         QuestionOptions = task.QuestionOptions,
         // Whether it waits on a deploy hand-over rather than a question (task a87891ca): the mark, the header and the chip.
         AwaitsDeploy = task.AwaitsDeploy,
+        // Whether its question only asks for a merge (task b99e5596): the page's mark when the task has no Inbox line.
+        AsksMerge = AskedPullRequests.AsksMerge(task),
         Important = task.Important,
         Urgent = task.Urgent,
         SnoozedUntil = task.SnoozedUntil.Map(until => (DateTimeOffset?)until).GetValueOrDefault(),
@@ -1944,6 +1946,9 @@ internal sealed record TaskRowView(Guid Id, string Title, string Detail, TaskSta
 
     /// <summary>Whether the task waits on the user for a deploy hand-over, not a question (TaskItem.AwaitsDeploy, task a87891ca).</summary>
     public bool AwaitsDeploy { get; init; }
+
+    /// <summary>Whether the task's question only asks for a pull request's merge (AskedPullRequests.AsksMerge, task b99e5596).</summary>
+    public bool AsksMerge { get; init; }
 
     /// <summary>The task's two flags (Task 12), drawn as the line's toggles.</summary>
     public bool Important { get; init; }

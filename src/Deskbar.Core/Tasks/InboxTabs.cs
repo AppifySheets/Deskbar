@@ -50,7 +50,9 @@ public enum InboxSection { Permissions, Questions, WentQuiet, Finished, WorkingN
 /// <summary>
 /// A line's state mark: one shape per state, so the marks are told apart without their colours (spec, "A line").
 /// </summary>
-public enum InboxMark { Asks, WentQuiet, Finished, FinishedNotRunning, Working, Idle, UsageLimit, Note, Closed, Snoozed, AsksPermission, WaitsForDeploy }
+// ReadyToMerge (task b99e5596): the question only asks for a pull request's merge (AskedPullRequests.AsksMerge), so it gets
+// a merge glyph instead of the "?" bubble. Added last, so no stored or traced number of the others changes.
+public enum InboxMark { Asks, WentQuiet, Finished, FinishedNotRunning, Working, Idle, UsageLimit, Note, Closed, Snoozed, AsksPermission, WaitsForDeploy, ReadyToMerge }
 
 /// <summary>
 /// One line of the Inbox: the task, its tab and section, its mark, when its state began (the time the line shows), whether
@@ -205,6 +207,8 @@ public static class InboxTabs
             // DeployWait). `hollow` is the task's delivery: for a task that is not Done it is shipping only when merged.
             // A hand-over the session marked (`task ask --deploy`, task a87891ca) waits for the deploy too.
             : DeployWait.Waits(task.Status, hollow?.Invoke(task) == true, task.QuestionOptions.Count, task.AwaitsDeploy) ? InboxMark.WaitsForDeploy
+            // A question that only asks for a merge (task b99e5596): the merge glyph, not the "?" bubble.
+            : AskedPullRequests.AsksMerge(task) ? InboxMark.ReadyToMerge
             : InboxMark.Asks
         : task.Status == TaskStatus.Done ? hollow?.Invoke(task) == true ? InboxMark.FinishedNotRunning : InboxMark.Finished
         : HandedBack(task) ? InboxMark.WentQuiet
@@ -220,7 +224,7 @@ public static class InboxTabs
     /// </summary>
     public static DateTimeOffset SinceOf(TaskItem task, InboxMark mark) => mark switch
     {
-        InboxMark.Asks or InboxMark.WaitsForDeploy => task.WaitingSince.GetValueOrDefault(task.Raised),
+        InboxMark.Asks or InboxMark.ReadyToMerge or InboxMark.WaitsForDeploy => task.WaitingSince.GetValueOrDefault(task.Raised),
         InboxMark.WentQuiet => task.HandedBack.HasValue ? task.HandedBack.Value : task.WaitingSince.GetValueOrDefault(task.Raised),
         InboxMark.Finished or InboxMark.FinishedNotRunning => task.Raised,
         InboxMark.Note => task.Created,
