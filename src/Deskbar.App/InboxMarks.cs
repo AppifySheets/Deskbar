@@ -118,6 +118,8 @@ internal static class InboxMarks
         InboxMark.WentQuiet => "stuck",
         InboxMark.Finished => "doneFill",
         InboxMark.FinishedNotRunning => "done",
+        // Task 1565789d (DeployWait): the same "merged, not running yet" ring, amber below since the deploy is his step.
+        InboxMark.WaitsForDeploy => "done",
         InboxMark.Working => "working",
         InboxMark.Idle => "idle",
         InboxMark.UsageLimit => "clock",
@@ -134,6 +136,7 @@ internal static class InboxMarks
         InboxMark.WentQuiet => "Went quiet",
         InboxMark.Finished => "Finished",
         InboxMark.FinishedNotRunning => "Finished, not running yet",
+        InboxMark.WaitsForDeploy => "Waits for your deploy",
         InboxMark.Working => "Claude is working",
         InboxMark.Idle => "Idle",
         InboxMark.UsageLimit => "Stopped: usage limit",
@@ -146,7 +149,7 @@ internal static class InboxMarks
     /// <summary>The mark's colour: amber needs you, blue is Claude at work, a light grey is finished, the rest quiet.</summary>
     internal static Brush InkOf(InboxMark mark) => mark switch
     {
-        InboxMark.Asks or InboxMark.WentQuiet or InboxMark.AsksPermission => InboxLook.Amber,
+        InboxMark.Asks or InboxMark.WentQuiet or InboxMark.AsksPermission or InboxMark.WaitsForDeploy => InboxLook.Amber,
         InboxMark.Finished or InboxMark.FinishedNotRunning => InboxLook.DoneInk,
         InboxMark.Working => InboxLook.Blue,
         _ => InboxLook.Ink3,

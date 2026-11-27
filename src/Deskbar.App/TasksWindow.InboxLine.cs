@@ -1,3 +1,4 @@
+using CSharpFunctionalExtensions;
 using System.Windows;
 using System.Windows.Automation;
 using System.Windows.Controls;
@@ -49,7 +50,7 @@ public partial class TasksWindow
 
     Button InboxLineOf(TaskRowView row, InboxLine line)
     {
-        var needsYou = line.Mark is InboxMark.Asks or InboxMark.WentQuiet;
+        var needsYou = line.Mark is InboxMark.Asks or InboxMark.WentQuiet or InboxMark.WaitsForDeploy;
         var grid = new Grid();
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(36) });
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
@@ -229,6 +230,10 @@ public partial class TasksWindow
     FrameworkElement? InboxText(TaskRowView row, InboxLine line)
     {
         var words = row.Detail.Length > 0 ? FloatingBar.FirstLine(TaskViews.PlainInline(row.Detail)) : TaskViews.PlainFirstLine(row.Description);
+        // WAITING FOR HIS DEPLOY (task 1565789d, DeployWait): the state goes in front of the session's hand-over, so the line
+        // reads "Merged, built · waiting for your deploy · Redeploy the portal stack…" rather than as a question.
+        if (line.Mark == InboxMark.WaitsForDeploy)
+            words = DeployWait.Words(row.DeployBuilt is { } built ? Maybe.From(built) : Maybe<bool>.None) + (words.Length > 0 ? " · " + words : "");
         if (words.Length == 0) return null;
         var text = new TextBlock
         {

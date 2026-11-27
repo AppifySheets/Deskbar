@@ -222,6 +222,36 @@ public sealed class DeployPullRequestTests : IDisposable
         Assert.False(RepoWatch.InFlight(service.Board, service.Watch).ContainsKey(Stacks));
     }
 
+    // --- waiting for his deploy (the Inbox mark, option A) -------------------------------------------------------------
+
+    // Merged, not running and no answer buttons: the Inbox draws it as waiting for his deploy, not as a question.
+    [Fact]
+    public void A_merged_task_waiting_on_him_without_answer_buttons_waits_for_his_deploy()
+    {
+        var (board, id) = WithDeploy();
+        var asked = board.Ask(id, "Redeploy the portal stack in Portainer", Now, Maybe<(string, Guid)>.None).Value.Tasks.Single();
+        var withOptions = board.Ask(id, "Which stack first?", Now, Maybe<(string, Guid)>.None, ["Portal", "Back office"]).Value.Tasks.Single();
+
+        Assert.Equal(InboxMark.WaitsForDeploy, InboxTabs.MarkOf(asked, _ => false, hollow: _ => true));
+        Assert.Equal(InboxMark.Asks, InboxTabs.MarkOf(asked, _ => false, hollow: _ => false));
+        Assert.Equal(InboxMark.Asks, InboxTabs.MarkOf(withOptions, _ => false, hollow: _ => true));
+        Assert.Equal(asked.WaitingSince.Value, InboxTabs.SinceOf(asked, InboxMark.WaitsForDeploy));
+    }
+
+    // Built is known only from the deploy pull requests: none says nothing, an open one is not built, all ended is built.
+    [Fact]
+    public void Built_comes_from_the_deploy_pull_requests()
+    {
+        var made = TaskBoard.Empty.Create("t", Maybe<Guid>.None, new TaskSession("s1", @"C:\x", Now, Maybe<DateTimeOffset>.None), Now, Guid.NewGuid()).Value;
+        var (board, id) = WithDeploy();
+
+        Assert.True(DeployWait.Built(made.Task).HasNoValue);
+        Assert.False(DeployWait.Built(board.Tasks.Single()).Value);
+        Assert.True(DeployWait.Built(board.DeployPullRequestsEnded(id, [Deploy.Key]).Tasks.Single()).Value);
+        Assert.Equal("Merged, built · waiting for your deploy", DeployWait.Words(true));
+        Assert.Equal("Merged · waiting for your deploy", DeployWait.Words(Maybe<bool>.None));
+    }
+
     // --- the file ------------------------------------------------------------------------------------------------------
 
     [Fact]
