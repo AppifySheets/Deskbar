@@ -1775,7 +1775,9 @@ public partial class FloatingBar
         // siblings', which reads as one more level of nesting. The arrow says where the line sits; the tick is the title's.
         // HOLLOW UNTIL IT RUNS (task 8470d176): a Done task whose change is not in this Deskbar yet gets the ring
         // (TaskStatusMarks.DoneTick), which fills into the disc once the running build holds it.
-        if (line.Status == TaskStatus.Done && !line.Closing)
+        // MERGED OR RUNNING BEFORE DONE (task 1afbd44f): a task waiting on a redeploy, or still in progress after its merge,
+        // gets the same ring or disc (TaskStatusMarks.ShowsTick).
+        if (TaskStatusMarks.ShowsTick(line.Status, line.Delivery) && !line.Closing)
         {
             var tick = TaskStatusMarks.DoneTick(Math.Round(Text(9.5)), line.Delivery.Shipping);
             tick.Margin = new Thickness(0, 0, 4, 0);

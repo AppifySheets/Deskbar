@@ -1729,7 +1729,9 @@ public partial class TasksWindow : Window
             //
             // HOLLOW UNTIL IT RUNS (task 8470d176): a Done task whose change is not in this Deskbar yet gets the ring, which
             // fills into the disc once the running build holds it (row.Delivery, TaskStatusMarks.DoneTick).
-            var doneTick = row.Status == TaskStatus.Done && !row.Closing;
+            // MERGED OR RUNNING BEFORE DONE (task 1afbd44f): a task waiting on a redeploy, or still in progress after its
+            // merge, gets the same ring or disc (TaskStatusMarks.ShowsTick).
+            var doneTick = TaskStatusMarks.ShowsTick(row.Status, row.Delivery) && !row.Closing;
             if (doneTick && row.ParentTitle is not null)
             {
                 var tick = TaskStatusMarks.DoneTick(12, row.Delivery.Shipping);

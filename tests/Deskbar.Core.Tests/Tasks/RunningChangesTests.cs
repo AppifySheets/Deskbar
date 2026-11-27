@@ -126,13 +126,58 @@ public sealed class RunningChangesTests
     }
 
     [Fact]
-    public void Only_done_tasks_with_a_recorded_pull_request_count()
+    public void Only_tasks_with_a_recorded_pull_request_count()
     {
         var facts = Facts((Pr573, MergedNotHere), (Elsewhere, MergedElsewhere));
 
-        Assert.Equal(TaskDelivery.None, RunningChanges.Of(Task(TaskStatus.InProgress, Pr573), Build, facts));
-        Assert.Equal(TaskDelivery.None, RunningChanges.Of(Task(TaskStatus.InProgress, Elsewhere), Build, facts));
         Assert.Equal(TaskDelivery.None, RunningChanges.Of(Task(TaskStatus.Done), Build, facts));
+        Assert.Equal(TaskDelivery.None, RunningChanges.Of(Task(TaskStatus.WaitingOnYou), Build, facts));
+    }
+
+    // --- an open task that is not Done (task 1afbd44f) --------------------------------------------------------------------
+
+    [Theory]
+    [InlineData(TaskStatus.WaitingOnYou)]
+    [InlineData(TaskStatus.InProgress)]
+    [InlineData(TaskStatus.Backlog)]
+    public void A_task_not_done_yet_shows_the_merged_ring_and_the_deployed_disc(TaskStatus status)
+    {
+        // Petre: "we have two circles - one for merged and the other for deployed". A task waiting on a redeploy is not
+        // Done, and its change is merged all the same.
+        Assert.Equal(DeliveryStage.Merged, RunningChanges.Of(Task(status, Elsewhere), Build, Facts((Elsewhere, MergedElsewhere))).Stage);
+        Assert.Equal(DeliveryStage.Merged, RunningChanges.Of(Task(status, Pr573), Build, Facts((Pr573, MergedNotHere))).Stage);
+        Assert.Equal(DeliveryStage.Running, RunningChanges.Of(Task(status, Pr573), Build, Facts((Pr573, Running))).Stage);
+    }
+
+    [Fact]
+    public void A_task_not_done_yet_shows_nothing_before_its_merge()
+    {
+        // Open and Checking say nothing about a merge, and a failed look cannot tell: no mark on a task still being worked on.
+        Assert.Equal(TaskDelivery.None, RunningChanges.Of(Task(TaskStatus.WaitingOnYou, Pr573), Build, Facts((Pr573, Open))));
+        Assert.Equal(TaskDelivery.None, RunningChanges.Of(Task(TaskStatus.WaitingOnYou, Pr573, Pr574), Build, Facts((Pr573, MergedNotHere), (Pr574, Open))));
+        Assert.Equal(TaskDelivery.None, RunningChanges.Of(Task(TaskStatus.InProgress, Pr573), Build, Facts()));
+        Assert.Equal(TaskDelivery.None, RunningChanges.Of(Task(TaskStatus.InProgress, Pr573), Build, Facts(), new HashSet<string> { Pr573.Key }));
+    }
+
+    [Theory]
+    [InlineData(TaskStatus.Done)]
+    [InlineData(TaskStatus.Closed)]
+    public void A_task_back_from_done_shows_no_mark_from_its_old_pull_requests(TaskStatus was)
+    {
+        // Reopened, woken by a comment, or on its schedule's next run: the recorded pull request is the finished work's,
+        // so no disc sits on the new work. Done again, it shows as any Done task does.
+        var back = Task(TaskStatus.InProgress, Pr573) with { StatusLog = [new StatusChange(Made, TaskStatus.InProgress, was), new StatusChange(Made.AddHours(1), was, TaskStatus.InProgress)] };
+
+        Assert.Equal(TaskDelivery.None, RunningChanges.Of(back, Build, Facts((Pr573, Running))));
+        Assert.Equal(DeliveryStage.Running, RunningChanges.Of(back with { Status = TaskStatus.Done }, Build, Facts((Pr573, Running))).Stage);
+    }
+
+    [Fact]
+    public void A_closed_task_shows_nothing()
+    {
+        // SetStatus refuses Closed (TaskBoard.Close is the way), so the record is closed directly.
+        var closed = Task(TaskStatus.Done, Pr573) with { Status = TaskStatus.Closed };
+        Assert.Equal(TaskDelivery.None, RunningChanges.Of(closed, Build, Facts((Pr573, Running))));
     }
 
     // --- another repository: a reported deploy (phase 2) ----------------------------------------------------------------
@@ -268,16 +313,23 @@ public sealed class RunningChangesTests
     // --- what is looked at ---------------------------------------------------------------------------------------------
 
     [Fact]
-    public void Only_open_or_unknown_pull_requests_of_done_tasks_are_looked_at()
+    public void Only_open_or_unknown_pull_requests_of_open_tasks_are_looked_at()
     {
         var (board, _) = Board(TaskStatus.Done, Pr573, Pr574, Elsewhere);
-        // A second task, in progress, whose pull request must not be looked at.
+        // A second task, in progress: an open task shows the merged ring too (task 1afbd44f), so its pull request is asked.
         var other = board.Create("Still going", Maybe<Guid>.None, Session, Made, Guid.NewGuid()).Value;
-        var both = other.Board.AddPullRequest(other.Task.Id, new PullRequestLink("AppifySheets", "Deskbar", 600), Made).Value;
+        var pr600 = new PullRequestLink("AppifySheets", "Deskbar", 600);
+        var both = other.Board.AddPullRequest(other.Task.Id, pr600, Made).Value;
+        // A third, closed: off every surface, so its pull request is not asked.
+        var gone = both.Create("Finished", Maybe<Guid>.None, Session, Made, Guid.NewGuid()).Value;
+        var all = gone.Board.AddPullRequest(gone.Task.Id, new PullRequestLink("AppifySheets", "Deskbar", 601), Made).Value
+            // A session is live on it, so the close goes the way "Stop Claude and close" does.
+            .Close(gone.Task.Id, Made, stoppingClaude: true).Value;
 
-        Assert.Equal([Pr573.Key, Pr574.Key, Elsewhere.Key], RunningChanges.ToLook(both, Build, Facts()).Select(l => l.Key));
-        Assert.Equal([Pr574.Key, Elsewhere.Key], RunningChanges.ToLook(both, Build, Facts((Pr573, MergedNotHere), (Pr574, Open))).Select(l => l.Key));
-        Assert.Empty(RunningChanges.ToLook(both, Build, Facts((Pr573, Running), (Pr574, Closed), (Elsewhere, MergedElsewhere))));
+        // The board's task order is not this test's business, so the keys are compared sorted.
+        Assert.Equal(new[] { Pr573.Key, Pr574.Key, Elsewhere.Key, pr600.Key }.Order(), RunningChanges.ToLook(all, Build, Facts()).Select(l => l.Key).Order());
+        Assert.Equal(new[] { Pr574.Key, Elsewhere.Key, pr600.Key }.Order(), RunningChanges.ToLook(all, Build, Facts((Pr573, MergedNotHere), (Pr574, Open))).Select(l => l.Key).Order());
+        Assert.Empty(RunningChanges.ToLook(all, Build, Facts((Pr573, Running), (Pr574, Closed), (Elsewhere, MergedElsewhere), (pr600, Running))));
     }
 
     [Fact]
@@ -413,12 +465,15 @@ public sealed class RunningChangesTests
     [Fact]
     public void A_task_turning_done_between_looks_is_checking_until_the_next_look()
     {
-        var (board, id) = Board(TaskStatus.InProgress, Pr573);
+        // The pull request is recorded between the looks too: an open task's is asked as well (task 1afbd44f), so one
+        // recorded before the first look would already be answered when the task turns Done.
+        var (board, id) = Board(TaskStatus.InProgress);
         using var watch = new Watch(board);
         watch.GitHub[Pr573.Key] = MergedNotHere;
         watch.Clock.AdvanceBy(TimeSpan.FromSeconds(1).Ticks);
         Assert.Empty(watch.Looked);
 
+        Assert.True(watch.Tasks.AddPullRequest(id, Pr573).IsSuccess);
         Assert.True(watch.Tasks.MarkDone(id).IsSuccess);
         Assert.Equal(DeliveryStage.Checking, watch.Delivery.Stage);
         Assert.True(watch.Delivery.Shipping);
@@ -547,9 +602,12 @@ public sealed class RunningChangesTests
     }
 
     [Fact]
-    public void With_no_done_task_to_check_the_watch_asks_GitHub_nothing()
+    public void With_no_open_task_to_check_the_watch_asks_GitHub_nothing()
     {
-        var (board, _) = Board(TaskStatus.InProgress, Pr573);
+        // Only a closed task holds a pull request: off every surface, so nothing is asked (task 1afbd44f asks for open
+        // tasks that are not Done too).
+        var (open, id) = Board(TaskStatus.InProgress, Pr573);
+        var board = open.Close(id, Made, stoppingClaude: true).Value;
         using var watch = new Watch(board);
 
         watch.Clock.AdvanceBy(TimeSpan.FromMinutes(5).Ticks);
