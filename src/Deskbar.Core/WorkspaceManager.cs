@@ -1609,7 +1609,7 @@ public sealed class WorkspaceManager(
             .Tap(w => Persist(State with
             {
                 Workspaces = Inserted(w, Math.Clamp(index, 0, State.Workspaces.Count)),
-                ReposFolder = WorkspaceFolders.ParentOf(w.Folder).GetValueOrDefault(State.ReposFolder),
+                ReposFolder = WorkspaceFolders.ParentOf(w.Folder).Match(parent => parent, () => State.ReposFolder),
             }));
 
     // Sets or clears (null or blank) a workspace's folder (Workspace.Folder, task 6edcc65a), for a workspace that
