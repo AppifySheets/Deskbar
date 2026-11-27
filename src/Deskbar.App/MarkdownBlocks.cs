@@ -38,6 +38,24 @@ namespace Deskbar.App;
 // Anything else (quotes, an unclosed **) shows as the text it is, in a paragraph: a comment is never lost to a
 // construct this does not know.
 //
+// COPY ON A CLICK (task b6af9445, Petre: "when there's a backticked or otherwise quoted command or something in the
+// chat, hovering over it should show me copy of the entire command"). In a document from Render, three things copy
+// their whole text when pressed, and say so in their hover text, "Click to copy": an `inline code` run, a fenced
+// block (all its lines, as written), and words in straight or curly double quotes ("Pull and redeploy", a button a
+// session names). The point is the WHOLE command: a long one wraps over two lines of a narrow bubble, and selecting
+// it by dragging across the wrap was the chore. The copied text flashes for a moment so the press is seen to have
+// done something, because WPF closes the hover text on a press.
+//   A press, not a release, for the reason a link opens on one: in a read-only box the editor captures the mouse on
+//   the press to start a selection, so the release never reaches the run. Taking the press means a drag that starts
+//   on code does not select part of it; a drag from the plain text beside it still does, and the whole command is
+//   what is wanted nearly every time.
+//   A quote copies its words without the quote marks. It is read only when it holds no other markdown (no backtick,
+//   star, bracket or "://"), so a quoted link or bold word keeps being what it was; it stays plain text to look at,
+//   only the pointer and the hover text change. Inside a link's text nothing copies, so the link keeps its click.
+//   InlinesOf (a task line's question and status line, a TextBlock) copies nothing: a press on a line picks the task.
+//   The copy goes through `copy`, which tests hand in so they never touch Petre's clipboard; left null it is the
+//   clipboard, and a busy clipboard is traced, never thrown.
+//
 // A link opens through `open`, which the window hands in; left null it opens the way `deskbar.cmd open` opens a link
 // "as usual" (RemoteControl.Open's last branch): the shell hands it to the default browser, on the desktop in front
 // (a file link goes by FileLink's plan instead, see OpenFile).
@@ -60,10 +78,20 @@ internal static class MarkdownBlocks
     internal const string TableTag = "table";
     internal const string TableHeaderTag = "table-header";
 
+    /// <summary>The Tag of a double-quoted run's words (the quote marks are runs of their own beside it).</summary>
+    internal const string QuoteTag = "quote";
+
+    /// <summary>What a copyable run, quote or code block says on hover.</summary>
+    internal const string CopyHint = "Click to copy";
+
     static readonly FontFamily CodeFont = new("Cascadia Mono, Consolas, Courier New");
     static readonly FontFamily TextFont = new("Segoe UI");
     static readonly Brush CodeFill = Frozen(Color.FromRgb(0x2A, 0x2C, 0x33));
     static readonly Brush LinkInk = Frozen(Color.FromRgb(0x7F, 0xB2, 0xFF));
+
+    // The flash on a copied run or block: a muted green, light enough to read the text through on every dark surface.
+    static readonly Brush CopiedFill = Frozen(Color.FromRgb(0x2E, 0x6B, 0x45));
+    static readonly TimeSpan CopiedFlash = TimeSpan.FromMilliseconds(600);
 
     // A table's grid lines and its header row's fill: white at low strength, so they show on every dark surface the
     // document lands on (a chat bubble, the tasks panel, a task window) without a colour of their own.
@@ -88,23 +116,28 @@ internal static class MarkdownBlocks
     // The inline constructs, tried left to right, the first match winning at each place: code first, so nothing
     // inside it is read; then bold before italic, so ** is not read as two empty italics; then links, then a bare
     // address. A bare address stops before closing punctuation, so the full stop ending a sentence is not in the link.
+    // Last, a double-quoted phrase (straight or curly quotes) on one line, up to 200 characters, starting and ending on
+    // a non-space, holding none of the other constructs' marks (see the header): it is the copyable kind.
     static readonly Regex Inline = new(
         @"(?<code>`[^`\n]+`)" +
         @"|(?<bold>\*\*(?=\S)(?<boldText>.+?)(?<=\S)\*\*)" +
         @"|(?<italic>\*(?=[^\s*])(?<italicText>.+?)(?<=[^\s*])\*)" +
         @"|(?<link>\[(?<linkText>[^\]\n]+)\]\((?:<(?<linkUrl>[^>\n]+)>|(?<linkUrl>[^)\s]+))\))" +
-        @"|(?<bare>(?:https?://|file:///)[^\s<>()\[\]]*[^\s<>()\[\].,;:!?'""])",
+        @"|(?<bare>(?:https?://|file:///)[^\s<>()\[\]]*[^\s<>()\[\].,;:!?'""])" +
+        @"|(?<quote>(?<open>[""\u201C])(?![^""\u201D\n]*://)(?<quoteText>[^\s""\u201C\u201D`*\[\]](?:[^""\u201C\u201D\n`*\[\]]{0,198}[^\s""\u201C\u201D`*\[\]])?)(?<close>[""\u201D]))",
         RegexOptions.Compiled);
 
     /// <summary>
     /// The comment as a document, ready for a read-only RichTextBox. <paramref name="open"/> is what a click on a link
     /// does; left null, the default browser opens it, or a file link's plan is followed (see the header).
     /// </summary>
-    public static FlowDocument Render(string markdown, Action<Uri>? open = null)
+    /// <remarks><paramref name="copy"/> is where a click on code or a quote puts its text (see the header); left null,
+    /// the clipboard.</remarks>
+    public static FlowDocument Render(string markdown, Action<Uri>? open = null, Action<string>? copy = null)
     {
-        var opener = open ?? Open;
+        var reading = new Reading(open ?? Open, copy ?? CopyToClipboard);
         var document = new FlowDocument { PagePadding = new Thickness(0), FontFamily = TextFont, TextAlignment = TextAlignment.Left };
-        Blocks((markdown ?? "").Replace("\r\n", "\n").Split('\n'), opener).ToList().ForEach(document.Blocks.Add);
+        Blocks((markdown ?? "").Replace("\r\n", "\n").Split('\n'), reading).ToList().ForEach(document.Blocks.Add);
         return document;
     }
 
@@ -117,13 +150,20 @@ internal static class MarkdownBlocks
     /// be one click away. Links are web addresses and local files, as in a comment (see the header).
     /// </summary>
     public static IReadOnlyList<Inline> InlinesOf(string text, Action<Uri>? open = null) =>
-        Inlines(text ?? "", open ?? Open).ToArray();
+        Inlines(text ?? "", new Reading(open ?? Open, null)).ToArray();
+
+    // What a reading hands down to every construct: where a link's click goes, and where a copy goes. Copy is null
+    // where nothing copies: in a TextBlock (InlinesOf) and inside a link's text (see the header).
+    sealed record Reading(Action<Uri> Open, Action<string>? Copy)
+    {
+        public Reading WithoutCopy => this with { Copy = null };
+    }
 
     // --- blocks --------------------------------------------------------------------------------------------------
 
     // The lines as blocks, read top to bottom. Each step takes one block's lines off the front and passes the rest on,
     // so the reader is a fold over the lines without an index to keep in step.
-    static IEnumerable<Block> Blocks(IReadOnlyList<string> lines, Action<Uri> open)
+    static IEnumerable<Block> Blocks(IReadOnlyList<string> lines, Reading open)
     {
         var rest = lines;
         while (rest.Count > 0)
@@ -135,11 +175,11 @@ internal static class MarkdownBlocks
     }
 
     // The block starting at the first line, and how many lines it took. A blank line takes one line and makes nothing.
-    static (Block? Block, int Taken) Next(IReadOnlyList<string> lines, Action<Uri> open)
+    static (Block? Block, int Taken) Next(IReadOnlyList<string> lines, Reading open)
     {
         var first = lines[0];
         if (string.IsNullOrWhiteSpace(first)) return (null, 1);
-        if (first.TrimStart().StartsWith("```", StringComparison.Ordinal)) return Fenced(lines);
+        if (first.TrimStart().StartsWith("```", StringComparison.Ordinal)) return Fenced(lines, open.Copy);
         if (Bullet.IsMatch(first)) return ListOf(lines, Bullet, TextMarkerStyle.Disc, open);
         if (Numbered.IsMatch(first)) return ListOf(lines, Numbered, TextMarkerStyle.Decimal, open);
         if (Heading.Match(first) is { Success: true } heading) return (HeadingOf(heading.Groups[1].Value, open), 1);
@@ -178,7 +218,7 @@ internal static class MarkdownBlocks
     // alignment comes from the colons on its dashes, and its share of the width from the longest text SHOWN in it (a
     // link counts its words, not its address), held between 4 and 40 characters' worth so a one-word column is not
     // crushed and a long sentence does not take the whole table.
-    static (Block, int) TableOf(IReadOnlyList<string> lines, Action<Uri> open)
+    static (Block, int) TableOf(IReadOnlyList<string> lines, Reading open)
     {
         var header = CellsOf(lines[0]);
         var alignments = CellsOf(lines[1]).Select(AlignmentOf).ToArray();
@@ -214,7 +254,7 @@ internal static class MarkdownBlocks
     }
 
     // One cell's text as a paragraph, read for inline markdown, aligned as its column.
-    static Paragraph CellOf(string text, TextAlignment alignment, Action<Uri> open)
+    static Paragraph CellOf(string text, TextAlignment alignment, Reading open)
     {
         var paragraph = new Paragraph { Margin = new Thickness(0), TextAlignment = alignment };
         Inlines(text, open).ToList().ForEach(paragraph.Inlines.Add);
@@ -255,7 +295,7 @@ internal static class MarkdownBlocks
 
     // A heading's one line, read for inline markdown like any other, in semibold with room above it to set it off
     // from the section before. No size of its own: it takes the document's, which the caller sets.
-    static Paragraph HeadingOf(string text, Action<Uri> open)
+    static Paragraph HeadingOf(string text, Reading open)
     {
         var paragraph = new Paragraph { Tag = HeadingTag, FontWeight = FontWeights.SemiBold, Margin = new Thickness(0, 6, 0, 2) };
         Inlines(text.TrimEnd(), open).ToList().ForEach(paragraph.Inlines.Add);
@@ -263,7 +303,7 @@ internal static class MarkdownBlocks
     }
 
     // Lines joined by line breaks, each read for inline markdown.
-    static Paragraph ParagraphOf(IReadOnlyList<string> lines, Action<Uri> open)
+    static Paragraph ParagraphOf(IReadOnlyList<string> lines, Reading open)
     {
         var paragraph = new Paragraph { Margin = new Thickness(0, 0, 0, 4) };
         lines.Select((line, i) => (line, i)).ToList().ForEach(x =>
@@ -276,7 +316,7 @@ internal static class MarkdownBlocks
 
     // A fenced block, from its opening fence to the closing one (or to the end, when the comment forgot to close it).
     // Its lines are kept exactly, leading spaces included, and read for nothing.
-    static (Block, int) Fenced(IReadOnlyList<string> lines)
+    static (Block, int) Fenced(IReadOnlyList<string> lines, Action<string>? copy)
     {
         var body = lines.Skip(1).TakeWhile(line => !line.TrimStart().StartsWith("```", StringComparison.Ordinal)).ToArray();
         var closed = body.Length + 1 < lines.Count;
@@ -293,12 +333,14 @@ internal static class MarkdownBlocks
             if (x.i > 0) code.Inlines.Add(new LineBreak());
             code.Inlines.Add(new Run(x.line));
         });
+        // The whole block copies, its lines joined as Windows joins lines, so a script pastes as it was written.
+        if (copy is not null && body.Length > 0) Copyable(code, string.Join(Environment.NewLine, body), copy);
         return (code, body.Length + (closed ? 2 : 1));
     }
 
     // Consecutive items of one kind of list. An indented line that is not an item continues the item above it, after
     // a line break, so a wrapped item stays one item.
-    static (Block, int) ListOf(IReadOnlyList<string> lines, Regex item, TextMarkerStyle marker, Action<Uri> open)
+    static (Block, int) ListOf(IReadOnlyList<string> lines, Regex item, TextMarkerStyle marker, Reading open)
     {
         var taken = lines.TakeWhile((line, i) => i == 0 || item.IsMatch(line) || (line.StartsWith(' ') && !string.IsNullOrWhiteSpace(line) && !EndsParagraph(line))).ToArray();
         var items = taken.Aggregate(new List<List<string>>(), (all, line) =>
@@ -322,7 +364,7 @@ internal static class MarkdownBlocks
     // --- inlines -------------------------------------------------------------------------------------------------
 
     // The text between matches is plain; each match becomes its construct, bold and italic read again inside.
-    static IEnumerable<Inline> Inlines(string text, Action<Uri> open)
+    static IEnumerable<Inline> Inlines(string text, Reading open)
     {
         var at = 0;
         foreach (Match match in Inline.Matches(text))
@@ -334,20 +376,72 @@ internal static class MarkdownBlocks
         if (at < text.Length) yield return new Run(text[at..]);
     }
 
-    static Inline Construct(Match match, Action<Uri> open)
+    static Inline Construct(Match match, Reading open)
     {
         if (match.Groups["code"].Success)
-            return new Run(match.Value[1..^1]) { Tag = CodeTag, FontFamily = CodeFont, Background = CodeFill };
+        {
+            var code = new Run(match.Value[1..^1]) { Tag = CodeTag, FontFamily = CodeFont, Background = CodeFill };
+            if (open.Copy is { } copy) Copyable(code, code.Text, copy);
+            return code;
+        }
+        if (match.Groups["quote"].Success)
+            return QuoteOf(match, open.Copy);
         if (match.Groups["bold"].Success)
             return new Bold().With(Inlines(match.Groups["boldText"].Value, open));
         if (match.Groups["italic"].Success)
             return new Italic().With(Inlines(match.Groups["italicText"].Value, open));
         if (match.Groups["link"].Success)
             return Address(match.Groups["linkUrl"].Value) is { } uri
-                ? Link(Inlines(match.Groups["linkText"].Value, open), uri, open)
+                ? Link(Inlines(match.Groups["linkText"].Value, open.WithoutCopy), uri, open.Open)
                 : new Run(match.Value);
-        return Address(match.Value) is { } bare ? Link([new Run(match.Value)], bare, open) : new Run(match.Value);
+        return Address(match.Value) is { } bare ? Link([new Run(match.Value)], bare, open.Open) : new Run(match.Value);
     }
+
+    // A quoted phrase: its marks as plain text either side of its words, the words copyable on their own. Where nothing
+    // copies (a TextBlock, a link's text) it is the text it was written as.
+    static Inline QuoteOf(Match match, Action<string>? copy)
+    {
+        if (copy is null) return new Run(match.Value);
+        var words = new Run(match.Groups["quoteText"].Value) { Tag = QuoteTag };
+        Copyable(words, words.Text, copy);
+        return new Span().With([new Run(match.Groups["open"].Value), words, new Run(match.Groups["close"].Value)]);
+    }
+
+    // Makes a run or a block copy `text` when pressed: the hand pointer and "Click to copy" on hover, the press taken
+    // (so neither the editor's selection nor the bubble under it sees it), and a short flash of the copied part. The
+    // flash puts back whatever background the part had at the press, so a restyle after Render (InboxMarks gives code
+    // its own chip) survives it.
+    static void Copyable(TextElement element, string text, Action<string> copy)
+    {
+        element.Cursor = System.Windows.Input.Cursors.Hand;
+        element.ToolTip = CopyHint;
+        element.MouseLeftButtonDown += (_, e) =>
+        {
+            e.Handled = true;
+            copy(text);
+            Flash(element);
+        };
+    }
+
+    static void Flash(TextElement element)
+    {
+        var before = element.ReadLocalValue(TextElement.BackgroundProperty);
+        element.Background = CopiedFill;
+        var timer = new System.Windows.Threading.DispatcherTimer { Interval = CopiedFlash };
+        timer.Tick += (_, _) =>
+        {
+            timer.Stop();
+            if (before == DependencyProperty.UnsetValue) element.ClearValue(TextElement.BackgroundProperty);
+            else element.SetValue(TextElement.BackgroundProperty, before);
+        };
+        timer.Start();
+    }
+
+    // The clipboard is shared with every program and one can hold it open for a moment; a copy that finds it busy is
+    // traced and dropped rather than thrown on the UI thread (as TaskLinkClipboard does).
+    static void CopyToClipboard(string text) =>
+        Result.Try(() => System.Windows.Clipboard.SetText(text))
+            .TapError(error => ClickTrace.Write($"copy from a comment: {error}"));
 
     // A hyperlink whose click goes to the opener. Click rather than RequestNavigate: there is no navigation host in a
     // RichTextBox, and Click is raised on a press in a read-only box with IsDocumentEnabled set.

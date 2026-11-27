@@ -281,4 +281,80 @@ public class MarkdownBlocksTests
     [Fact]
     public void Nothing_renders_as_an_empty_document() => StaThread.Run(() =>
         Assert.Empty(MarkdownBlocks.Render("   \n\n").Blocks));
+
+    // --- copy on a click (task b6af9445) ---------------------------------------------------------------------------
+    // The copies go to a list handed in, never to the clipboard, which is shared with the person at the machine.
+
+    // A left press on the element, as the read-only box routes one to the run under the pointer; true when taken.
+    static bool Press(TextElement element)
+    {
+        var press = new System.Windows.Input.MouseButtonEventArgs(System.Windows.Input.Mouse.PrimaryDevice, 0, System.Windows.Input.MouseButton.Left)
+        {
+            RoutedEvent = UIElement.MouseLeftButtonDownEvent,
+        };
+        element.RaiseEvent(press);
+        return press.Handled;
+    }
+
+    [Fact]
+    public void Inline_code_copies_the_whole_command_when_pressed() => StaThread.Run(() =>
+    {
+        var copied = new List<string>();
+        var document = MarkdownBlocks.Render("on contabo1 run `docker logs contabo1-infisical-backup-infisical-backup-1` around it", copy: copied.Add);
+
+        var code = Assert.Single(InlinesOf(document).OfType<Run>(), r => Equals(r.Tag, MarkdownBlocks.CodeTag));
+        Assert.Equal(MarkdownBlocks.CopyHint, code.ToolTip);
+        Assert.True(Press(code));
+        Assert.Equal(["docker logs contabo1-infisical-backup-infisical-backup-1"], copied);
+    });
+
+    [Fact]
+    public void A_fenced_block_copies_all_its_lines() => StaThread.Run(() =>
+    {
+        var copied = new List<string>();
+        var document = MarkdownBlocks.Render("```\ngit pull --rebase\n  ./bootstrap.sh\n```", copy: copied.Add);
+
+        var block = Assert.Single(document.Blocks.OfType<Paragraph>());
+        Assert.True(Press(block));
+        Assert.Equal([$"git pull --rebase{Environment.NewLine}  ./bootstrap.sh"], copied);
+    });
+
+    [Fact]
+    public void Quoted_words_copy_without_their_quote_marks() => StaThread.Run(() =>
+    {
+        var copied = new List<string>();
+        var document = MarkdownBlocks.Render("then \"Pull and redeploy\" and “merge it”", copy: copied.Add);
+
+        var quotes = InlinesOf(document).OfType<Run>().Where(r => Equals(r.Tag, MarkdownBlocks.QuoteTag)).ToList();
+        Assert.Equal(["Pull and redeploy", "merge it"], quotes.Select(q => q.Text));
+        // The marks stay on screen, as written.
+        Assert.Equal("then \"Pull and redeploy\" and “merge it”", TextOf(document).Trim());
+        quotes.ForEach(q => Press(q));
+        Assert.Equal(["Pull and redeploy", "merge it"], copied);
+    });
+
+    [Fact]
+    public void A_quote_holding_other_markdown_keeps_it() => StaThread.Run(() =>
+    {
+        var document = MarkdownBlocks.Render("say \"[PR 22](https://example.com/22)\" or \"https://example.com\" or \"`x`\"", copy: _ => { });
+
+        Assert.DoesNotContain(InlinesOf(document).OfType<Run>(), r => Equals(r.Tag, MarkdownBlocks.QuoteTag));
+        Assert.Equal(2, InlinesOf(document).OfType<Hyperlink>().Count());
+        Assert.Single(InlinesOf(document).OfType<Run>(), r => Equals(r.Tag, MarkdownBlocks.CodeTag));
+    });
+
+    [Fact]
+    public void Code_inside_a_link_and_a_task_line_copy_nothing() => StaThread.Run(() =>
+    {
+        var copied = new List<string>();
+        var document = MarkdownBlocks.Render("[`deskbar.cmd`](https://example.com)", copy: copied.Add);
+        var inLink = Assert.Single(InlinesOf(document).OfType<Run>(), r => Equals(r.Tag, MarkdownBlocks.CodeTag));
+        Assert.False(Press(inLink));
+
+        var line = MarkdownBlocks.InlinesOf("run `deskbar.cmd help` and \"Done\"").SelectMany(Deep).ToList();
+        var code = Assert.Single(line.OfType<Run>(), r => Equals(r.Tag, MarkdownBlocks.CodeTag));
+        Assert.Null(code.ToolTip);
+        Assert.DoesNotContain(line.OfType<Run>(), r => Equals(r.Tag, MarkdownBlocks.QuoteTag));
+        Assert.Empty(copied);
+    });
 }
