@@ -40,13 +40,23 @@ internal sealed class FastScrollViewer : ScrollViewer
     // Where the wheel has asked the view to go but layout has not taken it yet; null when VerticalOffset is current.
     double? pendingOffset;
 
-    public FastScrollViewer() =>
+    public FastScrollViewer()
+    {
+        // THE THEME'S LOOK: the app runs WPF's Fluent theme (ThemeMode="System", App.xaml), whose ScrollViewer style is an
+        // implicit one keyed by typeof(ScrollViewer). WPF applies an implicit style only to that exact type, so a subclass
+        // would fall back to the classic template, whose scroll bar takes 12 DIP of width where Fluent's floats over the
+        // content: every task line got 12 DIP narrower and the full line's title fell under TasksPanelLayout.FullTitleReadable
+        // (TasksBoardTests.At_the_full_lines_narrowest_width_the_columns_stay_inside_the_viewport, which failed the v2.6
+        // release build after this class first merged). A resource reference to the same key takes the theme's style,
+        // and follows it when the OS switches light and dark.
+        SetResourceReference(StyleProperty, typeof(ScrollViewer));
         // After layout the offset is real again, so the next wheel event starts from it. Only this viewer's own scrolls:
         // ScrollChanged bubbles, and a nested viewer's scroll says nothing about this one's offset.
         ScrollChanged += (_, e) =>
         {
             if (ReferenceEquals(e.OriginalSource, this)) pendingOffset = null;
         };
+    }
 
     protected override void OnMouseWheel(MouseWheelEventArgs e)
     {
