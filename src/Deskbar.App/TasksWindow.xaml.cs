@@ -2610,7 +2610,7 @@ public partial class TasksWindow : Window
         if (FullBubbles) InboxLook.Reading(document, isEvent ? InboxLook.ChatSmall : InboxLook.ChatText);
         else document.FontSize = isEvent ? 10.5 : 11.5;
         // The question waiting on Petre (task 968c2216) reads as it did on the line: orange, semibold.
-        document.Foreground = isEvent ? HeaderInk : comment.AsksNow ? Orange : Ink;
+        document.Foreground = isEvent ? HeaderInk : comment.AsksNow ? Orange : FullBubbles ? InboxLook.ReadInk : Ink;
         if (comment.AsksNow) document.FontWeight = FontWeights.SemiBold;
         if (isEvent) document.TextAlignment = TextAlignment.Center;
         var body = new RichTextBox
