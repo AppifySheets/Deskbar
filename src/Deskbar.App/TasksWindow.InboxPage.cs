@@ -314,7 +314,7 @@ public partial class TasksWindow
         // bottom, so the comment box is at the bottom edge and the empty room is on top; a longer one scrolls. The
         // scroller arranges its content at least as tall as the view, so the body's own bottom alignment does it.
         FollowTranscript(row.Id);
-        var body = PageBody(row);
+        var body = PageBody(row, mark);
         body.VerticalAlignment = VerticalAlignment.Bottom;
         // A FastScrollViewer like every other scroller in the panel (FastScrollViewer.cs, task 85df5e3f), so a page's chat
         // scrolls as far per wheel notch as the list it was opened from.
@@ -504,7 +504,7 @@ public partial class TasksWindow
         Actions?.OpenLink?.Invoke(task, new Uri(pr.Url));
     }
 
-    FrameworkElement PageBody(TaskRowView row)
+    FrameworkElement PageBody(TaskRowView row, InboxMark mark)
     {
         var body = new StackPanel { Margin = new Thickness(10, 8, 10, 10) };
         if (row.Problem is { Length: > 0 } problem) body.Children.Add(ProblemOf(problem));
@@ -541,7 +541,8 @@ public partial class TasksWindow
             // WAITING FOR HIS DEPLOY IS NOT A QUESTION (task 1565789d, DeployWait, option A): the session's hand-over
             // ("Redeploy the portal stack…") is drawn as an instruction under the page's track, with a rule down its left
             // edge, not in the amber question bubble.
-            if (shownDetail == row.Detail && DeployWait.Waits(row.Status, row.Delivery.Shipping, row.QuestionOptions.Count))
+            // On the page's own mark (review finding): a snoozed, went-quiet or permission page keeps its bubble.
+            if (shownDetail == row.Detail && mark == InboxMark.WaitsForDeploy)
             {
                 detail.Margin = new Thickness(10, 2, 0, 2);
                 body.Children.Add(new Border

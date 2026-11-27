@@ -659,7 +659,7 @@ public partial class TasksWindow : Window
     // own row, read the same way inside braces, so a comment or a session on it redraws the parent's thread.
     static string ListRowSignature(TaskRowView r) =>
         $"{r.Id}|{r.Title}|{r.Detail}|{r.Description}|{r.Status}|{r.Claudes}|{r.Assignee.Id}|{r.Sessions}|{r.SessionCount}|{r.LiveCount}|{PlaceSignature(r.Place)}|{r.CommentCount}|" +
-        $"{r.Expanded}|{r.Closing}|{r.Important}|{r.Urgent}|{r.WorkingCount}|{r.ParentTitle}|{r.ParentId}|{r.SubtaskCount}|{r.ClaudeWorking}|{r.Unfinished}|{r.Nested}|" +
+        $"{r.Expanded}|{r.Closing}|{r.Important}|{r.Urgent}|{r.WorkingCount}|{r.ParentTitle}|{r.ParentId}|{r.SubtaskCount}|{r.ClaudeWorking}|{r.Unfinished}|{r.Nested}|{r.DeployBuilt}|" +
         // Which Claude button the line has (task 6a57f59b, OpensSession): it changes when the first agents list arrives or
         // a session's worktree goes, with nothing else on a closed line changing, so without it the orange icon would stay.
         $"{r.OpensSession}|" +
