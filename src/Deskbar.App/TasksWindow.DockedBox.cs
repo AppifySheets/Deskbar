@@ -7,7 +7,7 @@ namespace Deskbar.App;
 // scrolled away with the chat). On a task's page, in the panel and in a task window, the comment box is docked at the bottom
 // of the page, OUTSIDE the scroller: only the chat above it scrolls, and the page's top row stays where it is. One docked area
 // holds what waits at the bottom: the permission card (when one shows) directly above the box, and the box last, with its
-// hint line and the pictures waiting to go with it, which are parts of the box and move with it.
+// pictures waiting to go with it, which are parts of the box and move with it.
 //
 // HOW THE BOX GETS THERE, with the smallest change to Thread: Thread calls AddCommentBox where it used to add CommentBox. On a
 // page's own thread that builds the very same box (every draft, picture, key and focus rule is CommentBox's and
