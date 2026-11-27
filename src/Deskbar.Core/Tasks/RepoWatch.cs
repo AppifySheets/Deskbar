@@ -134,6 +134,53 @@ public static class RepoWatch
         old.Concat(updates).GroupBy(kv => kv.Key).ToDictionary(g => g.Key, g => g.Last().Value);
 
     // ------------------------------------------------------------------------------------------------------------------
+    // FOLLOWING A MERGE (Follow)
+    // ------------------------------------------------------------------------------------------------------------------
+
+    // Conclusions that mean the merge commit's run FAILED. "cancelled" is deliberately absent: release.yml cancels an
+    // older build when a newer merge lands ("a newer merge cancels the older build"), so a cancelled run is the normal
+    // end of a burst of merges, never a reason to wake anybody. "skipped", "neutral" and "stale" are not failures either.
+    static readonly IReadOnlySet<string> RedConclusions =
+        new HashSet<string> { "failure", "timed_out", "startup_failure", "action_required" };
+
+    // How long a merge commit may show no workflow runs at all before Deskbar decides none will start (a workflow can
+    // take a minute or two to appear), and how long Deskbar follows before it gives the merge back to the session.
+    static readonly TimeSpan NoRunsAfter = TimeSpan.FromMinutes(10);
+    static readonly TimeSpan GiveUpAfter = TimeSpan.FromHours(3);
+
+    /// <summary>
+    /// One look at the workflow runs on a followed merge commit. Ends the follow (removes it from
+    /// <see cref="RepoWatchState.Following"/>) with a nudge when a run failed, when every run finished, when no run
+    /// started within ten minutes, or after three hours; otherwise nothing changes.
+    /// </summary>
+    public static FollowStep Follow(RepoWatchState state, FollowedMerge merge, IReadOnlyList<RunFacts> runs, DateTimeOffset now)
+    {
+        var label = merge.Link.Label;
+        FollowStep Ends(string text, params RedRun[] red) =>
+            new(state with { Following = state.Following.Where(m => m != merge).ToArray() }, [new WatchNudge(merge.TaskId, text)], red);
+
+        // A failed run ends the follow at once, even while others still run: the session must look now, and the manager
+        // hears of it too (RedRun). Only the first red run is reported, so one broken merge is one message.
+        if (runs.FirstOrDefault(r => r.Finished && RedConclusions.Contains(r.Conclusion)) is { } failed)
+            return Ends($"{failed.Name} failed on the merge commit of {label}: {failed.Url}. Look at it; the manager is told too.",
+                new RedRun(merge.TaskId, $"{merge.Link.Owner}/{merge.Link.Repo}", failed.Name, failed.Url, now));
+        // Every run finished and none failed: the session carries on in the briefing's order.
+        if (runs.Count > 0 && runs.All(r => r.Finished))
+            return Ends($"The runs on the merge commit of {label} finished: "
+                + string.Join(", ", runs.Select(r => $"{r.Name} ({Describe(r.Conclusion)})"))
+                + ". Carry on in the briefing's order: released, deployed, done.");
+        // No runs after ten minutes: a repository without workflows on its main branch is normal, so this is information.
+        if (runs.Count == 0 && now - merge.Since >= NoRunsAfter)
+            return Ends($"{label} merged and no workflow runs started on its merge commit; carry on as the briefing says.");
+        // Runs that never finish must not be followed forever.
+        if (now - merge.Since >= GiveUpAfter)
+            return Ends($"Deskbar stopped following the runs on the merge commit of {label} after 3 hours; check them yourself.");
+        return new FollowStep(state, [], []);
+    }
+
+    static string Describe(string conclusion) => conclusion == "cancelled" ? "cancelled, a newer run took over" : conclusion;
+
+    // ------------------------------------------------------------------------------------------------------------------
     // THE GH ANSWERS (Query, ParseRepository, ParseRuns)
     // ------------------------------------------------------------------------------------------------------------------
 
@@ -282,3 +329,9 @@ public sealed record RepoWatchState(
 
 /// <summary>The memory after a poll and the nudges it produced.</summary>
 public sealed record RepoWatchStep(RepoWatchState State, IReadOnlyList<WatchNudge> Nudges);
+
+/// <summary>A workflow run that failed on a followed merge commit; the manager is told (ManagerWakes) after the session is.</summary>
+public sealed record RedRun(Guid TaskId, string Repository, string Name, string Url, DateTimeOffset At);
+
+/// <summary>The memory after looking at one followed merge, the nudges it produced and any failed run.</summary>
+public sealed record FollowStep(RepoWatchState State, IReadOnlyList<WatchNudge> Nudges, IReadOnlyList<RedRun> Red);
