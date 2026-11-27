@@ -296,6 +296,28 @@ public class MarkdownBlocksTests
         return press.Handled;
     }
 
+    // A second press during the flash restarts it; the background the run had before the first press comes back.
+    [Fact]
+    public void A_second_press_during_the_flash_puts_the_old_background_back() => StaThread.Run(() =>
+    {
+        var copied = new List<string>();
+        var document = MarkdownBlocks.Render("run `git pull --rebase` now", copy: copied.Add);
+        var code = Assert.Single(InlinesOf(document).OfType<Run>(), r => Equals(r.Tag, MarkdownBlocks.CodeTag));
+        var original = code.Background;
+
+        Press(code);
+        Assert.NotSame(original, code.Background);
+        Press(code);
+        var frame = new System.Windows.Threading.DispatcherFrame();
+        var wait = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromMilliseconds(1500) };
+        wait.Tick += (_, _) => { wait.Stop(); frame.Continue = false; };
+        wait.Start();
+        System.Windows.Threading.Dispatcher.PushFrame(frame);
+
+        Assert.Same(original, code.Background);
+        Assert.Equal(2, copied.Count);
+    });
+
     [Fact]
     public void Inline_code_copies_the_whole_command_when_pressed() => StaThread.Run(() =>
     {
