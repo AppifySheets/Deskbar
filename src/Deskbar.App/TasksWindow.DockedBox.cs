@@ -46,6 +46,10 @@ public partial class TasksWindow
         {
             text.MinHeight = 0;
             text.Padding = new Thickness(0);
+            // What is typed reads as the chat above it does (the owner on build 8: "I dont think you made same changes for my
+            // chatbox"): the same size, and lines as tall.
+            text.FontSize = InboxLook.ChatText;
+            TextBlock.SetLineHeight(text, Math.Round(InboxLook.ChatText * 1.5));
         }
         dockedBox = box;
         dockedBoxFor = id;
