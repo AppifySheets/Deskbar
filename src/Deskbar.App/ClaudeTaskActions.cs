@@ -380,6 +380,57 @@ public sealed class ClaudeTaskActions : IDisposable
         ClaudeStart.NewTaskFolders(workspace, parent, tasks.Board,
             ClaudeStart.EditorRepos(seams.EditorFolderNames(workspace), tasks.Board), seams.WorkspaceFolder(workspace));
 
+    // --- a workspace's folder, chosen (Deskbar task 50b61120) -----------------------------------------------------------
+    //
+    // Petre: "Add an option to set the folder for the claude workflows, which should also run claude and add permissions
+    // on that choice". The folder is Workspace.Folder (task 6edcc65a). The row menu's "Folder…" (FloatingBar.ClaudeFolder.cs)
+    // lands in ChooseWorkspaceFolder, and a folder given in the New workspace dialog in SetUpFolder. Together they:
+    //   1. store the folder on the workspace (WorkspaceManager.SetWorkspaceFolder; the dialog's create already has), so a
+    //      task there with no session yet starts in it (ClaudeStart.NewTaskFolders);
+    //   2. trust it for Claude Code (seams.TrustFolder, ClaudeTrust): picking the folder for this purpose is Petre
+    //      answering the trust prompt, and without the yes a background session there cannot start at all. Off the UI
+    //      thread, since the file is a few hundred kilobytes and may be busy;
+    //   3. then, back on the UI thread, open a terminal running `claude` there, on that workspace, the window the trust
+    //      offer opens: Claude is running in the folder at once, and should the trust not have been written (the file
+    //      busy, a drive's root, the home folder), its own prompt asks him there, which is what Deskbar did before.
+    // A trust that fails is not told on its own: the terminal is the fallback and says it better. Only a terminal that
+    // cannot open is told, since then nothing else would show. With Claude tasks off, the menu item says so and does
+    // nothing, as "Start Claude on this" does; a folder from the dialog is stored as before and nothing more happens.
+
+    /// <summary>
+    /// The row menu's "Folder…": Windows' folder picker, and on a pick the folder stored on the workspace and
+    /// <see cref="SetUpFolder"/>. A cancel changes nothing.
+    /// </summary>
+    public void ChooseWorkspaceFolder(Guid workspaceId)
+    {
+        if (!manager.State.ClaudeTasksInEffect)
+        {
+            seams.Tell(FeatureOff);
+            return;
+        }
+        seams.PickFolder().Tap(folder => manager.SetWorkspaceFolder(workspaceId, folder)
+            .Tap(() => SetUpFolder(workspaceId, folder))
+            .TapError(seams.Tell));
+    }
+
+    /// <summary>
+    /// Trusts <paramref name="folder"/> for Claude Code in the background, then opens a terminal running `claude` in it on
+    /// the workspace; a terminal that cannot open is told. Nothing while Claude tasks are off.
+    /// </summary>
+    public void SetUpFolder(Guid workspaceId, string folder)
+    {
+        if (!manager.State.ClaudeTasksInEffect || string.IsNullOrWhiteSpace(folder)) return;
+        Observable.Start(() => seams.TrustFolder(folder), seams.Background)
+            .ObserveOn(scheduler)
+            .Subscribe(
+                trusted =>
+                {
+                    trusted.TapError(e => trace?.Invoke($"workspace folder: trust of {folder} not written: {e}"));
+                    TrustTerminal(folder, workspaceId).TapError(seams.Tell);
+                },
+                error => seams.Tell($"Deskbar could not set up {folder} for Claude:\n\n{error.Message}"));
+    }
+
     // A TASK TITLED WITH A SKILL STARTS WHERE THAT SKILL IS (task 3a872301). "/refresh-pr 245" is a project's skill, and
     // a session started in another of the workspace's repos would not have it. So the folders Claude Code is known NOT
     // to have that skill in (SkillCatalog, from the add box's lists) are dropped; a folder never asked stays, since it
@@ -674,6 +725,18 @@ public sealed record ClaudeTaskSeams(
     /// so a test that does not care sees the folders exactly as before.
     /// </summary>
     public Func<Maybe<Guid>, Maybe<string>> WorkspaceFolder { get; init; } = _ => Maybe<string>.None;
+
+    /// <summary>
+    /// Marks a folder trusted in Claude Code's own .claude.json (ClaudeTrustFile), for a workspace's chosen folder
+    /// (Deskbar task 50b61120). Refused by default, so a test that does not hand one in never writes the real file.
+    /// </summary>
+    public Func<string, Result> TrustFolder { get; init; } = _ => Result.Failure("No way to trust a folder");
+
+    /// <summary>
+    /// Where the trust write runs: the task pool in the app, so the menu click does not wait on the file. The tests hand
+    /// in an immediate scheduler.
+    /// </summary>
+    public IScheduler Background { get; init; } = TaskPoolScheduler.Default;
 
     /// <summary>A Yes/No question (the second session's); no means no.</summary>
     public Func<string, bool> Confirm { get; init; } = _ => false;

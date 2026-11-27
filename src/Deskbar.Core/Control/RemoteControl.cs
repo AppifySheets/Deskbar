@@ -272,6 +272,9 @@ public sealed partial class RemoteControl(WorkspaceManager manager, Func<bool, R
             // left them in, as the rest of this description does (final review, M5).
             tiled = workspace.Tiled,
             keepsSpace = workspace.TileKeepsSpace,
+            // The folder its new tasks start Claude in (Workspace.Folder), so an agent running `task start` can see why
+            // a task went where it did (task 50b61120). Null when none is set.
+            folder = workspace.Folder,
         };
     }
 

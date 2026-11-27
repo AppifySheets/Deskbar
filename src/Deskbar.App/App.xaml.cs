@@ -2155,6 +2155,8 @@ public partial class App : Application
             {
                 Confirm = question => MessageBox.Show(question, "Deskbar", MessageBoxButton.YesNo, MessageBoxImage.Question) == MessageBoxResult.Yes,
                 PickFolder = PickClaudeFolder,
+                // A workspace's chosen folder is trusted in Claude Code's own file (task 50b61120).
+                TrustFolder = folder => ClaudeTrustFile.Accept(ClaudeTrustFile.DefaultPath, folder),
                 // The folder the workspace was given in the New workspace dialog (task 6edcc65a), read at each start so
                 // a folder set a moment ago counts; the one in front for a free task, as for the editors above.
                 WorkspaceFolder = workspace => workspace.Or(manager.CurrentWorkspaceId)
@@ -2446,6 +2448,10 @@ public partial class App : Application
                 SessionWindow = SessionWindowOf,
                 // A line menu's "Start Claude on this" (Task 9): ClaudeTaskActions.Offer, which may open a pick list.
                 StartClaude = id => claudeActions?.Offer(id),
+                // The row menu's "Folder…" and the New workspace dialog's folder (task 50b61120): store, trust, and a
+                // terminal running claude there.
+                ChooseClaudeFolder = id => claudeActions?.ChooseWorkspaceFolder(id),
+                FolderChosen = (id, folder) => claudeActions?.SetUpFolder(id, folder),
                 // The add box's "/" list (task 3a872301): the skills Claude Code lists in the folders a task on the chip's
                 // workspace would start in (ClaudeTaskActions.NewTaskFolders), through the catalog. Empty while the
                 // actions are not built yet.
