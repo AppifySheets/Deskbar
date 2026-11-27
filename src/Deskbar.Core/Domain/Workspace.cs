@@ -149,4 +149,17 @@ public sealed record Workspace(Guid Id, string Name, Guid? DesktopId, string? Co
     // silently drop every nesting in a file that has not been loaded since groups arrived, which is
     // data loss that looks like a rendering bug.
     public Guid? ParentId { get; init; }
+
+    // Fields of this workspace in state.json that this build does not know, carried through a save unchanged, as
+    // AppState.Extra does for the top level. Without it an older build drops anything a newer one added INSIDE a
+    // workspace on its first save: that is how 2.6.48 lost every bookmark on 2026-11-27 (Deskbar task 0bd17709),
+    // since Bookmarks is a field of the workspace and 2.6.48 had never heard of it. This bag only protects fields
+    // added from now on; builds older than it still drop them, which is what state.json.from-<version>
+    // (JsonPersistenceStore.KeepCopyIfNewer) is for.
+    //
+    // Every edit goes through `with`, which copies this reference, so an edited workspace keeps what it carried. A new
+    // workspace has none. Null when the file had nothing unknown, the normal case, which leaves equality as it was.
+    // A mutable dictionary only because System.Text.Json fills extension data into IDictionary; nothing writes it.
+    [JsonExtensionData]
+    public IDictionary<string, System.Text.Json.JsonElement>? Extra { get; init; }
 }

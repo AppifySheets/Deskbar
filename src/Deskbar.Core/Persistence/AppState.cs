@@ -555,7 +555,8 @@ public sealed record AppState(
     // The version of the build that last saved this file, e.g. "2.1.44". JsonPersistenceStore stamps it on every
     // Save and StateVersionGate.Check refuses to load a file whose stamp is from a newer MAJOR version than the
     // running build. Within a major an older copy (the lagging Microsoft Store build) loads a newer file and
-    // keeps what it understands; Extra below is what stops it dropping the rest. Init property with no
+    // keeps what it understands; Extra below is what stops it dropping the rest. A stamp newer at any part also
+    // makes the older build copy the file aside first (JsonPersistenceStore.KeepCopyIfNewer). Init property with no
     // default, so files written before this key load as null, which passes.
     public string? WrittenBy { get; init; }
 
@@ -564,8 +565,10 @@ public sealed record AppState(
     // copy within a major loses no top-level setting (see "Shared state and version lag" in
     // docs/superpowers/specs/2026-10-24-deskbar-store-packaging-design.md).
     //
-    // Top level only: nested records (a Workspace, a rule, the bar's state) have no such bag, so a field a newer
-    // build adds INSIDE one of them is still dropped by an older save. Null when the file had nothing unknown,
+    // A Workspace and a Bookmark carry a bag of their own (Workspace.Extra, Bookmark.Extra, added after 2.6.48
+    // dropped every bookmark, Deskbar task 0bd17709). Other nested records (a rule, the bar's state) have none, so
+    // a field a newer build adds INSIDE one of them is still dropped by an older save; the copy KeepCopyIfNewer
+    // makes is what keeps it recoverable. Null when the file had nothing unknown,
     // which is the normal case and keeps the record's equality unaffected. The type is a mutable dictionary
     // because System.Text.Json fills extension data only into IDictionary or JsonObject; nothing here writes it.
     [JsonExtensionData]

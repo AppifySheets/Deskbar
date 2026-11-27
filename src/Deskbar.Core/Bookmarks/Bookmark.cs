@@ -32,7 +32,16 @@ public sealed record Bookmark(
     string? Arguments = null,
     string? WorkingDirectory = null,
     int? Screen = null,
-    string? Color = null);
+    string? Color = null)
+{
+    // Fields of this bookmark in state.json that this build does not know, so an older build's save keeps what a newer
+    // one added to a bookmark (as Workspace.Extra does for a workspace; Deskbar task 0bd17709). BookmarkConverter reads
+    // and writes it, since bookmarks do not go through the plain record serializer. Edits use `with`, which keeps it;
+    // a new bookmark has none. Null when there was nothing unknown, which leaves equality as it was.
+    // JsonIgnore: anything that ever serializes a bookmark directly shows the record as it was, without the bag.
+    [System.Text.Json.Serialization.JsonIgnore]
+    public IReadOnlyDictionary<string, System.Text.Json.JsonElement>? Extra { get; init; }
+}
 
 // What a move asks of a bookmark's screen: leave it (Keep, the default), forget it (Any) or set it (On). A struct
 // rather than an int? because "leave it" and "forget it" are two different requests that a null cannot tell apart.

@@ -11,7 +11,9 @@ namespace Deskbar.Core.Persistence;
 //
 // `runningVersion` is this build's version. Save stamps it into state.json as WrittenBy and Load refuses a file
 // stamped by a newer major version (StateVersionGate). Null (the tests, mostly) stamps nothing and refuses
-// nothing. Top-level fields this build does not know ride through Load and Save in AppState.Extra.
+// nothing. Fields this build does not know ride through Load and Save in AppState.Extra (top level), Workspace.Extra
+// and Bookmark.Extra. A file stamped by a newer build of the same major still loads, and is first copied to
+// state.json.from-<version>.<date> (KeepCopyIfNewer), because what this build cannot see it cannot carry.
 //
 // `write` puts the serialized text on the disk. Null (the tests) is DurableFile.Write, synchronous. The app passes
 // DeferredWrites.Write, so the flush to the disk happens off the UI thread (DeferredWrites has the measurement).
@@ -46,7 +48,75 @@ public sealed class JsonPersistenceStore(string baseDirectory, Action<string>? t
         // protecting it.
         .Bind(state => runningVersion is null
             ? Result.Success(state)
-            : StateVersionGate.Check(state.WrittenBy, runningVersion).Map(() => state));
+            : StateVersionGate.Check(state.WrittenBy, runningVersion).Map(() => state))
+        .Tap(KeepCopyIfNewer);
+
+    // The file a newer build wrote, kept before this older build saves over it. Within a major an older build loads a
+    // newer file (StateVersionGate), and Extra carries unknown fields through its save, but only the fields it can SEE:
+    // a list it has never heard of inside a record it does know, or a field whose meaning changed, is gone after the
+    // first save. That happened on 2026-11-27 (Deskbar task 0bd17709): the installed 2.6.48 started after a 2.6.208
+    // test build, ran 47 seconds, and its save dropped every workspace's Bookmarks, which 2.6.48 predates. Seven
+    // bookmarks were lost for good because nothing else held them.
+    //
+    // So before any save can happen (Load runs once, at start, before the first Save), the file as the newer build left
+    // it is copied to state.json.from-<that build's version>.<yyyyMMdd-HHmmss>. Nothing reads the copy back: it is there
+    // so a person can restore what was lost, by hand or by asking a session to.
+    //
+    // A copy is NEVER overwritten, and the date is in the name for that reason (whole-branch review): the same newer
+    // version can write again AFTER the older build stripped the file (the test build restarted, loaded the stripped
+    // file and saved it), and a copy named by version alone would then replace the one good copy with the stripped one.
+    // A copy whose bytes match one already kept is not made again, so switching between the Store copy and the GitHub
+    // copy several times a day costs nothing while neither changes. Copies go after 30 days, and past the newest 20:
+    // a count as low as three let a few test builds in a row push out the only copy that still had the lost data,
+    // before anyone had noticed the loss.
+    //
+    // The source is the file the load read: state.json, or state.json.previous when state.json could not be read
+    // (DurableFile.Read has then moved it aside), since that one too can be the newer build's.
+    //
+    // NOTHING HERE MAY FAIL THE LOAD. A copy that cannot be made is traced and the start goes on: the user's settings
+    // matter more than the backup of them.
+    const int NewerCopiesKept = 20;
+    static readonly TimeSpan NewerCopiesAge = TimeSpan.FromDays(30);
+
+    void KeepCopyIfNewer(AppState state)
+    {
+        if (runningVersion is null || !StateVersionGate.IsNewer(state.WrittenBy, runningVersion)) return;
+        var source = new[] { StatePath, DurableFile.PreviousOf(StatePath) }.FirstOrDefault(File.Exists);
+        if (source is null) return;
+        try
+        {
+            var bytes = File.ReadAllBytes(source);
+            var same = new DirectoryInfo(baseDirectory).GetFiles("state.json.from-*")
+                .FirstOrDefault(f => File.ReadAllBytes(f.FullName).AsSpan().SequenceEqual(bytes));
+            if (same is not null)
+            {
+                trace?.Invoke($"state.json was written by the newer {state.WrittenBy}; this is {runningVersion}; already kept as {same.Name}");
+                return;
+            }
+
+            // The version goes into a file name, so anything Windows refuses there ('+' is allowed) becomes '_'.
+            var version = Path.GetInvalidFileNameChars().Aggregate(state.WrittenBy!, (text, bad) => text.Replace(bad, '_'));
+            var stamp = DateTime.Now.ToString("yyyyMMdd-HHmmss");
+            var copy = Enumerable.Range(0, int.MaxValue)
+                .Select(n => Path.Combine(baseDirectory, n == 0 ? $"state.json.from-{version}.{stamp}" : $"state.json.from-{version}.{stamp}-{n}"))
+                .First(candidate => !File.Exists(candidate));
+            // WriteAllBytes rather than File.Copy, so the copy's write time is NOW: the pruning below ages copies from
+            // when they were made, not from when the newer build last wrote the file.
+            File.WriteAllBytes(copy, bytes);
+            trace?.Invoke($"state.json was written by the newer {state.WrittenBy}; this is {runningVersion}; kept a copy as {Path.GetFileName(copy)}");
+
+            var cutoff = DateTime.UtcNow - NewerCopiesAge;
+            new DirectoryInfo(baseDirectory).GetFiles("state.json.from-*")
+                .OrderByDescending(f => f.LastWriteTimeUtc)
+                .Where((f, index) => index >= NewerCopiesKept || f.LastWriteTimeUtc < cutoff)
+                .ToList()
+                .ForEach(f => f.Delete());
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            trace?.Invoke($"state.json was written by the newer {state.WrittenBy}; keeping a copy failed: {e.Message}");
+        }
+    }
 
     // Tiling moved from columns-of-rows sizes to a split tree. A workspace written by an older build has TileSizes
     // and no TileLayouts: each entry becomes the tree TileLayout.FromGrid builds, and TileSizes is emptied so the
