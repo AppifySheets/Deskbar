@@ -1078,7 +1078,9 @@ public partial class FloatingBarTaskListTests
             if (repaint) t.Bar.RequestRebuild();
         }
 
-        // No repaint between the switch and Enter: Enter itself reads the workspace in front.
+        // Text in the box and the box still typing, the switch alone and then Enter. (The harness's desktop event
+        // already repaints the bar synchronously, so this checks the paint while typing; CommitTaskNote's own re-read
+        // at Enter is the backstop for a switch no paint has caught yet.)
         ClickBox(t);
         t.Box.Text = "Change the DERP map";
         SwitchTo(sparrow.DesktopId!.Value, repaint: false);
@@ -1098,11 +1100,22 @@ public partial class FloatingBarTaskListTests
         // A workspace picked by hand is kept across the switch, and the next note starts from the one in front again.
         ClickBox(t);
         t.Box.Text = "Book the flight";
-        PickTarget(t, "Sparrow");
-        SwitchTo(gephaDesktop, repaint: true);
+        PickTarget(t, "GEPHA");
+        SwitchTo(sparrow.DesktopId!.Value, repaint: true);
         Press(t.Bar, t.Box, Key.Enter);
-        Assert.Equal(sparrow.Id, t.Tasks.Board.Tasks.Single(x => x.Title == "Book the flight").WorkspaceId.Value);
-        Assert.Equal(t.Gepha, t.Bar.TaskAddTarget.Value);
+        Assert.Equal(t.Gepha, t.Tasks.Board.Tasks.Single(x => x.Title == "Book the flight").WorkspaceId.Value);
+        Assert.Equal(sparrow.Id, t.Bar.TaskAddTarget.Value);
+
+        // A pick on an empty box that is then left (a click into another app) is dropped: the idle box follows the
+        // workspace in front again at the next paint, and a note typed later goes there, not to the old pick.
+        PickTarget(t, "GEPHA");
+        typeof(Window).GetMethod("OnDeactivated", BindingFlags.NonPublic | BindingFlags.Instance)!.Invoke(t.Bar, [EventArgs.Empty]);
+        SwitchTo(sparrow.DesktopId!.Value, repaint: true);
+        Assert.Equal(sparrow.Id, t.Bar.TaskAddTarget.Value);
+        ClickBox(t);
+        t.Box.Text = "Renew the domain";
+        Press(t.Bar, t.Box, Key.Enter);
+        Assert.Equal(sparrow.Id, t.Tasks.Board.Tasks.Single(x => x.Title == "Renew the domain").WorkspaceId.Value);
     });
 
     // RULING 45 (Petre, of the add box's chip row, "on [Deskbar] [none] [other…]": "those buttons could be only one, or
