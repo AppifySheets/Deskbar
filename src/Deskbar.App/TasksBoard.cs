@@ -1614,6 +1614,7 @@ public sealed partial class TasksBoard : IDisposable
         RepeatModel = task.Repeat.Map(r => r.Model).GetValueOrDefault(),
         PullRequests = task.PullRequests,
         DeployPullRequests = task.DeployPullRequests,
+        DeployBuilt = DeployWait.Built(task).Map(built => (bool?)built).GetValueOrDefault(),
         // Whether a Done task's change runs in this Deskbar yet: the ring and the outlined chip until it does (task 8470d176).
         Delivery = tasks.DeliveryOf(task),
         // Whether its menu offers "Mark deployed": merged, and a pull request outside this build's repository not
@@ -1966,6 +1967,12 @@ internal sealed record TaskRowView(Guid Id, string Title, string Detail, TaskSta
     /// them in a section of their own, so the deploy step is told apart from the task's own work.
     /// </summary>
     public IReadOnlyList<PullRequestLink> DeployPullRequests { get; init; } = [];
+
+    /// <summary>
+    /// Whether the change is built as far as the deploy pull requests tell (task 1565789d, DeployWait.Built): null when the
+    /// task has none, so the Inbox page's track leaves the Built step out.
+    /// </summary>
+    public bool? DeployBuilt { get; init; }
 
     /// <summary>
     /// Whether a Done task's change runs in this Deskbar yet (task 8470d176, RunningChanges): Shipping draws the hollow

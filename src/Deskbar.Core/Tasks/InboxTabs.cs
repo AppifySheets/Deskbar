@@ -50,7 +50,7 @@ public enum InboxSection { Permissions, Questions, WentQuiet, Finished, WorkingN
 /// <summary>
 /// A line's state mark: one shape per state, so the marks are told apart without their colours (spec, "A line").
 /// </summary>
-public enum InboxMark { Asks, WentQuiet, Finished, FinishedNotRunning, Working, Idle, UsageLimit, Note, Closed, Snoozed, AsksPermission }
+public enum InboxMark { Asks, WentQuiet, Finished, FinishedNotRunning, Working, Idle, UsageLimit, Note, Closed, Snoozed, AsksPermission, WaitsForDeploy }
 
 /// <summary>
 /// One line of the Inbox: the task, its tab and section, its mark, when its state began (the time the line shows), whether
@@ -200,7 +200,11 @@ public static class InboxTabs
         task.Status == TaskStatus.Closed ? InboxMark.Closed
         : task.IsSnoozed ? InboxMark.Snoozed
         : asksPermission?.Invoke(task) == true ? InboxMark.AsksPermission
-        : task.Status == TaskStatus.WaitingOnYou ? SessionKeeper.GivenUp(task) ? InboxMark.WentQuiet : InboxMark.Asks
+        : task.Status == TaskStatus.WaitingOnYou ? SessionKeeper.GivenUp(task) ? InboxMark.WentQuiet
+            // Merged, not running yet and no answer buttons: waiting for his deploy, not a question (task 1565789d,
+            // DeployWait). `hollow` is the task's delivery: for a task that is not Done it is shipping only when merged.
+            : DeployWait.Waits(task.Status, hollow?.Invoke(task) == true, task.QuestionOptions.Count) ? InboxMark.WaitsForDeploy
+            : InboxMark.Asks
         : task.Status == TaskStatus.Done ? hollow?.Invoke(task) == true ? InboxMark.FinishedNotRunning : InboxMark.Finished
         : HandedBack(task) ? InboxMark.WentQuiet
         : !task.IsClaudes ? InboxMark.Note
@@ -215,7 +219,7 @@ public static class InboxTabs
     /// </summary>
     public static DateTimeOffset SinceOf(TaskItem task, InboxMark mark) => mark switch
     {
-        InboxMark.Asks => task.WaitingSince.GetValueOrDefault(task.Raised),
+        InboxMark.Asks or InboxMark.WaitsForDeploy => task.WaitingSince.GetValueOrDefault(task.Raised),
         InboxMark.WentQuiet => task.HandedBack.HasValue ? task.HandedBack.Value : task.WaitingSince.GetValueOrDefault(task.Raised),
         InboxMark.Finished or InboxMark.FinishedNotRunning => task.Raised,
         InboxMark.Note => task.Created,

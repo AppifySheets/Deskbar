@@ -1,3 +1,4 @@
+using CSharpFunctionalExtensions;
 using System.Windows;
 using System.Windows.Automation;
 using System.Windows.Controls;
@@ -373,6 +374,7 @@ public partial class TasksWindow
     static InboxMark MarkOfRow(TaskRowView row) =>
         row.Status == TaskStatus.Closed ? InboxMark.Closed
         : row.SnoozedUntil is not null ? InboxMark.Snoozed
+        : DeployWait.Waits(row.Status, row.Delivery.Shipping, row.QuestionOptions.Count) ? InboxMark.WaitsForDeploy
         : row.Status == TaskStatus.WaitingOnYou ? InboxMark.Asks
         : row.Status == TaskStatus.Done ? row.Delivery.Shipping ? InboxMark.FinishedNotRunning : InboxMark.Finished
         : !row.Claudes ? InboxMark.Note
@@ -392,8 +394,40 @@ public partial class TasksWindow
         InboxMark.Closed => "Closed",
         InboxMark.Snoozed => "Snoozed",
         InboxMark.AsksPermission => "Waits for your yes or no",
+        InboxMark.WaitsForDeploy => DeployWait.Words(row.DeployBuilt is { } built ? Maybe.From(built) : Maybe<bool>.None),
         _ => "A note. No Claude on it yet",
     };
+
+    // THE DEPLOY TRACK (task 1565789d, DeployWait, the mockup's option A): Merged › Built › Deploy: yours › Running, a
+    // pill per step. Merged is ticked (the mark only shows for a merged change); Built is ticked once every deploy pull
+    // request has ended, plain while one is open, and left out for a task with none, since nothing says a build happened;
+    // the deploy is amber because it is his step; Running stays plain, as nothing has shown the change running yet.
+    // Named "State" for a screen reader, as the words it replaces are.
+    FrameworkElement DeployTrack(TaskRowView row)
+    {
+        var track = new WrapPanel { Margin = new Thickness(0, 0, 10, 4), VerticalAlignment = VerticalAlignment.Center };
+        AutomationProperties.SetName(track, "State: " + PageStateWords(row, InboxMark.WaitsForDeploy));
+        Border Step(string text, Brush ink, Brush edge) => new()
+        {
+            BorderBrush = edge,
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(9),
+            Padding = new Thickness(7, 1, 7, 1),
+            Child = Text(text, 12, ink, FontWeights.SemiBold, new Thickness(0)),
+        };
+        TextBlock Arrow() => Text("›", 12, InboxLook.Ink3, FontWeights.Normal, new Thickness(5, 0, 5, 0));
+        var steps = new List<FrameworkElement> { Step("✓ Merged", InboxLook.DoneInk, InboxLook.StrongLine) };
+        if (row.DeployBuilt is { } built)
+            steps.Add(built ? Step("✓ Built", InboxLook.DoneInk, InboxLook.StrongLine) : Step("Built", InboxLook.Ink3, InboxLook.Hairline));
+        steps.Add(Step("Deploy: yours", InboxLook.Amber, InboxLook.Amber));
+        steps.Add(Step("Running", InboxLook.Ink3, InboxLook.Hairline));
+        steps.Select((step, i) => (step, i)).ToList().ForEach(x =>
+        {
+            if (x.i > 0) track.Children.Add(Arrow());
+            track.Children.Add(x.step);
+        });
+        return track;
+    }
 
     UIElement PageTop(TaskRowView row, InboxMark mark)
     {
@@ -435,7 +469,8 @@ public partial class TasksWindow
         var words = Text(PageStateWords(row, mark), 12, mark is InboxMark.Asks or InboxMark.WentQuiet or InboxMark.AsksPermission ? InboxLook.Amber : InboxLook.Ink2,
             FontWeights.SemiBold, new Thickness(0, 0, 10, 4));
         AutomationProperties.SetName(words, "State");
-        second.Children.Add(words);
+        // Waiting for his deploy (task 1565789d, option A): the steps instead of the words, done ones ticked, his in amber.
+        second.Children.Add(mark == InboxMark.WaitsForDeploy ? DeployTrack(row) : words);
         if (InboxChip(row) is FrameworkElement chip)
         {
             chip.Margin = new Thickness(0, 0, 10, 4);
@@ -503,7 +538,21 @@ public partial class TasksWindow
             detail.Foreground = InboxLook.Ink;
             detail.TextWrapping = TextWrapping.Wrap;
             detail.TextTrimming = TextTrimming.None;
-            if (row.Status == TaskStatus.WaitingOnYou && shownDetail == row.Detail)
+            // WAITING FOR HIS DEPLOY IS NOT A QUESTION (task 1565789d, DeployWait, option A): the session's hand-over
+            // ("Redeploy the portal stack…") is drawn as an instruction under the page's track, with a rule down its left
+            // edge, not in the amber question bubble.
+            if (shownDetail == row.Detail && DeployWait.Waits(row.Status, row.Delivery.Shipping, row.QuestionOptions.Count))
+            {
+                detail.Margin = new Thickness(10, 2, 0, 2);
+                body.Children.Add(new Border
+                {
+                    BorderBrush = InboxLook.StrongLine,
+                    BorderThickness = new Thickness(2, 0, 0, 0),
+                    Margin = new Thickness(0, 2, 0, 10),
+                    Child = detail,
+                });
+            }
+            else if (row.Status == TaskStatus.WaitingOnYou && shownDetail == row.Detail)
             {
                 // The question in a bubble with an amber edge, as the mockup's "Claude asks".
                 var bubble = new StackPanel();
