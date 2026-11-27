@@ -3,6 +3,7 @@ using System.Windows.Automation;
 using System.Windows.Controls;
 using System.Windows.Documents;
 using System.Windows.Input;
+using System.Windows.Markup;
 using System.Windows.Media;
 using Deskbar.Core.Tasks;
 
@@ -25,8 +26,10 @@ namespace Deskbar.App;
 //                 italic when urgent (Ruling 59); "↳" before a subtask and "· N subtasks" after a parent;
 //                 NO SECOND LINE (the owner, 2026-11-27, after using it: it added nothing and the bar has little room).
 //                 A question or a status line is in the line's tooltip, in full, with the title;
-//   the chip      the workspace's full name with a dot in its colour, under the title at every width; a click opens the
-//                 move menu as today's chip does. A task on no workspace has no chip.
+//   the chip      the workspace's name with a dot in its colour, at the right end of the title's FIRST row, trimmed to
+//                 a cap (task 891caa7c, "make denser, compact": the owner picked one row per task over the chip's own
+//                 row under the title); a click opens the move menu as today's chip does. A task on no workspace has no
+//                 chip.
 // The mark is the panel's (InboxMarks): amber only for a line that asks or went quiet. No fill behind a line but the
 // bar's hover and the selection. The text is the bar's own sizes (Text), so the text-size setting keeps working.
 //
@@ -101,9 +104,19 @@ public partial class FloatingBar
         Grid.SetRow(lead, 1);
         grid.Children.Add(lead);
 
-        var text = new StackPanel { Margin = new Thickness(7, 0, 0, 0) };
+        // ONE ROW (task 891caa7c, the owner picked option A of the denser-lines mockup): the title takes the room and wraps
+        // to its second row when it must; the workspace sits at the right end of the title's FIRST row, top-aligned to it,
+        // so a one-row title is one row of line. The chip used to be a row of its own under the title.
+        var text = new Grid { Margin = new Thickness(7, 0, 0, 0) };
+        text.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        text.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         text.Children.Add(editingTask == line.Id && !line.Closing ? TitleOrEditor(line) : InboxBarTitle(line));
-        if (line.WorkspaceName is not null) text.Children.Add(InboxBarChip(line));
+        if (line.WorkspaceName is not null)
+        {
+            var chip = InboxBarChip(line);
+            Grid.SetColumn(chip, 1);
+            text.Children.Add(chip);
+        }
         Grid.SetRow(text, 1);
         Grid.SetColumn(text, 1);
         grid.Children.Add(text);
@@ -120,7 +133,8 @@ public partial class FloatingBar
             BorderBrush = selected ? TaskPickedEdge : Brushes.Transparent,
             Background = selected ? InboxBarSelectedFill : Brushes.Transparent,
             CornerRadius = new CornerRadius(9),
-            Padding = new Thickness(5, 4, 6, 5),
+            // 2 DIP above and below the text (was 4 and 5 while the chip had its own row): the denser line of task 891caa7c.
+            Padding = new Thickness(5, 2, 6, 2),
             Child = grid,
             // A permission question waiting on this line's session is said in the tooltip, above the bar's own text for
             // the line (TipOf, the Button's tooltip, which shows whenever this one is null).
@@ -155,13 +169,50 @@ public partial class FloatingBar
         return title;
     }
 
-    // The chip under the title: the full name and a dot in the workspace's colour, in a quiet pill; the move menu on a
-    // click, as today's chip (OpenTaskMoveMenu). A line in its undo window has a plain chip: its task is closed.
+    // The widest the workspace may grow at the right end of the title's row, in the bar's text size so a larger text
+    // setting keeps the same share. About 64 DIP at the default size: "Personal" or "Deskbar" whole, a longer name ends in
+    // "…" and is whole in the tooltip. The title keeps the rest of the row.
+    double InboxBarChipMaxWidth => Math.Round(Text(8.5) * 7.5);
+
+    // The chip's button: its content and nothing else, so no hover wash (see InboxBarChip). The face's transparent
+    // background still takes the press.
+    static readonly ControlTemplate InboxBarChipTemplate = Sealed((ControlTemplate)XamlReader.Parse(
+        """
+        <ControlTemplate TargetType="Button" xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation">
+          <ContentPresenter />
+        </ControlTemplate>
+        """));
+
+    // The chip's name: the second ink at rest, the first ink while the pointer is on the chip's button, which is the
+    // chip's only hover sign. Both inks read at 4.5 to 1 or better on the line's hover (FloatingBarTaskListTests).
+    static readonly Style InboxBarChipNameStyle = SealedStyle();
+
+    static Style SealedStyle()
+    {
+        var style = new Style(typeof(TextBlock));
+        style.Setters.Add(new Setter(TextBlock.ForegroundProperty, InboxLook.Ink2));
+        var hover = new DataTrigger
+        {
+            Binding = new System.Windows.Data.Binding(nameof(IsMouseOver))
+                { RelativeSource = new System.Windows.Data.RelativeSource(System.Windows.Data.RelativeSourceMode.FindAncestor, typeof(Button), 1) },
+            Value = true,
+        };
+        hover.Setters.Add(new Setter(TextBlock.ForegroundProperty, InboxLook.Ink));
+        style.Triggers.Add(hover);
+        style.Seal();
+        return style;
+    }
+
+    // The workspace at the right end of the title's first row: a dot in its colour and its full name, trimmed; no pill
+    // edge or fill any more (task 891caa7c: the pill's edge read as one more box on a line that should be quiet). The
+    // move menu on a click, as today's chip (OpenTaskMoveMenu). A line in its undo window has a plain chip: its task is
+    // closed. It stands exactly one title row tall and centres its words in it, so it lines up with the title's first row
+    // whether the title takes one row or two.
     UIElement InboxBarChip(TaskLine line)
     {
         var name = line.WorkspaceName ?? "";
         // A DockPanel, not a horizontal StackPanel: a StackPanel gives the name all the width it wants, so a long name was
-        // cut off at the line's edge with no "…"; docked after the dot it gets the room the line has, and trims.
+        // cut off with no "…"; docked after the dot it gets what is left of the chip's cap (InboxBarChipMaxWidth), and trims.
         var content = new DockPanel { LastChildFill = true };
         var dot = new System.Windows.Shapes.Ellipse
         {
@@ -169,24 +220,34 @@ public partial class FloatingBar
         };
         DockPanel.SetDock(dot, Dock.Left);
         content.Children.Add(dot);
-        content.Children.Add(new TextBlock { Text = name, FontSize = Text(8.5), Foreground = InboxLook.Ink2, TextTrimming = TextTrimming.CharacterEllipsis });
-        var pill = new Border
+        // The name's ink comes from InboxBarChipNameStyle, not a local value, so the style's hover trigger can brighten it.
+        content.Children.Add(new TextBlock
+        {
+            Text = name, FontSize = Text(8.5), Style = InboxBarChipNameStyle, TextTrimming = TextTrimming.CharacterEllipsis,
+            VerticalAlignment = VerticalAlignment.Center,
+        });
+        var face = new Border
         {
             Tag = "task-workspace",
-            Background = InboxLook.Surface,
-            BorderBrush = InboxLook.StrongLine,
-            BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(8),
-            Padding = new Thickness(6, 0, 7, 1),
+            // Transparent, not null: the whole face, gaps included, takes the press that opens the move menu.
+            Background = Brushes.Transparent,
+            Height = TaskTextLineHeight,
+            Padding = new Thickness(2, 0, 2, 0),
             Child = content,
             ToolTip = $"On {name}",
         };
-        if (line.Closing) return new Border { Child = pill, HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(0, 3, 0, 0) };
+        var margin = new Thickness(6, 0, 0, 0);
+        if (line.Closing)
+            return new Border { Child = face, VerticalAlignment = VerticalAlignment.Top, MaxWidth = InboxBarChipMaxWidth, Margin = margin };
         Button? button = null;
-        button = TaskButton("Move to workspace", pill, () => OpenTaskMoveMenu(line.Id, button), $"On {name}: move to another workspace",
+        button = TaskButton("Move to workspace", face, () => OpenTaskMoveMenu(line.Id, button), $"On {name}: move to another workspace",
             ignoredWhen: TaskClickIgnored);
-        button.HorizontalAlignment = HorizontalAlignment.Left;
-        button.Margin = new Thickness(0, 3, 0, 0);
+        // No wash of its own on hover: with the pill's opaque fill gone, the shell template's 12% white wash would land on
+        // top of the line's own hover wash, and the name would read at about 4.3 to 1 there. The name brightens instead.
+        button.Template = InboxBarChipTemplate;
+        button.VerticalAlignment = VerticalAlignment.Top;
+        button.MaxWidth = InboxBarChipMaxWidth;
+        button.Margin = margin;
         return button;
     }
 
