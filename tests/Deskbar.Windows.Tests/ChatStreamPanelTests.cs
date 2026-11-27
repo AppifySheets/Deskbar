@@ -443,6 +443,72 @@ public class ChatStreamPanelTests
         again.Apply([Said(Paras(90), 0)]);
         Assert.True(double.IsPositiveInfinity(Inside(again).OfType<RichTextBox>().Single().MaxHeight));
     });
+
+    // THE WHEEL OVER A BUBBLE (the owner, build 9: the wheel would not scroll the page down over some bubbles, up still worked).
+    // WPF's TextBoxBase marks a wheel-down handled while its own inner viewer has room below, which a bubble cut by the guard
+    // always has (its inner bars are Disabled, so nothing moves), so the page's scroller never saw it.
+    static (FastScrollViewer Page, RichTextBox Box) PageWith(string text, string below)
+    {
+        var panel = Panel();
+        panel.Apply([Said(text, 0), Said(below, 10)]);
+        var page = new FastScrollViewer
+        {
+            Content = panel,
+            VerticalScrollBarVisibility = ScrollBarVisibility.Hidden,
+            HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
+        };
+        page.Measure(new Size(500, 300));
+        page.Arrange(new Rect(0, 0, 500, 300));
+        page.UpdateLayout();
+        return (page, Inside(panel).OfType<RichTextBox>().First());
+    }
+
+    // What WPF's input does for one notch: the tunnelling event first, then the bubbling one, which starts handled if the
+    // tunnelling one was (so a class handler such as TextBoxBase's does not run for it).
+    static void WheelOver(UIElement target, int delta)
+    {
+        var preview = new System.Windows.Input.MouseWheelEventArgs(System.Windows.Input.Mouse.PrimaryDevice, 0, delta) { RoutedEvent = UIElement.PreviewMouseWheelEvent };
+        target.RaiseEvent(preview);
+        target.RaiseEvent(new System.Windows.Input.MouseWheelEventArgs(System.Windows.Input.Mouse.PrimaryDevice, 0, delta) { RoutedEvent = UIElement.MouseWheelEvent, Handled = preview.Handled });
+    }
+
+    static ScrollViewer? FindViewer(DependencyObject node)
+    {
+        for (var i = 0; i < VisualTreeHelper.GetChildrenCount(node); i++)
+        {
+            var child = VisualTreeHelper.GetChild(node, i);
+            if (child is ScrollViewer viewer) return viewer;
+            if (FindViewer(child) is { } deeper) return deeper;
+        }
+        return null;
+    }
+
+    [Fact]
+    public void The_wheel_down_over_a_message_cut_by_the_guard_scrolls_the_page() => StaThread.Run(() =>
+    {
+        var (page, box) = PageWith(Paras(90), "A last short line.");
+        Assert.True(page.ScrollableHeight > 0);
+        Assert.True(FindViewer(box)!.ScrollableHeight > FindViewer(box)!.VerticalOffset);
+
+        WheelOver(box, -120);
+        page.UpdateLayout();
+
+        Assert.True(page.VerticalOffset > 0, $"the page did not move; bubble {box.ActualHeight}, inner ScrollableHeight {FindViewer(box)!.ScrollableHeight}");
+    });
+
+    [Fact]
+    public void The_wheel_down_over_a_short_message_scrolls_the_page() => StaThread.Run(() =>
+    {
+        // Two lines, with a message below it that fills the page, so the page has room to scroll.
+        var (page, box) = PageWith("First line" + "\n\n" + "Second line", Paras(30));
+        Assert.True(page.ScrollableHeight > 0);
+
+        WheelOver(box, -120);
+        page.UpdateLayout();
+
+        Assert.True(page.VerticalOffset > 0, $"the page did not move; bubble {box.ActualHeight}, inner ScrollableHeight {FindViewer(box)!.ScrollableHeight}");
+    });
+
     [Fact]
     public void Pictures_show_as_a_count() => StaThread.Run(() =>
     {

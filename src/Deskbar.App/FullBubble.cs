@@ -1,5 +1,6 @@
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Input;
 using System.Windows.Media;
 
 namespace Deskbar.App;
@@ -43,6 +44,16 @@ internal static class FullBubble
             body.MaxHeight = tall;
             body.ClipToBounds = true;
         }
+        // THE WHEEL NEVER STAYS IN A BUBBLE (the owner, build 9: wheel down stuck over a bubble, wheel up worked). WPF's
+        // TextBoxBase.OnMouseWheel marks a wheel-down handled while its own viewer has room below, and a bubble cut by the
+        // guard always has (its inner bars are Disabled, so nothing moves): the page's scroller never saw the event. So the
+        // wheel is taken before the box sees it and raised again on its parent, as PassWheelAtEnd does for a capped thread.
+        body.PreviewMouseWheel += (_, e) =>
+        {
+            if (e.Handled || VisualTreeHelper.GetParent(body) is not UIElement parent) return;
+            e.Handled = true;
+            parent.RaiseEvent(new MouseWheelEventArgs(e.MouseDevice, e.Timestamp, e.Delta) { RoutedEvent = UIElement.MouseWheelEvent, Source = body });
+        };
         var words = new TextBlock { Text = ShowAllName, FontSize = 10.5, Foreground = InboxLook.Ink2 };
         Button? show = null;
         show = button(words, ShowAllName, () =>
