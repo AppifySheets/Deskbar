@@ -34,9 +34,20 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  build-and-test:
+  # TWO RUNNERS, EACH BUILDING FOR ITSELF AND RUNNING HALF THE WINDOW TESTS. Deskbar.Windows.Tests is most
+  # of the time and runs one test at a time on purpose, and splitting it across processes on ONE runner
+  # broke tests (measured 2026-11-27, Deskbar task 78d5481a; the reasoning is in scripts/Test-CiShard.ps1).
+  # Two runners took the run from about 3.7 to about 2.7 minutes. Public repository, so the minutes are
+  # free; the cost is two of the organisation's 20 concurrent jobs per pull request instead of one.
+  tests:
+    name: tests (${{ matrix.shard }} of 2)
     # MUST be Windows: WPF app targeting net10.0-windows, and the tests construct real windows.
     runs-on: windows-latest
+    strategy:
+      # A failure in one half does not cancel the other, so one run reports every failing test.
+      fail-fast: false
+      matrix:
+        shard: [0, 1]
 
     steps:
       - name: Check out the repository
@@ -59,8 +70,25 @@ jobs:
         # warning nobody will ever go back and fix.
         run: dotnet build Deskbar.sln -c Release --no-restore -warnaserror
 
-      - name: Test
-        # Category=Integration excluded: those tests create, switch and delete REAL virtual
-        # desktops, which on a CI runner is meaningless at best and hangs the agent at worst.
-        # Same filter Petre runs locally.
-        run: dotnet test Deskbar.sln -c Release --no-build --filter "Category!=Integration" --verbosity normal
+      - name: Test this runner's half
+        # Category=Integration excluded inside the script: those tests create, switch and delete REAL
+        # virtual desktops, which on a CI runner is meaningless at best and hangs the agent at worst.
+        # Same filter Petre runs locally. Shard 0 also runs Deskbar.Core.Tests and every window test
+        # not dealt to shard 1, so no test can fall between the halves.
+        shell: pwsh
+        run: ./scripts/Test-CiShard.ps1 -Shard ${{ matrix.shard }} -Of 2
+
+  # THE ONE CHECK THAT MEANS "BUILT AND TESTED". release.yml asks GitHub whether a check run named
+  # build-and-test passed on a commit before it skips its own tests, and a matrix job's check runs are
+  # named per shard. So this job keeps the name and passes only when both halves passed. `!cancelled()`
+  # makes it run, and fail, when a half failed, instead of being skipped (a skipped check would not read
+  # as a failure). A run cancelled because a newer push superseded it is left alone.
+  build-and-test:
+    needs: tests
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Both halves passed
+        run: |
+          echo "tests: ${{ needs.tests.result }}"
+          test "${{ needs.tests.result }}" = success
