@@ -1062,6 +1062,49 @@ public partial class FloatingBarTaskListTests
         Assert.True(t.Bar.TaskAddTarget.HasNoValue);
     });
 
+    // TASK 701c71a8 (Petre: "I added a task in contabo workspace but it opened claude session in Rustdesk"). He clicked
+    // into the box on Rustdesk, pasted a note, clicked contabo on the bar and pressed Enter there: the box was still
+    // typing and held text, so it kept Rustdesk. A target nobody picked by hand is settled at Enter, from the workspace
+    // in front, whether or not a repaint ran after the switch; a picked one stays (the test above).
+    [Fact]
+    public void A_note_begun_on_one_workspace_and_sent_from_another_goes_to_the_one_in_front() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var sparrow = t.Harness.Manager.State.Workspaces.Single(w => w.Name == "Sparrow");
+        void SwitchTo(Guid desktop, bool repaint)
+        {
+            t.Harness.Desktops.CurrentId = desktop;
+            ((Subject<Guid>)t.Harness.Desktops.CurrentChanged).OnNext(desktop);
+            if (repaint) t.Bar.RequestRebuild();
+        }
+
+        // No repaint between the switch and Enter: Enter itself reads the workspace in front.
+        ClickBox(t);
+        t.Box.Text = "Change the DERP map";
+        SwitchTo(sparrow.DesktopId!.Value, repaint: false);
+        Press(t.Bar, t.Box, Key.Enter);
+        Assert.Equal(sparrow.Id, t.Tasks.Board.Tasks.Single(x => x.Title == "Change the DERP map").WorkspaceId.Value);
+
+        // With a repaint and a second click in the box (Petre's steps): the chip shows the new workspace before Enter.
+        var gephaDesktop = t.Harness.Manager.State.Workspaces.Single(w => w.Name == "GEPHA").DesktopId!.Value;
+        ClickBox(t);
+        t.Box.Text = "Rotate the relay key";
+        SwitchTo(gephaDesktop, repaint: true);
+        Assert.Equal(t.Gepha, t.Bar.TaskAddTarget.Value);
+        ClickBox(t);
+        Press(t.Bar, t.Box, Key.Enter);
+        Assert.Equal(t.Gepha, t.Tasks.Board.Tasks.Single(x => x.Title == "Rotate the relay key").WorkspaceId.Value);
+
+        // A workspace picked by hand is kept across the switch, and the next note starts from the one in front again.
+        ClickBox(t);
+        t.Box.Text = "Book the flight";
+        PickTarget(t, "Sparrow");
+        SwitchTo(gephaDesktop, repaint: true);
+        Press(t.Bar, t.Box, Key.Enter);
+        Assert.Equal(sparrow.Id, t.Tasks.Board.Tasks.Single(x => x.Title == "Book the flight").WorkspaceId.Value);
+        Assert.Equal(t.Gepha, t.Bar.TaskAddTarget.Value);
+    });
+
     // RULING 45 (Petre, of the add box's chip row, "on [Deskbar] [none] [other…]": "those buttons could be only one, or
     // two - selected or nothing"). The row is ONE chip, with no "on" before it (task 47398c0f), the chosen target, with a small arrow: the current
     // workspace's by default, or "none". Its press opens the compact workspace menu, none first; a pick changes the chip.

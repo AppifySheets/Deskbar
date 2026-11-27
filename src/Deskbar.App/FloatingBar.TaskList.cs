@@ -479,6 +479,14 @@ public partial class FloatingBar
     Maybe<Guid> taskAddHere = Maybe<Guid>.None;
     Maybe<Guid> taskAddTarget = Maybe<Guid>.None;
 
+    // WHETHER THE TARGET WAS CHOSEN BY HAND (task 701c71a8). Set when Petre picks a workspace (or "none") from the chip's
+    // menu (ChooseTaskTarget); cleared when the box empties after Enter or Esc (EndTyping). While it is unset the target
+    // is only the default, the workspace in front, and it keeps following that workspace even with text in the box: he
+    // clicked into the box on Rustdesk, pasted a note, clicked contabo on the bar and pressed Enter there, and the note
+    // (and the Claude session started on it) went to Rustdesk, because a box holding text used to keep whatever
+    // workspace it opened on. A choice made by hand still stays put across a desktop switch, as Ruling 9 intends.
+    bool taskAddTargetPicked;
+
     // Whether the box has the keyboard: from a click in it (BeginTyping) until Enter, Esc or the bar losing the
     // foreground (EndTyping). The bar stays at full strength while it is set, not merely while the box holds text. And
     // the window to hand the keyboard back to after Enter or Esc.
@@ -2129,7 +2137,8 @@ public partial class FloatingBar
             : languageTarget != 0 && OnCurrentDesktop(languageTarget) ? languageTarget : 0;
         taskAddHere = manager.CurrentWorkspaceId;
         // A subtask box keeps its parent's workspace, empty or not (final review, finding 2): the subtask lands with its parent.
-        if (taskAddBox.Text.Length == 0 && taskAddParent.HasNoValue) taskAddTarget = taskAddHere;
+        // A workspace picked by hand stays too; any other target is the workspace in front, text in the box or not (task 701c71a8).
+        if (TaskAddTargetFollowsFront) taskAddTarget = taskAddHere;
         taskTyping = true;
         PaintTaskChips();
         PaintAddRow();
@@ -2152,6 +2161,8 @@ public partial class FloatingBar
         {
             taskAddBox.Text = "";
             taskAddTarget = taskAddHere;
+            // The next note starts from the workspace in front again, not from this one's pick (task 701c71a8).
+            taskAddTargetPicked = false;
             // The toggles are off again after an add (and after Esc): each note says its own flags (Ruling 37).
             taskAddFlags = (false, false);
             // A subtask's parent is for that one add (subtasks spec): the next note is a plain one again.
@@ -2182,21 +2193,23 @@ public partial class FloatingBar
         taskAddPlaceholder.Visibility = taskAddBox.Text.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
     }
 
-    // On every paint, while nobody is typing, the "here" chip is the workspace in front. An empty box's chip follows it
-    // (and the placeholder with it, so it follows a desktop switch); a box holding text keeps the workspace it was
-    // given, which then shows as the "other…" chip if it is no longer the one in front. The placeholder always names
-    // the chosen chip's workspace (PaintPlaceholder).
+    // On every paint the "here" chip is the workspace in front, and the chosen chip follows it (the placeholder with it,
+    // so both follow a desktop switch) unless the chip was picked by hand or the box is adding a subtask: those keep
+    // their workspace, text in the box or not. Before task 701c71a8 a box holding text, or one being typed in, kept
+    // whatever workspace it opened on, so a note begun on one desktop and sent after switching to another went to the
+    // first. The placeholder always names the chosen chip's workspace (PaintPlaceholder).
     void FollowCurrentWorkspace()
     {
         if (taskAddPlaceholder is null || taskAddBox is null) return;
         var current = manager.CurrentWorkspaceId;
-        PaintPlaceholder();
-        if (taskTyping) return;
         taskAddHere = current;
-        // As in BeginTyping: an empty subtask box keeps its parent's workspace (final review, finding 2).
-        if (taskAddBox.Text.Length == 0 && taskAddParent.HasNoValue) taskAddTarget = current;
+        if (TaskAddTargetFollowsFront) taskAddTarget = current;
         PaintTaskChips();
     }
+
+    // Whether the add box's target is only the default and so follows the workspace in front: nothing was picked from
+    // the chip's menu for this note, and it is not a subtask (a subtask lands with its parent; final review, finding 2).
+    bool TaskAddTargetFollowsFront => !taskAddTargetPicked && taskAddParent.HasNoValue;
 
     // The window noted when the box opened gets the foreground back, the way the language switcher hands it back
     // (HandForegroundTo), so Petre's next keystrokes land where he was typing rather than in a bar with nothing to
@@ -2274,6 +2287,9 @@ public partial class FloatingBar
         if (taskService is null || taskAddBox is null) return;
         var (title, body) = TaskNote.Split(taskAddBox.Text, taskAddImages.Count);
         var quadrant = QuadrantOf.Flags(taskAddFlags.Important, taskAddFlags.Urgent);
+        // The workspace is settled at Enter, not when the box opened (task 701c71a8): unless Petre picked one by hand,
+        // the note goes to the workspace in front now, even if no repaint has caught a desktop switch made since.
+        if (TaskAddTargetFollowsFront) taskAddTarget = manager.CurrentWorkspaceId;
         (TaskAddDescription(body) is { } describe
                 ? taskService.AddNote(title, taskAddTarget, quadrant, taskAddParent, describe)
                 : taskService.AddNote(title, taskAddTarget, quadrant, taskAddParent))
@@ -2400,6 +2416,8 @@ public partial class FloatingBar
     {
         if (!taskTyping) BeginTyping();
         taskAddTarget = target;
+        // A pick by hand stays put across a desktop switch until the note is added or dropped (task 701c71a8).
+        taskAddTargetPicked = true;
         PaintTaskChips();
         taskAddBox?.Focus();
     }
@@ -2528,6 +2546,9 @@ public partial class FloatingBar
     void DropTaskAddParent()
     {
         taskAddParent = Maybe<Guid>.None;
+        // The note stays on the parent's workspace the chip shows, as though picked by hand, rather than jumping to the
+        // workspace in front at the next paint or at Enter (task 701c71a8).
+        taskAddTargetPicked = true;
         PaintTaskChips();
         taskAddBox?.Focus();
     }
