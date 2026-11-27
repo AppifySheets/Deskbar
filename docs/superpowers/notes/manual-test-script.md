@@ -1878,3 +1878,12 @@ PA1. In a plain terminal, `claude` in a scratch folder, joined to the note; ask 
 PA2. Same again with `mkdir pa2`, but answer **Yes** in the terminal: the folder is made, and the card leaves the page within about five seconds, while the session is still working.
 PA3. Same in a VS Code Claude tab with `mkdir pa3`: the card shows beside VS Code's own prompt; **Deny** refuses the command and the session says so.
 PA4. A background session (`claude --bg`) still behaves as before: card, Allow, and answering in the attached terminal takes the card off.
+
+## Click to copy a command
+
+A command in a comment or chat message copies whole on a click ([Deskbar task b6af9445](https://deskbar.app/task#b6af9445-56f0-42ea-9df1-f9ee58a89179)). A throwaway note with a comment holding `` `docker logs some-very-long-container-name-that-wraps` ``, a fenced block of two lines and "Pull and redeploy" in double quotes.
+
+CC1. In the tasks panel's thread, point at the inline code: the pointer is a hand and "Click to copy" shows. Click it: the code flashes green and Ctrl+V in Notepad pastes the whole command, with no line break where it wrapped.
+CC2. Click the fenced block: both lines paste, as written. Click "Pull and redeploy": the words paste without the quote marks.
+CC3. The same in the Inbox chat and in the task's own window. A link in the comment still opens on a click, and dragging from the plain text beside the code still selects text.
+CC4. A task line's question or status line with code in it: a click picks the task, as before, and copies nothing.

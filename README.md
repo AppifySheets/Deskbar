@@ -530,6 +530,9 @@ with every task, its comments, and a Matrix view of the four quadrants side by s
 A task's open thread is never taller than the list less the task's own line, so the task stays in sight while you
 read: the comments scroll inside the thread, starting at the latest, with its row of buttons above them and the
 comment box below. Opening a thread scrolls the list just enough to show the line and the thread together.
+A command in a comment or a chat message copies with one click: point at anything in `backticks`, a code
+block or words in double quotes, and "Click to copy" shows; a click puts the whole command on the clipboard, however
+it wraps.
 The panel is a full-height strip docked just inside the bar, on every virtual desktop, and it pushes
 maximized windows aside as the bar does. A window that is not maximized but reaches under the panel when
 it opens or grows is moved out from under it, keeping its size where there is room and narrowed where
