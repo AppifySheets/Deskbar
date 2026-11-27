@@ -420,10 +420,9 @@ public sealed class JsonPersistenceStoreTests : IDisposable
         Assert.False(panel.HideSubtasks);
     }
 
-    // The Inbox view is opt in (task 740a2231): a file written before the key, or a panel state saved without it, keeps
-    // the view the profile had, the List or the Matrix.
+    // The Inbox view is the default (task 43a11881): a fresh profile, and a panel state saved without the key, show it.
     [Fact]
-    public void A_panel_state_without_the_key_keeps_todays_view()
+    public void A_panel_state_without_the_key_shows_the_inbox()
     {
         Directory.CreateDirectory(dir);
         File.WriteAllText(Path.Combine(dir, "state.json"),
@@ -433,8 +432,41 @@ public sealed class JsonPersistenceStoreTests : IDisposable
 
         Assert.True(loaded.IsSuccess);
         Assert.NotNull(loaded.Value.TasksPanel);
-        Assert.False(loaded.Value.TasksPanel!.Inbox);
-        Assert.False(TasksPanelState.Default.Inbox);
+        Assert.True(loaded.Value.TasksPanel!.Inbox);
+        Assert.True(TasksPanelState.Default.Inbox);
+    }
+
+    // The old opt-in key is not read (task 43a11881): every save wrote "Inbox": false for a profile that never picked the
+    // Inbox, so honouring it would keep those profiles on the List, which is what the task asked to end. Both of its values
+    // load as the Inbox; only the new key, set by picking List or Matrix, leaves it.
+    [Theory]
+    [InlineData("\"Inbox\":false", true)]
+    [InlineData("\"Inbox\":true", true)]
+    [InlineData("\"InboxLeft\":true", false)]
+    [InlineData("\"Inbox\":true,\"InboxLeft\":true", false)]
+    public void Only_leaving_the_inbox_is_remembered(string keys, bool inbox)
+    {
+        Directory.CreateDirectory(dir);
+        File.WriteAllText(Path.Combine(dir, "state.json"),
+            $$$"""{"Workspaces":[],"WorkspaceRules":[],"RenameRules":[],"Inventory":{},"TasksPanel":{"Open":true,"Width":500,{{{keys}}}}}""");
+
+        var loaded = new JsonPersistenceStore(dir).Load();
+
+        Assert.True(loaded.IsSuccess);
+        Assert.Equal(inbox, loaded.Value.TasksPanel!.Inbox);
+    }
+
+    // Picking List or Matrix writes the leaving, and only that key: the file never carries the old one again.
+    [Fact]
+    public void Leaving_the_inbox_round_trips_without_the_old_key()
+    {
+        var panel = TasksPanelState.Default with { Inbox = false };
+
+        var json = System.Text.Json.JsonSerializer.Serialize(panel);
+
+        Assert.Contains("\"InboxLeft\":true", json);
+        Assert.DoesNotContain("\"Inbox\":", json);
+        Assert.False(System.Text.Json.JsonSerializer.Deserialize<TasksPanelState>(json)!.Inbox);
     }
 
     [Fact]

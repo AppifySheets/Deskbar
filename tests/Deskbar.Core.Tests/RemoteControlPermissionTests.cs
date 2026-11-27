@@ -37,14 +37,16 @@ public sealed class RemoteControlPermissionTests : IDisposable
         public Result Save(TaskBoard board) => Result.Success();
     }
 
-    // Everything on: sessions keep tasks, the permission setting, the Inbox look, and a task for the session.
-    WorkspaceManager Ready(bool permissions = true, bool inbox = true, bool task = true)
+    // Everything on: sessions keep tasks, the permission setting, the Inbox look, and a task for the session. A null
+    // `inbox` saves no panel state at all, a profile that never touched the panel (on the Inbox, the default since task
+    // 43a11881).
+    WorkspaceManager Ready(bool permissions = true, bool? inbox = true, bool task = true)
     {
         var manager = new WorkspaceManager(desktops, monitor, titles, store, ownProcessId: 4242);
         Assert.True(manager.Start().IsSuccess);
         manager.AddWorkspace("Deskbar");
         Assert.True(manager.SetClaudePermissions(permissions).IsSuccess);
-        manager.SaveTasksPanel(TasksPanelState.Default with { Inbox = inbox });
+        if (inbox is { } on) manager.SaveTasksPanel(TasksPanelState.Default with { Inbox = on });
         if (task) Assert.True(tasks.Create("Ship it", Maybe<Guid>.None, tasks.NewSession(Session, Repo)).IsSuccess);
         return manager;
     }
@@ -66,6 +68,20 @@ public sealed class RemoteControlPermissionTests : IDisposable
         ["claude-permission", "--entry", "cli", "--attended", attended, "--job", job, "--from", Repo, "--slot", slot, "--json", json];
 
     ControlReply Registered(WorkspaceManager manager, string[] call, bool withDesk = true) => Control(manager, withDesk).Execute(call);
+
+    // The review of task 43a11881: the hook asked `{ TasksPanel.Inbox: true }`, so a profile with no panel state, which
+    // is on the Inbox by default, never got a card. AppState.TasksInbox reads it as the Inbox.
+    [Fact]
+    public void A_profile_that_never_touched_the_panel_gets_the_card()
+    {
+        var manager = Ready(inbox: null);
+        Assert.Null(manager.State.TasksPanel);
+
+        var reply = Registered(manager, Call(Slot(), Hook()));
+
+        Assert.Matches("^[0-9a-f]{32}\r\n$", reply.Output);
+        Assert.Single(desk.Of(Session));
+    }
 
     [Fact]
     public void A_background_sessions_question_is_held_and_the_reply_is_its_code_alone()

@@ -3952,13 +3952,13 @@ public partial class FloatingBarTaskListTests
         t.Tasks.Ask(asking, "Child question?");
         Assert.Contains(plain, t.Bar.TaskListLines.Select(l => l.Id));
 
-        Assert.True(t.Harness.Manager.SaveTasksPanel(Deskbar.Core.Persistence.TasksPanelState.Default with { HideSubtasks = true }).IsSuccess);
+        Assert.True(t.Harness.Manager.SaveTasksPanel(Deskbar.Core.Persistence.TasksPanelState.Default with { HideSubtasks = true, Inbox = false }).IsSuccess);
         var ids = t.Bar.TaskListLines.Select(l => l.Id).ToArray();
         Assert.DoesNotContain(plain, ids);
         Assert.Contains(asking, ids);
         Assert.Equal(2, t.Bar.TaskListLines.Single(l => l.Id == parent).SubtaskCount);
 
-        Assert.True(t.Harness.Manager.SaveTasksPanel(Deskbar.Core.Persistence.TasksPanelState.Default).IsSuccess);
+        Assert.True(t.Harness.Manager.SaveTasksPanel(Deskbar.Core.Persistence.TasksPanelState.Default with { Inbox = false }).IsSuccess);
         Assert.Contains(plain, t.Bar.TaskListLines.Select(l => l.Id));
     });
 

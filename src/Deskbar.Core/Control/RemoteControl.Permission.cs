@@ -59,7 +59,7 @@ public sealed partial class RemoteControl
         // up), whether or not this one goes on a card: an AskUserQuestion dialog or a refused question means the session
         // no longer waits on the old one either. Their slots go, so a click can never reach a hook that stopped waiting.
         desk.Forget(asked.SessionId);
-        return manager.State is { ClaudePermissionsInEffect: true, TasksPanel.Inbox: true }
+        return manager.State is { ClaudePermissionsInEffect: true, TasksInbox: true }
             && hook is { Headless: false }
             && !asked.IsDialog
             && request.Slot is { Length: > 0 } slot
@@ -98,6 +98,6 @@ public sealed partial class RemoteControl
     {
         claudePermissions = manager.State.ClaudePermissions ? "on" : "off",
         inEffect = manager.State.ClaudePermissionsInEffect,
-        inbox = manager.State.TasksPanel?.Inbox ?? false,
+        inbox = manager.State.TasksInbox,
     };
 }

@@ -117,8 +117,9 @@ public partial class TasksBoardTests
         };
 #pragma warning restore WPF0001
         // A panel wide enough for everything (Wide, below): the full line and the Matrix switch both need it. The slim line
-        // below 850 DIP and the switch's 780 are Task 8's, with their own tests passing a `width`.
-        Assert.True(harness.Manager.SaveTasksPanel(new Deskbar.Core.Persistence.TasksPanelState(false, width)).IsSuccess);
+        // below 850 DIP and the switch's 780 are Task 8's, with their own tests passing a `width`. On the List, as these
+        // tests were written for it: the Inbox is the default (task 43a11881), and its own tests pick it (ChooseInbox).
+        Assert.True(harness.Manager.SaveTasksPanel(new Deskbar.Core.Persistence.TasksPanelState(false, width) { Inbox = false }).IsSuccess);
         var panel = new TasksPanelRig(window).Docked(edge, screenDips);
         var controller = new TasksBoard(window, panel.Panel, tasks, harness.Manager, goTo ?? (t =>
         {
@@ -721,10 +722,10 @@ public partial class TasksBoardTests
         using var t = Build();
 
         t.Controller.Show();
-        Assert.Equal(new Deskbar.Core.Persistence.TasksPanelState(true, Wide), t.Harness.Manager.State.TasksPanel);
+        Assert.Equal(new Deskbar.Core.Persistence.TasksPanelState(true, Wide) { Inbox = false }, t.Harness.Manager.State.TasksPanel);
 
         t.Controller.Hide();
-        Assert.Equal(new Deskbar.Core.Persistence.TasksPanelState(false, Wide), t.Harness.Manager.State.TasksPanel);
+        Assert.Equal(new Deskbar.Core.Persistence.TasksPanelState(false, Wide) { Inbox = false }, t.Harness.Manager.State.TasksPanel);
     });
 
     // The app exiting is not the user closing the panel: Shutdown saves it as open when it was, before the panel's own
@@ -737,7 +738,7 @@ public partial class TasksBoardTests
 
         t.Controller.Shutdown();
 
-        Assert.Equal(new Deskbar.Core.Persistence.TasksPanelState(true, Wide), t.Harness.Manager.State.TasksPanel);
+        Assert.Equal(new Deskbar.Core.Persistence.TasksPanelState(true, Wide) { Inbox = false }, t.Harness.Manager.State.TasksPanel);
         Assert.Equal("Undock", t.Panel.Calls[^1]);
     });
 
@@ -757,7 +758,7 @@ public partial class TasksBoardTests
         // A late Hide (a queued pipe command, the bar's toggle) cannot undo the state saved for the next start either.
         t.Controller.Hide();
 
-        Assert.Equal(new Deskbar.Core.Persistence.TasksPanelState(true, Wide), t.Harness.Manager.State.TasksPanel);
+        Assert.Equal(new Deskbar.Core.Persistence.TasksPanelState(true, Wide) { Inbox = false }, t.Harness.Manager.State.TasksPanel);
         Assert.True(t.Panel.Panel.IsShown);
     });
 
@@ -1221,7 +1222,7 @@ public partial class TasksBoardTests
         t.Window.Close();
         Assert.False(t.Controller.IsOpen);
         Assert.False(t.Window.IsVisible);
-        Assert.Equal(new Deskbar.Core.Persistence.TasksPanelState(false, Wide), t.Harness.Manager.State.TasksPanel);
+        Assert.Equal(new Deskbar.Core.Persistence.TasksPanelState(false, Wide) { Inbox = false }, t.Harness.Manager.State.TasksPanel);
 
         t.Controller.Show();
         Assert.True(t.Window.IsVisible);
@@ -1251,7 +1252,7 @@ public partial class TasksBoardTests
 
         t.Window.Actions!.ResizePanel(900);
 
-        Assert.Equal(new Deskbar.Core.Persistence.TasksPanelState(true, 900), t.Harness.Manager.State.TasksPanel);
+        Assert.Equal(new Deskbar.Core.Persistence.TasksPanelState(true, 900) { Inbox = false }, t.Harness.Manager.State.TasksPanel);
         Assert.Equal([$"DockWith Right {Px(t, 900)}"], t.Panel.Calls);
     });
 

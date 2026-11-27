@@ -1142,6 +1142,8 @@ sealed class Harness
                 Groups = grouped ? [team] : [],
                 // The strips are the default; the harness is about the bar itself (see StubStore).
                 WindowListOffScreens = true,
+                // The Inbox is the default view (task 43a11881); the bar's tests were written for its plain lines (see StubStore).
+                TasksPanel = Deskbar.Core.Persistence.TasksPanelState.Default with { Inbox = false },
             },
         };
         var manager = new WorkspaceManager(desktops, monitor, new StubTitles(), store, clock);
@@ -1290,7 +1292,14 @@ sealed class StubStore : IPersistenceStore
     // tests were written for, and are about, the bar itself with the current workspace's row expanded. So a stub
     // store starts with the strips off; a test about the strips turns them on with SetWindowListPlace, which is also
     // what makes the bar fill them.
-    public AppState Stored { get; set; } = AppState.Empty with { WindowListOffScreens = true };
+    // Likewise the tasks panel's Inbox view, the default since task 43a11881 (TasksPanelState.Inbox): these tests were
+    // written for the List and the bar's plain task lines, so a stub store starts with the List picked; a test about the
+    // Inbox picks it (ShowInbox, as the view switch does), and one about the default saves TasksPanelState.Default.
+    public AppState Stored { get; set; } = AppState.Empty with
+    {
+        WindowListOffScreens = true,
+        TasksPanel = Deskbar.Core.Persistence.TasksPanelState.Default with { Inbox = false },
+    };
     public Result<AppState> Load() => Stored;
 
     public Result Save(AppState state)

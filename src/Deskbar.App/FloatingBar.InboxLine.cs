@@ -38,8 +38,9 @@ namespace Deskbar.App;
 // lines use the first two inks and amber alone (every pair at 4.5 to 1 or better, FloatingBarTaskListTests).
 public partial class FloatingBar
 {
-    // The switch: the tasks panel's Inbox view, as it saves it.
-    bool InboxBarOn => manager.State.TasksPanel?.Inbox ?? false;
+    // The switch: the tasks panel's Inbox view, as it saves it. No panel state yet is the Inbox, the default since task
+    // 43a11881 (AppState.TasksInbox).
+    bool InboxBarOn => manager.State.TasksInbox;
 
     // The selected line's fill in the Inbox look (the mockup's .bi.on); the old look keeps its own.
     static readonly Brush InboxBarSelectedFill = Frozen(0xFF, 0x27, 0x2C, 0x36);

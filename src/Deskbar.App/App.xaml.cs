@@ -2204,7 +2204,9 @@ public partial class App : Application
             // the comment box's own list (repo skills only, not the user's or the plugins') and probes a folder not asked yet.
             knowsSkill: async (task, skill) => (await skillCatalog.For(SessionRepos(task))).Any(choice => choice.Name == skill));
         permissionKeeper = new Core.Tasks.PermissionKeeper(PermissionDesk,
-            manager.StateChanged.Select(_ => manager.State is { ClaudePermissionsInEffect: true, TasksPanel.Inbox: true }),
+            // A profile with no panel state yet is on the Inbox, the default since task 43a11881 (AppState.TasksInbox).
+            manager.StateChanged.Select(_ => manager.State.ClaudePermissionsInEffect
+                && manager.State.TasksInbox),
             claudeSessions.Live, new System.Reactive.Concurrency.SynchronizationContextScheduler(new System.Windows.Threading.DispatcherSynchronizationContext(Dispatcher)),
             () => DateTimeOffset.UtcNow);
 
