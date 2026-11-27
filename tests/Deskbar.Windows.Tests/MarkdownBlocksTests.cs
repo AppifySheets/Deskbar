@@ -26,6 +26,7 @@ public class MarkdownBlocksTests
         Paragraph p => p.Inlines.SelectMany(Deep),
         List l => l.ListItems.SelectMany(i => i.Blocks).SelectMany(BlockInlines),
         Section s => s.Blocks.SelectMany(BlockInlines),
+        Table t => t.RowGroups.SelectMany(g => g.Rows).SelectMany(r => r.Cells).SelectMany(c => c.Blocks).SelectMany(BlockInlines),
         _ => [],
     };
 
@@ -206,6 +207,75 @@ public class MarkdownBlocksTests
         Assert.All(headings, h => Assert.Equal(FontWeights.SemiBold, h.FontWeight));
         Assert.Equal("intro line", TextOf(document.Blocks.First()).Trim());
         Assert.Single(document.Blocks.OfType<List>());
+    });
+
+    // A table as a session writes one (task 24813c78, where the Inbox chat showed it as rows of pipes): a header row, a
+    // dashes row, body rows. The cells hold their text without the pipes, the header is its own tagged row group in
+    // semibold, colons align columns, and bold inside a cell is still bold.
+    static IReadOnlyList<string> CellTexts(TableRow row) => row.Cells.Select(c => TextOf(c).Trim()).ToArray();
+
+    [Fact]
+    public void A_pipe_table_is_a_table() => StaThread.Run(() =>
+    {
+        var document = MarkdownBlocks.Render(
+            "Where the time goes:\n\n| Counterparties | Window | Sale lines |\n|---|:---:|---:|\n| one customer | 2 years | 37k |\n| all | 1 year | **over 10M** |\n\nafter");
+
+        var table = Assert.Single(document.Blocks.OfType<Table>());
+        Assert.Equal(MarkdownBlocks.TableTag, table.Tag);
+        Assert.Equal(3, table.Columns.Count);
+        Assert.Equal(MarkdownBlocks.TableHeaderTag, table.RowGroups[0].Tag);
+        var header = Assert.Single(table.RowGroups[0].Rows);
+        Assert.Equal(["Counterparties", "Window", "Sale lines"], CellTexts(header));
+        Assert.All(header.Cells, c => Assert.Equal(FontWeights.SemiBold, ((Paragraph)c.Blocks.FirstBlock).FontWeight));
+        var body = table.RowGroups[1].Rows;
+        Assert.Equal(["one customer", "2 years", "37k"], CellTexts(body[0]));
+        Assert.Equal(["all", "1 year", "over 10M"], CellTexts(body[1]));
+        Assert.Equal([TextAlignment.Left, TextAlignment.Center, TextAlignment.Right],
+            body[0].Cells.Select(c => ((Paragraph)c.Blocks.FirstBlock).TextAlignment));
+        Assert.Equal("over 10M", TextOf(Assert.Single(InlinesOf(document).OfType<Bold>())));
+        Assert.Equal(["Where the time goes:", "after"], document.Blocks.OfType<Paragraph>().Select(p => TextOf(p).Trim()));
+    });
+
+    // As upstream markdown has it: a table may follow its lead-in line with no blank line between, rows may go without
+    // outer pipes, a short row is filled with empty cells, and an escaped pipe stays inside its cell. Unlike upstream,
+    // a line with no pipe ends the table (it is far likelier a sentence than a one-cell row; see TableOf).
+    [Fact]
+    public void A_table_may_follow_its_lead_in_line_and_rows_may_be_loose() => StaThread.Run(() =>
+    {
+        var document = MarkdownBlocks.Render("lead in\na | b\n--- | ---\nx \\| y | z\nshort |\nafter");
+
+        var table = Assert.Single(document.Blocks.OfType<Table>());
+        Assert.Equal(["a", "b"], CellTexts(table.RowGroups[0].Rows[0]));
+        Assert.Equal(["x | y", "z"], CellTexts(table.RowGroups[1].Rows[0]));
+        Assert.Equal(["short", ""], CellTexts(table.RowGroups[1].Rows[1]));
+        Assert.Equal(["lead in", "after"], document.Blocks.OfType<Paragraph>().Select(p => TextOf(p).Trim()));
+    });
+
+    // A heading or list item right under a table starts its own block even with a pipe in it; body cells carry no
+    // weight of their own, so a document drawn semibold keeps them semibold; and a link's address does not count
+    // toward its column's share of the width, only its words.
+    [Fact]
+    public void A_table_ends_at_the_next_block_and_sizes_columns_by_shown_text() => StaThread.Run(() =>
+    {
+        var document = MarkdownBlocks.Render(
+            "| PR | What |\n|---|---|\n| [#306](https://example.com/a/very/long/address/that/goes/on/and/on/for/ever) | a much longer summary of what it does |\n## Next | step\n- a | b");
+
+        var table = Assert.Single(document.Blocks.OfType<Table>());
+        Assert.Single(table.RowGroups[1].Rows);
+        Assert.Single(document.Blocks.OfType<List>());
+        Assert.Single(document.Blocks.OfType<Paragraph>(), p => Equals(p.Tag, MarkdownBlocks.HeadingTag));
+        Assert.True(table.Columns[0].Width.Value < table.Columns[1].Width.Value);
+        Assert.All(table.RowGroups[1].Rows[0].Cells,
+            c => Assert.Equal(DependencyProperty.UnsetValue, c.Blocks.FirstBlock.ReadLocalValue(TextElement.FontWeightProperty)));
+    });
+
+    [Fact]
+    public void A_table_whose_dashes_row_has_another_cell_count_stays_text() => StaThread.Run(() =>
+    {
+        var document = MarkdownBlocks.Render("| a | b | c |\n|---|---|\n| 1 | 2 | 3 |");
+
+        Assert.Empty(document.Blocks.OfType<Table>());
+        Assert.Contains("| a | b | c |", TextOf(document));
     });
 
     [Fact]

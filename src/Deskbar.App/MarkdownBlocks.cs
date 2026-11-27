@@ -28,8 +28,14 @@ namespace Deskbar.App;
 //   # .. ###### title a heading: one line, semibold, with a little room above it. Every level looks the same, because
 //                     the text is 11 or 12 points in a narrow column and sizes there would only jump about. Added
 //                     2026-11-23 for task descriptions, which Petre writes as sections under "## ..." lines.
+//   | a | b |          a table, as GitHub writes one (task 24813c78: a session's answer in the Inbox chat showed its
+//   |---|--:|          table as rows of pipes). A header row, a dashes row with as many cells under it (a colon on the
+//   | 1 | 2 |          left, right or both ends aligns the column), then every following line with a pipe in it, up to
+//                     a blank line, a pipeless line or another block (TableOf has the details). Cells are read for inline markdown; "\|" is a pipe inside a cell. Columns share
+//                     the width by how much text each holds, since a FlowDocument table cannot size a column to its
+//                     content. Without the dashes row the lines are a paragraph, as on GitHub.
 //
-// Anything else (quotes, tables, an unclosed **) shows as the text it is, in a paragraph: a comment is never lost to a
+// Anything else (quotes, an unclosed **) shows as the text it is, in a paragraph: a comment is never lost to a
 // construct this does not know.
 //
 // A link opens through `open`, which the window hands in; left null it opens the way `deskbar.cmd open` opens a link
@@ -50,10 +56,19 @@ internal static class MarkdownBlocks
     /// <summary>The Tag of a heading's paragraph.</summary>
     internal const string HeadingTag = "heading";
 
+    /// <summary>The Tag of a table, and of its header row group (the first row), for the tests and the window's styling.</summary>
+    internal const string TableTag = "table";
+    internal const string TableHeaderTag = "table-header";
+
     static readonly FontFamily CodeFont = new("Cascadia Mono, Consolas, Courier New");
     static readonly FontFamily TextFont = new("Segoe UI");
     static readonly Brush CodeFill = Frozen(Color.FromRgb(0x2A, 0x2C, 0x33));
     static readonly Brush LinkInk = Frozen(Color.FromRgb(0x7F, 0xB2, 0xFF));
+
+    // A table's grid lines and its header row's fill: white at low strength, so they show on every dark surface the
+    // document lands on (a chat bubble, the tasks panel, a task window) without a colour of their own.
+    static readonly Brush TableRule = Frozen(Color.FromArgb(0x48, 0xFF, 0xFF, 0xFF));
+    static readonly Brush TableHeaderFill = Frozen(Color.FromArgb(0x1C, 0xFF, 0xFF, 0xFF));
 
     // A list item: a dash, star or plus then a space; or a number with a full stop or a bracket then a space.
     static readonly Regex Bullet = new(@"^\s*[-*+]\s+(.*)$", RegexOptions.Compiled);
@@ -62,6 +77,13 @@ internal static class MarkdownBlocks
     // A heading: up to three spaces, one to six hashes, a space, then its text; trailing hashes (the closing kind,
     // "## Title ##") are dropped. "#tag" with no space is not a heading, as on GitHub.
     static readonly Regex Heading = new(@"^ {0,3}#{1,6}\s+(.*?)(?:\s+#+)?\s*$", RegexOptions.Compiled);
+
+    // A table's dashes row: cells of dashes, each with an optional colon at either end, parted by pipes. It must hold
+    // a pipe somewhere (TableStarts checks), or a lone "---" (a rule under a line) would make a one-column table.
+    static readonly Regex TableDashes = new(@"^\s*\|?\s*:?-+:?\s*(?:\|\s*:?-+:?\s*)*\|?\s*$", RegexOptions.Compiled);
+
+    // A pipe that parts two cells: any pipe not escaped by a backslash.
+    static readonly Regex CellSplit = new(@"(?<!\\)\|", RegexOptions.Compiled);
 
     // The inline constructs, tried left to right, the first match winning at each place: code first, so nothing
     // inside it is read; then bold before italic, so ** is not read as two empty italics; then links, then a bare
@@ -121,15 +143,115 @@ internal static class MarkdownBlocks
         if (Bullet.IsMatch(first)) return ListOf(lines, Bullet, TextMarkerStyle.Disc, open);
         if (Numbered.IsMatch(first)) return ListOf(lines, Numbered, TextMarkerStyle.Decimal, open);
         if (Heading.Match(first) is { Success: true } heading) return (HeadingOf(heading.Groups[1].Value, open), 1);
+        if (TableStarts(lines, 0)) return TableOf(lines, open);
 
-        // A paragraph runs to the next blank line, fence or list item.
-        var taken = lines.TakeWhile((line, i) => i == 0 || !EndsParagraph(line)).ToArray();
+        // A paragraph runs to the next blank line, fence, list item, heading or table. A table may follow its
+        // introducing line directly, as GitHub allows, so the lead-in line is not read as the table's header.
+        var taken = lines.TakeWhile((line, i) => i == 0 || !(EndsParagraph(line) || TableStarts(lines, i))).ToArray();
         return (ParagraphOf(taken, open), taken.Length);
     }
 
     static bool EndsParagraph(string line) =>
         string.IsNullOrWhiteSpace(line) || line.TrimStart().StartsWith("```", StringComparison.Ordinal) || Bullet.IsMatch(line) || Numbered.IsMatch(line)
         || Heading.IsMatch(line);
+
+    // Whether a table starts at line i: a line with a pipe, then a dashes row with as many cells (GitHub's rule; a
+    // header of three cells over a dashes row of two is no table, and both stay the text they were).
+    static bool TableStarts(IReadOnlyList<string> lines, int i) =>
+        i + 1 < lines.Count && lines[i].Contains('|') && lines[i + 1].Contains('|') && TableDashes.IsMatch(lines[i + 1])
+        && CellsOf(lines[i]).Count == CellsOf(lines[i + 1]).Count;
+
+    // A row's cells: the outer pipes dropped, parted at every unescaped pipe, each trimmed, "\|" turned into a pipe.
+    static IReadOnlyList<string> CellsOf(string line)
+    {
+        var row = line.Trim();
+        if (row.StartsWith('|')) row = row[1..];
+        if (row.EndsWith('|') && !row.EndsWith("\\|", StringComparison.Ordinal)) row = row[..^1];
+        return CellSplit.Split(row).Select(cell => cell.Trim().Replace("\\|", "|")).ToArray();
+    }
+
+    // A table from its header row, its dashes row and the body rows after them: every following line with a pipe in
+    // it, up to a blank line, a line with no pipe or the start of another block (a heading, a list item or a fence,
+    // even one with a pipe in it). Upstream markdown would take a pipeless line as one more row; here it ends the
+    // table, since a session's sentence right under its table is far likelier than a one-cell row. A body row with
+    // fewer cells than the header is filled with empty ones; extra cells are dropped, as upstream. Each column's
+    // alignment comes from the colons on its dashes, and its share of the width from the longest text SHOWN in it (a
+    // link counts its words, not its address), held between 4 and 40 characters' worth so a one-word column is not
+    // crushed and a long sentence does not take the whole table.
+    static (Block, int) TableOf(IReadOnlyList<string> lines, Action<Uri> open)
+    {
+        var header = CellsOf(lines[0]);
+        var alignments = CellsOf(lines[1]).Select(AlignmentOf).ToArray();
+        var body = lines.Skip(2).TakeWhile(line => line.Contains('|') && !EndsParagraph(line)).ToArray();
+        var rows = new[] { header }
+            .Concat(body.Select(line => CellsOf(line).Concat(Enumerable.Repeat("", header.Count)).Take(header.Count).ToArray()))
+            .Select(cells => cells.Select((text, column) => CellOf(text, alignments[column], open)).ToArray())
+            .ToArray();
+
+        var table = new Table
+        {
+            Tag = TableTag,
+            CellSpacing = 0,
+            BorderBrush = TableRule,
+            BorderThickness = new Thickness(1, 1, 0, 0),
+            Margin = new Thickness(0, 2, 0, 6),
+        };
+        Enumerable.Range(0, header.Count)
+            .Select(column => rows.Max(row => ShownLength(row[column].Inlines)))
+            .Select(longest => new TableColumn { Width = new GridLength(Math.Clamp(longest, 4, 40), GridUnitType.Star) })
+            .ToList().ForEach(table.Columns.Add);
+
+        // The header in semibold. Body cells set no weight of their own, so a document drawn semibold as a whole (a
+        // question waiting on the user) keeps its table semibold too.
+        rows[0].ToList().ForEach(cell => cell.FontWeight = FontWeights.SemiBold);
+        var head = new TableRowGroup { Tag = TableHeaderTag, Background = TableHeaderFill };
+        head.Rows.Add(RowOf(rows[0]));
+        table.RowGroups.Add(head);
+        var rest = new TableRowGroup();
+        rows.Skip(1).ToList().ForEach(row => rest.Rows.Add(RowOf(row)));
+        table.RowGroups.Add(rest);
+        return (table, 2 + body.Length);
+    }
+
+    // One cell's text as a paragraph, read for inline markdown, aligned as its column.
+    static Paragraph CellOf(string text, TextAlignment alignment, Action<Uri> open)
+    {
+        var paragraph = new Paragraph { Margin = new Thickness(0), TextAlignment = alignment };
+        Inlines(text, open).ToList().ForEach(paragraph.Inlines.Add);
+        return paragraph;
+    }
+
+    // How many characters the inlines show: runs counted, spans (bold, italic, links) walked into.
+    static int ShownLength(IEnumerable<Inline> inlines) =>
+        inlines.Sum(inline => inline switch
+        {
+            Run run => run.Text.Length,
+            Span span => ShownLength(span.Inlines),
+            _ => 0,
+        });
+
+    // One row of cells, each with the grid line on its right and bottom (the table draws the top and left ones, so no
+    // line is doubled).
+    static TableRow RowOf(IReadOnlyList<Paragraph> cells)
+    {
+        var row = new TableRow();
+        cells.ToList().ForEach(paragraph => row.Cells.Add(new TableCell(paragraph)
+        {
+            BorderBrush = TableRule,
+            BorderThickness = new Thickness(0, 0, 1, 1),
+            Padding = new Thickness(6, 2, 6, 2),
+        }));
+        return row;
+    }
+
+    // ":--" or "---" is left, "--:" right and ":-:" centre.
+    static TextAlignment AlignmentOf(string dashes) =>
+        (dashes.StartsWith(':'), dashes.EndsWith(':')) switch
+        {
+            (true, true) => TextAlignment.Center,
+            (false, true) => TextAlignment.Right,
+            _ => TextAlignment.Left,
+        };
 
     // A heading's one line, read for inline markdown like any other, in semibold with room above it to set it off
     // from the section before. No size of its own: it takes the document's, which the caller sets.
