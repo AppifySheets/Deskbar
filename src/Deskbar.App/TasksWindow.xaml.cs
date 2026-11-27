@@ -2828,7 +2828,12 @@ public partial class TasksWindow : Window
             BorderThickness = new Thickness(0),
             FontSize = 12,
             TextWrapping = TextWrapping.Wrap,
-            AcceptsReturn = false,
+            // A PASTE KEEPS ALL ITS LINES (task 0596fca2, "pasting long text should increase the comment space"): with
+            // AcceptsReturn off WPF cuts a paste at its first line break, so a pasted form of many lines arrived as its
+            // first line and the box had nothing to grow for. With it on, the pasted lines stay and the box grows with
+            // them up to MaxHeight (about seven lines), then scrolls inside, as the subtask and add boxes do. Plain Enter
+            // still posts: PressInComment, on PreviewKeyDown, takes it before the box can break the line.
+            AcceptsReturn = true,
             MaxHeight = 120,
         };
         AutomationProperties.SetName(box, "New comment");

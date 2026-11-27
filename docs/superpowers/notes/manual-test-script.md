@@ -307,6 +307,9 @@ written for the floating window and now describe the panel; 64a to 64n cover wha
     it appears under "you", the box empties and keeps the keyboard. Shift+Enter makes a new line instead. While you
     type, add a task from the pipe: what you typed stays. Click the link: it opens in the default browser. A `file:`
     link in a comment shows as plain text.
+60a. Copy ten lines of text from Notepad and paste them into a comment box ([Deskbar task 0596fca2](https://deskbar.app/task#0596fca2-cf31-4cab-b972-8186f87802ca)):
+    every line arrives, not only the first, and the box grows to about seven lines, then scrolls inside. Enter
+    posts all ten.
 61. "…" on a line: set the status to each of the four, Edit (opens the title in place: Enter keeps it, Esc drops it), Move to (the
     coloured workspace menu), Close (the line stays struck through with Undo for six seconds; Undo brings back
     the status it had, a waiting task its question too, and the selection) and Delete, then Delete for good. While that menu is open, change a task from the pipe:
