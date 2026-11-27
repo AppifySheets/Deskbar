@@ -1602,6 +1602,12 @@ RE5. The bar's right-click menu of a Claude task has "Reevaluate" after "Add sub
      open); a note's has none.
 RE6. `deskbar.cmd task reevaluate <note id>` is refused ("no Claude session has worked on this task..."), and nothing
      changes on the note.
+RE7. (Task c980f8c0.) Switch to the Inbox. Point at the state mark at the left of the waiting task's line: the tooltip
+     starts with the state ("Asks you") and says a click asks Claude to check it. Click it: the thread gets "Asked Claude
+     to reevaluate the task." and the page does not open. The note's box and a finished task's tick still close.
+RE8. Open the waiting task's page. The mark at the top and the state words under the title ("Waits for your answer")
+     each do the same on a click, with a faint fill on hover; the words stay where they were before the change. On a
+     task waiting for your deploy the Merged, Built, Deploy, Running track is the button.
 
 ## Results (2026-08-01)
 

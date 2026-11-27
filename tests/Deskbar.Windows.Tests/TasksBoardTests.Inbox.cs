@@ -389,6 +389,56 @@ public partial class TasksBoardTests
         Assert.Equal(t.Sparrow, t.Tasks.Board.Tasks.Single(x => x.Id == k.Asking).WorkspaceId.Value);
     });
 
+    // Task c980f8c0 ("clicking a chip should tell the session to refresh, re-fetch, etc and potentially update the status",
+    // "in the inbox list as well as the task view"): the state asks the session to recheck. On a line the mark's tile, on
+    // the page the tile and the state words, press Reevaluate (Reevaluations hears the task), and the line's tile does not
+    // also open the page. A note has no session to ask and a finished task's tile is its Close, so neither has one.
+    [Fact]
+    public void The_state_asks_the_session_to_recheck_on_the_line_and_the_page() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var k = InboxTasks(t);
+        var heard = new List<Guid>();
+        using var _ = t.Tasks.Reevaluations.Subscribe(heard.Add);
+        t.Controller.Show();
+        ChooseInbox(t);
+        IEnumerable<Button> Rechecks(object scope) =>
+            Inside(scope).OfType<Button>().Where(b => AutomationProperties.GetName(b) == TasksWindow.RecheckStateName);
+
+        Click(Assert.Single(Rechecks(LineOf(t.Window, k.Asking))));
+        Assert.Equal([k.Asking], heard);
+        Assert.Null(t.Window.InboxPageContent);
+        Assert.Empty(Rechecks(LineOf(t.Window, k.Done)));
+        // The note is under its own tab.
+        t.Window.ChooseInboxTab(InboxTab.Notes);
+        Assert.Empty(Rechecks(LineOf(t.Window, k.Note)));
+        t.Window.ChooseInboxTab(InboxTab.NeedsYou);
+
+        Click(LineOf(t.Window, k.Asking));
+        Assert.Equal(k.Asking, t.Window.InboxPageShown);
+        var onPage = Rechecks(t.Window.InboxPageContent!).ToList();
+        Assert.Equal(2, onPage.Count);
+        onPage.ForEach(Click);
+        Assert.Equal([k.Asking, k.Asking, k.Asking], heard);
+    });
+
+    // Review finding on task c980f8c0: a tile that is neither a tick box nor a recheck (a snoozed note's moon) once gave
+    // its icon two parents, which threw while the whole Inbox drew. The Snoozed filter lists it: it draws, plain.
+    [Fact]
+    public void A_snoozed_notes_tile_draws_without_a_recheck() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var snoozed = t.Tasks.AddNote("Renew the passport", Maybe<Guid>.None).Value.Id;
+        Assert.True(t.Tasks.Snooze(snoozed, DateTimeOffset.Now.AddDays(2)).IsSuccess);
+        t.Controller.Show();
+        ChooseInbox(t);
+        t.Controller.Filter(TaskFilter.Snoozed);
+
+        Assert.Equal(InboxMark.Snoozed, t.Window.InboxShown!.Lines.Single().Mark);
+        Assert.DoesNotContain(Inside(LineOf(t.Window, snoozed)).OfType<Button>(),
+            b => AutomationProperties.GetName(b) == TasksWindow.RecheckStateName);
+    });
+
     // Criterion 7, its list half: a click picks the task and opens its page; a double-click goes to its workspace.
     [Fact]
     public void A_click_opens_the_tasks_page_and_a_double_click_goes_there() => StaThread.Run(() =>

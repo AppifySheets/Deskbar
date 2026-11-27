@@ -857,7 +857,9 @@ Reevaluate. The task's session wakes up (an idle or ended one too, the way a com
 task really stands with gh and git, and puts right what is out of date: it settles a question that is already
 answered, marks finished work done and rewrites an old status line. The button is the refresh icon right after the
 orange Claude icon on a Claude task's line in the tasks panel, and "Reevaluate" is on the bar's right-click menu of a
-Claude task.
+Claude task. In the Inbox the state itself does it too: click the state mark at the left of a line, or the mark or
+the state words ("Claude is idle") at the top of a task's page. A note's box and a finished task's tick still close
+the task.
 `deskbar.cmd task reevaluate <id>` does the same from a script.
 Every session Deskbar starts on a task names its model, so it does not follow whatever model your Claude Code
 settings hold that day: Opus until you choose another with `deskbar.cmd claude-model <name>` (an alias such as
