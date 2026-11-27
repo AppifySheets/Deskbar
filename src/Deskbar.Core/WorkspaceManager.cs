@@ -1593,15 +1593,36 @@ public sealed class WorkspaceManager(
     //
     // The group is validated -- it must exist -- rather than trusted because a caller derived it from
     // a row. A UI that only offers legal choices is not a guarantee; it is a UI.
-    public Result<Workspace> InsertWorkspace(string name, int index, Guid? groupId = null) =>
+    //
+    // `folder` is the workspace's folder from the New workspace dialog (Workspace.Folder, task 6edcc65a), null or blank
+    // for none. A workspace made with one also remembers that folder's parent as the repos folder
+    // (AppState.ReposFolder), so the next dialog offers its subfolder in the same place. Only a path is stored: the
+    // dialog has already made a new folder on disk, and Core does not touch the disk.
+    public Result<Workspace> InsertWorkspace(string name, int index, Guid? groupId = null, string? folder = null) =>
         Result.FailureIf(string.IsNullOrWhiteSpace(name), "Workspace name required")
             .Bind(() => Result.FailureIf(NameTaken(name, excluding: null), $"A workspace named '{name.Trim()}' already exists."))
             .Bind(() => groupId is { } group && State.Groups.All(g => g.Id != group)
                 ? Result.Failure("That group no longer exists.")
                 : Result.Success())
             .Bind(() => desktops.Create(name))
-            .Map(d => new Workspace(Guid.NewGuid(), name, d.Id) { GroupId = groupId })
-            .Tap(w => Persist(State with { Workspaces = Inserted(w, Math.Clamp(index, 0, State.Workspaces.Count)) }));
+            .Map(d => new Workspace(Guid.NewGuid(), name, d.Id) { GroupId = groupId, Folder = WorkspaceFolders.Normal(folder) })
+            .Tap(w => Persist(State with
+            {
+                Workspaces = Inserted(w, Math.Clamp(index, 0, State.Workspaces.Count)),
+                ReposFolder = WorkspaceFolders.ParentOf(w.Folder).GetValueOrDefault(State.ReposFolder),
+            }));
+
+    // Sets or clears (null or blank) a workspace's folder (Workspace.Folder, task 6edcc65a), for a workspace that
+    // already exists (task 50b61120 puts it on the row menu). Unlike InsertWorkspace it leaves the
+    // repos folder alone: pointing one workspace at an odd folder is no reason to move where new ones are offered.
+    // An unchanged folder writes nothing.
+    public Result SetWorkspaceFolder(Guid id, string? folder) =>
+        Workspace(id).Bind(w => WorkspaceFolders.Normal(folder) is var wanted && wanted == w.Folder
+            ? Result.Success()
+            : Result.Success().Tap(() => Persist(State with
+            {
+                Workspaces = State.Workspaces.Select(x => x.Id == id ? x with { Folder = wanted } : x).ToList(),
+            })));
 
     // A new workspace at the bottom of a group, which is where MoveIntoGroup puts a joiner, so a row
     // created into a group and a row moved into one end up in the same place. For the remote control's

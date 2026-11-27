@@ -335,6 +335,12 @@ public sealed record AppState(
     // there is no value that hands the choice back to Claude Code's own settings.
     public string? ClaudeTaskModel { get; init; }
 
+    // THE ONE REPOS FOLDER (task 6edcc65a): the folder the New workspace dialog offers a workspace's folder inside, as a
+    // subfolder named after the workspace or one already there. Null until a workspace is made with a folder; until
+    // then the dialog guesses it (WorkspaceFolders.ReposFolder). Creating a workspace with a folder stores that
+    // folder's parent here, so the next dialog starts where the last one ended.
+    public string? ReposFolder { get; init; }
+
     // What a start passes to `--model`. Not stored.
     [JsonIgnore] public string ClaudeTaskModelInEffect =>
         string.IsNullOrWhiteSpace(ClaudeTaskModel) ? Tasks.ClaudeStart.DefaultModel : ClaudeTaskModel;

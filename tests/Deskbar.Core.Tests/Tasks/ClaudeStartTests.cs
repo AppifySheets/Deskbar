@@ -120,6 +120,30 @@ public class ClaudeStartTests
             ClaudeStart.NewTaskFolders(workspace, Maybe<Guid>.None, board, [@"E:\repos\Editor", @"E:\repos\old"]));
     }
 
+    // Task 6edcc65a: the folder the user gave the workspace leads, ahead of every folder guessed from sessions and
+    // editors, and is listed once when a session already ran there.
+    [Fact]
+    public void A_workspaces_own_folder_leads_the_folders_of_a_task_not_added_yet()
+    {
+        var workspace = Guid.NewGuid();
+        var board = Board(Task(Guid.NewGuid(), "older", workspace, "", Session("a", @"E:\repos\Old", 1)));
+
+        Assert.Equal([@"E:\repos\Mine", @"E:\repos\Old", @"E:\repos\Editor"],
+            ClaudeStart.NewTaskFolders(workspace, Maybe<Guid>.None, board, [@"E:\repos\Editor"], @"E:\repos\Mine"));
+        Assert.Equal([@"E:\repos\Old", @"E:\repos\Editor"],
+            ClaudeStart.NewTaskFolders(workspace, Maybe<Guid>.None, board, [@"E:\repos\Editor"], @"E:\repos\Old"));
+    }
+
+    // A task that has had a session keeps starting at that session's repo: the workspace's folder is only the default
+    // for work with no history.
+    [Fact]
+    public void A_task_with_a_session_ignores_the_workspaces_folder()
+    {
+        var task = Task(Guid.NewGuid(), "started", Guid.NewGuid(), "", Session("a", @"E:\repos\Old", 1));
+
+        Assert.Equal([@"E:\repos\Old"], ClaudeStart.Folders(task, Board(task), [], @"E:\repos\Mine"));
+    }
+
     [Fact]
     public void The_first_message_is_cut_to_1000_characters()
     {

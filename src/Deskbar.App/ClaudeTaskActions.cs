@@ -346,7 +346,8 @@ public sealed class ClaudeTaskActions : IDisposable
     /// session's repo, or the repos of its workspace's tasks and VS Code windows.
     /// </summary>
     public IReadOnlyList<string> Folders(TaskItem task) =>
-        ClaudeStart.Folders(task, tasks.Board, ClaudeStart.EditorRepos(seams.EditorFolderNames(task.WorkspaceId), tasks.Board));
+        ClaudeStart.Folders(task, tasks.Board, ClaudeStart.EditorRepos(seams.EditorFolderNames(task.WorkspaceId), tasks.Board),
+            seams.WorkspaceFolder(task.WorkspaceId));
 
     /// <summary>
     /// The folders a task not added yet would start in, on <paramref name="workspace"/> under <paramref name="parent"/>
@@ -354,7 +355,7 @@ public sealed class ClaudeTaskActions : IDisposable
     /// </summary>
     public IReadOnlyList<string> NewTaskFolders(Maybe<Guid> workspace, Maybe<Guid> parent) =>
         ClaudeStart.NewTaskFolders(workspace, parent, tasks.Board,
-            ClaudeStart.EditorRepos(seams.EditorFolderNames(workspace), tasks.Board));
+            ClaudeStart.EditorRepos(seams.EditorFolderNames(workspace), tasks.Board), seams.WorkspaceFolder(workspace));
 
     // A TASK TITLED WITH A SKILL STARTS WHERE THAT SKILL IS (task 3a872301). "/refresh-pr 245" is a project's skill, and
     // a session started in another of the workspace's repos would not have it. So the folders Claude Code is known NOT
@@ -644,6 +645,13 @@ public sealed record ClaudeTaskSeams(
     Func<TaskSession, bool> TranscriptExists,
     Func<Maybe<Guid>, IEnumerable<string>> EditorFolderNames)
 {
+    /// <summary>
+    /// The folder the user gave a workspace (Workspace.Folder, task 6edcc65a), which a task on it with no session yet
+    /// starts in ahead of every guessed folder; the one in front for a free task, as EditorFolderNames. None by default,
+    /// so a test that does not care sees the folders exactly as before.
+    /// </summary>
+    public Func<Maybe<Guid>, Maybe<string>> WorkspaceFolder { get; init; } = _ => Maybe<string>.None;
+
     /// <summary>A Yes/No question (the second session's); no means no.</summary>
     public Func<string, bool> Confirm { get; init; } = _ => false;
 
