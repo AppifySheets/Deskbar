@@ -3506,7 +3506,7 @@ public partial class App : Application
         ClickTrace.Write($"restart: {why}");
         var started = exe is not null
             ? Result.Try(
-                () => System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(exe, AwaitPreviousSwitch) { UseShellExecute = false })?.Dispose(),
+                () => System.Diagnostics.Process.Start(SuccessorStart(exe))?.Dispose(),
                 e => $"Could not start a new copy of Deskbar: {e.Message}")
             : Result.Failure("Could not start a new copy of Deskbar: this process has no exe path.");
         if (started.IsFailure)
@@ -3518,6 +3518,26 @@ public partial class App : Application
         ClickTrace.Write("restart: the next copy is started; this one is exiting");
         ExitApp();
         EndIfShutdownHangs();
+    }
+
+    // How the successor is started. Restarting into this same exe passes everything on, as Restart Deskbar always has.
+    // Restarting into ANOTHER exe (a test build handing over to a release) starts it the way login would, for two
+    // reasons a review found:
+    // - Without the DESKBAR_* switches. A test build runs with DESKBAR_APPDATA pointed at a scratch profile (CLAUDE.md,
+    //   Traps), and a release inheriting it would run against that profile, without the person's workspaces and tasks,
+    //   and keep it through its own updates until the next sign-in. The trace, pro and pipe overrides are test switches
+    //   too. Nothing else in the environment is touched: the rest is what this copy was itself given.
+    // - In the release's own folder, not this copy's working folder. A process holds its working folder open, and the
+    //   release lives for days, so the worktree it was started from could not be deleted until it exits.
+    static System.Diagnostics.ProcessStartInfo SuccessorStart(string exe)
+    {
+        var start = new System.Diagnostics.ProcessStartInfo(exe, AwaitPreviousSwitch) { UseShellExecute = false };
+        if (string.Equals(exe, Environment.ProcessPath, StringComparison.OrdinalIgnoreCase)) return start;
+        start.WorkingDirectory = Path.GetDirectoryName(exe) ?? "";
+        new[] { "DESKBAR_APPDATA", "DESKBAR_CONTROL_PIPE", "DESKBAR_PRO", "DESKBAR_PRO_REMINDER", "DESKBAR_TRACE" }
+            .ToList()
+            .ForEach(name => start.Environment.Remove(name));
+        return start;
     }
 
     // TEST BUILDS (Deskbar task 7dd83c89; Core's TestBuild has the story). A copy a session built and started to show
@@ -3535,8 +3555,9 @@ public partial class App : Application
 
     // The newest installed release: Deskbar-<x.y.z>-win-x64.exe in the login entry's folder (wherever the person keeps
     // the releases, since only a published build writes that entry) and in %LOCALAPPDATA%\Programs\Deskbar, where the
-    // owner's machine keeps them, for a login entry that is off. Listed afresh each time a menu is built, so a release downloaded while this
-    // copy runs is the one offered. A folder that is missing or unreadable adds nothing.
+    // owner's machine keeps them, for a login entry that is off. Listed afresh for each menu that is built and again on
+    // the click (RestartIntoNewestRelease), because the tray menu is built once and kept. A folder that is missing or
+    // unreadable adds nothing.
     static string? NewestInstalledRelease() =>
         Core.Updates.TestBuild.NewestRelease(
             new[]
@@ -3548,14 +3569,21 @@ public partial class App : Application
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .SelectMany(folder => Result.Try(() => Directory.GetFiles(folder, "Deskbar-*-win-x64.exe")).GetValueOrDefault([])));
 
-    // The top of both menus in a test build (TrayMenu.AddTestBuildItems), null in a release. Built each time a menu is,
-    // for the reason NewestInstalledRelease gives.
+    // The top of both menus in a test build (TrayMenu.AddTestBuildItems), null in a release. The label names the release
+    // found when the menu was built; the click looks again (RestartIntoNewestRelease), so a tray menu built at start
+    // still starts the newest one, and one deleted since lands in the Check for updates answer instead of an error.
     TestBuildItems? TestBuildMenu() =>
         !IsTestBuild ? null
         : new TestBuildItems($"{TestBuildLabel}, gets no updates",
             NewestInstalledRelease() is { } release
-                ? ($"Restart into Deskbar {Core.Updates.TestBuild.VersionOf(release)}", () => RestartInto(release, $"from a test build into {release}"))
+                ? ($"Restart into Deskbar {Core.Updates.TestBuild.VersionOf(release)}", RestartIntoNewestRelease)
                 : null);
+
+    void RestartIntoNewestRelease()
+    {
+        if (NewestInstalledRelease() is { } release) RestartInto(release, $"from a test build into {release}");
+        else AnswerAsTestBuild();
+    }
 
     // "Check for updates…" in a test build: what it is, and the way onto a release (CheckForUpdateNow says why it does
     // not ask GitHub). The restart when a release is installed, the releases page when none is.
@@ -3565,7 +3593,7 @@ public partial class App : Application
         {
             var version = Core.Updates.TestBuild.VersionOf(release);
             if (MessageBox.Show(
-                    $"This Deskbar is a {TestBuildLabel.ToLowerInvariant()}, and a test build gets no updates.\n\n" +
+                    $"This copy of Deskbar is a test build ({TestBuildLabel}), and a test build gets no updates.\n\n" +
                     $"Restart into the installed Deskbar {version}? It then updates itself as usual.",
                     "Deskbar", MessageBoxButton.YesNo, MessageBoxImage.Information) == MessageBoxResult.Yes)
                 RestartInto(release, $"from a test build into {release}, asked from Check for updates");
@@ -3573,7 +3601,7 @@ public partial class App : Application
         }
 
         if (MessageBox.Show(
-                $"This Deskbar is a {TestBuildLabel.ToLowerInvariant()}, and a test build gets no updates. No installed release was found.\n\n" +
+                $"This copy of Deskbar is a test build ({TestBuildLabel}), and a test build gets no updates. No installed release was found.\n\n" +
                 "Open the releases page to download one?",
                 "Deskbar", MessageBoxButton.YesNo, MessageBoxImage.Information) == MessageBoxResult.Yes)
             OpenUrl(UpdateService.ReleasesPage);

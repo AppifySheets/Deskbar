@@ -24,7 +24,6 @@ public class TrayMenuTests
         Assert.Equal(["Manage…", "Check for updates…", "Exit"], Headers(menu));
     });
 
-    // Clicking it has to actually reach the app, which is the half a header assertion cannot see.
     // Deskbar task 7dd83c89: a test build is marked first, the marking is a fact and not a command, and the item under
     // it restarts into the installed release. With no release installed the marking stands alone.
     [Fact]
@@ -46,6 +45,7 @@ public class TrayMenuTests
         Assert.Equal(["⚠ Test build 2.6.208, gets no updates", "Manage…", "Check for updates…", "Exit"], Headers(alone));
     });
 
+    // Clicking it has to actually reach the app, which is the half a header assertion cannot see.
     [Fact]
     public void The_update_check_item_invokes_the_check() => StaThread.Run(() =>
     {
