@@ -1,6 +1,7 @@
 <Window x:Class="Deskbar.App.TasksWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:local="clr-namespace:Deskbar.App"
         Title="Tasks"
         WindowStyle="None" ResizeMode="NoResize" Background="#FF1E1F24"
         ShowInTaskbar="False" Topmost="True" ShowActivated="False">
@@ -203,18 +204,18 @@
             <!-- The List (Scroller, the groups one under another) or the Matrix (MatrixGrid, Covey's 2 by 2, each cell
                  scrolling on its own; TasksWindow.Matrix.cs), whichever the toolbar's switch shows (Task 12). -->
             <Grid>
-                <ScrollViewer x:Name="Scroller" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"
+                <local:FastScrollViewer x:Name="Scroller" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"
                               Focusable="False">
                     <StackPanel x:Name="Rows" Margin="0,0,0,8"/>
-                </ScrollViewer>
+                </local:FastScrollViewer>
                 <Grid x:Name="MatrixGrid" Margin="6,4,8,8" Visibility="Collapsed" Background="Transparent"/>
                 <!-- The Stats view (task 521d2b07, TasksWindow.Stats.cs): the four numbers, the open-tasks line, the added
                      and finished bars, and the picked day's tasks, each a link to its task. Shown by the toolbar's Stats
                      switch in place of the List or the Matrix. -->
-                <ScrollViewer x:Name="StatsScroller" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"
+                <local:FastScrollViewer x:Name="StatsScroller" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"
                               Focusable="False" Visibility="Collapsed">
                     <StackPanel x:Name="StatsPanel" Margin="12,8,12,12"/>
-                </ScrollViewer>
+                </local:FastScrollViewer>
             </Grid>
         </DockPanel>
     </Border>

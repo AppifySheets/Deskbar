@@ -103,7 +103,7 @@ public partial class TasksWindow
     /// </summary>
     UIElement CappedThread(Guid id, Border frame, FrameworkElement line, UIElement head, UIElement body, UIElement box, Guid? latest)
     {
-        var scroller = new ScrollViewer
+        var scroller = new FastScrollViewer
         {
             Content = body,
             VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
@@ -188,7 +188,7 @@ public partial class TasksWindow
     // under its line, uncapped) leaves the parent's comments and comment box room; the wheel at its end moves the list.
     static ScrollViewer SubtaskShelf(UIElement subtasks, Border frame)
     {
-        var shelf = new ScrollViewer
+        var shelf = new FastScrollViewer
         {
             Content = subtasks,
             VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
