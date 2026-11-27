@@ -44,7 +44,9 @@ task (`TaskItem.Sessions`: id, folder, joined, ended). He wants the task to be t
   session's task still shows working or idle and still goes to its VS Code window as today.
 - Deskbar running Claude itself (`claude -p` workers it owns). Measured and dropped: Claude Code's own background
   sessions do the same job, outlive Deskbar, and keep the full interactive UI.
-- A chat UI drawn by Deskbar.
+- A chat UI drawn by Deskbar. (Moved on 2026-11-27: Petre merged the Inbox's task page, PR 646, which draws a
+  session's messages and steps from its transcript next to the comments. It only reads the transcript; Deskbar still
+  does not run Claude.)
 
 ## Anti-goals
 
