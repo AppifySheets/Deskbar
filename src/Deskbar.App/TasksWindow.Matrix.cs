@@ -163,7 +163,7 @@ public partial class TasksWindow
         };
         DockPanel.SetDock(caption, Dock.Top);
         body.Children.Add(caption);
-        body.Children.Add(new ScrollViewer
+        body.Children.Add(new FastScrollViewer
         {
             Content = lines,
             VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
