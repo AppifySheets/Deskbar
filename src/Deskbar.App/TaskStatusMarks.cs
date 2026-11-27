@@ -79,6 +79,15 @@ internal static class TaskStatusMarks
         };
     }
 
+    /// <summary>
+    /// Whether a line draws the tick in front of its title: every Done task, and an open task that is not Done once its
+    /// change is merged (the ring) or running (the disc), task 1afbd44f, Petre: "we have two circles - one for merged and
+    /// the other for deployed". RunningChanges.Of gives a task that is not Done no stage but those two, so any stage
+    /// there is one of them. The caller still leaves out a line in its undo window.
+    /// </summary>
+    internal static bool ShowsTick(TaskStatus status, TaskDelivery delivery) =>
+        status == TaskStatus.Done || delivery.Stage != DeliveryStage.None;
+
     internal const string DoneTickTag = "task-done-tick";
     internal const string ShippingTickTag = "task-shipping-tick";
     internal const string ChipTag = "task-status-chip";

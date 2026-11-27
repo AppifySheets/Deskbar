@@ -7,7 +7,8 @@ using CSharpFunctionalExtensions;
 namespace Deskbar.Core.Tasks;
 
 // ASKS GITHUB WHERE EACH DONE TASK'S CHANGE STANDS (task 8470d176; the rules are in RunningChanges). Every Poll it reads
-// the board for the recorded pull requests of Done tasks that have no settled answer (RunningChanges.ToLook): those of
+// the board for the recorded pull requests of open tasks, Done or not (an open task shows the merged ring too, task
+// 1afbd44f), that have no settled answer (RunningChanges.ToLook): those of
 // this build's repository, and those of any other that no deploy report covers yet. With none it asks nothing, so a
 // machine without such tasks, or without `gh`, runs nothing; it still tells TaskService which build runs, once, so a
 // task decided by reports alone shows its hover line. Otherwise it asks GitHub about each, off the UI thread, and back

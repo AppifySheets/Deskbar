@@ -1434,6 +1434,12 @@ DR8. With several Done tasks under the questions, some full discs and some hollo
      in the tasks panel's List and in each Matrix cell, the full discs come first and the rings after them, each half
      in the order you dragged it. When a ring fills (DR2, DR6) its line moves up among the discs. `deskbar.cmd task
      list` prints them in the same order.
+DR9. A task that is not Done yet but whose pull request merged (task 1afbd44f), say one Waiting on you to redeploy in
+     another repository: within a minute of the merge its line on the bar and in the tasks panel has the hollow ring
+     in front of its title, next to its question, and its chip still says "Waiting". "Mark deployed" is on its menu;
+     pick it and the ring fills into the disc. A task whose pull request is still open, or one still In progress with
+     no pull request, has no mark at all, and so does a task reopened after it was Done (or a repeating task's
+     next run) until it is Done again.
 
 ## The bar's waiting block folds after three
 

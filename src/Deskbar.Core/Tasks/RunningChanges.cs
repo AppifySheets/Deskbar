@@ -16,7 +16,8 @@ namespace Deskbar.Core.Tasks;
 // hook or `task pr`), in any repository. Links only mentioned in a task's text are left out, because a thread can
 // mention someone else's pull request. A pull request closed without a merge is left out too: it never shipped and
 // never will. Everything else keeps today's full tick, DeliveryStage.None: a Done note, research, a task with no
-// recorded pull request.
+// recorded pull request. An open task that is not Done shows the ring and the disc too, but only those two (task
+// 1afbd44f, the comment on Of).
 //
 // TWO SOURCES OF "RUNNING", one per kind of repository.
 //
@@ -55,11 +56,18 @@ namespace Deskbar.Core.Tasks;
 //   is at once when gh is missing (its look fails before asking anything).
 public static class RunningChanges
 {
+    // AN OPEN TASK GETS THE MERGED AND DEPLOYED CIRCLES TOO (task 1afbd44f, 2026-11-27, Petre: "but we have two circles -
+    // one for merged and the other for deployed"). Since sessions mark a task done only after its deploy (the briefing's
+    // merged, released, deployed, done order), a task whose pull request merged sits Waiting on a redeploy, or In progress
+    // while its session releases, and the ring that says "merged, not running yet" never showed on it. So a task that is
+    // not Done but still open shows the ring while its change is Merged and the full disc once it is Running. Only those
+    // two: Checking and Open say nothing about a merge, and None stays None, so a task still being worked on, or one
+    // whose pull request is not merged yet, keeps no mark at all. A Closed task is off every surface, so None.
     /// <summary>
     /// What a task's tick says (see the header): None (the full disc, as before this existed) for anything that is not a
     /// Done task with a recorded pull request whose state is all known; otherwise Open while one of them is still open,
     /// Merged while one is merged but not running (not in the running build, or not reported deployed), and Running once
-    /// every one runs.
+    /// every one runs. A task that is open but not Done shows only Merged and Running (the comment above), None otherwise.
     /// <paramref name="facts"/> is keyed by <see cref="PullRequestLink.Key"/>; a missing key is unknown: Checking while
     /// its look is still to come, None once it is in <paramref name="unreachable"/> (its last look failed).
     /// </summary>
@@ -67,9 +75,26 @@ public static class RunningChanges
     /// offline), so one not asked yet cannot be answered either and keeps the full disc too, rather than a ring for the
     /// minute until its own look fails.
     public static TaskDelivery Of(TaskItem task, RunningBuild build, IReadOnlyDictionary<string, PullRequestArrival> facts,
-        IReadOnlySet<string>? unreachable = null, bool blind = false)
+        IReadOnlySet<string>? unreachable = null, bool blind = false) =>
+        task.Status switch
+        {
+            TaskStatus.Done => StageOf(task, build, facts, unreachable, blind),
+            TaskStatus.Closed => TaskDelivery.None,
+            // BACK FROM DONE: a task reopened, woken by a comment, or on a later run of its schedule still carries the
+            // pull requests of the work it finished (TaskItem.PullRequests is never cleared), and a mark from those would
+            // sit on the new work, a green disc saying "deployed" all through a run that has shipped nothing yet. The
+            // links carry no time to tell old from new, so a task whose status log shows it Done or Closed before gets no
+            // mark until it is Done again.
+            _ when task.StatusLog.Any(c => c.To is TaskStatus.Done or TaskStatus.Closed) => TaskDelivery.None,
+            _ => StageOf(task, build, facts, unreachable, blind) is { Stage: DeliveryStage.Merged or DeliveryStage.Running } merged
+                ? merged
+                : TaskDelivery.None,
+        };
+
+    // The stage of a task's recorded pull requests, whatever its status (Of decides which stages each status shows).
+    static TaskDelivery StageOf(TaskItem task, RunningBuild build, IReadOnlyDictionary<string, PullRequestArrival> facts,
+        IReadOnlySet<string>? unreachable, bool blind)
     {
-        if (task.Status != TaskStatus.Done) return TaskDelivery.None;
         var links = Watched(task);
         var reported = task.Deployed.Select(d => d.Key).ToHashSet();
         // An other-repository pull request that was reported deployed runs, unless GitHub says it is still OPEN: a
@@ -123,7 +148,8 @@ public static class RunningChanges
         task.PullRequests.DistinctBy(l => l.Key).ToArray();
 
     /// <summary>
-    /// The pull requests the watch should ask GitHub about now: those of Done tasks (Watched), each once, that have no
+    /// The pull requests the watch should ask GitHub about now: those of open tasks, Done or not (Watched; an open task
+    /// shows the merged ring too, task 1afbd44f), each once, that have no
     /// settled answer yet, a reported one included: a report does not fill a pull request GitHub says is still open
     /// (Of), so its state is still wanted, and asked once it costs one gh call. Only an open one is ever asked again,
     /// since it can still merge. A
@@ -133,7 +159,7 @@ public static class RunningChanges
     /// </summary>
     public static IReadOnlyList<PullRequestLink> ToLook(TaskBoard board, RunningBuild build, IReadOnlyDictionary<string, PullRequestArrival> facts) =>
         board.Tasks
-            .Where(t => t.Status == TaskStatus.Done)
+            .Where(t => t.Status != TaskStatus.Closed)
             .SelectMany(Watched)
             .DistinctBy(l => l.Key)
             .Where(l => !facts.TryGetValue(l.Key, out var f) || !f.Settled)
