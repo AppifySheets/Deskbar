@@ -12,8 +12,9 @@ namespace Deskbar.App;
 // a 36 DIP rounded square, then the title (two rows at most, whole in the tooltip) with the workspace chip at the end of
 // its first row, then one line of text, and at the right the time with the small marks under it.
 //
-//   the mark     one shape per state (InboxMarks). A note's mark IS its tick box: a click closes it, with the six seconds
-//                of Undo the List gives (TickOf's Undo sits in its place meanwhile). Every other mark is a picture.
+//   the mark     one shape per state (InboxMarks). A note's mark IS its tick box, and so is a finished task's tick: a
+//                click closes it, with the six seconds of Undo the List gives (TickOf's Undo sits in its place
+//                meanwhile). Every other mark is a picture.
 //   the title    13.5, bold when the task needs you or is important, italic when urgent (Ruling 59), struck through in
 //                its undo window. A subtask drawn under its parent is indented and starts with "↳".
 //   the chip     the workspace's full name with a dot in its colour; a click opens the same move menu as the List's chip
@@ -158,10 +159,12 @@ public partial class TasksWindow
         var icon = InboxMarks.Icon(InboxMarks.IconOf(line.Mark), 18, InboxMarks.InkOf(line.Mark), InboxLook.Raised, turning: line.Mark == InboxMark.Working);
         if (row.Closing)
             tile.Child = Centred(TickOf(row.Id, row.Status, row.Closing, ""));
-        else if (line.Mark == InboxMark.Note)
+        else if (line.Mark is InboxMark.Note or InboxMark.Finished or InboxMark.FinishedNotRunning)
         {
             // The note's box closes it (TickOf's Close: Actions.Close, the click guard, the board's refusal for a parent with
-            // open subtasks), drawn as the mockup's empty box.
+            // open subtasks), drawn as the mockup's empty box. A finished task's tick closes it the same way: it is drawn
+            // as a tick in a circle, which reads as a tick box, and a click on it used to open the page instead (Luka on
+            // build 4: "I had impression that if task is finished I could click on this tick and task would close").
             var close = Small(icon, "Close", () => Actions?.Close(row.Id), TaskViews.TickTip(row.Claudes, row.SubtaskCount, row.ClaudeWorking));
             close.Padding = new Thickness(0);
             close.Width = 36;
