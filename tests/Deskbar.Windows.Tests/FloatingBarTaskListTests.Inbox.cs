@@ -122,9 +122,10 @@ public partial class FloatingBarTaskListTests
         Assert.Equal(FontWeights.Bold, Title(k.Loose).FontWeight);
     });
 
-    // The chip sits under the title with the workspace's full name, at the narrowest bar too; no chip without a workspace.
+    // The chip sits at the right end of the title's first row (task 891caa7c, one row per task), with the workspace's
+    // full name in its text, and no chip without a workspace.
     [Fact]
-    public void The_chip_is_under_the_title_with_the_full_name_and_none_without_a_workspace() => StaThread.Run(() =>
+    public void The_chip_is_on_the_titles_first_row_at_its_right_with_the_full_name_and_none_without_a_workspace() => StaThread.Run(() =>
     {
         using var t = Build();
         var k = BarTasks(t);
@@ -134,13 +135,39 @@ public partial class FloatingBarTaskListTests
         var line = LineFor(t, k.Note);
         var chip = Inside(line).OfType<Button>().Single(b => AutomationProperties.GetName(b) == "Move to workspace");
         var title = Inside(line).OfType<TextBlock>().First(b => Equals(b.Tag, "task-text"));
-        Assert.True(chip.TranslatePoint(new Point(0, 0), line).Y >= title.TranslatePoint(new Point(0, title.ActualHeight), line).Y - 0.5);
+        var chipAt = chip.TranslatePoint(new Point(0, 0), line);
+        var titleAt = title.TranslatePoint(new Point(0, 0), line);
+        Assert.InRange(chipAt.Y, titleAt.Y - 0.5, titleAt.Y + 0.5);
+        Assert.True(chipAt.X >= titleAt.X + title.ActualWidth - 0.5, "the chip is right of the title, not under it");
         Assert.Contains(Inside(chip).OfType<TextBlock>(), b => b.Text == "GEPHA");
         Assert.False(Inside(LineFor(t, k.Loose)).OfType<Button>().Any(b => AutomationProperties.GetName(b) == "Move to workspace"));
 
         Click(chip);
         Assert.NotNull(t.Bar.TaskMoveMenu);
         t.Bar.TaskMoveMenu!.IsOpen = false;
+    });
+
+    // Task 891caa7c, "make denser, compact": a line whose title fits one row is one row tall, its 2 DIP padding above
+    // and below and the mark's own height (a little taller than a text row) included. It was about 40 DIP while the
+    // chip had a row of its own; this bound fails long before that comes back.
+    [Fact]
+    public void A_one_row_title_makes_a_one_row_line() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        // A short title: the test bar is narrow (its lines about 176 DIP), and beside the chip there "Book the dentist"
+        // already wraps to a second row, as it should.
+        var note = t.Tasks.AddNote("Tax", t.Gepha).Value.Id;
+        InboxLook(t);
+        t.Bar.UpdateLayout();
+
+        var line = LineFor(t, note);
+        var title = Inside(line).OfType<TextBlock>().First(b => Equals(b.Tag, "task-text"));
+        Assert.True(Inside(line).OfType<Button>().Any(b => AutomationProperties.GetName(b) == "Move to workspace"), "the line has its chip");
+        // One row: the title's own measured height. Its ActualHeight is the row's, which the mark (1.5 x the text size,
+        // a little taller than a text row) sets, and the title stretches to it.
+        Assert.InRange(title.DesiredSize.Height, 0, title.LineHeight + 0.5);
+        // The row, which is the mark's height at the default text size, plus 2 DIP of padding above and below.
+        Assert.InRange(line.ActualHeight, title.LineHeight, title.LineHeight + 6);
     });
 
     // The selection and the glow paint the Inbox look's selected fill on the line's content.
@@ -248,8 +275,8 @@ public partial class FloatingBarTaskListTests
         var bar = BarSurface.Base;
         var backs = new (string Name, Color Colour)[]
         {
+            // No chip fill since task 891caa7c: the chip's words sit on the line's own background, one of these three.
             ("the bar", bar), ("the hover", Over(bar, 0x1F, Colors.White)), ("the selection", Color.FromRgb(0x27, 0x2C, 0x36)),
-            ("the chip", ((SolidColorBrush)Deskbar.App.InboxLook.Surface).Color),
         };
         var inks = new (string Name, Brush Ink)[] { ("ink", Deskbar.App.InboxLook.Ink), ("second ink", Deskbar.App.InboxLook.Ink2) };
         Assert.All(backs.SelectMany(b => inks.Select(i => (i.Name, b.Name, Ratio: Contrast(((SolidColorBrush)i.Ink).Color, b.Colour)))),
@@ -606,6 +633,34 @@ public partial class FloatingBarTaskListTests
         var name = Inside(line).OfType<TextBlock>().Single(b => b.Text.StartsWith("Customer onboarding"));
         Assert.Equal(TextTrimming.CharacterEllipsis, name.TextTrimming);
         Assert.True(name.TranslatePoint(new Point(name.ActualWidth, 0), line).X <= line.ActualWidth + 0.5);
+        // Task 891caa7c: the chip sits beside the title now, so a long name stops at the chip's cap and leaves the title
+        // most of the row, rather than taking the line's whole width.
+        var chip = Inside(line).OfType<Button>().Single(b => AutomationProperties.GetName(b) == "Move to workspace");
+        Assert.True(chip.ActualWidth <= chip.MaxWidth + 0.5 && chip.MaxWidth < line.ActualWidth / 2,
+            $"chip {chip.ActualWidth} (cap {chip.MaxWidth}) on a {line.ActualWidth} DIP line");
+        Assert.True(Inside(line).OfType<TextBlock>().First(b => Equals(b.Tag, "task-text")).ActualWidth > chip.ActualWidth, "the title keeps more room than the chip");
+    });
+
+    // The chip has no wash of its own (it would stack on the line's hover); its name brightens from the second ink to
+    // the first while the pointer is on it.
+    [Fact]
+    public void The_chips_name_brightens_on_hover_with_no_wash_of_its_own() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var k = BarTasks(t);
+        InboxLook(t);
+        t.Bar.UpdateLayout();
+
+        var chip = Inside(LineFor(t, k.Note)).OfType<Button>().Single(b => AutomationProperties.GetName(b) == "Move to workspace");
+        var name = Inside(chip).OfType<TextBlock>().Single(b => b.Text == "GEPHA");
+        Assert.Equal(Deskbar.App.InboxLook.Ink2, name.Foreground);
+        Assert.DoesNotContain(Inside(chip).OfType<Border>(), b => b.Background is SolidColorBrush { Color.A: > 0 });
+        Assert.Empty(chip.Template.Triggers); // no wash on hover or press
+        // IsMouseOver cannot be set from a test, so the hover is read from the name's style: one trigger, on the chip
+        // button's IsMouseOver, putting the first ink on the name.
+        var hover = Assert.IsType<DataTrigger>(Assert.Single(name.Style.Triggers));
+        Assert.Equal(nameof(UIElement.IsMouseOver), ((System.Windows.Data.Binding)hover.Binding).Path.Path);
+        Assert.Equal(Deskbar.App.InboxLook.Ink, ((Setter)Assert.Single(hover.Setters)).Value);
     });
 
     // A Claude terminal brought to the front selects its task (#477); in the Inbox look, as in the old one, the task's line
