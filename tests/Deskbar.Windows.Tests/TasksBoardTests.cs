@@ -477,6 +477,22 @@ public partial class TasksBoardTests
         Assert.Empty(t.Tasks.Board.Tasks.Single(x => x.Id == id).Comments);
     });
 
+    // Task 0596fca2: a paste of several lines kept only its first line, because WPF cuts a paste at the first line break
+    // in a box that does not accept returns. The box accepts them now, so a pasted block stays whole and posts whole.
+    [Fact]
+    public void Comment_box_keeps_every_line_of_a_paste() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var id = t.Tasks.AddNote("note", t.Gepha).Value.Id;
+        t.Controller.Show();
+        t.Controller.ToggleThread(id);
+
+        Assert.True(Assert.IsType<TextBox>(t.Window.CommentBoxOf(id)).AcceptsReturn);
+        Assert.True(t.Window.TypeComment(id, "Name: someone\r\nCity: Tbilisi\r\nPhone: 555", Key.Enter));
+
+        Assert.Equal("Name: someone\r\nCity: Tbilisi\r\nPhone: 555", t.Tasks.Board.Tasks.Single(x => x.Id == id).Comments.Single().Markdown);
+    });
+
     [Fact]
     public void Close_reopen_and_set_status_from_the_window() => StaThread.Run(() =>
     {
