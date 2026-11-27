@@ -2037,7 +2037,7 @@ public partial class TasksBoardTests
     });
 
     // Petre's screenshot: the placeholder "Comment as you, in markdow…" was cut off and the box squeezed. A short
-    // placeholder, the hint in the tooltip, the box across the thread, and nothing clipped at the minimum width.
+    // placeholder, no hint, the box across the thread, and nothing clipped at the minimum width.
     [Fact]
     public void The_comment_box_is_short_spoken_and_never_clips() => StaThread.Run(() =>
     {
@@ -2049,7 +2049,9 @@ public partial class TasksBoardTests
         t.Window.UpdateLayout();
 
         var box = t.Window.CommentBoxOf(id)!;
-        Assert.Equal(TasksWindow.CommentHint, box.ToolTip);
+        // No "Markdown works" tooltip or hint line any more (task bc27a308): it popped up over the text.
+        Assert.Null(box.ToolTip);
+        Assert.DoesNotContain(Inside(t.Window).OfType<TextBlock>(), b => Equals(b.Tag, "comment-hint"));
         var placeholder = Inside(t.Window).OfType<TextBlock>().Single(b => Equals(b.Tag, "comment-placeholder"));
         Assert.Equal("Add a comment…", placeholder.Text);
         var post = ButtonNamed(t.Window, "Post comment");

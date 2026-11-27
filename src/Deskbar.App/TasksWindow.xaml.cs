@@ -2746,7 +2746,7 @@ public partial class TasksWindow : Window
             TextWrapping = TextWrapping.Wrap,
             AcceptsReturn = true,
             MaxHeight = 160,
-            ToolTip = "Markdown works. Enter saves, Shift+Enter starts a new line, Esc keeps the comment as it was.",
+            // No tooltip: it popped up over the text whenever the pointer rested on the box (task bc27a308).
         };
         AutomationProperties.SetName(box, "Edit your comment");
         commentEditor = box;
@@ -2806,12 +2806,15 @@ public partial class TasksWindow : Window
     // kept in `drafts`, so a redraw while he types (from a session's change) loses nothing.
     //
     // Petre's screenshot: the placeholder "Comment as you, in markdow…" was cut off and the box was squeezed beside its
-    // button inside the indented frame. So the box spans the frame's full width with a short placeholder; the hint
-    // (markdown works, which keys do what) is its tooltip and a dim line under it while it has the keyboard; the send
+    // button inside the indented frame. So the box spans the frame's full width with a short placeholder and the send
     // button sits inside the box's right end (task 39bc9c4d). Nothing here has a width of its own to clip at the
-    // window's minimum width: the hint trims, the box wraps.
+    // window's minimum width: the box wraps.
+    //
+    // NO "MARKDOWN WORKS" HINT (task bc27a308, "it appears and is annoying"): the box used to carry the hint (markdown
+    // works, which keys do what) as a tooltip, which popped up over the text whenever the pointer rested on the box,
+    // and as a dim line under it while it had the keyboard. Both are gone; the placeholder and the send button's own
+    // tooltip ("Post the comment (Enter)") are all the box says about itself.
     internal const string CommentPlaceholder = "Add a comment…";
-    internal const string CommentHint = "Markdown works. Paste or drop images. Enter adds, Shift+Enter starts a new line.";
 
     UIElement CommentBox(Guid id)
     {
@@ -2827,7 +2830,6 @@ public partial class TasksWindow : Window
             TextWrapping = TextWrapping.Wrap,
             AcceptsReturn = false,
             MaxHeight = 120,
-            ToolTip = CommentHint,
         };
         AutomationProperties.SetName(box, "New comment");
         var placeholder = new TextBlock
@@ -2840,18 +2842,6 @@ public partial class TasksWindow : Window
             Margin = new Thickness(2, 0, 0, 0),
             TextTrimming = TextTrimming.CharacterEllipsis,
             Visibility = box.Text.Length == 0 ? Visibility.Visible : Visibility.Collapsed,
-        };
-        var hint = new TextBlock
-        {
-            Tag = "comment-hint",
-            Text = CommentHint,
-            FontSize = 10.5,
-            Foreground = HeaderInk,
-            TextTrimming = TextTrimming.CharacterEllipsis,
-            VerticalAlignment = VerticalAlignment.Center,
-            // Hidden rather than collapsed, so the line under the box keeps its height and nothing moves as the keyboard
-            // comes and goes.
-            Visibility = Visibility.Hidden,
         };
         box.TextChanged += (_, _) =>
         {
@@ -2871,13 +2861,8 @@ public partial class TasksWindow : Window
         box.PreviewKeyDown += (_, e) => e.Handled = PressInComment(id, e.Key, Keyboard.Modifiers) != KeyOutcome.Ignored;
         // Ctrl+V and drops of pictures (TasksWindow.Images.cs). After the handler above, which sets Handled for every key.
         TakePictures(box, id);
-        box.GotKeyboardFocus += (_, _) => hint.Visibility = Visibility.Visible;
-        // The keyboard leaving the box hides the hint, and frees a redraw that waited for it.
-        box.LostKeyboardFocus += (_, _) =>
-        {
-            hint.Visibility = Visibility.Hidden;
-            Flush();
-        };
+        // The keyboard leaving the box frees a redraw that waited for it.
+        box.LostKeyboardFocus += (_, _) => Flush();
         commentBoxes[id] = box;
 
         // THE BOX AS A CHAT'S (task 39bc9c4d): a rounded box with a round send button inside its right end, in place of the
@@ -2894,7 +2879,6 @@ public partial class TasksWindow : Window
         var inside = new Grid { Children = { box, placeholder, post } };
         inside.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         inside.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        hint.Margin = new Thickness(12, 3, 0, 0);
         return new StackPanel
         {
             Margin = new Thickness(0, 4, 0, 0),
@@ -2911,7 +2895,6 @@ public partial class TasksWindow : Window
                 },
                 // The pictures waiting to go with the comment, each with its x (TasksWindow.Images.cs).
                 PendingRow(id),
-                hint,
             },
         };
     }
@@ -3013,7 +2996,6 @@ public partial class TasksWindow : Window
         var box = EditorBox(row, TaskImages.Split(row.Description).Text, "Task description");
         box.MinHeight = 38;
         box.Margin = new Thickness(0, 3, 0, 0);
-        box.ToolTip = "A description, in markdown. Paste or drop images. Enter saves, Shift+Enter starts a new line.";
         TakeEditorPictures(box);
         return box;
     }
