@@ -110,7 +110,8 @@ public partial class TaskDetailWindow : Window
         commentSkills = new SkillCompletion(CommentBox,
             () => Actions?.TaskSkills is { } skills && TaskId != Guid.Empty ? skills(TaskId) : Task.FromResult<IReadOnlyList<SkillChoice>>([]),
             () => Actions?.TaskSkills is not null,
-            new SkillCompletion.Look(DetailFill, ThreadEdge, Ink, DimInk, Frozen(0x38, 0xFF, 0xFF, 0xFF)));
+            new SkillCompletion.Look(DetailFill, ThreadEdge, Ink, DimInk, Frozen(0x38, 0xFF, 0xFF, 0xFF)),
+            SkillCompletion.CommentAsking, SkillCompletion.CommentNone);
         CommentBox.PreviewKeyDown += (_, e) =>
         {
             // Ctrl+Enter posts; a plain Enter is a new line, since a comment written here is often long.

@@ -28,6 +28,12 @@ sealed class SkillCompletion
     /// <summary>The colours and size the list is drawn in, the box's own.</summary>
     public sealed record Look(Brush Fill, Brush Edge, Brush Ink, Brush DimInk, Brush PickedFill);
 
+    /// <summary>A comment box's words (task 29bdd158): its list is the repo the task's session works in.</summary>
+    public const string CommentAsking = "Asking Claude Code for this task's skills…";
+
+    /// <summary>A comment box's words when the session's repo has no skills, or the task has no session.</summary>
+    public const string CommentNone = "No skills here: this task's session repo has none in .claude/skills";
+
     // Rows shown before the list scrolls.
     const int VisibleRows = 10;
 
@@ -48,8 +54,17 @@ sealed class SkillCompletion
     // The text Esc closed the list on; the list stays shut until the text is something else.
     string? dismissed;
 
-    public SkillCompletion(TextBox box, Func<Task<IReadOnlyList<SkillChoice>>> source, Func<bool> enabled, Look look)
+    // What the list says while Claude Code is asked, and when the folders have no skills of their own. The add box's words
+    // name the workspace; a comment box's name the task (task 29bdd158), whose list is its session's repo.
+    readonly string asking;
+    readonly string none;
+
+    public SkillCompletion(TextBox box, Func<Task<IReadOnlyList<SkillChoice>>> source, Func<bool> enabled, Look look,
+        string asking = "Asking Claude Code for this workspace's skills…",
+        string none = "No skills of this workspace's own repos (their .claude/skills)")
     {
+        this.asking = asking;
+        this.none = none;
         this.box = box;
         this.source = source;
         this.enabled = enabled;
@@ -160,7 +175,7 @@ sealed class SkillCompletion
         if (all is null)
         {
             shown = [];
-            rows.Children.Add(Note("Asking Claude Code for this workspace's skills…"));
+            rows.Children.Add(Note(asking));
             return;
         }
         var before = shown.ElementAtOrDefault(picked)?.Name;
@@ -169,9 +184,7 @@ sealed class SkillCompletion
         picked = Math.Max(0, shown.Select(s => s.Name).ToList().IndexOf(before ?? ""));
         if (shown.Count == 0)
         {
-            rows.Children.Add(Note(all.Count == 0
-                ? "No skills of this workspace's own repos (their .claude/skills)"
-                : $"No skill matches /{query}"));
+            rows.Children.Add(Note(all.Count == 0 ? none : $"No skill matches /{query}"));
             return;
         }
         shown.Select(Row).ToList().ForEach(row => rows.Children.Add(row));

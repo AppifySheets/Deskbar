@@ -1080,16 +1080,24 @@ public partial class App : Application
             ? skillCatalog.For(actions.NewTaskFolders(workspace, parent))
             : Task.FromResult<IReadOnlyList<Deskbar.Core.Tasks.SkillChoice>>([]);
 
-    // A comment box's "/" list (task 29bdd158, "add /skills support to comments"): the skills of the folder the comment
-    // would reach, which is where the task's latest session runs (its repo, for a worktree, as KnowsSkill reads it), so
-    // the list and CommentWaker's check agree. A task that never had a session lists what a new task on its workspace,
-    // under its parent, would have, as the add box does: Claude started on it later reads the thread from the top.
+    // A comment box's "/" list (task 29bdd158, "add /skills support to comments"): the repo's own skills where the task's
+    // sessions work (their repos, for worktrees), the very list CommentWaker's knowsSkill checks a posted comment against,
+    // so what the list offers is what the session is asked to run. A task with no session lists nothing: a comment on it
+    // wakes no session, so a picked skill would run nowhere.
     Task<IReadOnlyList<Deskbar.Core.Tasks.SkillChoice>> TaskSkillsOf(Guid taskId) =>
-        tasks?.Board.Tasks.FirstOrDefault(t => t.Id == taskId) is { } task
-            ? task.Sessions.OrderByDescending(session => session.Joined).FirstOrDefault() is { } latest
-                ? skillCatalog.For([Deskbar.Core.Tasks.ClaudeStart.RepoOf(latest.Folder)])
-                : WorkspaceSkillsOf(task.WorkspaceId, task.ParentId)
+        tasks?.Board.Tasks.FirstOrDefault(t => t.Id == taskId) is { } task && SessionRepos(task) is { Count: > 0 } repos
+            ? skillCatalog.For(repos)
             : Task.FromResult<IReadOnlyList<Deskbar.Core.Tasks.SkillChoice>>([]);
+
+    // The repos a task's sessions work in, latest session first, once each; a session with no folder is left out, as
+    // ClaudeStart.Folders leaves it out.
+    static IReadOnlyList<string> SessionRepos(Deskbar.Core.Tasks.TaskItem task) =>
+        task.Sessions
+            .Where(session => session.Folder != "")
+            .OrderByDescending(session => session.Joined)
+            .Select(session => Deskbar.Core.Tasks.ClaudeStart.RepoOf(session.Folder).TrimEnd('\\', '/'))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
 
     IEnumerable<string> EditorFolderNamesOn(Maybe<Guid> workspace) =>
         workspace.HasNoValue
@@ -2099,9 +2107,10 @@ public partial class App : Application
             // A comment on a recurring task between runs starts a run (WakePlan.FreshRun, task 0b78269e). The runner is
             // built just below, after the Claude actions; this is read when a comment arrives.
             startRun: id => recurringRunner?.RunNow(id) ?? Result.Failure("Deskbar is still starting up"),
-            // A comment that opens with a skill Claude Code lists where one of the task's sessions runs is delivered with
-            // the request to run it (task 29bdd158). KnowsSkill is set just below and read when a comment arrives.
-            knowsSkill: (task, skill) => task.Sessions.Any(session => claudeSessions.KnowsSkill(session.Folder, skill)));
+            // A comment that opens with one of the repo's own skills, as Claude Code lists them where one of the task's
+            // sessions works, is delivered with the request to run it (task 29bdd158). Asked through the catalog, so it is
+            // the comment box's own list (repo skills only, not the user's or the plugins') and probes a folder not asked yet.
+            knowsSkill: async (task, skill) => (await skillCatalog.For(SessionRepos(task))).Any(choice => choice.Name == skill));
 
         // ...and what a click on a task does with those sessions (ClaudeTaskActions, Task 9): the double-click's session
         // window, "Start Claude on this", the thread's list and Open, the pipe's three verbs. Its answers land on this
