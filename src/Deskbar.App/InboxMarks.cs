@@ -235,6 +235,18 @@ internal static class InboxLook
     internal const double ChatText = 13.5;
     internal const double ChatSmall = 11.5;
 
+    // Reading text on an Inbox page: the size, lines one and a half sizes tall and twice the gap between blocks (WPF's
+    // own line is about 1.33 sizes, and MarkdownBlocks parts paragraphs by 4). The owner on build 6, at 13.5: "to read
+    // vs code is much easier than our chat"; its chat has the same face and size, with taller lines and wider gaps.
+    // The last block keeps its gap, so a bubble's foot does not grow.
+    internal static void Reading(System.Windows.Documents.FlowDocument document, double size)
+    {
+        document.FontSize = size;
+        document.LineHeight = Math.Round(size * 1.5);
+        foreach (var block in document.Blocks.Where(b => b != document.Blocks.LastBlock))
+            block.Margin = new Thickness(block.Margin.Left, block.Margin.Top, block.Margin.Right, block.Margin.Bottom * 2);
+    }
+
     static Brush Frozen(byte r, byte g, byte b)
     {
         var brush = new SolidColorBrush(Color.FromRgb(r, g, b));
