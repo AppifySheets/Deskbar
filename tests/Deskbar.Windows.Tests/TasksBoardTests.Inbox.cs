@@ -801,9 +801,10 @@ public partial class TasksBoardTests
         Assert.Equal(extent, offset, 1);
     });
 
-    // A short page reads like a chat from the bottom up: the comment box at the bottom edge, the empty room on top.
+    // A short page starts at the top (task 5ee182cf, which replaced "a chat read from the bottom up"): the chat sits right
+    // under the header, the empty room under it, and the comment box, docked below the scroller, still at the bottom edge.
     [Fact]
-    public void A_short_page_sits_at_the_bottom() => StaThread.Run(() =>
+    public void A_short_page_starts_at_the_top_with_the_box_at_the_bottom() => StaThread.Run(() =>
     {
         using var t = Build(width: 460);
         var k = InboxTasks(t);
@@ -814,10 +815,16 @@ public partial class TasksBoardTests
 
         var scroller = t.Window.InboxPageScroller!;
         Assert.Equal(0, scroller.ScrollableHeight, 1);
-        var box = t.Window.CommentBoxOf(k.Done)!;
-        var bottom = box.TranslatePoint(new Point(0, box.ActualHeight), scroller).Y;
-        Assert.True(scroller.ViewportHeight - bottom < 40, $"box ends at {bottom} of {scroller.ViewportHeight}");
         Assert.True(scroller.ViewportHeight > 200);
+        var body = (FrameworkElement)scroller.Content;
+        Assert.Equal(VerticalAlignment.Top, body.VerticalAlignment);
+        // Its own top margin is all that stands between the scroller's top and the body (bottom-aligned, it was hundreds).
+        var top = body.TranslatePoint(new Point(0, 0), scroller).Y;
+        Assert.Equal(body.Margin.Top, top, 1);
+        Assert.True(body.ActualHeight < scroller.ViewportHeight - 40, $"body {body.ActualHeight} of {scroller.ViewportHeight}: not short");
+        var box = t.Window.CommentBoxOf(k.Done)!;
+        var boxTop = box.TranslatePoint(new Point(0, 0), scroller).Y;
+        Assert.True(boxTop >= scroller.ViewportHeight - 1, $"box starts at {boxTop}, the view ends at {scroller.ViewportHeight}");
     });
 
     // The manager's violet line stays in sight on a page too.

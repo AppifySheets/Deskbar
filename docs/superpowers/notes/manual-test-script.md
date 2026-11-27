@@ -1750,7 +1750,7 @@ QC3. Open the task in its own window (Open in window): the thread holds the ques
 QC4. Have the session ask the same question again: no second copy in the thread. Ask a different one: a new message,
      the new question orange, the old one in the plain text colour.
 QC5. Reply, then have the session run `task answered`: the question folds away under "N settled comments" with the
-     session's other comments since it asked.
+     session's other comments since it asked. On the task's Inbox page they stay where they were, dimmed (task 5ee182cf).
 
 ## Workspace bookmarks
 
@@ -1901,3 +1901,12 @@ SP3. `/plan`, ask for a small plan, and leave the approval dialog: "Approve the 
 SP4. Ask the session to use AskUserQuestion, then press Esc on the dialog (step 68a): the question goes within about five seconds.
 SP5. `task ask` something on the note from the session, then trigger a permission dialog: the asked question stays, and stays after the dialog is answered.
 SP6. The same as SP1 in a VS Code Claude tab: the question names the tool, and answering in VS Code clears it.
+
+## The Inbox page keeps its whole chat
+
+Settled and older comments stay in the page's chat ([Deskbar task 5ee182cf](https://deskbar.app/task#5ee182cf-1c44-4560-94e5-1080e28f3d5d)). A note joined by a throwaway session in a scratch folder, the Inbox chosen.
+
+PW1. Have the session write five comments, then `task ask` and `task answered` after your reply. Open the note's page: every comment is in the chat, the settled ones dimmed in their places, with no "N settled comments" or "N earlier comments" line, and the session's steps from before the oldest comment are still there.
+PW2. Keep the page open and have the session settle one more comment (`task comment-settle <id>`): it dims where it is, and nothing above it disappears.
+PW3. Back to the List and open the same note's thread: there the settled comments fold behind "N settled comments" and only the latest three show, as before.
+PW4. Open the page of a task with one or two comments: the chat starts right under the header, the empty room is under it, and the comment box is at the bottom edge. Add comments until it is taller than the page: it scrolls and stays at the newest.
