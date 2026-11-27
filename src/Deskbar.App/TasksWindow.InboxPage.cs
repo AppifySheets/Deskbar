@@ -382,6 +382,8 @@ public partial class TasksWindow
         row.Status == TaskStatus.Closed ? InboxMark.Closed
         : row.SnoozedUntil is not null ? InboxMark.Snoozed
         : DeployWait.Waits(row.Status, row.Delivery.Shipping, row.QuestionOptions.Count, row.AwaitsDeploy) ? InboxMark.WaitsForDeploy
+        // Only a merge asked (task b99e5596, AskedPullRequests.AsksMerge): the merge glyph, as the task's Inbox line has.
+        : row.AsksMerge ? InboxMark.ReadyToMerge
         : row.Status == TaskStatus.WaitingOnYou ? InboxMark.Asks
         : row.Status == TaskStatus.Done ? row.Delivery.Shipping ? InboxMark.FinishedNotRunning : InboxMark.Finished
         : !row.Claudes ? InboxMark.Note
@@ -392,6 +394,7 @@ public partial class TasksWindow
     static string PageStateWords(TaskRowView row, InboxMark mark) => mark switch
     {
         InboxMark.Asks => "Waits for your answer",
+        InboxMark.ReadyToMerge => "Waits for your merge",
         InboxMark.WentQuiet => row.Status == TaskStatus.WaitingOnYou ? "Could not be restarted" : "Went quiet: no update for a while",
         InboxMark.Finished => "Finished. Check it and close",
         InboxMark.FinishedNotRunning => "Finished. Not running yet",
@@ -473,7 +476,7 @@ public partial class TasksWindow
         });
 
         var second = new WrapPanel { Margin = new Thickness(36, 6, 0, 0) };
-        var words = Text(PageStateWords(row, mark), 12, mark is InboxMark.Asks or InboxMark.WentQuiet or InboxMark.AsksPermission ? InboxLook.Amber : InboxLook.Ink2,
+        var words = Text(PageStateWords(row, mark), 12, mark is InboxMark.Asks or InboxMark.ReadyToMerge or InboxMark.WentQuiet or InboxMark.AsksPermission ? InboxLook.Amber : InboxLook.Ink2,
             FontWeights.SemiBold, new Thickness(0, 0, 10, 4));
         AutomationProperties.SetName(words, "State");
         // Waiting for his deploy (task 1565789d, option A): the steps instead of the words, done ones ticked, his in amber.

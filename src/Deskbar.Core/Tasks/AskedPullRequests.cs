@@ -45,6 +45,37 @@ public static class AskedPullRequests
             .DistinctBy(link => link.Key)
             .ToArray();
 
+    // A QUESTION THAT ONLY ASKS FOR A MERGE (task b99e5596, 2026-11-28, the owner: "new chip for PR ready, not a question
+    // mark"). Most questions are "merge this pull request", and they wore the same "?" bubble as a real decision, so the
+    // two could not be told apart on the bar. Such a question now gets a mark of its own (InboxMark.ReadyToMerge, a merge
+    // glyph; the mockup's option A). It counts as one when:
+    //   * its opening says merge: the text before its first link or URL starts with "merge", or has "and merge" within its
+    //     first few words ("Merge [Deskbar #707](...)", "Review and merge [PR 24](...)", "Mark it ready and merge ..."). The
+    //     briefing tells a session to put what the user must do in the first words, so the opening is where the ask is;
+    //   * it links at least one GitHub pull request (In), the thing to merge;
+    //   * it offers no answer buttons, and is not a deploy hand-over (TaskItem.AwaitsDeploy): those ask for something else.
+    // So "Answer in the session: ... Then merge PR 583" keeps the "?" (a decision comes first), as do "Decide whether we
+    // should merge the two pages" and "Redeploy ...: [stacks 311] is merged". No GitHub call is needed: once the pull
+    // request merges, Settlements settles the question by itself, and the mark goes with it.
+    static readonly Regex MergeOpening = new(@"^\W*(?:merge\b|(?:[\w'-]+\s+){1,3}and\s+merge\b)",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+
+    // Where a question's opening ends: its first markdown link or bare URL.
+    static readonly Regex FirstLink = new(@"\[|https?://", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+
+    /// <summary>Whether a question's text only asks for a merge (see above): its opening says merge and it links a pull request.</summary>
+    public static bool AsksMerge(string? question) =>
+        In(question).Count > 0 && MergeOpening.IsMatch(Opening(question!));
+
+    /// <summary>Whether a task waits on the user only for a merge (see above): the task's open question, with no answer buttons.</summary>
+    public static bool AsksMerge(TaskItem task) =>
+        task.Status == TaskStatus.WaitingOnYou && !task.AwaitsDeploy && task.QuestionOptions.Count == 0
+        && task.Question.Map(AsksMerge).GetValueOrDefault(false);
+
+    // The question's text before its first link: the words that say what is asked.
+    static string Opening(string question) =>
+        FirstLink.Match(question) is { Success: true } link ? question[..link.Index] : question;
+
     /// <summary>
     /// The open tasks waiting on Petre whose question links at least one pull request, with those links: what the watch
     /// asks GitHub about. A snoozed task counts too, since it still waits and settling it is still right.

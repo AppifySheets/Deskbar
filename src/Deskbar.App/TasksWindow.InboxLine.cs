@@ -50,7 +50,7 @@ public partial class TasksWindow
 
     Button InboxLineOf(TaskRowView row, InboxLine line)
     {
-        var needsYou = line.Mark is InboxMark.Asks or InboxMark.WentQuiet or InboxMark.WaitsForDeploy;
+        var needsYou = line.Mark is InboxMark.Asks or InboxMark.ReadyToMerge or InboxMark.WentQuiet or InboxMark.WaitsForDeploy;
         var grid = new Grid();
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(36) });
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
