@@ -68,11 +68,20 @@ public static class StalledTasks
     /// When a session last set each task's status line, even to the line it already had (TaskService.SetStatusLine): the
     /// same line again changes nothing on the board, yet it is a session answering the ask with "still waiting on CI".
     /// </param>
+    /// <param name="following">
+    /// The tasks whose merge Deskbar's repository watch is following (RepoWatchState.Following, Deskbar task c8e6967d,
+    /// spec docs/superpowers/specs/2026-11-27-repo-watcher-design.md). Such a task is quiet ON PURPOSE: its session was told
+    /// not to wait on the merge commit's runs in a loop, and Deskbar nudges it when they finish. Asking it whether it waits
+    /// on Petre, or handing it back after the ask, would be noise; it is excluded from both. Only in memory: after a restart
+    /// the follow is gone and so is this exception, and the ask reaches the session within 15 minutes.
+    /// </param>
     public static StalledStep Step(TaskBoard board, IReadOnlySet<string> busy, IReadOnlySet<string> working,
         ImmutableDictionary<Guid, DateTimeOffset> lastBusy, DateTimeOffset now,
-        ImmutableDictionary<Guid, DateTimeOffset>? nudged = null, IReadOnlyDictionary<Guid, DateTimeOffset>? heard = null)
+        ImmutableDictionary<Guid, DateTimeOffset>? nudged = null, IReadOnlyDictionary<Guid, DateTimeOffset>? heard = null,
+        IReadOnlySet<Guid>? following = null)
     {
         var asked = nudged ?? ImmutableDictionary<Guid, DateTimeOffset>.Empty;
+        var followed = following ?? new HashSet<Guid>();
         var said = heard ?? ImmutableDictionary<Guid, DateTimeOffset>.Empty;
         var watched = board.Tasks.Where(t => t is { IsOpen: true, Status: TaskStatus.InProgress, IsClaudes: true }).ToArray();
         // Only LIVE entries count: a session that moved to another task (Join, Create) leaves an ended entry with the same
@@ -103,10 +112,10 @@ public static class StalledTasks
             .ToImmutableDictionary(t => t.Id, t => asked[t.Id]);
 
         var handBack = claudes
-            .Where(t => standing.TryGetValue(t.Id, out var at) && !worked.Contains(t.Id) && now - at >= Answer)
+            .Where(t => standing.TryGetValue(t.Id, out var at) && !worked.Contains(t.Id) && !followed.Contains(t.Id) && now - at >= Answer)
             .Select(t => t.Id).ToArray();
         var nudge = claudes
-            .Where(t => !standing.ContainsKey(t.Id) && !worked.Contains(t.Id) && now - QuietSince(t) >= After)
+            .Where(t => !standing.ContainsKey(t.Id) && !worked.Contains(t.Id) && !followed.Contains(t.Id) && now - QuietSince(t) >= After)
             .Select(t => t.Id).ToArray();
         var takeBack = watched
             .Where(t => t.HandedBack.HasValue && t.Assignee.IsMe && settled.Contains(t.Id))

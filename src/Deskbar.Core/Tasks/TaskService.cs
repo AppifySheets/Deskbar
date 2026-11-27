@@ -538,6 +538,43 @@ public sealed class TaskService(ITaskStore store, Func<DateTimeOffset> now, Func
     /// </summary>
     public IObservable<Guid> StalledNudges => stalledNudges;
 
+    // DESKBAR WATCHES THE PULL REQUESTS (Deskbar task c8e6967d, spec docs/superpowers/specs/2026-11-27-repo-watcher-design.md,
+    // rules in RepoWatch). The watch's memory lives here, IN MEMORY ONLY and never saved: a restart starts from
+    // RepoWatchState.Empty, so base heads are recorded again without a nudge, a merge in the middle of being followed is
+    // left to its session, and with it the StalledTasks exception lapses (the stalled ask then reaches the session within
+    // 15 minutes). RepoWatchPoll feeds Watched and Followed with the pure rules' answers; CommentWaker delivers WatchNudges.
+    RepoWatchState watch = RepoWatchState.Empty;
+    readonly Subject<WatchNudge> watchNudges = new();
+    IReadOnlyList<RedRun> redRuns = [];
+
+    /// <summary>The watch's memory: what it saw, which merges it follows and when each repository last answered.</summary>
+    public RepoWatchState Watch => watch;
+
+    /// <summary>The messages the watch sends to sessions. They leave no thread line, delivered or not.</summary>
+    public IObservable<WatchNudge> WatchNudges => watchNudges;
+
+    /// <summary>The failed runs on followed merge commits that were not yet a day old, the newest 50 (ManagerWakes reads them).</summary>
+    public IReadOnlyList<RedRun> RedRuns => redRuns;
+
+    /// <summary>Takes one repository's poll: stores the new memory, then announces each nudge (after the state is stored).</summary>
+    public void Watched(RepoWatchStep step)
+    {
+        watch = step.State;
+        step.Nudges.ToList().ForEach(watchNudges.OnNext);
+    }
+
+    /// <summary>Takes one look at a followed merge: stores the memory, keeps any red run (50 at most, a day old at most) and announces the nudges.</summary>
+    public void Followed(FollowStep step)
+    {
+        watch = step.State;
+        var since = now() - TimeSpan.FromDays(1);
+        redRuns = [.. redRuns.Concat(step.Red).Where(r => r.At > since).TakeLast(50)];
+        step.Nudges.ToList().ForEach(watchNudges.OnNext);
+    }
+
+    /// <summary>Whether Deskbar watches this task's pull request now (RepoWatch.Watched): the prompt line says so to the session.</summary>
+    public bool IsWatched(TaskItem task) => RepoWatch.Watched(watch, task, now());
+
     // A SET-ASIDE QUESTION IS WRITTEN AFRESH, NOT PUT BACK AS IT WAS (task 0cac3082). Petre, 2026-11-26: "claude should
     // regenerate the message if it needs my attention when the task gets to waiting on me", and "previous messages are
     // not good enough". Seen on task f7ac687c: its question "merge 629 and deskbar-site 16" was set aside while the session
@@ -644,7 +681,9 @@ public sealed class TaskService(ITaskStore store, Func<DateTimeOffset> now, Func
             trace?.Invoke($"tasks: set the question of {Line(next, found.TaskId)} aside, its session works on it again after a reply");
             Commit(next);
         });
-        var step = StalledTasks.Step(Board, busy, working, lastBusy, now(), nudged, statusLinesHeard);
+        // A task whose merge Deskbar follows is quiet on purpose and is neither asked nor handed back (Deskbar task c8e6967d).
+        var step = StalledTasks.Step(Board, busy, working, lastBusy, now(), nudged, statusLinesHeard,
+            Watch.Following.Select(m => m.TaskId).ToHashSet());
         lastBusy = step.LastBusy;
         // A task whose session is asked to write its set-aside question afresh is not ALSO asked whether it is stalled
         // (review of task 0cac3082): after a Deskbar restart the quiet clock starts from UpdatedAt, so a task set aside long

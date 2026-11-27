@@ -312,6 +312,53 @@ public sealed class TaskServiceTests
         Assert.Contains(traced, line => line.Contains("taken back"));
     }
 
+    // Deskbar task c8e6967d, spec 2026-11-27-repo-watcher-design.md: the service holds the watch's memory and announces the
+    // nudges of each step.
+    [Fact]
+    public void NudgesFromAStepAreRaised()
+    {
+        var s = NewService();
+        var id = Guid.NewGuid();
+        var heard = new List<WatchNudge>();
+        using var _ = s.WatchNudges.Subscribe(heard.Add);
+        var red = new RedRun(id, "o/r", "Release", "https://x/1", clock);
+
+        s.Watched(new RepoWatchStep(RepoWatchState.Empty, [new WatchNudge(id, "moved")]));
+        s.Followed(new FollowStep(RepoWatchState.Empty, [new WatchNudge(id, "failed")], [red]));
+
+        Assert.Equal(["moved", "failed"], heard.Select(n => n.Text));
+        Assert.Equal([red], s.RedRuns);
+    }
+
+    // Review Focus 2: gh missing or signed out means no poll succeeds, the last success ages and the watch lapses.
+    [Fact]
+    public void IsWatchedLapsesWhenPollsFail()
+    {
+        var s = NewService();
+        var task = s.Create("Watch", ws, Session("s1", clock)).Value;
+        s.AddPullRequest(task.Id, new PullRequestLink("O", "R", 1));
+        var state = RepoWatchState.Empty with { LastSuccess = new Dictionary<string, DateTimeOffset> { ["o/r"] = clock } };
+
+        s.Watched(new RepoWatchStep(state, []));
+        Assert.True(s.IsWatched(s.Board.Tasks.Single()));
+
+        clock = clock.AddMinutes(6);
+        Assert.False(s.IsWatched(s.Board.Tasks.Single()));
+    }
+
+    [Fact]
+    public void Red_runs_older_than_a_day_are_dropped()
+    {
+        var s = NewService();
+        var id = Guid.NewGuid();
+        s.Followed(new FollowStep(RepoWatchState.Empty, [], [new RedRun(id, "o/r", "A", "u", clock)]));
+
+        clock = clock.AddDays(2);
+        s.Followed(new FollowStep(RepoWatchState.Empty, [], [new RedRun(id, "o/r", "B", "u", clock)]));
+
+        Assert.Equal(["B"], s.RedRuns.Select(r => r.Name));
+    }
+
     // Task 43765c61: a deploy reported reaches the task waiting on the same repository's deploy, with a Deskbar line in
     // its thread, and the reporter itself is not told.
     [Fact]
