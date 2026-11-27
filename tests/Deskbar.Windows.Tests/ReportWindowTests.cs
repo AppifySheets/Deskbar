@@ -152,6 +152,25 @@ public class ReportWindowTests
         window.Close();
     });
 
+    // `deskbar.cmd report` (task c28ed674): SendNow fills in the text and sends at once, with no contact ask, answering
+    // the report's id.
+    [Fact]
+    public void SendNow_sends_the_text_with_the_dump_and_no_contact_and_answers_the_id() => StaThread.Run(() =>
+    {
+        var fakes = new Fakes();
+        var window = Window(fakes, dump: "the dump");
+
+        var id = window.SendNow("The bar vanished");
+
+        var report = Assert.Single(fakes.Sent);
+        Assert.Equal("The bar vanished", report.Text);
+        Assert.Equal("", report.Contact ?? "");
+        Assert.Contains("dump.txt", report.Attachments.Select(a => a.Name));
+        Assert.Equal(report.Id, id);
+        Assert.Equal(System.Windows.Visibility.Collapsed, window.ContactNote.Visibility);
+        window.Close();
+    });
+
     [Fact]
     public void A_sent_report_shows_its_reference() => StaThread.Run(() =>
     {

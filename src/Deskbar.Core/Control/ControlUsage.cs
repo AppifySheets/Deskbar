@@ -364,6 +364,10 @@ public static class ControlUsage
         ]),
         new("Diagnostics", [
             new("dump", "", "Save debug dump: write a diagnostics file (screens, the bar, every window in z-order) and print its path"),
+            new("report", "<text>|-",
+                "Report a problem…: send the text to Deskbar's developers with a debug dump of this moment, as the\n"
+                + "      window's Send does. The report window opens filled in and sending, and shows the report's\n"
+                + "      reference or why it failed; the reply is the report's id. - reads the text from stdin"),
         ]),
     ];
 

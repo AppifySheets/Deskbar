@@ -165,6 +165,8 @@ public class ManagerSessionTests
         Assert.Equal(@"C:\state\manager-briefing.md", args[args.IndexOf("--append-system-prompt-file") + 1]);
         // The allow rule carries the shim's path with forward slashes, the one form measured to match.
         Assert.Equal($"Bash({Shim} task:*)", args[args.IndexOf("--allowedTools") + 1]);
+        // Task c28ed674: `report` is the one other verb allowed, right after the task rule.
+        Assert.Equal($"Bash({Shim} report:*)", args[args.IndexOf("--allowedTools") + 2]);
         // PowerShell is disallowed too: a Bash rule does not cover it.
         Assert.Contains("PowerShell", args);
         // Task 1c9eefdf: the manager is the one session with Remote Control, named so the phone app lists it by name.
@@ -216,6 +218,15 @@ public class ManagerSessionTests
 
     // Task 61e4d143: the manager's own question. The briefing names both verbs, and keeps the manager from relaying a
     // task's question, which already reaches the user (the 40 line cap is asserted above).
+    // Task c28ed674: the manager may report a problem with Deskbar itself, only when asked, text on stdin.
+    [Fact]
+    public void Briefing_names_the_report_verb()
+    {
+        var text = ManagerSession.Briefing(Shim);
+
+        Assert.Contains($"{Shim} report -", text);
+    }
+
     [Fact]
     public void Briefing_names_the_managers_own_ask_and_answered()
     {

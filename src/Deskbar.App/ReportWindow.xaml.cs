@@ -232,6 +232,24 @@ public partial class ReportWindow : Window
         await SendAsync(sent);
     }
 
+    /// <summary>
+    /// `deskbar.cmd report` (task c28ed674): fills in "What happened?" and sends at once, as Send would, and answers the
+    /// report's id. The window stays to show the progress, the reference or the failure with Try again, exactly as after
+    /// a click.
+    /// </summary>
+    //
+    // No contact ask: whoever sent the command (the manager session, often while the user talks to it from the phone)
+    // is not at this window to answer it, and the contact line stays optional (ReportContact). The dump box keeps its
+    // default, ticked, so the report carries the dump composed as the window opened, the moment the user asked.
+    // SendAsync turns every failure of the send into the window's failed state, so nothing escapes the discarded task.
+    internal string SendNow(string text)
+    {
+        Description.Text = text;
+        sent = Compose();
+        _ = SendAsync(sent);
+        return reportId;
+    }
+
     // THE CONTACT ASK. The line is optional, but without it nobody can ask a follow-up question, so a Send with it
     // empty, or holding something that is not an email, Telegram handle or phone number (most often a typo), stops
     // once: a note under the line says why, the cursor goes to the line, and the button becomes "Send anyway". A

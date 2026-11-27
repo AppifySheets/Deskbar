@@ -101,7 +101,10 @@ public sealed partial class RemoteControl(WorkspaceManager manager, Func<bool, R
     BookmarkOpener? bookmarks = null,
     // Allow / Deny from a task's page: the permission questions on show and their slots (PermissionDesk), which
     // `claude-permission` registers into. Left null, the verb answers nothing and every question stays in the terminal.
-    PermissionDesk? permissions = null)
+    PermissionDesk? permissions = null,
+    // `report` (RemoteControl.Report.cs, task c28ed674): opens "Report a problem…" with the text filled in and sends it,
+    // answering the report's id. The window and the network are the app's business; left null, `report` refuses.
+    Func<string, Result<string>>? fileReport = null)
 {
     // `longPath` turns an 8.3 short path into its long form (GetLongPathNameW, LongPath on the Windows side), for
     // FolderPath. Left null, a path is taken as it is, which is all a test that names long paths needs.
@@ -209,6 +212,9 @@ public sealed partial class RemoteControl(WorkspaceManager manager, Func<bool, R
         ("focus-ring", [var onOff]) => FocusRing(onOff),
         ("see-through", [var onOff]) => SeeThrough(onOff),
         ("previous-workspace", [var onOff]) => PreviousWorkspace(onOff),
+
+        // Report a problem… without the window's hands (RemoteControl.Report.cs): the text and the caller's folder.
+        ("report", _) => Report(rest),
 
         // The file is the answer, not a window: whoever asked through the pipe reads it back from the path.
         ("dump", []) => dump is null
