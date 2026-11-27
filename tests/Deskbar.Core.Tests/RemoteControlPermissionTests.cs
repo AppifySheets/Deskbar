@@ -79,11 +79,48 @@ public sealed class RemoteControlPermissionTests : IDisposable
         Assert.Equal(Secret, held.Request.Fields[0].Value);
     }
 
+    // A SESSION IN A TERMINAL OR IN VS CODE GETS THE CARD TOO (task 6306d261, Petre: "Yes, all sessions"): no job folder,
+    // attended. `claude agents` does not list it, so its question is not judged by that list (Listed false) but by where
+    // its transcript stood when it asked (Mark), and leaves the page once the transcript goes on.
+    [Theory]
+    [InlineData("cli")]
+    [InlineData("claude-vscode")]
+    public void A_terminal_or_vs_code_sessions_question_is_held_and_watched_through_its_transcript(string entry)
+    {
+        var transcript = Path.Combine(box, "session.jsonl");
+        Directory.CreateDirectory(box);
+        File.WriteAllText(transcript, "{\"type\":\"user\"}\n");
+        var json = Hook().Replace("\"transcript_path\":\"t\"", "\"transcript_path\":" + System.Text.Json.JsonSerializer.Serialize(transcript));
+
+        var reply = Registered(Ready(), ["claude-permission", "--entry", entry, "--attended", "1", "--from", Repo, "--slot", Slot(), "--json", json]);
+
+        Assert.Matches("^[0-9a-f]{32}\r\n$", reply.Output);
+        var held = desk.Of(Session).Single();
+        Assert.False(held.Listed);
+        Assert.Equal(new TranscriptMark(transcript, new FileInfo(transcript).Length), held.Mark);
+
+        // Answered in the session's own dialog: the tool's lines land in the transcript, and the question goes.
+        File.AppendAllText(transcript, "{\"type\":\"assistant\"}\n");
+        Assert.True(desk.Settle());
+        Assert.Empty(desk.All);
+    }
+
+    // A background session's question is judged by the session list as before, and carries no transcript mark.
+    [Fact]
+    public void A_background_sessions_question_is_listed_and_carries_no_mark()
+    {
+        Registered(Ready(), Call(Slot(), Hook()));
+
+        var held = desk.Of(Session).Single();
+        Assert.True(held.Listed);
+        Assert.Null(held.Mark);
+    }
+
     // Every case that is not a question Deskbar can show answers NOTHING: the script then prints nothing, and the terminal
     // dialog stays. Never an allow, never a code.
     public static TheoryData<string> Refusals =>
     [
-        "setting off", "inbox off", "no task", "no desk", "not background", "headless", "ask dialog", "plan dialog",
+        "setting off", "inbox off", "no task", "no desk", "headless", "ask dialog", "plan dialog",
         "not a permission hook", "no slot", "bad slot", "slot already held", "bad json",
     ];
 
@@ -96,7 +133,6 @@ public sealed class RemoteControlPermissionTests : IDisposable
         if (why == "slot already held") Registered(manager, Call(slot, Hook()));
         string[] call = why switch
         {
-            "not background" => ["claude-permission", "--entry", "cli", "--attended", "1", "--from", Repo, "--slot", slot, "--json", Hook()],
             "headless" => ["claude-permission", "--entry", "sdk-cli", "--attended", "0", "--from", Repo, "--slot", slot, "--json", Hook()],
             "ask dialog" => Call(slot, Hook("AskUserQuestion")),
             "plan dialog" => Call(slot, Hook("ExitPlanMode")),

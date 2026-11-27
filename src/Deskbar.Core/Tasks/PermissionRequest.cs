@@ -19,11 +19,14 @@ namespace Deskbar.Core.Tasks;
 //   Fields      tool_input's top-level fields in the order Claude Code wrote them, each as text: a string as it is, any
 //               other value as indented JSON. EVERY field is kept, so the card can show all of it (PermissionDisplay);
 //               a tool_input that is not an object becomes the one field "input".
+//   AgentId     agent_id, when a SUBAGENT asked (the hooks reference lists it among the fields of a hook fired inside one).
+//               A subagent writes its turns to its own transcript, so the question is watched there (TranscriptMark.For).
+//               Only letters, digits, '-' and '_' are taken, since it becomes part of a file name.
 //
 // Only a hook whose hook_event_name is PermissionRequest and that names a session and a tool is taken; anything else is
 // refused, and the verb that reads it then answers nothing, which leaves Claude Code's own terminal dialog.
 public sealed record PermissionRequest(string SessionId, string Tool, string Folder, Maybe<string> Mode,
-    IReadOnlyList<PermissionField> Fields)
+    IReadOnlyList<PermissionField> Fields, Maybe<string> AgentId = default)
 {
     public const string Event = "PermissionRequest";
 
@@ -62,13 +65,15 @@ public sealed record PermissionRequest(string SessionId, string Tool, string Fol
                     : [new PermissionField("input", ValueText(input))];
 
             return new PermissionRequest(session.Value, tool.Value, Text(root, "cwd").GetValueOrDefault(""),
-                Text(root, "permission_mode"), fields);
+                Text(root, "permission_mode"), fields, Text(root, "agent_id").Where(SafeAgentId.IsMatch));
         }
         catch (JsonException e)
         {
             return Result.Failure<PermissionRequest>($"the hook's JSON does not parse: {e.Message}");
         }
     }
+
+    static readonly System.Text.RegularExpressions.Regex SafeAgentId = new("^[A-Za-z0-9_-]{1,64}$");
 
     static string ValueText(JsonElement value) =>
         value.ValueKind == JsonValueKind.String ? value.GetString() ?? "" : JsonSerializer.Serialize(value, Indented);
