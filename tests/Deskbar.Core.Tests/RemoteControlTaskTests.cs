@@ -1159,7 +1159,7 @@ public class RemoteControlTaskTests
              // Task 521d2b07: the Stats view's numbers.
              "stats [--days <n>]",
              "overview", "show <id>",
-             "add <title>|- [--workspace <name>|none] [--important] [--urgent] [--parent <id>] [--session <session>]", "close <id> [--stop-claude]", "reopen <id>",
+             "add <title>|- [--workspace <name>|none] [--important] [--urgent] [--parent <id>] [--session <session>]", "close <id> [--stop-claude|--anyway]", "reopen <id>",
              "status <id> <backlog|in-progress|waiting|done>", "rename <id> <title>|-", "move <id> <workspace>|none",
              "comment <id> <markdown>|-", "delete <id>", "flag <id> important|urgent on|off", "order <id> top|end|<n>",
              // Task 9: going to a task, starting Claude on it and opening one of its sessions.
@@ -1254,6 +1254,44 @@ public class RemoteControlTaskTests
         Ok(closed);
         Assert.Equal("closed", Json(closed).GetProperty("status").GetString());
         Assert.Equal(["stop-and-close:Fix the bar"], commands.Calls);
+    }
+
+    // Task 579f2e4c: a task waiting on Petre with a question and nothing merged refuses a plain `task close`, names
+    // `--anyway`, and closes with it. Once GitHub says its pull request merged (TaskService.Merged), a plain close works.
+    [Fact]
+    public void Task_close_refuses_an_unfinished_task_until_anyway_or_merged()
+    {
+        var manager = Started();
+        var session = new TaskSession("884c127f-9633-40eb-bed7-593800bca40f", @"C:\repos\Deskbar", clock, Maybe<DateTimeOffset>.None);
+        var id = tasks.Create("Fix the bar", Maybe<Guid>.None, session).Value.Id;
+        Assert.True(tasks.Ask(id, "Merge the PR").IsSuccess);
+        var prefix = id.ToString()[..6];
+
+        var before = tasks.Board;
+        var refused = Run(manager, "task", "close", prefix);
+        AssertRefusedAndUnchanged(refused, before);
+        Assert.Equal($"{TaskViews.UnfinishedRefusal} (task close {prefix} --anyway)", refused.Output.Trim());
+
+        // A recorded pull request GitHub has not answered for is not merged; an open one is not; a merged one is.
+        var link = new PullRequestLink("AppifySheets", "Deskbar", 700);
+        Assert.True(tasks.AddPullRequest(id, link).IsSuccess);
+        var task = tasks.Board.Tasks.First(t => t.Id == id);
+        Assert.False(tasks.Merged(task));
+        var build = new RunningBuild("AppifySheets", "Deskbar", "2.6.70", "0123456789abcdef0123456789abcdef01234567");
+        tasks.Arrived(build, new Dictionary<string, PullRequestArrival> { [link.Key] = new(PullRequestState.Open, false) });
+        Assert.True(tasks.Unfinished(task));
+        tasks.Arrived(build, new Dictionary<string, PullRequestArrival> { [link.Key] = new(PullRequestState.Merged, false) });
+        Assert.True(tasks.Merged(task));
+        Assert.False(tasks.Unfinished(task));
+        Ok(Run(manager, "task", "close", prefix));
+
+        // --anyway closes one that is not merged.
+        var other = tasks.Create("Second", Maybe<Guid>.None,
+            new TaskSession("994c127f-9633-40eb-bed7-593800bca40f", @"C:\repos\Deskbar", clock, Maybe<DateTimeOffset>.None)).Value.Id;
+        Assert.True(tasks.Ask(other, "Which way?").IsSuccess);
+        var closed = Run(manager, "task", "close", other.ToString()[..6], "--anyway");
+        Ok(closed);
+        Assert.Equal("closed", Json(closed).GetProperty("status").GetString());
     }
 
     // The manager session design ("The button"): `task manager` is the bar button's twin, so both go through the App's

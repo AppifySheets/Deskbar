@@ -328,9 +328,10 @@ public class TaskBoardTests
         Assert.True(TaskBoard.ClaudeStillWorking(Get(working, id1)));
         Assert.Equal(TaskViews.ClaudeStillWorkingRefusal, working.Close(id1, clock).Error);
 
+        // Waiting on Petre is not Claude working, so no stop menu; whether it closes is the not-finished rule's (below).
         var asking = working.Ask(id1, "Install the update", clock).Value;
         Assert.False(TaskBoard.ClaudeStillWorking(Get(asking, id1)));
-        Assert.Equal(TaskStatus.Closed, Get(asking.Close(id1, clock).Value, id1).Status);
+        Assert.Equal(TaskStatus.Closed, Get(asking.Close(id1, clock, merged: _ => true).Value, id1).Status);
         var backlog = working.SetStatus(id1, TaskStatus.Backlog, clock).Value;
         Assert.Equal(TaskViews.ClaudeStillWorkingRefusal, backlog.Close(id1, clock).Error);
 
@@ -347,6 +348,45 @@ public class TaskBoardTests
         var ended = working.SessionEnded("s1", clock);
         Assert.True(ended.Close(id1, clock).IsSuccess);
         Assert.True(Note(TaskBoard.Empty, id2, ws).Close(id2, clock).IsSuccess);
+    }
+
+    // Task 579f2e4c, Petre: "i shouldn't be allowed to just close a task that's still ongoing / still has an active
+    // session or has a question, that hasn't yet been merged". A task that still asks something or has a live session,
+    // and whose work is not merged, refuses a plain close; "Close anyway" (anyway) and stopping Claude go past it, and a
+    // merge, Done, an ended session with no question and a note all close at once as before.
+    [Fact]
+    public void A_task_not_finished_and_not_merged_closes_only_anyway()
+    {
+        var waiting = Claudes(TaskBoard.Empty, id1, ws).Ask(id1, "How far should the fix go?", clock).Value;
+        Assert.True(TaskBoard.Unfinished(Get(waiting, id1), merged: false));
+        Assert.Equal(TaskViews.UnfinishedRefusal, waiting.Close(id1, clock).Error);
+        Assert.Equal(TaskViews.UnfinishedRefusal, waiting.Close(id1, clock, merged: _ => false).Error);
+        // The refusal changed nothing: the task still waits with its question.
+        Assert.Equal("How far should the fix go?", Get(waiting, id1).Question.Value);
+
+        Assert.Equal(TaskStatus.Closed, Get(waiting.Close(id1, clock, anyway: true).Value, id1).Status);
+        Assert.Equal(TaskStatus.Closed, Get(waiting.Close(id1, clock, stoppingClaude: true).Value, id1).Status);
+        // Merged: finished as far as the close cares, so one tick closes it.
+        Assert.False(TaskBoard.Unfinished(Get(waiting, id1), merged: true));
+        Assert.True(waiting.Close(id1, clock, merged: _ => true).IsSuccess);
+
+        // The question alone holds it, with no session left.
+        var askingAlone = waiting.SessionEnded("s1", clock);
+        Assert.Equal(TaskViews.UnfinishedRefusal, askingAlone.Close(id1, clock).Error);
+        // A live session alone holds a waiting task too (its question answered by hand, say).
+        var live = Claudes(TaskBoard.Empty, id2, ws, "s2").SetStatus(id2, TaskStatus.WaitingOnYou, clock).Value;
+        Assert.True(TaskBoard.Unfinished(Get(live, id2), merged: false));
+
+        // Done, an ended session asking nothing, and a note close on one tick, as before.
+        Assert.True(Claudes(TaskBoard.Empty, id1, ws).MarkDone(id1, clock).Value.Close(id1, clock).IsSuccess);
+        Assert.True(Claudes(TaskBoard.Empty, id1, ws).SessionEnded("s1", clock).Close(id1, clock).IsSuccess);
+        Assert.True(Note(TaskBoard.Empty, id2, ws).Close(id2, clock).IsSuccess);
+        // Anyway never skips the other refusals: a closed task still says so.
+        Assert.Equal("The task is closed.", waiting.Close(id1, clock, anyway: true).Value.Close(id1, clock, anyway: true).Error);
+        // Marking it a duplicate is a deliberate close, so it goes through (review finding: the panel's "Duplicate of"
+        // and `task duplicate` have no "Close anyway").
+        var both = Note(waiting, id2, ws);
+        Assert.Equal(TaskStatus.Closed, Get(both.MarkDuplicate(id1, id2, clock).Value, id1).Status);
     }
 
     [Fact]

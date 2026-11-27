@@ -13,7 +13,7 @@ namespace Deskbar.Core.Control;
 //   task overview                     (one line per open task, for the manager session: TaskOverview)
 //   task show <id>                    (one task as `list` prints it, thread text included)
 //   task add <title>|- [--workspace <name>|none] [--important] [--urgent] [--parent <id>] [--session <sid>]
-//   task close <id> [--stop-claude]
+//   task close <id> [--stop-claude|--anyway]
 //   task reopen <id>
 //   task status <id> <backlog|in-progress|waiting|done>
 //   task rename <id> <title>
@@ -144,9 +144,15 @@ public sealed partial class RemoteControl
             ["add", .. var more] => TaskAdd(service, more, from),
             // A task Claude is still working on refuses a plain close (task 37cd7081, TaskBoard.Close), and the refusal
             // names the flag; `--stop-claude` is the menus' "Stop Claude and close", through the app (ClaudeTaskActions).
+            // A task that is not finished (task 579f2e4c: it still asks something or has a live session, and its work is not
+            // merged) refuses too, and its refusal names `--anyway`, the ticks' "Close anyway".
             ["close", var id] => TaskChange(service, id, t => service.Close(t.Id)
-                .MapError(e => e == TaskViews.ClaudeStillWorkingRefusal ? $"{e} (task close {id} --stop-claude)" : e)),
+                .MapError(e => e == TaskViews.ClaudeStillWorkingRefusal ? $"{e} (task close {id} --stop-claude)"
+                    : e == TaskViews.UnfinishedRefusal ? $"{e} (task close {id} --anyway)"
+                    : e)),
             ["close", var id, "--stop-claude"] => WithSessions(c => TaskChange(service, id, c.StopAndClose)),
+            ["close", var id, "--anyway"] => TaskChange(service, id, t => service.Close(t.Id, anyway: true)
+                .MapError(e => e == TaskViews.ClaudeStillWorkingRefusal ? $"{e} (task close {id} --stop-claude)" : e)),
             ["reopen", var id] => TaskChange(service, id, t => service.Reopen(t.Id)),
             ["status", var id, var status] => ParseStatus(status)
                 .Match(s => TaskChange(service, id, t => service.SetStatus(t.Id, s)), ControlReply.Fail),
@@ -305,7 +311,7 @@ public sealed partial class RemoteControl
     // everyone; for the manager it gets the manager's refusal too, so the answer is the same however it is spelled.
     static bool FinishesATask(string[] args) => args switch
     {
-        ["close", _] or ["close", _, "--stop-claude"] or ["delete", _] => true,
+        ["close", _] or ["close", _, "--stop-claude"] or ["close", _, "--anyway"] or ["delete", _] => true,
         ["status", _, var status] => status.Trim().ToLowerInvariant() is "done" or "closed",
         // `repeat <id> off` ends a task that is between runs, or waiting on one of the repeat's own questions, as Done
         // (TaskService.ClearRepeat), so it finishes one. The
