@@ -183,6 +183,33 @@ public partial class TasksWindow
         list.RaiseEvent(new MouseWheelEventArgs(e.MouseDevice, e.Timestamp, e.Delta) { RoutedEvent = MouseWheelEvent, Source = thread });
     }
 
+    // THE SUBTASK SHELF (task 452487b4): a capped thread's subtasks, in its head so they never scroll away under the
+    // comments. It scrolls on its own past half the thread's cap, so one subtask opened in place (its own thread drawn
+    // under its line, uncapped) leaves the parent's comments and comment box room; the wheel at its end moves the list.
+    static ScrollViewer SubtaskShelf(UIElement subtasks, Border frame)
+    {
+        var shelf = new ScrollViewer
+        {
+            Content = subtasks,
+            VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+            HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
+            Focusable = false,
+        };
+        shelf.SetBinding(MaxHeightProperty, new Binding(nameof(MaxHeight)) { Source = frame, Converter = new HalfOf() });
+        shelf.PreviewMouseWheel += (_, e) => PassWheelAtEnd(shelf, e);
+        return shelf;
+    }
+
+    // Half a height, no cap staying no cap (the frame's MaxHeight is infinite until the list has a size).
+    sealed class HalfOf : IValueConverter
+    {
+        public object Convert(object value, Type targetType, object parameter, CultureInfo culture) =>
+            value is double height && !double.IsInfinity(height) ? height / 2 : double.PositiveInfinity;
+
+        public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture) =>
+            throw new NotSupportedException("The shelf's cap is only ever read from the thread's.");
+    }
+
     // The nearest scroller above a thread's own: the List's Scroller or the Matrix cell's.
     static ScrollViewer? ListAround(DependencyObject from) =>
         VisualTreeHelper.GetParent(from) is not { } parent ? null

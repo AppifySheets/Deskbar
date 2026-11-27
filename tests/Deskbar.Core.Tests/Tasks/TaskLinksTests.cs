@@ -108,7 +108,7 @@ public class TaskLinksTests
     public void A_task_with_open_subtasks_cannot_close_as_a_duplicate()
     {
         var board = Note(Three(), parent, "Parent").SetParent(third, parent, clock).Value;
-        Assert.Equal(TaskViews.CloseSubtasksFirst(1), board.MarkDuplicate(parent, original, clock).Error);
+        Assert.Equal(TaskViews.CloseSubtasksFirst(["Task links"]), board.MarkDuplicate(parent, original, clock).Error);
     }
 
     [Fact]

@@ -1304,7 +1304,7 @@ public class TasksBoardTests
         Assert.True(t.Controller.Close(parent).IsFailure);
 
         Assert.Null(t.Window.Problem);
-        Assert.Equal(TaskViews.CloseSubtasksFirst(1), LineProblemOf(t.Window, parent));
+        Assert.Equal(TaskViews.CloseSubtasksFirst(["Write the notes"]), LineProblemOf(t.Window, parent));
         Assert.Null(LineProblemOf(t.Window, child));
 
         Assert.True(t.Controller.SetFlag(child, TaskFlag.Important, true).IsSuccess);
@@ -1326,7 +1326,7 @@ public class TasksBoardTests
 
         Assert.True(t.Controller.Close(parent).IsFailure);
 
-        Assert.Equal(TaskViews.CloseSubtasksFirst(1), t.Window.Problem);
+        Assert.Equal(TaskViews.CloseSubtasksFirst(["Write the notes"]), t.Window.Problem);
     });
 
     // A task window shows a refusal on its own task, and only its own: another task's window stays clear.
@@ -1342,7 +1342,7 @@ public class TasksBoardTests
 
         Assert.True(t.Controller.Close(parent).IsFailure);
 
-        Assert.Equal(TaskViews.CloseSubtasksFirst(1), t.Controller.WindowOf(parent)!.ProblemText.Text);
+        Assert.Equal(TaskViews.CloseSubtasksFirst(["Write the notes"]), t.Controller.WindowOf(parent)!.ProblemText.Text);
         Assert.Equal("", t.Controller.WindowOf(child)!.ProblemText.Text);
         t.Controller.WindowOf(parent)!.CloseForGood();
         t.Controller.WindowOf(child)?.CloseForGood();
@@ -6724,10 +6724,10 @@ public class TasksBoardTests
         Click(ButtonNamed(t.Window, "Parent Ship the release"));
 
         Assert.Equal(parent.Id, selection.Current.Value);
-        // The parent's line is drawn with its thread open, and its subtask right under it; the thread does not list the
-        // subtask a second time (task 0eb943d8).
-        Assert.Equal([parent.Id, child.Id], t.Window.Keys);
-        Assert.False(HasButtonNamed(t.Window, "Subtask Write the notes"));
+        // The parent's line is drawn with its thread open, and its subtask inside that thread rather than on a line of its
+        // own below the whole thread (task 452487b4); shown once, so no line for it outside (task 0eb943d8).
+        Assert.Equal([parent.Id], t.Window.Keys);
+        Assert.True(HasButtonNamed(t.Window, "Subtask Write the notes"));
     });
 
     // Task f64d06ae (Petre: "subtask can't be dragged out of a parent, should be able to"). With "Subtasks" unticked a
@@ -6933,11 +6933,13 @@ public class TasksBoardTests
         Assert.False(selection.Current.HasValue);
     });
 
-    // Task 0eb943d8 (Petre: "it shows up twice", "clicking the one above takes me to the one below"): with "Subtasks"
-    // ticked every subtask has a line right under its parent, so the parent's open thread lists none of them; one the
-    // filter hides (closed here) has no line, so the thread still lists it.
+    // Task 0eb943d8 (Petre: "it shows up twice", "clicking the one above takes me to the one below") and task 452487b4
+    // (Petre, of a refusal naming a subtask he could not see: "where is it?"). With "Subtasks" ticked a subtask has a line
+    // right under its parent, but an open thread is drawn between the two, so that line sat below the whole thread. While
+    // the parent's thread is open the subtask moves into it instead: listed there once, with no line of its own, beside
+    // the one the filter hides (closed here). Closing the thread gives it its line back, and the thread lists it no more.
     [Fact]
-    public void An_open_parents_thread_leaves_out_subtasks_drawn_under_it() => StaThread.Run(() =>
+    public void An_open_parents_thread_takes_in_the_subtasks_drawn_under_it() => StaThread.Run(() =>
     {
         using var t = Build();
         var parent = t.Tasks.AddNote("Ship the release", t.Gepha).Value.Id;
@@ -6945,11 +6947,49 @@ public class TasksBoardTests
         var closed = t.Tasks.AddNote("Tag the build", t.Gepha, Quadrant.IV, parent).Value.Id;
         t.Tasks.Close(closed);
         t.Controller.Show();
+        Assert.Equal([parent, drawn], t.Window.Keys);
+
+        t.Controller.ToggleThread(parent);
+
+        Assert.Equal([parent], t.Window.Keys);
+        Assert.Single(Inside(t.Window).OfType<Button>(), b => AutomationProperties.GetName(b) == "Subtask Write the notes");
+        Assert.True(HasButtonNamed(t.Window, "Subtask Tag the build"));
+
         t.Controller.ToggleThread(parent);
 
         Assert.Equal([parent, drawn], t.Window.Keys);
         Assert.False(HasButtonNamed(t.Window, "Subtask Write the notes"));
-        Assert.True(HasButtonNamed(t.Window, "Subtask Tag the build"));
+    });
+
+    // The visual parents of an element, nearest first.
+    static IEnumerable<DependencyObject> Ancestors(DependencyObject from) =>
+        VisualTreeHelper.GetParent(from) is { } parent ? [parent, .. Ancestors(parent)] : [];
+
+    // Task 452487b4, the case on Petre's screen: a parent and its subtask both wait on you, so the subtask is nested under
+    // the parent in the pinned block. With the parent's thread open the subtask, question and all, is in that thread, not
+    // under the thread out of sight; and the parent's refused tick names it.
+    [Fact]
+    public void A_waiting_subtask_moves_into_its_waiting_parents_open_thread() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var parent = t.Tasks.Create("Ship the release", t.Gepha, Session("s1")).Value.Id;
+        var child = t.Tasks.Create("Write the notes", t.Gepha, Session("s2")).Value.Id;
+        t.Tasks.SetParent(child, Maybe.From(parent));
+        t.Tasks.Ask(parent, "Which store?");
+        t.Tasks.Ask(child, "Merge the notes PR");
+        t.Controller.Show();
+        Assert.Equal([parent, child], t.Window.Keys);
+
+        t.Controller.ToggleThread(parent);
+
+        Assert.Equal([parent], t.Window.Keys);
+        // In the thread's head, a shelf of its own (TasksWindow.SubtaskShelf), not the body that scrolls to the latest
+        // comment: the first scroller around the subtask's line sits in the head's stack, not in the thread's dock.
+        t.Window.UpdateLayout();
+        var shelf = Ancestors(ButtonNamed(t.Window, "Subtask Write the notes")).OfType<ScrollViewer>().First();
+        Assert.IsType<StackPanel>(VisualTreeHelper.GetParent(shelf));
+        Assert.True(t.Controller.Close(parent).IsFailure);
+        Assert.Equal("Close its open subtask first: \"Write the notes\"", LineProblemOf(t.Window, parent));
     });
 
     // Task 0eb943d8 (Petre: "how do i close subtasks?"): a subtask folded into its parent's thread has no line, so it had

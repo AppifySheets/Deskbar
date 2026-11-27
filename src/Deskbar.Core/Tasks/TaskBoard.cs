@@ -469,7 +469,7 @@ public sealed record TaskBoard(IReadOnlyList<TaskItem> Tasks)
     /// Petre closes the task: it leaves the lists. Closing a closed task is refused, and so is closing a parent while any
     /// of its subtasks is still open (task 842e1ba4, Petre: "closing a parent task shouldn't be possible if not all
     /// children are also closed"): the parent stands for the whole piece of work, so it cannot be ticked off while part
-    /// of that work is still open. The refusal says how many are left (<see cref="TaskViews.CloseSubtasksFirst"/>), and
+    /// of that work is still open. The refusal names what is left (<see cref="TaskViews.CloseSubtasksFirst(IReadOnlyList{string})"/>), and
     /// every way to close (the bar's tick and menu, the window's, `task close`) comes through here, so none can skip it.
     /// </summary>
     //
@@ -485,7 +485,9 @@ public sealed record TaskBoard(IReadOnlyList<TaskItem> Tasks)
     // A task WAITING ON PETRE closes at once too (task 3cdd0a52, below on ClaudeStillWorking).
     public Result<TaskBoard> Close(Guid id, DateTimeOffset now, bool stoppingClaude = false) =>
         // Only an OPEN task is checked for open subtasks, so closing a closed task still says it is closed.
-        Tasks.FirstOrDefault(t => t.Id == id) is { IsOpen: true } && OpenSubtaskCount(id) is var open and > 0
+        // The refusal names the open subtasks (task 452487b4): Petre met it on a parent whose subtask was out of sight
+        // and read it as "it doesn't have a subtask", so the words say which task is in the way.
+        Tasks.FirstOrDefault(t => t.Id == id) is { IsOpen: true } && OpenSubtaskTitles(id) is { Count: > 0 } open
             ? Result.Failure<TaskBoard>(TaskViews.CloseSubtasksFirst(open))
             // ClaudeStillWorking is false for a closed task, so closing a closed task still says it is closed.
             : !stoppingClaude && Tasks.FirstOrDefault(t => t.Id == id) is { } task && ClaudeStillWorking(task)
@@ -1072,6 +1074,10 @@ public sealed record TaskBoard(IReadOnlyList<TaskItem> Tasks)
     /// history and do not count (subtasks spec, "Calls Claude made").
     /// </summary>
     public int OpenSubtaskCount(Guid id) => Tasks.Count(t => t.ParentId == id && t.IsOpen);
+
+    /// <summary>The titles of a task's open subtasks, in board order: what Close's refusal names (task 452487b4).</summary>
+    public IReadOnlyList<string> OpenSubtaskTitles(Guid id) =>
+        Tasks.Where(t => t.ParentId == id && t.IsOpen).Select(t => t.Title).ToArray();
 
     // A task's subtasks: open ones in the pile's order, then closed ones latest closed first (closing stamps UpdatedAt),
     // the same orders `task list` and `task list --closed` print them in.

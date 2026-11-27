@@ -1341,7 +1341,11 @@ public sealed class TasksBoard : IDisposable
         var snoozedFamily = search.IsBlank && filter != TaskFilter.Snoozed
             ? TaskViews.UnderSnoozedParent(whole, shown, assigneeFilter)
             : new HashSet<Guid>();
-        var listed = showsSubtasks ? underParents : TaskViews.FoldSubtasks(underParents, nested, selection.Current, snoozedFamily);
+        // A subtask nested under a parent whose thread is open moves into that thread (task 452487b4, TaskViews.IntoOpenThreads):
+        // its own line was drawn under the whole thread, out of sight. Its line comes back when the thread closes.
+        var listed = TaskViews.IntoOpenThreads(
+            showsSubtasks ? underParents : TaskViews.FoldSubtasks(underParents, nested, selection.Current, snoozedFamily),
+            nested, expanded);
         // A SUBTASK SHOWS ONCE (task 0eb943d8, Petre: "it shows up twice", "clicking the one above takes me to the one
         // below"). A parent's open thread lists its subtasks, so one folded away (Subtasks unticked) or hidden by a filter
         // can still be reached. A subtask that has a line of its own right under the parent is already on screen, and
