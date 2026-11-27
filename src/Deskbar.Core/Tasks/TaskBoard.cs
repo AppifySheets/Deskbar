@@ -173,7 +173,9 @@ public sealed record TaskBoard(IReadOnlyList<TaskItem> Tasks)
     /// open a pull request for work Petre closed, and the search must find it.
     /// </summary>
     public Result<TaskBoard> AddPullRequest(Guid id, PullRequestLink link, DateTimeOffset now) =>
-        Lookup(id).Map(task => task.PullRequests.Any(p => p.Key == link.Key)
+        // One already on the deploy list stays there only (task 1565789d, review finding): on both lists it would count
+        // as the task's own work for the prompt line, the merged ring and deploy reports.
+        Lookup(id).Map(task => task.PullRequests.Any(p => p.Key == link.Key) || task.DeployPullRequests.Any(p => p.Key == link.Key)
             ? this
             : Replaced(task with { PullRequests = [.. task.PullRequests, link], UpdatedAt = now }));
 
@@ -221,9 +223,12 @@ public sealed record TaskBoard(IReadOnlyList<TaskItem> Tasks)
     /// </summary>
     public Result<TaskBoard> MarkDeployed(Guid id, string note, DateTimeOffset now) =>
         CleanText(note, "A deploy needs a note: where the deployed app was seen running the change (its logs, health page or deploy output)")
-            .Bind(text => Lookup(id).Bind(task => task.PullRequests.Count == 0
+            // A task's deploy pull requests count too (task 1565789d, review finding): the deploy-merged nudge tells the
+            // session to run `task deployed`, and a task whose only recorded pull request is its deploy one (its own work
+            // had none, or `task pr --deploy` moved it over) would otherwise be refused.
+            .Bind(text => Lookup(id).Bind(task => task.PullRequests.Concat(task.DeployPullRequests).ToArray() is not { Length: > 0 } recorded
                 ? Result.Failure<TaskBoard>(NoPullRequestToDeploy)
-                : task.PullRequests.Where(p => task.Deployed.All(d => d.Key != p.Key)).DistinctBy(p => p.Key).ToArray() is { Length: > 0 } fresh
+                : recorded.Where(p => task.Deployed.All(d => d.Key != p.Key)).DistinctBy(p => p.Key).ToArray() is { Length: > 0 } fresh
                     ? Replaced(task with
                     {
                         Deployed = [.. task.Deployed, .. fresh.Select(p => new DeployedPullRequest(p.Key, now, text.Trim()))],

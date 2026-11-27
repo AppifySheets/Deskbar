@@ -48,16 +48,18 @@ public static class AskedPullRequests
     /// <summary>
     /// The open tasks waiting on Petre whose question links at least one pull request, with those links: what the watch
     /// asks GitHub about. A snoozed task counts too, since it still waits and settling it is still right.
-    /// The task's own DEPLOY pull requests are left out (task 1565789d, TaskItem.DeployPullRequests): a question that links
-    /// one goes on to ask for the deploy that follows its merge ("merge stacks #309, then press Pull and redeploy"), so its
-    /// merge must not settle the question and take the redeploy off Petre's list. RepoWatch tells the session of that merge
-    /// instead, and the session answers the question once the new version runs.
+    /// A question that links one of the task's own DEPLOY pull requests is left out altogether (task 1565789d,
+    /// TaskItem.DeployPullRequests): it goes on to ask for the deploy that follows that merge ("merge stacks #309, then
+    /// press Pull and redeploy"), so no merge may settle it and take the redeploy off Petre's list. RepoWatch tells the
+    /// session of the deploy merge instead, and the session answers the question once the new version runs. The whole
+    /// question, not just the deploy link (review finding): with the link filtered out, "merge #579 and stacks #309, then
+    /// redeploy" settled on #579's merge alone while #309 and the redeploy still waited on him.
     /// </summary>
     public static IReadOnlyList<(TaskItem Task, IReadOnlyList<PullRequestLink> Links)> Watched(TaskBoard board) =>
         board.Tasks
             .Where(t => t.IsOpen && t.Status == TaskStatus.WaitingOnYou && t.Question.HasValue)
-            .Select(t => (Task: t, Links: (IReadOnlyList<PullRequestLink>)In(t.Question.Value)
-                .Where(l => t.DeployPullRequests.All(d => d.Key != l.Key)).ToArray()))
+            .Select(t => (Task: t, Links: In(t.Question.Value)))
+            .Where(x => x.Links.All(l => x.Task.DeployPullRequests.All(d => d.Key != l.Key)))
             .Where(x => x.Links.Count > 0)
             .ToArray();
 
