@@ -3046,7 +3046,10 @@ public partial class TasksWindow : Window
         // Not from a box being typed in (the add box, the search box, the subtask box in a thread): F2 there is the box's.
         // Any line on show, a subtask's in its parent's open thread included (task 452487b4: an open thread takes in the
         // subtasks nested under it, so a selected subtask can have no top-level line).
-        if (RowFor(id) is null || closing.GetValueOrDefault(id) || AddBoxShown && AddBox.IsKeyboardFocusWithin || SearchBox.IsKeyboardFocusWithin
+        // In the Inbox only a line drawn in the tab on show (Keys): RowFor reads every row of the view, the other tabs' too,
+        // and F2 must not open an editor on a line that is not on screen (task 740a2231, the tester's M1).
+        if (RowFor(id) is null || latest?.Inbox is not null && !Keys.Contains(id)
+            || closing.GetValueOrDefault(id) || AddBoxShown && AddBox.IsKeyboardFocusWithin || SearchBox.IsKeyboardFocusWithin
             || subtaskBox?.IsKeyboardFocusWithin == true) return false;
         BeginRename(id);
         return true;
