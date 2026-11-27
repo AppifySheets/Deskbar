@@ -243,7 +243,7 @@ public sealed class ManagerActions : IDisposable
     public void Tick(IReadOnlyCollection<ClaudeAgent> listed)
     {
         if (pending || tasks is null || inbox is null || !manager.State.ClaudeTasksInEffect || manager.State.Manager is not { } record) return;
-        switch (ManagerWakes.Plan(record, tasks.Board, listed, today(), scheduler.Now))
+        switch (ManagerWakes.Plan(record, tasks.Board, listed, today(), scheduler.Now, tasks.RedRuns))
         {
             case ManagerWake.Nothing(var kept) when kept != record:
                 manager.SetManagerSession(kept);

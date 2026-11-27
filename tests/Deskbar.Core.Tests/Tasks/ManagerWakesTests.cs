@@ -36,8 +36,37 @@ public sealed class ManagerWakesTests
 
     static ClaudeAgent Agent(bool busy) => new(Manager, Manager[..8], @"C:\state\manager", true, busy, ManagerSession.Name);
 
-    static ManagerWake Plan(ManagerRecord record, TaskBoard board, DateTimeOffset now, IReadOnlyCollection<ClaudeAgent>? listed = null) =>
-        ManagerWakes.Plan(record, board, listed ?? [], today, now);
+    static ManagerWake Plan(ManagerRecord record, TaskBoard board, DateTimeOffset now, IReadOnlyCollection<ClaudeAgent>? listed = null,
+        IReadOnlyList<RedRun>? red = null) =>
+        ManagerWakes.Plan(record, board, listed ?? [], today, now, red);
+
+    static RedRun Red(Guid id, DateTimeOffset at) => new(id, "AppifySheets/Deskbar", "Release", "https://example.test/runs/1", at);
+
+    // Deskbar task c8e6967d: a red run on a followed merge commit wakes the manager, once per gap, with its own instruction.
+    [Fact]
+    public void RedRunWakesTheManager()
+    {
+        var plan = Assert.IsType<ManagerWake.Wake>(Plan(Record(), Board(Task(id1, "Tasks redesign")), At(30), red: [Red(id1, At(10))]));
+
+        Assert.Contains("Failed runs on merge commits:", plan.Message);
+        Assert.Contains("- AppifySheets/Deskbar: Release https://example.test/runs/1, task 11111111 \"Tasks redesign\"", plan.Message);
+        Assert.Contains("Tell the user in one line only if several tasks are blocked by it; the task's session was nudged.", plan.Message);
+        Assert.StartsWith(ManagerWakes.Prefix, plan.Message);
+    }
+
+    [Fact]
+    public void OldRedRunWakesNothing()
+    {
+        var record = Record(since: At(20));
+        Assert.Equal(new ManagerWake.Nothing(record), Plan(record, Board(Task(id1, "Tasks redesign")), At(60), red: [Red(id1, At(10))]));
+    }
+
+    [Fact]
+    public void RedRunWaitsForTheGap()
+    {
+        var record = Record();
+        Assert.Equal(new ManagerWake.Nothing(record), Plan(record, Board(Task(id1, "Tasks redesign")), At(29), red: [Red(id1, At(10))]));
+    }
 
     [Fact]
     public void Yesterdays_manager_is_never_woken()
