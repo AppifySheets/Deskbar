@@ -1918,7 +1918,7 @@ Settled and older comments stay in the page's chat ([Deskbar task 5ee182cf](http
 PW1. Have the session write five comments, then `task ask` and `task answered` after your reply. Open the note's page: every comment is in the chat, the settled ones dimmed in their places, with no "N settled comments" or "N earlier comments" line, and the session's steps from before the oldest comment are still there.
 PW2. Keep the page open and have the session settle one more comment (`task comment-settle <id>`): it dims where it is, and nothing above it disappears.
 PW3. Back to the List and open the same note's thread: there the settled comments fold behind "N settled comments" and only the latest three show, as before.
-PW4. Open the page of a task with one or two comments: the chat starts right under the header, the empty room is under it, and the comment box is at the bottom edge. Add comments until it is taller than the page: it scrolls and stays at the newest.
+PW4. Open the page of a task with one or two comments: the chat sits at the bottom, its newest message just above the comment box at the bottom edge, and the empty room is between the header and the chat (task 6da6758f, which undid the top start). Add comments until it is taller than the page: it scrolls and stays at the newest.
 
 ## A deploy hand-over is not a question
 

@@ -310,17 +310,19 @@ public partial class TasksWindow
             DockPanel.SetDock(bottom, Dock.Bottom);
             dock.Children.Add(bottom);
         }
-        // A SHORT CHAT STARTS AT THE TOP (task 5ee182cf). The PM's fix 1 after checkpoint 1 had a body shorter than the page
-        // sit at its bottom, a chat read from the bottom up, with the empty room on top. Petre, on a screenshot of a page that
-        // was mostly that empty room with the chat crowded at its foot: "chat shouldn't collapse on me in the inbox task
-        // view", and he picked "it starts at the top under the header and grows down". The comment box no longer needs the
-        // bottom alignment to sit at the bottom edge: it is docked below the scroller (TasksWindow.DockedBox.cs). So the body
-        // is top-aligned: a short chat reads from just under the header down, the empty room between it and the docked box;
-        // once it is taller than the page it scrolls and follows its newest as before (KeepPlace: a page that cannot scroll
-        // counts as at its end, so it is held at its end as it grows past the view).
+        // A SHORT CHAT SITS AT THE BOTTOM, READ FROM THE BOTTOM UP, like a messenger (the PM's fix 1 after checkpoint 1, and
+        // again since task 6da6758f). Task 5ee182cf had turned it around for one release: Petre's "chat shouldn't collapse on
+        // me" was a guess at this layout (option A, "a, likely"), so the body went to the top with the empty room under it.
+        // On the build that did it, his very next task was "show text closer to the bottom, not the top", a screenshot of a
+        // short chat at the top of an empty page. What that complaint really meant was the settled and earlier comments
+        // folding away, and those still stay (ThreadComments). So the body is bottom-aligned again: the newest message sits
+        // just above the comment box, which is docked below the scroller (TasksWindow.DockedBox.cs), and the empty room is
+        // between the header and the chat. The scroller arranges its content at least as tall as the view, so the body's own
+        // alignment does it. Once the chat is taller than the page it scrolls and follows its newest (KeepPlace: a page that
+        // cannot scroll counts as at its end, so it is held at its end as it grows past the view).
         FollowTranscript(row.Id);
         var body = PageBody(row, mark);
-        body.VerticalAlignment = VerticalAlignment.Top;
+        body.VerticalAlignment = VerticalAlignment.Bottom;
         // A FastScrollViewer like every other scroller in the panel (FastScrollViewer.cs, task 85df5e3f), so a page's chat
         // scrolls as far per wheel notch as the list it was opened from.
         pageScroller = new FastScrollViewer
