@@ -54,6 +54,7 @@ public static class AskedPullRequests
     //     briefing tells a session to put what the user must do in the first words, so the opening is where the ask is;
     //   * it links at least one GitHub pull request (In), the thing to merge;
     //   * it offers no answer buttons, and is not a deploy hand-over (TaskItem.AwaitsDeploy): those ask for something else.
+    //   * it has no "?" outside its links: a question mark means it asks something besides the merge (Url, below).
     // So "Answer in the session: ... Then merge PR 583" keeps the "?" (a decision comes first), as do "Decide whether we
     // should merge the two pages" and "Redeploy ...: [stacks 311] is merged". No GitHub call is needed: once the pull
     // request merges, Settlements settles the question by itself, and the mark goes with it.
@@ -63,9 +64,17 @@ public static class AskedPullRequests
     // Where a question's opening ends: its first markdown link or bare URL.
     static readonly Regex FirstLink = new(@"\[|https?://", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
 
-    /// <summary>Whether a question's text only asks for a merge (see above): its opening says merge and it links a pull request.</summary>
+    // A question mark anywhere in the text, links aside (a URL may carry a query string): the question asks something
+    // besides the merge ("Merge conflicts on [#12]: keep mine or theirs?", "Should I squash and merge [#12]?", "Merge or
+    // close [#12]?"), so it keeps the "?" bubble. Review finding: each of those opened with merge and linked a pull request.
+    static readonly Regex Url = new(@"https?://[^\s)\]>]+", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+
+    /// <summary>
+    /// Whether a question's text only asks for a merge (see above): its opening says merge, it links a pull request, and it
+    /// asks nothing else (no "?" outside its links).
+    /// </summary>
     public static bool AsksMerge(string? question) =>
-        In(question).Count > 0 && MergeOpening.IsMatch(Opening(question!));
+        In(question).Count > 0 && MergeOpening.IsMatch(Opening(question!)) && !Url.Replace(question!, "").Contains('?');
 
     /// <summary>Whether a task waits on the user only for a merge (see above): the task's open question, with no answer buttons.</summary>
     public static bool AsksMerge(TaskItem task) =>
