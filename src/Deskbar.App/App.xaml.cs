@@ -545,6 +545,16 @@ public partial class App : Application
     // asked without prompting would be the wrong reading of it.
     async void CheckForUpdateNow()
     {
+        // A test build is never updated, so asking GitHub would only mislead: its patch number is the git height
+        // (2.6.208) while releases count up one at a time (2.6.58), so the check calls the test build current. That
+        // answer is what left Petre on one for a night (Deskbar task 7dd83c89). Asked by hand, it says what it is
+        // and offers the restart into the installed release, or the releases page when none is installed.
+        if (IsTestBuild)
+        {
+            AnswerAsTestBuild();
+            return;
+        }
+
         // The tooltip is the only progress there is room for, and the same one DownloadAndRestart
         // uses. A menu item that closes and then says nothing for two seconds looks like a click
         // that missed.
@@ -2175,8 +2185,12 @@ public partial class App : Application
             // GDI+ historically does not. Same file the exe is stamped with, so tray,
             // taskbar and window icons cannot drift apart.
             IconSource = AppIcon,
-            ToolTipText = compatibilityMode ? "Deskbar (compatibility mode)" : "Deskbar",
-            ContextMenu = TrayMenu.Build(compatibilityMode, OpenManage, ExitApp, CheckForUpdateNow, null, BarToggle(), ReportProblem, RestartApp),
+            // A test build names itself here too (Deskbar task 7dd83c89), so hovering the icon tells it from a release.
+            ToolTipText = compatibilityMode ? "Deskbar (compatibility mode)"
+                : IsTestBuild ? $"Deskbar {TestBuildLabel}"
+                : "Deskbar",
+            ContextMenu = TrayMenu.Build(compatibilityMode, OpenManage, ExitApp, CheckForUpdateNow, null, BarToggle(), ReportProblem, RestartApp,
+                TestBuildMenu()),
             // Petre: "left click gives us the main window, right click gives exit and
             // manage". RightClick only, so a left-click is free to open Manage (wired
             // below) instead of raising the same menu twice.
@@ -2304,7 +2318,8 @@ public partial class App : Application
                 // first time, it opens at the top right of the main screen, clear of the bar's usual corner.
                 DetachStats = () => ShowDetachedStats(manager.State.DetachedStats ?? FirstDetachedStatsPlace()),
                 // The tray's own commands, for the bar's background menu, so both menus run the same code.
-                AppActions = new FloatingBar.AppCommands(OpenManage, CheckForUpdateNow, ExitApp, () => pendingUpdate, ReportProblem, RestartApp),
+                AppActions = new FloatingBar.AppCommands(OpenManage, CheckForUpdateNow, ExitApp, () => pendingUpdate, ReportProblem, RestartApp,
+                    TestBuildMenu),
                 // ...and the Search button's: quick find, built further down, so reached through the field.
                 OpenFind = () => quickFind?.ToggleFromBar(),
                 // ...and the Deskbar Pro reminder line's (FloatingBar.ProReminder.cs): when it is due, what "Get Pro"
@@ -3367,7 +3382,7 @@ public partial class App : Application
     {
         if (trayIcon is null) return;
         trayIcon.ContextMenu = TrayMenu.Build(compatibilityMode, OpenManage, ExitApp, CheckForUpdateNow,
-            pendingUpdate, BarToggle(), ReportProblem, RestartApp);
+            pendingUpdate, BarToggle(), ReportProblem, RestartApp, TestBuildMenu());
     }
 
     (string Label, Action Toggle)? BarToggle() =>
@@ -3480,10 +3495,16 @@ public partial class App : Application
     // not wearing names from a ledger it never saw. ProcessPath rather than a file on disk also serves the
     // Store build: a packaged process starting its own exe stays inside the package, as the crash relaunch
     // (CrashRelaunch.Start) already relies on.
-    void RestartApp()
+    void RestartApp() => RestartInto(Environment.ProcessPath, "asked from a menu");
+
+    // The restart itself, into `exe`: this copy's own exe for Restart Deskbar, the newest installed release for a test
+    // build's "Restart into Deskbar x.y.z" (TestBuildMenu). One handover for both, so the test build's restart gets the
+    // same order (successor first, this copy only stands down once it is running) and the same exit path. A release
+    // understands the wait switch as this build does: every 2.x release has carried it since the update handover.
+    void RestartInto(string? exe, string why)
     {
-        ClickTrace.Write("restart: asked from a menu");
-        var started = Environment.ProcessPath is { } exe
+        ClickTrace.Write($"restart: {why}");
+        var started = exe is not null
             ? Result.Try(
                 () => System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(exe, AwaitPreviousSwitch) { UseShellExecute = false })?.Dispose(),
                 e => $"Could not start a new copy of Deskbar: {e.Message}")
@@ -3497,6 +3518,65 @@ public partial class App : Application
         ClickTrace.Write("restart: the next copy is started; this one is exiting");
         ExitApp();
         EndIfShutdownHangs();
+    }
+
+    // TEST BUILDS (Deskbar task 7dd83c89; Core's TestBuild has the story). A copy a session built and started to show
+    // Petre a change gets no updates: its patch number is the git height, far above any release's, so the update check
+    // calls it current. One stayed on his screen all night with nothing saying what it was. Petre: "let there be a
+    // clear marking that it's a test build somewhere and offer a restart to a regular build in the context menu".
+    //
+    // A test build is any copy that is neither single-file published (every GitHub release is: release.yml,
+    // PublishSingleFile) nor the Store package (published as files, so RunsAsPublished alone would call it a test
+    // build; Store packaging design: docs/superpowers/specs/2026-10-24-deskbar-store-packaging-design.md).
+    static bool IsTestBuild => !StartupRegistration.RunsAsPublished && !PackageIdentity.IsPackaged;
+
+    // "Test build 2.6.208 (add-box-skills)": the worktree a session built it in, when it has one.
+    static string TestBuildLabel => Core.Updates.TestBuild.Label(UpdateService.DisplayVersion, Environment.ProcessPath ?? "");
+
+    // The newest installed release: Deskbar-<x.y.z>-win-x64.exe in the login entry's folder (wherever the person keeps
+    // the releases, since only a published build writes that entry) and in %LOCALAPPDATA%\Programs\Deskbar, where the
+    // owner's machine keeps them, for a login entry that is off. Listed afresh each time a menu is built, so a release downloaded while this
+    // copy runs is the one offered. A folder that is missing or unreadable adds nothing.
+    static string? NewestInstalledRelease() =>
+        Core.Updates.TestBuild.NewestRelease(
+            new[]
+                {
+                    StartupRegistration.RegisteredExe is { } registered ? Path.GetDirectoryName(registered) : null,
+                    Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Programs", "Deskbar"),
+                }
+                .OfType<string>()
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .SelectMany(folder => Result.Try(() => Directory.GetFiles(folder, "Deskbar-*-win-x64.exe")).GetValueOrDefault([])));
+
+    // The top of both menus in a test build (TrayMenu.AddTestBuildItems), null in a release. Built each time a menu is,
+    // for the reason NewestInstalledRelease gives.
+    TestBuildItems? TestBuildMenu() =>
+        !IsTestBuild ? null
+        : new TestBuildItems($"{TestBuildLabel}, gets no updates",
+            NewestInstalledRelease() is { } release
+                ? ($"Restart into Deskbar {Core.Updates.TestBuild.VersionOf(release)}", () => RestartInto(release, $"from a test build into {release}"))
+                : null);
+
+    // "Check for updates…" in a test build: what it is, and the way onto a release (CheckForUpdateNow says why it does
+    // not ask GitHub). The restart when a release is installed, the releases page when none is.
+    void AnswerAsTestBuild()
+    {
+        if (NewestInstalledRelease() is { } release)
+        {
+            var version = Core.Updates.TestBuild.VersionOf(release);
+            if (MessageBox.Show(
+                    $"This Deskbar is a {TestBuildLabel.ToLowerInvariant()}, and a test build gets no updates.\n\n" +
+                    $"Restart into the installed Deskbar {version}? It then updates itself as usual.",
+                    "Deskbar", MessageBoxButton.YesNo, MessageBoxImage.Information) == MessageBoxResult.Yes)
+                RestartInto(release, $"from a test build into {release}, asked from Check for updates");
+            return;
+        }
+
+        if (MessageBox.Show(
+                $"This Deskbar is a {TestBuildLabel.ToLowerInvariant()}, and a test build gets no updates. No installed release was found.\n\n" +
+                "Open the releases page to download one?",
+                "Deskbar", MessageBoxButton.YesNo, MessageBoxImage.Information) == MessageBoxResult.Yes)
+            OpenUrl(UpdateService.ReleasesPage);
     }
 
     // Lets go of both single-instance mutexes, the new name and the old one, on the two ways this copy

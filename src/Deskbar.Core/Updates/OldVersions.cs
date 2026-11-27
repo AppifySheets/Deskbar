@@ -31,7 +31,7 @@ public static partial class OldVersions
     private static partial Regex PublishedName();
 
     // Null for any name that is not a published exe, including a number too large to be a version.
-    static Version? VersionOf(string fileName) =>
+    internal static Version? VersionOf(string fileName) =>
         PublishedName().Match(fileName) is { Success: true } m && Version.TryParse(m.Groups["version"].Value, out var version)
             ? version
             : null;

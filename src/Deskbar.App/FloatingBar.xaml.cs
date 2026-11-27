@@ -7846,6 +7846,13 @@ public partial class FloatingBar : Window
 
         if (AppActions is not { } app) return;
         menu.Items.Add(new Separator());
+        // A test build's marking and its restart into the installed release (Deskbar task 7dd83c89), first in the app
+        // section, where a pending update would be, and worded by the same code as the tray's.
+        if (app.TestBuild?.Invoke() is { } test)
+        {
+            TrayMenu.AddTestBuildItems(menu, test, (glyph, header) => new MenuItem { Header = header, Icon = MenuGlyph(glyph) });
+            menu.Items.Add(new Separator());
+        }
         if (app.PendingUpdate() is { } update) Add("⬇", update.Label, update.Open);
         Add("⚙", "Manage…", app.OpenManage);
         Add("↻", "Check for updates…", app.CheckForUpdates);
@@ -7861,9 +7868,10 @@ public partial class FloatingBar : Window
     // The tray's app-wide commands, for the bar's background menu. Null in the tests, which then get the bar's
     // own items only. ReportProblem is the tray's "Report a problem…" (App.ReportProblem, ReportWindow), which replaced
     // "Save debug dump", optional so a caller that has no report window to offer leaves the item out; Restart is the
-    // tray's "Restart Deskbar" (App.RestartApp), optional for the same reason.
+    // tray's "Restart Deskbar" (App.RestartApp), optional for the same reason. TestBuild is what a test build shows at
+    // the top of the app section (App.TestBuildMenu, Deskbar task 7dd83c89): null, or answering null, in a release.
     public sealed record AppCommands(Action OpenManage, Action CheckForUpdates, Action Exit, Func<(string Label, Action Open)?> PendingUpdate,
-        Action? ReportProblem = null, Action? Restart = null);
+        Action? ReportProblem = null, Action? Restart = null, Func<TestBuildItems?>? TestBuild = null);
 
     public AppCommands? AppActions { get; init; }
 
