@@ -7672,6 +7672,9 @@ public partial class FloatingBar : Window
         // "Open all bookmarks" (with any) and "Bookmark link from clipboard" (FloatingBar.Bookmarks.cs).
         AddBookmarkItems(menu, workspaceId, Add);
 
+        // "Folder…": where this workspace's tasks start Claude (FloatingBar.ClaudeFolder.cs, Deskbar task 50b61120).
+        AddClaudeFolderItems(workspaceId, Add);
+
         AddGroupItems(menu, workspaceId, Add);
 
         menu.Items.Add(new Separator());
@@ -8238,7 +8241,10 @@ public partial class FloatingBar : Window
             // Result<Workspace> converts implicitly to Result, which is all Report needs: it only
             // ever shows the ERROR, and the new Workspace has no reader here -- the bar redraws
             // off the pulse that creating it sent.
-            .Tap(fresh => Report(manager.InsertWorkspace(fresh.Name, index, groupId, fresh.Folder)));
+            .Tap(fresh => Report(manager.InsertWorkspace(fresh.Name, index, groupId, fresh.Folder)
+                // A folder given here is the same choice as the row menu's "Folder…" (task 50b61120): once the
+                // workspace exists, the folder is trusted for Claude Code and a terminal runs claude in it.
+                .Tap(created => Maybe.From(created.Folder).Tap(folder => FolderChosen?.Invoke(created.Id, folder)))));
 
     string ReposFolder() =>
         manager.State.ReposFolder ?? WorkspaceFolders.GuessReposFolder(SessionFolders(),
