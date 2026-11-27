@@ -74,8 +74,37 @@ public static class AskedPullRequests
     public static IReadOnlyList<Settlement> Settlements(TaskBoard board, IReadOnlyDictionary<string, PullRequestFacts> facts, DateTimeOffset now) =>
         Watched(board)
             .Where(x => Settles(x.Links, facts, x.Task.WaitingSince.GetValueOrDefault(x.Task.Raised)))
-            .Select(x => new Settlement(x.Task.Id, x.Task.Question.Value, Note(x.Links, facts)))
+            .Select(x => new Settlement(x.Task.Id, x.Task.Question.Value, Note(x.Links, facts),
+                // Only the links that ended while the task waited (the same test as Settles' second half): in "now that
+                // [#500] is in, merge [#501]" the long-merged #500 is neither news to the session nor this task's work.
+                x.Links
+                    .Where(link => facts[link.Key].ClosedAt.Map(at => at >= x.Task.WaitingSince.GetValueOrDefault(x.Task.Raised)).GetValueOrDefault(false))
+                    .Select(link => (link, facts[link.Key].State))
+                    .ToArray()))
             .ToArray();
+
+    // A SETTLED QUESTION WAKES ITS SESSION (task ede8dbe8, 2026-11-27). Seen on a colleague's task: the session asked for a
+    // stock pull request to be marked ready, it merged, this watch settled the question, and the session sat idle for
+    // seven minutes until the manager commented, though it had the deploy check and `task done` still to do. Settling only
+    // wrote a thread line, and Deskbar's minute poll (RepoWatch), which does wake a session on a merge, watches only the
+    // pull requests recorded on the task, which this one was not. TaskService.SettleQuestion now sends this text through
+    // the watch's nudges for every link the minute poll does not cover itself.
+
+    /// <summary>
+    /// What the session hears when its question was settled by what happened to <paramref name="ended"/>, each link with
+    /// its final state: a merge asks it to check the merge commit's runs itself (nothing follows them for a pull request
+    /// the minute poll did not watch) and carry on in the briefing's order; a close without a merge asks it to see why.
+    /// </summary>
+    // Each link's news, then the instruction for merges once, however many merged.
+    public static string WakeText(IReadOnlyList<(PullRequestLink Link, PullRequestState State)> ended) =>
+        "Your question is settled: "
+        + string.Join("; ", ended.Select(e => e.State == PullRequestState.Merged
+            ? $"{e.Link.Label} ({e.Link.Url}) merged"
+            : $"{e.Link.Label} ({e.Link.Url}) was closed without merging, so find out why and carry on, or ask the user"))
+        + "."
+        + (ended.Any(e => e.State == PullRequestState.Merged)
+            ? " Deskbar did not follow the runs on the merge commit, so check them, then carry on in the briefing's order: released, deployed, done."
+            : "");
 
     /// <summary>
     /// Deskbar's line in the thread when it settles a question: "Question settled: [Deskbar #504](...) was merged."
@@ -144,5 +173,8 @@ public enum PullRequestState { Open, Merged, Closed }
 /// <summary>What GitHub says about one pull request: its state, and when it was merged or closed (none while open).</summary>
 public sealed record PullRequestFacts(PullRequestState State, Maybe<DateTimeOffset> ClosedAt);
 
-/// <summary>A question to settle: the task, the question as it was read, and Deskbar's line for the thread.</summary>
-public sealed record Settlement(Guid TaskId, string Question, string Note);
+/// <summary>
+/// A question to settle: the task, the question as it was read, Deskbar's line for the thread, and every pull request the
+/// question links with the state that settled it (merged or closed), so the session can be told and the merged ones recorded.
+/// </summary>
+public sealed record Settlement(Guid TaskId, string Question, string Note, IReadOnlyList<(PullRequestLink Link, PullRequestState State)> Ended);

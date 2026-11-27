@@ -64,10 +64,19 @@ public static class RepoWatch
     // followed (first seen already merged, or its follow ended) has nothing watching it, yet used to count, so the prompt
     // line told the session "Deskbar watches" and to drop its own loop while nobody watched.
     public static bool Watched(RepoWatchState state, TaskItem task, DateTimeOffset now) =>
-        FlightLinks(task, state)
-            .Where(link => state.Seen.TryGetValue(link.Key, out var seen) && seen == PullRequestState.Open
-                || state.Following.Any(m => m.TaskId == task.Id && m.Link.Key == link.Key))
-            .Any(link => state.LastSuccess.TryGetValue(RepositoryOf(link), out var at) && now - at <= TimeSpan.FromMinutes(5));
+        FlightLinks(task, state).Any(link => Covers(state, task, link, now));
+
+    /// <summary>
+    /// Whether this watch covers <paramref name="link"/> of <paramref name="task"/> right now (see Watched): it is one of
+    /// the task's links in flight, last Seen Open or followed after its merge, in a repository polled within five minutes.
+    /// A merge of a covered link is told to the session by Poll; TaskService.SettleQuestion tells the others itself
+    /// (task ede8dbe8), so a merge that settles a question is told exactly once.
+    /// </summary>
+    public static bool Covers(RepoWatchState state, TaskItem task, PullRequestLink link, DateTimeOffset now) =>
+        FlightLinks(task, state).Any(l => l.Key == link.Key)
+        && (state.Seen.TryGetValue(link.Key, out var seen) && seen == PullRequestState.Open
+            || state.Following.Any(m => m.TaskId == task.Id && m.Link.Key == link.Key))
+        && state.LastSuccess.TryGetValue(RepositoryOf(link), out var at) && now - at <= TimeSpan.FromMinutes(5);
 
     /// <summary>
     /// One poll of one repository: what gh said (<paramref name="facts"/>, one per pull request asked about) against what
@@ -150,6 +159,13 @@ public static class RepoWatch
         };
         return new RepoWatchStep(nextState, nudges);
     }
+
+    /// <summary>
+    /// The memory with <paramref name="links"/> seen Merged: a merge TaskService.SettleQuestion told the session itself
+    /// (task ede8dbe8), so a later Poll that still had the link as Open does not take it for a new merge and tell it again.
+    /// </summary>
+    public static RepoWatchState SeenMerged(RepoWatchState state, IEnumerable<PullRequestLink> links) =>
+        state with { Seen = Updated(state.Seen, links.Select(l => KeyValuePair.Create(l.Key, PullRequestState.Merged))) };
 
     // A copy of a dictionary with the updates written over it (the last of a key wins).
     static IReadOnlyDictionary<string, T> Updated<T>(IReadOnlyDictionary<string, T> old, IEnumerable<KeyValuePair<string, T>> updates) =>

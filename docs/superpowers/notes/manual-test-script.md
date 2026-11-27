@@ -1174,6 +1174,11 @@ PM2. Merge the pull request on GitHub. Within 30 seconds, and before the session
 PM3. Ask again, linking a pull request that was merged long ago ("now that [#1](...) is in, A or B?"): it keeps waiting.
 PM4. Ask linking a pull request, then close it without merging: the question settles, and the line says "closed without
      merging".
+PM5. (Task ede8dbe8.) Open the pull request some way other than the session's `gh pr create` (on the GitHub page), so
+     the task does not list it, and have the idle session ask for its merge. Merge it: within 30 seconds the question
+     settles, the task lists the pull request, and the session wakes with "Your question is settled: ... merged" and goes
+     on to its runs and deploy without anyone commenting. With PM4's close instead, it wakes with "closed without merging"
+     and the task lists nothing.
 
 ## A reply sets the question aside while Claude works
 
