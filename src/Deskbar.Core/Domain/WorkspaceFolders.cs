@@ -15,7 +15,7 @@ public static class WorkspaceFolders
     // means the drive's current folder), and null for blank, which is "no folder". So "E:\repos\x\" and "E:\repos\x"
     // are the same folder and SetWorkspaceFolder sees no change between them.
     public static string? Normal(string? folder) =>
-        string.IsNullOrWhiteSpace(folder)
+        string.IsNullOrWhiteSpace(folder) || folder.Trim().TrimEnd('\\', '/').Length == 0
             ? null
             : folder.Trim() is var trimmed && trimmed.TrimEnd('\\', '/') is var bare && bare.EndsWith(':')
                 ? bare + "\\"

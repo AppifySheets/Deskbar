@@ -20,7 +20,7 @@ Everything the bar's menus do has a command, and each one runs the same code as 
 | Group | Commands |
 |---|---|
 | Listing (JSON) | `workspaces`, `windows`, `desktops` |
-| Workspaces | `create <name> [placement]`, `rename`, `reorder <ws> up\|down\|top\|end\|<n>`, `fold`, `unfold`, `color <ws> <colour>`, `delete <ws> [--close-windows]`, `switch` |
+| Workspaces | `create <name> [placement] [--folder <path>]`, `rename`, `reorder <ws> up\|down\|top\|end\|<n>`, `fold`, `unfold`, `color <ws> <colour>`, `delete <ws> [--close-windows]`, `switch` |
 | Groups | `group-create`, `group-join`, `group-leave`, `group-rename`, `group-color`, `group-fold`, `group-unfold`, `group-reorder <group> up\|down\|top\|end\|<n>`, `ungroup` |
 | Desktops | `name-desktop <id or number> <name>` |
 | Starting | `start <ws> [--create [placement]] [--cwd <folder>] -- <program> [arguments...]`, `open <link> [--from <folder>]` |

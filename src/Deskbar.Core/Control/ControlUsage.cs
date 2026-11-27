@@ -26,7 +26,7 @@ public static class ControlUsage
                 + "      VS Code tab on every workspace"),
         ]),
         new("Creating, and moving windows", [
-            new("create", "<name> [placement]", "create a workspace; already existing is not an error"),
+            new("create", "<name> [placement] [--folder <path>]", "create a workspace; already existing is not an error; --folder sets its folder"),
             new("move", "<workspace> [--create [placement]] [--no-follow] (--title <text> | --hwnd <handle>)...",
                 "move windows; every selector must match or nothing moves (exit 3). Moving the window you are\n"
                 + "      in takes you along, as a drag does; --no-follow leaves you where you are"),

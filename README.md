@@ -269,7 +269,8 @@ on Manage → Settings. A fully opaque setting means it never dims.
 
 ### The workspace row menu
 
-Right-click a row for: **Rename…**; **Insert before…** and **Insert after…**;
+Right-click a row for: **Rename…**; **Insert before…** and **Insert after…**, which ask for the new
+workspace's name and folder like **New workspace…** (see [Claude sessions](docs/features/claude-sessions.md#a-workspaces-folder));
 **Open all bookmarks** (only when the workspace has bookmarks) and **Bookmark link from clipboard**;
 the group items (next section); **Fold row**, which flips to **Unfold row**; **Pin to strip**, which
 flips to **Unpin from strip**; the **Window list** submenu; the colour strip; **Delete workspace…**; and the bar items,

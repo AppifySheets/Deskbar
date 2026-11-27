@@ -81,7 +81,7 @@ public sealed record Workspace(Guid Id, string Name, Guid? DesktopId, string? Co
     // THE WORKSPACE'S FOLDER: where a Claude session for one of its tasks starts when the task has no session of its
     // own yet (ClaudeStart.NewTaskFolders lists it ahead of the folders guessed from earlier sessions and open VS Code
     // windows). Task 6edcc65a, Petre: "New workspace: option to set its folder path; default to a single repos folder
-    // and offer a subfolder in it". The New workspace dialog asks for it (WorkspaceFolderDialog); null is "no folder",
+    // and offer a subfolder in it". The New workspace dialog asks for it (NewWorkspaceDialog); null is "no folder",
     // which is every workspace made before this and behaves exactly as before.
     //
     // A full path as the user chose it, not checked against the disk on load: a folder on a drive that is not plugged
