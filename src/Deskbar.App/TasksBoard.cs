@@ -1856,13 +1856,26 @@ internal sealed record TaskCommentView(Guid Id, string Author, bool ByClaude, st
     public bool Asks { get; init; }
 
     /// <summary>
-    /// Whether the line under its bubble names its author ("you · 21:21") or carries the time alone ("21:15"). False
-    /// for every bubble of a run by one author but the last (task 85218923, ChatThread.WithDays sets it).
+    /// What the line under its bubble says: its author and time ("you · 21:21"), its time alone ("21:15"), or nothing,
+    /// its time shown beside the bubble on hover. Named for the last bubble of a run by one author (task 85218923), and
+    /// for the others Bare when the next one came within a few minutes, Timed when later (task da1e1188, "you and time,
+    /// both can be merged"). ChatThread.Grouped sets it; ChatThread.WithDays calls that.
     /// </summary>
-    public bool NamesAuthor { get; init; } = true;
+    public BubbleSign Sign { get; init; } = BubbleSign.Named;
 
     /// <summary>The moment it was written: where it goes among a session's messages and steps (ClaudeChatStream).</summary>
     public DateTimeOffset At { get; init; }
+}
+
+/// <summary>What the small line under a chat bubble says (ChatThread.Grouped decides it, task da1e1188).</summary>
+internal enum BubbleSign
+{
+    /// <summary>"you · 21:21": the last bubble of a run by one author, or a bubble alone.</summary>
+    Named,
+    /// <summary>"21:15": a bubble inside a run whose next bubble came more than a few minutes later.</summary>
+    Timed,
+    /// <summary>No line: a bubble inside a run whose next bubble came within a few minutes; its time shows beside it on hover.</summary>
+    Bare,
 }
 
 /// <summary>A comment's author, as the chat thread tells them apart (task 39bc9c4d).</summary>

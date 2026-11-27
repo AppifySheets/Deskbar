@@ -104,11 +104,11 @@ internal sealed class ChatStreamPanel : StackPanel
         var newestRun = view.Entries.LastOrDefault(e => e.Item is ChatSteps)?.Key;
         var commentOf = comments.ToDictionary(c => c.Key, c => c.Element, StringComparer.Ordinal);
         var wanted = new List<Slot>();
-        var unnamed = Unnamed(view.Entries);
+        var signs = Signs(view.Entries);
         using (ChatThread.Using(ChatThread.InboxLook))
             foreach (var entry in view.Entries)
             {
-                var names = !unnamed.Contains(entry.Key);
+                var sign = signs.GetValueOrDefault(entry.Key, BubbleSign.Named);
                 var running = live && entry.Key == newestRun;
                 if (slots.TryGetValue(entry.Key, out var slot))
                 {
@@ -129,11 +129,11 @@ internal sealed class ChatStreamPanel : StackPanel
                     slot = entry.Item is { } created ? Create(entry, created, running) : new Slot(entry.Key, entry.At, commentOf[entry.Key], null);
                     slots[entry.Key] = slot;
                 }
-                // A message joined by the next one, or no longer joined, is signed again where it is (Unnamed).
-                if (entry.Item is ChatMessage && slot.Names != names && slot.Element is FrameworkElement signedRow)
+                // A message joined by the next one, or no longer joined, is signed again where it is (Signs).
+                if (entry.Item is ChatMessage && slot.Sign != sign && slot.Element is FrameworkElement signedRow)
                 {
-                    ChatThread.NameAuthor(signedRow, names);
-                    slot.Names = names;
+                    ChatThread.Sign(signedRow, sign);
+                    slot.Sign = sign;
                 }
                 wanted.Add(slot);
             }
@@ -184,26 +184,36 @@ internal sealed class ChatStreamPanel : StackPanel
         public TextBlock? DayLine { get; set; }
         /// <summary>For a run of steps: whether it was drawn as the newest run of a live session (its unfinished steps "running").</summary>
         public bool Running { get; set; }
-        /// <summary>Whether a message's line names its author as drawn (see Unnamed); every message is drawn named.</summary>
-        public bool Names { get; set; } = true;
+        /// <summary>How a message's line is signed as drawn (see Signs); every message is drawn named.</summary>
+        public BubbleSign Sign { get; set; } = BubbleSign.Named;
     }
 
     // A RUN OF ONE AUTHOR'S MESSAGES NAMES THE AUTHOR ONCE, under its last (task 85218923, the rule ChatThread.Grouped keeps
-    // for the comments): the keys of the session's messages whose next entry is a message of the same role on the same day.
+    // for the comments), and shares one time with it when they came close together (task da1e1188, "you and time, both can
+    // be merged"): the signs of the session's messages whose next entry is a message of the same role on the same day,
+    // Bare when that next one falls in its stretch, Timed when it starts a new one (ChatThread.SignsOf, the rule the
+    // threads use, so the two split a run alike). A message missing here is Named.
     // A marker or a comment between them ends the run (TasksWindow.GroupedInStream groups the comments); a run of STEPS does
     // not (task ac1ebd57, "make these more compact"): folded, it is one dim line, and Claude's answer after its own steps
     // is the same author still talking, so "Claude · 11:13" is not written twice around it. A message that a new one joins
-    // loses its name in place (ChatThread.NameAuthor), so nothing is re-created for it.
-    internal static HashSet<string> Unnamed(IReadOnlyList<StreamEntry> entries) =>
+    // is signed again in place (ChatThread.Sign), so nothing is re-created for it.
+    internal static Dictionary<string, BubbleSign> Signs(IReadOnlyList<StreamEntry> entries) =>
         Joined(entries.Where(e => e.Item is not ChatSteps).ToList());
 
-    // Unnamed's pairs, on the entries with the runs of steps taken out.
-    static HashSet<string> Joined(IReadOnlyList<StreamEntry> talk) =>
-        talk.Zip(talk.Skip(1))
-            .Where(p => p.First.Item is ChatMessage a && p.Second.Item is ChatMessage b && a.Role == b.Role
-                && p.First.At.ToLocalTime().Date == p.Second.At.ToLocalTime().Date)
-            .Select(p => p.First.Key)
-            .ToHashSet(StringComparer.Ordinal);
+    // Signs' pairs, on the entries with the runs of steps taken out.
+    static Dictionary<string, BubbleSign> Joined(IReadOnlyList<StreamEntry> talk)
+    {
+        var signs = ChatThread.SignsOf(talk.Select((entry, index) =>
+            (JoinsNext: index < talk.Count - 1 && Joins(entry, talk[index + 1]), entry.At)).ToArray());
+        return talk.Select((entry, index) => (entry.Key, Sign: signs[index]))
+            .Where(p => p.Sign != BubbleSign.Named)
+            .ToDictionary(p => p.Key, p => p.Sign, StringComparer.Ordinal);
+    }
+
+    // Two neighbouring entries are one run: both the session's messages, of one role, on the same day.
+    static bool Joins(StreamEntry entry, StreamEntry next) =>
+        entry.Item is ChatMessage a && next.Item is ChatMessage b && a.Role == b.Role
+        && entry.At.ToLocalTime().Date == next.At.ToLocalTime().Date;
 
     // Whether the drawn item and the new one say the same: a run by its steps (the list is a new object every snapshot), the
     // rest by value.
@@ -237,7 +247,7 @@ internal sealed class ChatStreamPanel : StackPanel
         else if (item is ChatMessage message)
         {
             // Drawn named, as every new message is; Apply signs it again if a run holds it.
-            slot.Names = true;
+            slot.Sign = BubbleSign.Named;
             var index = Children.IndexOf(slot.Element);
             var fresh = MessageOf(message);
             Created++;
