@@ -646,6 +646,13 @@ deployed`, or you use Mark deployed), other tasks whose pull request in the same
 reported deployed may be in that deploy as well. Deskbar writes a line in each one's thread and tells its Claude
 session at once, and the session checks whether its own change runs and reports it itself.
 
+Deskbar also watches the pull requests of tasks that have a Claude session, so the sessions need no watch loops of
+their own. Once a minute it asks GitHub (through `gh`) about every pull request in flight, and tells the task's session
+when the base branch moved, when the pull request conflicts, when it merged, and when the runs on its merge commit have
+finished. It tells the manager only when a run on a merge commit failed. These nudges leave no line in the task's
+thread. If `gh` is missing or signed out, Deskbar says so to the sessions after five minutes and they watch for
+themselves again.
+
 When the manager needs a decision from you, its question shows as a violet line at the top of the bar's task list and
 of the tasks panel, above every task's question. Click it to open the manager; your reply clears it.
 

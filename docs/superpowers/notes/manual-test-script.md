@@ -1834,3 +1834,11 @@ LH1. Open A's comments and keep moving the pointer over the panel. From a termin
 LH2. Reopen B (`deskbar.cmd task reopen <B>`), start Claude on it and tell its session to ask you something with `task ask`. While it works, open A's comments and keep touching the panel: when the question comes, B keeps its place with the question under its title. Leave the panel alone for one to two minutes: B moves to Waiting on you.
 LH3. Open A's comments, touch the panel, then `deskbar.cmd task add -` a note: it does not show yet. Type a note in the panel's **+ Add** box and press Enter: both notes show.
 LH4. With no comments open, run `deskbar.cmd task close <A>`: A's line leaves at once, as before.
+
+Deskbar watches the pull requests of tasks in flight ([Deskbar task c8e6967d](https://deskbar.app/task#c8e6967d), spec `docs/superpowers/specs/2026-11-27-repo-watcher-design.md`). A throwaway repository with `gh` signed in, a Claude task with a session and an open pull request on it, the trace on (`%APPDATA%\Deskbar\trace.on`).
+
+RW1. Merge another pull request into the base branch (or push to it) while yours is open: within about two minutes the task's session is nudged ("The base main of ... moved to ..."), rebases and pushes. No line is added to the task's thread.
+RW2. Make the pull request conflict with its base (change the same line on the base): the session is nudged once ("... conflicts with main"), and not again each minute until the base moves again.
+RW3. Merge the pull request: the session is nudged that it merged and that Deskbar follows the runs on its merge commit, and the session starts no loop of its own.
+RW4. Let the merge commit's runs finish green: the session is nudged with the runs' names and conclusions. Make one run fail instead (re-run on a repository whose workflow fails): the session is nudged with the run's link, and on a day the manager is open it is woken with a "Failed runs on merge commits" line.
+RW5. Sign `gh` out (`gh auth logout`) and wait six minutes: a new prompt in the task's session no longer says Deskbar watches its pull request, and the session watches for itself with its own Monitor. Sign in again: within about a minute of the next poll the prompt line says Deskbar watches again.

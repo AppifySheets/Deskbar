@@ -70,8 +70,16 @@ object.
   longer fast-forward it, and what lands is no longer the commit that was tested. So once
   a session has opened a pull request, it watches the pull request's base (main, or the branch of
   the pull request below it in a stack) until the pull request is merged or closed, and runs the
-  `refresh-pr` skill as soon as the base moves or GitHub says it conflicts. The watch is a Monitor
-  that polls every minute and stops by itself once the pull request is no longer open:
+  `refresh-pr` skill as soon as the base moves or GitHub says it conflicts.
+
+  **Deskbar does the watching when it can** (Deskbar task c8e6967d, spec
+  `docs/superpowers/specs/2026-11-27-repo-watcher-design.md`): once a minute it asks GitHub about every
+  pull request a task has in flight, and nudges the session when the base moves, the pull request
+  conflicts, it merges, or the runs on its merge commit finish. When the session's prompt line says
+  Deskbar watches its pull request, do not run the loop below: rebase and push when the nudge comes.
+  The Monitor below is the fallback, for a session whose prompt line does not say so (gh missing or
+  signed out, Deskbar not running, a pull request no task owns). It polls every minute and stops by
+  itself once the pull request is no longer open:
 
   ```bash
   pr=245; repo=AppifySheets/Deskbar; base=; head=; was=
