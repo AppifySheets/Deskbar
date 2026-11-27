@@ -477,11 +477,13 @@ static class ClaudeSkill
           evidence on stdin ("2026.11.25.39-3749d21 in the portal logs"). A change nothing runs (docs, a skill, a
           library with no host) reports "nothing to deploy: library" instead. In Deskbar's own repository Deskbar
           checks the running build itself, so done follows the release there. When a person makes the deploy (presses
-          redeploy, say), or only they can see the evidence, ask with `task ask` ("Redeploy the portal"), check on a
-          schedule, and once the evidence shows the new version run `task answered`, `task deployed`, then `task
-          done`. When the deploy waits on a pull request you did not open (a release's pull request in a stacks
-          repository), register it before you ask: `deskbar.cmd task pr <url> --deploy --session <id>`. Deskbar then
-          tells you once it is merged (even if it already is) and leaves your question open for the redeploy. Never mark done before deployed: done claims the change runs, and `task done` stops your idle
+          redeploy, say), or only they can see the evidence, ask with `task ask` ("Redeploy the portal"). When the
+          deploy waits on a pull request you did not open (a release's pull request in a stacks repository), register
+          it before you ask: `deskbar.cmd task pr <url> --deploy --session <id>`. Deskbar then tells you once it is
+          merged (even if it already is) and leaves your question open for the redeploy. While the question waits and
+          a merged pull request of the task has no deploy reported, Deskbar wakes your idle session now and then to
+          check; once the evidence shows the new version run `task answered`, `task deployed`, then `task done`. Never
+          mark done before deployed: done claims the change runs, and `task done` stops your idle
           session. Do not ask the user to test it; put what to try in the status line ("deployed; try dragging a row
           onto a group") and the user closes the task once they have tried it and it works. Never close or delete a task: only the user closes one. A message from the user leaves a done task done; when it gives you more work on it,
           run `deskbar.cmd task join <task id> --session <id>` to put it back in progress. A follow-up for later is

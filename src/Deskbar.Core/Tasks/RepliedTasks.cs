@@ -62,7 +62,7 @@ public static class RepliedTasks
     // When the question last began to stand: the ask (WaitingSince, or Raised in a file from before it), or a later restore
     // of a set-aside question, which keeps WaitingSince (for the pull request watch) and moves only Raised
     // (TaskBoard.Restored). So the reply that set a question aside never sets it aside a second time.
-    static DateTimeOffset AskedAt(TaskItem task) =>
+    internal static DateTimeOffset AskedAt(TaskItem task) =>
         task.WaitingSince.GetValueOrDefault(task.Raised) is var since && since > task.Raised ? since : task.Raised;
 
     /// <summary>

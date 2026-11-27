@@ -583,6 +583,26 @@ public sealed class TaskService(ITaskStore store, Func<DateTimeOffset> now, Func
     /// </summary>
     public IObservable<Guid> StalledNudges => stalledNudges;
 
+    // A QUESTION WAITING ON A DEPLOY IS CHECKED (task 6a4104c0, DeployWaits' header): the slot last nudged per task, and
+    // when this Deskbar's first poll ran (slots before it are not nudged, so a restart wakes nobody at once). In memory
+    // only: a restart forgets the slots, and the next one comes within two hours.
+    ImmutableDictionary<Guid, DateTimeOffset> deployChecked = ImmutableDictionary<Guid, DateTimeOffset>.Empty;
+    DateTimeOffset? firstPoll;
+    readonly Subject<Guid> deployChecks = new();
+
+    /// <summary>
+    /// The tasks waiting on the user for a deploy whose idle session is to be woken now to check it (DeployWaits), for the
+    /// app's CommentWaker to deliver quietly with SessionBriefing.DeployCheck.
+    /// </summary>
+    public IObservable<Guid> DeployChecks => deployChecks;
+
+    /// <summary>
+    /// Whether the task still waits on a deploy its session can check (DeployWaits.WaitsOnDeploy): asked again just
+    /// before delivery, so a check that waited behind another delivery is dropped once the question was answered.
+    /// </summary>
+    public bool StillWaitsOnDeployCheck(Guid id) =>
+        Board.Tasks.FirstOrDefault(t => t.Id == id) is { } task && DeployWaits.WaitsOnDeploy(task, arrivals, SelfChecked);
+
     // DESKBAR WATCHES THE PULL REQUESTS (Deskbar task c8e6967d, spec docs/superpowers/specs/2026-11-27-repo-watcher-design.md,
     // rules in RepoWatch). The watch's memory lives here, IN MEMORY ONLY and never saved: a restart starts from
     // RepoWatchState.Empty, so base heads are recorded again without a nudge, a merge in the middle of being followed is
@@ -751,6 +771,16 @@ public sealed class TaskService(ITaskStore store, Func<DateTimeOffset> now, Func
         // Announced after the board is saved, so the waker reads the task as it stands.
         step.Nudge.ToList().ForEach(stalledNudges.OnNext);
         toRegenerate.ToList().ForEach(regenerations.OnNext);
+        // Last, the waiting tasks whose question waits on a deploy (task 6a4104c0): their idle session is woken on
+        // DeployWaits' schedule to check whether it runs yet. Read from the board as saved above; changes nothing on it.
+        firstPoll ??= now();
+        var checks = DeployWaits.Step(step.Board, busy, arrivals, SelfChecked, now(), firstPoll.Value, deployChecked);
+        deployChecked = checks.Nudged;
+        checks.Nudge.ToList().ForEach(id =>
+        {
+            trace?.Invoke($"tasks: woke the session of {Line(step.Board, id)} to check the deploy its question waits on");
+            deployChecks.OnNext(id);
+        });
     }
 
     static string Line(TaskBoard board, Guid id) =>
