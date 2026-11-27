@@ -111,4 +111,16 @@ public class TaskImagesTests
     [InlineData("", 0, "")]
     public void TitleFor_names_a_task_of_pictures_alone(string text, int pictures, string title) =>
         Assert.Equal(title, TaskImages.TitleFor(text, pictures));
+
+    // Task a662f8c3: the stand-in title is "Picture" or "Pictures" with a picture to read; a typed title, or a "Picture"
+    // with no picture behind it, is left alone. Text added to the description later does not make the title a real one.
+    [Theory]
+    [InlineData("Picture", "![image](task-images/t/1.png)", true)]
+    [InlineData("Pictures", "![image](task-images/t/1.png)\n![image](task-images/t/2.png)", true)]
+    [InlineData("Picture", "the bar looks off\n\n![image](task-images/t/1.png)", true)]
+    [InlineData("Bar looks wrong", "![image](task-images/t/1.png)", false)]
+    [InlineData("Picture", "", false)]
+    [InlineData("Picture", "![image](C:/elsewhere/1.png)", false)]
+    public void HasStandInTitle_spots_a_task_named_after_its_pictures(string title, string description, bool standIn) =>
+        Assert.Equal(standIn, TaskImages.HasStandInTitle(title, description));
 }

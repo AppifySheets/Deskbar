@@ -582,7 +582,17 @@ public static class SessionBriefing
         : t.StatusLine.Length > 0 ? $", status line: \"{Cut(t.StatusLine)}\""
         : "")
         + (TaskImages.Split(t.Description).Text is { Length: > 0 } text ? $", the user's description: \"{Cut(text, DescriptionLength)}\"" : "")
-        + (expand is null ? "" : Images(t.Description, expand));
+        + (expand is null ? "" : Images(t.Description, expand) + StandInTitle(t));
+
+    // Task a662f8c3 (Petre: "when a task is just a picture, give it a title yourself"). A task made of a pasted picture
+    // alone is titled "Picture" (TaskImages.TitleFor), which tells nobody what the work is. Only the session's OWN task
+    // gets this (it follows `expand`, like Images): the session is about to read the picture anyway, so naming the work
+    // costs it one command. The line comes with every prompt until the rename lands, then stops by itself, because the
+    // title is no longer the stand-in.
+    static string StandInTitle(TaskItem t) =>
+        TaskImages.HasStandInTitle(t.Title, t.Description)
+            ? $"; its title is only the stand-in for pictures pasted with no words typed, so once you have read them, name the work in a few words with {Shim} task rename {t.Id.ToString()[..8]} - (the title on stdin)"
+            : "";
 
     // Images in tasks (docs/superpowers/specs/2026-11-24-task-images-design.md): the description's pictures, each path made
     // absolute by `expand` (TaskService.ExpandImages) and given whole, with what to do with them. "Any you have not looked

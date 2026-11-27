@@ -66,6 +66,16 @@ public static class TaskImages
     public static string TitleFor(string text, int pictures) =>
         !string.IsNullOrWhiteSpace(text) || pictures == 0 ? text ?? "" : pictures == 1 ? "Picture" : "Pictures";
 
+    /// <summary>
+    /// Whether a task's title is still the stand-in <see cref="TitleFor"/> gave a task of pictures alone: "Picture" or
+    /// "Pictures", with at least one picture in the description to say what the work is. Task a662f8c3 (Petre: "when a
+    /// task is just a picture, give it a title yourself"): the Claude session on such a task reads the picture and names
+    /// the work, because "Picture" says nothing in the bar or in `task list` once there are two of them. Text added to
+    /// the description later does not change the answer: the title is still the stand-in, and the session can use both.
+    /// </summary>
+    public static bool HasStandInTitle(string title, string description) =>
+        title.Trim() is "Picture" or "Pictures" && Split(description).Images.Count > 0;
+
     /// <summary>Whether a relative path is one of Deskbar's own task images (see the header for why so narrow).</summary>
     public static bool IsOurs(string relative) =>
         OurPath.IsMatch(relative ?? "") && relative!.Split('/').All(segment => segment is not ("." or ".."));

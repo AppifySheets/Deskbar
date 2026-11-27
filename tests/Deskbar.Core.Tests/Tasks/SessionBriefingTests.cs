@@ -364,4 +364,19 @@ public sealed class SessionBriefingTests
         Assert.DoesNotContain("the user's description", text);
         Assert.Contains(@"images in the description: C:\S\task-images\t\1.png; read any you have not looked at yet with your Read tool", text);
     }
+
+    // Task a662f8c3: a task of a picture alone is titled "Picture", and its own session is asked to name the work, in the
+    // start briefing and in the line every prompt carries. An offered task is not the session's to rename, and once the
+    // title is a real one the ask stops.
+    [Fact]
+    public void A_picture_task_asks_its_own_session_for_a_title()
+    {
+        var own = Task("Picture") with { Description = "![image](task-images/t/1.png)" };
+        var ask = $"so once you have read them, name the work in a few words with deskbar.cmd task rename {own.Id.ToString()[..8]} - (the title on stdin)";
+
+        Assert.Contains(ask, SessionBriefing.Start(Start(), own, [], Absolute));
+        Assert.Contains(ask, SessionBriefing.Prompt(Sid, own, Maybe<TaskItem>.None, Absolute));
+        Assert.DoesNotContain("stand-in", SessionBriefing.Start(Start(), Maybe<TaskItem>.None, [own], Absolute));
+        Assert.DoesNotContain("stand-in", SessionBriefing.Prompt(Sid, own with { Title = "Bar clips the clock" }, Maybe<TaskItem>.None, Absolute));
+    }
 }
