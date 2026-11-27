@@ -14,6 +14,8 @@ Accepting downloads the new exe next to the one you are running, never over it, 
 
 **Check for updates…** on the tray and bar menus asks immediately and always answers: you are on the latest, a newer one exists, the download is still being built, or the check failed and here is the releases page.
 
+A test build, one you or a Claude session built from the source rather than a release, never updates: its version comes from the git history and sits above every release's. It says so in the tray icon's tooltip and at the top of the tray and bar menus ("Test build 2.6.208 (add-box-skills), gets no updates", the name in brackets being the git worktree it was built in). Under that line, **Restart into Deskbar …** starts the newest release found in the folder "Start with Windows" points at, or in `%LOCALAPPDATA%\Programs\Deskbar`, and that copy then updates as usual. **Check for updates…** in a test build offers the same restart, or the releases page when no release is installed.
+
 The Microsoft Store copy does not use GitHub for any of this. It asks the Store on the same timer, from the same menu items and under the same checkbox in Manage. Its offer window has one action button, **Update from the Store**, which has the Store install the update. Deskbar closes to update and comes back by itself.
 
 Deskbar asks in its own window rather than with a Windows notification because a portable exe with no Start menu shortcut has no AppUserModelID, and Windows silently drops its toasts. Registering one would cost the "one file, nothing installed" property.

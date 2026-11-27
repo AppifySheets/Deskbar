@@ -1793,3 +1793,10 @@ RT7. Rename the task's folder, then Wake now: the task asks once, and no further
 RT8. Put the folder back, then run `deskbar.cmd task repeat <id> off` between runs: the task becomes Done, and closing it ends the job. Run `deskbar.cmd task repeat <id> off` on a task that is mid-run: only the schedule goes, the run finishes.
 RT9. Set Custom… to `daily HH:MM` two minutes ahead: it runs at that time without a window.
 RT10. Close the task, wait past a due time, reopen it: nothing ran while it was closed, and the next run counts from the reopening.
+
+Test builds (Deskbar task 7dd83c89, https://deskbar.app/task#7dd83c89-2f70-4852-bbed-86d356d4472f):
+
+TB1. Start a Debug build from a worktree (with `DESKBAR_APPDATA` set to a scratch folder): the tray tooltip reads "Deskbar Test build <version> (<worktree>)", and the tray menu and the bar's background menu both start with a greyed "Test build <version> (<worktree>), gets no updates" line.
+TB2. With a `Deskbar-<x.y.z>-win-x64.exe` in `%LOCALAPPDATA%\Programs\Deskbar`, the line under it is "Restart into Deskbar <x.y.z>": clicking it starts that release, which takes over the bar against the REAL profile (no scratch `DESKBAR_APPDATA` carried over) and, from Process Explorer, with its own folder as its working directory. Do this one only when Petre has asked to go back to his release.
+TB3. Check for updates… in a test build asks to restart into the installed release instead of saying it is the latest version. With no release installed, the line under the marking is missing and Check for updates… offers the releases page.
+TB4. A release (single-file exe) and the Store copy show no test-build line and their usual tooltip.
