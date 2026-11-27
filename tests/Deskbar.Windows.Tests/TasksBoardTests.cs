@@ -98,7 +98,8 @@ public partial class TasksBoardTests
         string? stateDir = null, Action<string>? openImage = null, Func<Result>? openManager = null, Action<Uri>? openUri = null,
         Func<TaskItem, Action<string>, ContextMenu?>? pickFolder = null, Func<Guid, Result>? runNow = null,
         Func<string, Maybe<string>>? askRepeat = null, Func<string, bool>? folderExists = null,
-        Func<TaskSession, Maybe<string>>? transcriptOf = null)
+        Func<TaskSession, Maybe<string>>? transcriptOf = null,
+        Func<Guid, Task<IReadOnlyList<SkillChoice>>>? taskSkills = null)
     {
         var harness = Harness.Build();
         var minutes = 0;
@@ -129,7 +130,8 @@ public partial class TasksBoardTests
             return activates?.Invoke() ?? true;
         }, undoTimer: timers.Start, now: () => Start.AddHours(1), selection: selection,
             sessionsOf: sessionsOf, startClaude: startClaude, openSession: openSession, sessionsChanged: sessionsChanged,
-            workingOf: workingOf, pickFolder: pickFolder, runNow: runNow, transcriptOf: transcriptOf)
+            workingOf: workingOf, pickFolder: pickFolder, runNow: runNow, transcriptOf: transcriptOf,
+            taskSkills: taskSkills)
         {
             // The manager line's click (task 61e4d143); none by default, so no manager line is drawn.
             OpenManager = openManager,
@@ -1998,6 +2000,37 @@ public partial class TasksBoardTests
         t.Window.UpdateLayout();
         Assert.Equal("Merged", StatusWordOf(LineOf(t.Window, here)));
         Assert.False(Offered(here));
+    });
+
+    // "/" IN A COMMENT BOX (Deskbar task 9a06cb76, Petre on 2.6.67: '"/ " failed in comments section of the task'; his
+    // trace showed no skill probe at all). Typed as the keyboard types it: the key, then the text, into the focused box.
+    [Fact]
+    public void A_slash_typed_in_a_comment_box_asks_for_the_tasks_skills_and_lists_them() => StaThread.Run(() =>
+    {
+        var asked = new List<Guid>();
+        using var t = Build(taskSkills: id =>
+        {
+            asked.Add(id);
+            return Task.FromResult<IReadOnlyList<SkillChoice>>([new SkillChoice("refresh-pr", [@"C:\repos\TaskSpaces"])]);
+        });
+        var id = t.Tasks.Create("comment skills", t.Gepha, Session("s1")).Value.Id;
+        t.Controller.Show();
+        t.Controller.ToggleThread(id);
+        t.Window.Activate();
+        t.Window.UpdateLayout();
+        var box = t.Window.CommentBoxOf(id)!;
+        box.Focus();
+        Assert.True(box.IsKeyboardFocused, "the comment box has no keyboard focus");
+
+        var source = PresentationSource.FromVisual(box)!;
+        box.RaiseEvent(new KeyEventArgs(Keyboard.PrimaryDevice, source, 0, Key.OemQuestion) { RoutedEvent = Keyboard.PreviewKeyDownEvent });
+        TextCompositionManager.StartComposition(new TextComposition(InputManager.Current, box, "/"));
+        t.Window.Dispatcher.Invoke(() => { }, System.Windows.Threading.DispatcherPriority.Background);
+
+        Assert.Equal("/", box.Text);
+        Assert.True(t.Window.CommentSkillsOf(id) is { IsOpen: true }, "the list did not open");
+        Assert.Equal([id], asked);
+        Assert.Equal(["refresh-pr"], t.Window.CommentSkillsOf(id)!.Shown);
     });
 
     // Petre's screenshot: the placeholder "Comment as you, in markdow…" was cut off and the box squeezed. A short

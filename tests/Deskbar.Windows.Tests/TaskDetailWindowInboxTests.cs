@@ -44,7 +44,7 @@ public partial class TaskDetailWindowInboxTests
         }
     }
 
-    static Rig Build(bool inbox = true)
+    static Rig Build(bool inbox = true, Func<Guid, Task<IReadOnlyList<SkillChoice>>>? taskSkills = null)
     {
         var harness = Harness.Build();
         var minutes = 0;
@@ -58,7 +58,8 @@ public partial class TaskDetailWindowInboxTests
         var brought = new List<nint>();
         var opened = new List<Uri>();
         var seconds = 0;
-        var board = new TasksBoard(panel, rig.Panel, tasks, harness.Manager, _ => Result.Success(), now: () => Start.AddHours(1))
+        var board = new TasksBoard(panel, rig.Panel, tasks, harness.Manager, _ => Result.Success(), now: () => Start.AddHours(1),
+            taskSkills: taskSkills)
         {
             // A scratch picture folder, a click on a picture recorded rather than opening a viewer, and a click a second
             // after the last one, so the click guard (a click right after a redraw is dropped) lets it by.
@@ -149,6 +150,39 @@ public partial class TaskDetailWindowInboxTests
             window.Close();
             renderer.CloseForGood();
         }
+    });
+
+    // "/" IN THE COMMENT BOX OF A TASK'S PAGE (Deskbar task 9a06cb76, Petre on 2.6.67: '"/ " failed in comments section
+    // of the task'; his trace showed no skill probe at all, and it worked once tried on a task with a session). Typed as
+    // the keyboard types it, in a task's own window. The panel's thread has its own test in TasksBoardTests.
+    [Fact]
+    public void A_slash_typed_in_a_pages_comment_box_lists_the_tasks_skills() => StaThread.Run(() =>
+    {
+        var asked = new List<Guid>();
+        using var t = Build(taskSkills: id =>
+        {
+            asked.Add(id);
+            return Task.FromResult<IReadOnlyList<SkillChoice>>([new SkillChoice("refresh-pr", [@"C:\repos\TaskSpaces"])]);
+        });
+        var id = t.Tasks.Create("comment skills", t.Sparrow, Session("s1")).Value.Id;
+        Assert.True(t.Board.OpenWindow(id).IsSuccess);
+        var host = t.Board.WindowOf(id)!;
+        var page = host.PageRenderer!;
+        host.Activate();
+        host.UpdateLayout();
+        var box = page.CommentBoxOf(id)!;
+        box.Focus();
+        Assert.True(box.IsKeyboardFocused, "the comment box has no keyboard focus");
+
+        var source = PresentationSource.FromVisual(box)!;
+        box.RaiseEvent(new KeyEventArgs(Keyboard.PrimaryDevice, source, 0, Key.OemQuestion) { RoutedEvent = Keyboard.PreviewKeyDownEvent });
+        TextCompositionManager.StartComposition(new TextComposition(InputManager.Current, box, "/"));
+        box.Dispatcher.Invoke(() => { }, System.Windows.Threading.DispatcherPriority.Background);
+
+        Assert.Equal("/", box.Text);
+        Assert.True(page.CommentSkillsOf(id) is { IsOpen: true }, "the list did not open");
+        Assert.Equal([id], asked);
+        Assert.Equal(["refresh-pr"], page.CommentSkillsOf(id)!.Shown);
     });
 
     static Visibility HeaderOf(TaskDetailWindow window) => ((FrameworkElement)window.FindName("Header")).Visibility;
