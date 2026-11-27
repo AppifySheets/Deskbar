@@ -120,6 +120,42 @@ public static class ManagerSession
         "Run the overview once. Tell me only what the bar does not show: sessions that collide or duplicate each other, "
         + "work stuck on something else, one decision blocking several tasks. One line if there is none.";
 
+    // "CURRENT TASK" IS THE TASK OPEN IN THE INBOX (task fcdf47f1; the user: "current is the task open in the inbox").
+    // The user writes to the manager about "the current task" while one task's page is open in the Inbox, and the manager
+    // had no way to see which: `task overview` and `task show` say nothing about the panel. So the manager's prompt hook
+    // (RemoteControl.ManagerPrompted) adds this one line to the user's message, naming the task whose Inbox page was open
+    // AS THE MESSAGE WAS SENT. Fixed at that moment on purpose: the user may open another task before the manager's turn
+    // gets to it, and the message was written about the one they were looking at. A verb the manager would call later
+    // would read the page open then, which is the wrong one in exactly that case.
+    //
+    // Nothing is added when no page is open (the list, another view, the panel closed), and the briefing tells the manager
+    // that no line means no task was open, so it asks rather than guesses. The line carries its own meaning too, so a
+    // manager still running on yesterday's briefing (it is rewritten only at a start or a resume) reads it right.
+    public const string OpenTaskOpening = "Deskbar: the task open in the user's Inbox as they sent this is";
+
+    /// <summary>
+    /// The line the manager's prompt hook adds to the user's message, naming the task open in the Inbox (see above), or
+    /// nothing: no task open, or a prompt that is not the user's message (a Deskbar wake, or the first message Deskbar
+    /// starts the manager with).
+    /// </summary>
+    public static Maybe<string> OpenTaskLine(Maybe<string> prompt, Maybe<TaskItem> open) =>
+        IsUsersMessage(prompt.GetValueOrDefault(""))
+            ? open.Map(task => $"{OpenTaskOpening} {task.Id.ToString()[..8]} \"{OneLine(task.Title, 80)}\". "
+                               + "\"Current task\", \"this task\" or \"the open task\" in the message means this one.")
+            : Maybe<string>.None;
+
+    // The user's own message, not one Deskbar typed: a wake carries the wake prefix (looked for anywhere, as
+    // ManagerQuestion.AfterPrompt does), and a fresh manager's first turn is FirstMessage itself.
+    static bool IsUsersMessage(string prompt) =>
+        !prompt.Contains(ManagerWakes.Prefix, StringComparison.Ordinal) && prompt.Trim() != FirstMessage;
+
+    // A title as one line of at most `limit` characters, so a pasted paragraph cannot blow up the user's message. The cut
+    // steps back one when it would split an emoji's surrogate pair, which would otherwise print as a replacement mark.
+    static string OneLine(string text, int limit) =>
+        text.ReplaceLineEndings(" ").Trim() is var line && line.Length > limit
+            ? line[..(char.IsHighSurrogate(line[limit - 2]) ? limit - 2 : limit - 1)].TrimEnd() + "…"
+            : line;
+
     // The manager lives in its own folder under the state directory (so DESKBAR_APPDATA moves it too), which keeps its
     // cwd out of every repo and lets its sessions be told apart from the user's by folder alone.
     public static string FolderIn(string stateDir) => Path.Combine(stateDir, FolderName);
@@ -236,8 +272,10 @@ public static class ManagerSession
         // window title on the user's screens. The window it opens shows the reference, so the manager does not wait on it.
         $"When the user asks you to report a problem with Deskbar itself to its developers: {shim} report - with what happened",
         "  on stdin, in the user's words, then what you saw. It sends at once with a debug dump; a window on their screen shows the result.",
-        "Do not take a task of your own: never join one.",
-        "Never use Monitor, loop, scheduled wakeups, subagents, file reading or transcript reading.",
+        // Task fcdf47f1: the two lines below were one pair before, joined to make room for the "current task" line under
+        // the 40 line cap. The user's message carries OpenTaskLine when a task's page was open in the Inbox.
+        "Do not take a task of your own: never join one. Never use Monitor, loop, scheduled wakeups, subagents, file reading or transcript reading.",
+        $"\"Current task\", \"this task\", \"the open task\" mean the one named after \"{OpenTaskOpening}\"; with no such line none was open: ask which.",
         "You act when the user messages you, or when a message starts with \"Deskbar wake.\" (event wakes, ManagerWakes).",
         "On a Deskbar wake:",
         $"- Each handed-back task not marked AGAIN: one comment ({shim} task comment <id> -) to wake its session.",

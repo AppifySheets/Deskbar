@@ -666,6 +666,10 @@ When the manager answers a message of yours while its window is not in front, th
 answered" with the first line of the answer, in the bar's task list and at the top of the Inbox. Opening the manager,
 bringing its window forward or writing to it again clears it. Its replies to Deskbar's own wakes leave no line.
 
+"The current task", "this task" or "the open task" in a message to the manager means the task whose page is open in
+the Inbox as you send it: Deskbar adds a line naming that task to your message. With the panel closed or showing a list,
+no task is named, and the manager asks which one you mean.
+
 The manager starts with Claude Code's Remote Control on, so it shows up as "Deskbar manager" in the Claude app on your
 phone and you can talk to it from there, with the keyboard's microphone if you like. It is the only one: the sessions
 Deskbar starts on tasks keep Remote Control off, whatever your Claude Code settings say, so the phone's list is not
