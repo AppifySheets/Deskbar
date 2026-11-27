@@ -678,6 +678,50 @@ public partial class TasksBoardTests
         Assert.Null(t.Window.InboxPageShown);
     });
 
+    // A terminal window coming to the front with no page open (the owner: "let's highlight those inbox issues when
+    // selecting claude session / terminal windows, as it's done with the list"): its task's line is lit and scrolled into
+    // view, the tab that holds it coming on show first; a tab that holds it already (All too) stays.
+    [Fact]
+    public void A_terminal_in_front_lights_its_tasks_line_in_the_tab_that_holds_it() => StaThread.Run(() =>
+    {
+        var selection = new TaskSelection();
+        using var t = Build(selection: selection, workingOf: _ => 1);
+        var many = Enumerable.Range(0, 30).Select(i => t.Tasks.Create($"Session {i}", t.Gepha, Session($"m{i}")).Value.Id).ToArray();
+        var note = t.Tasks.AddNote("Book the dentist", t.Gepha).Value.Id;
+        t.Controller.Show();
+        ChooseInbox(t);
+        t.Window.UpdateLayout();
+        var scroller = (ScrollViewer)t.Window.Rows.Parent;
+        scroller.SetValue(FrameworkElement.HeightProperty, 300.0);
+        t.Window.UpdateLayout();
+        Assert.Equal(InboxTab.NeedsYou, t.Window.InboxTabShown);
+
+        // The last line of the Claude tab, far below the fold.
+        var claudes = t.Window.InboxShown!.In(InboxTab.Claude).Select(l => l.Id).ToArray();
+        Assert.Equal(many.Order(), claudes.Order());
+        var id = claudes[^1];
+        selection.Select(id);
+        t.Controller.Reveal();
+        t.Window.UpdateLayout();
+
+        Assert.Equal(InboxTab.Claude, t.Window.InboxTabShown);
+        Assert.Null(t.Window.InboxPageShown);
+        var line = t.Window.InboxLineButton(id)!;
+        Assert.Same(InboxLook.Raised, line.Background);
+        var top = line.TranslatePoint(new Point(0, 0), scroller).Y;
+        Assert.InRange(top, -0.5, scroller.ViewportHeight - line.ActualHeight + 0.5);
+
+        // A tab that holds the line already stays: Claude for another session, All for the note.
+        selection.Select(claudes[0]);
+        t.Controller.Reveal();
+        Assert.Equal(InboxTab.Claude, t.Window.InboxTabShown);
+        t.Window.ChooseInboxTab(InboxTab.All);
+        selection.Select(note);
+        t.Controller.Reveal();
+        Assert.Equal(InboxTab.All, t.Window.InboxTabShown);
+        Assert.Same(InboxLook.Raised, t.Window.InboxLineButton(note)!.Background);
+    });
+
     // A subtask in the page opens a page of its own; back returns to its parent's page.
     [Fact]
     public void A_subtask_opens_its_page_and_back_returns_to_the_parent() => StaThread.Run(() =>

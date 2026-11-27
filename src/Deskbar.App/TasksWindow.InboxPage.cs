@@ -148,13 +148,16 @@ public partial class TasksWindow
     /// <summary>
     /// A selection from outside the panel's lines (ScrollToSelected and RevealSelected call this): while the Inbox shows it
     /// answers for them. <paramref name="open"/>: an explicit "show this task" (a click on the bar, a Stats line, a task
-    /// link, Open parent: TasksBoard.ShowTask), which switches to the task's tab and opens its page. Without it (a terminal
-    /// window coming to the front, the panel opening) the line is brought into view only if it is in the tab on show, and
-    /// the tab and the page stay as they are.
+    /// link, Open parent: TasksBoard.ShowTask), which switches to the task's tab and opens its page. Without it
+    /// (RevealSelected: a Claude task's terminal window coming to the front) the task's line is lit and brought into view,
+    /// switching to the tab that holds it when need be, and an open page stays as it is (see TERMINAL IN FRONT below).
+    /// The panel opening (ScrollToSelected with no thread open) brings the line into view only if it is in the tab on show.
     /// </summary>
     bool InboxFollowsSelection(bool open)
     {
         if (latest?.Inbox is not { } inbox) return false;
+        // RevealSelected is the one caller that asks with open false: a terminal in front (TasksBoard.Reveal).
+        var terminalInFront = !open;
         // A task just added from the panel (InboxGlow) is no explicit "show": its line is already brought into view.
         var justAdded = inboxJustAdded;
         inboxJustAdded = null;
@@ -179,8 +182,48 @@ public partial class TasksWindow
             RedrawInbox();
             return true;
         }
-        if (inboxPage is null && inboxLines.TryGetValue(id, out var line)) line.Line.BringIntoView();
+        // TERMINAL IN FRONT (the owner: "let's highlight those inbox issues when selecting claude session / terminal
+        // windows, as it's done with the list"). The List lights the task's line (PaintSelection, already done by the
+        // selection's change) and brings it into view as little as it takes (RevealSelected). In the Inbox the line is
+        // often not drawn at all: it sits in another tab than the one on show (a session's task is in Claude while the user
+        // reads Needs you), so lighting it alone showed nothing. So the tab that holds it comes on show first, chosen by
+        // InboxView.TabToShow: the tab on show stays while it holds the line, All included (All holds every line), else the
+        // line's own tab. The line's own tab rather than All, because it is the switch a click on the bar makes
+        // (ShowTask), so the two ways of picking a task from outside land in the same place, and the tab says what state the
+        // task is in. The redraw that switches paints the selection on the new lines (DrawInbox's PaintInboxSelection).
+        // NOT WITH A PAGE OPEN, mirroring the List: there a terminal in front moves the selection frame and never folds or
+        // replaces an open thread, and a page is the Inbox's open thread (the PM's ruling, see the header), so the page and
+        // the tab under it stay. NOT FOR A TASK THE INBOX HAS NO LINE FOR (a filter or the search hides it): the List moves
+        // nothing then either. Under a search the tabs do not apply and the one list is already on show.
+        if (inboxPage is not null) return true;
+        if (terminalInFront && inbox.Tabbed && inbox.TabToShow(id, inboxTab) is { HasValue: true } holder && holder.Value != inboxTab)
+        {
+            inboxTab = holder.Value;
+            // Brought into view once its line is drawn: a redraw held by a press in flight (MustWait) draws it later.
+            inboxRevealPending = id;
+            RedrawInbox();
+            ApplyInboxReveal();
+            return true;
+        }
+        if (inboxLines.TryGetValue(id, out var line)) line.Line.BringIntoView();
         return true;
+    }
+
+    // The line a terminal in front switched tabs for, brought into view once it is drawn (DrawInbox calls this too).
+    Guid? inboxRevealPending;
+
+    // Dropped unshown once the selection has moved to another task: a later draw must not scroll to a line nobody asked for.
+    void ApplyInboxReveal()
+    {
+        if (inboxRevealPending is not { } id) return;
+        if (!Picked(id))
+        {
+            inboxRevealPending = null;
+            return;
+        }
+        if (!inboxLines.TryGetValue(id, out var line)) return;
+        inboxRevealPending = null;
+        line.Line.BringIntoView();
     }
 
     // A SUBTASK ADDED FROM A PAGE'S THREAD (the tester's L1). The board does what it does for the List: the thread the box

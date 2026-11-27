@@ -607,4 +607,24 @@ public partial class FloatingBarTaskListTests
         Assert.Equal(TextTrimming.CharacterEllipsis, name.TextTrimming);
         Assert.True(name.TranslatePoint(new Point(name.ActualWidth, 0), line).X <= line.ActualWidth + 0.5);
     });
+
+    // A Claude terminal brought to the front selects its task (#477); in the Inbox look, as in the old one, the task's line
+    // is lit and a line out of sight is scrolled into view (the owner: "highlight those inbox issues when selecting claude
+    // session / terminal windows, as it's done with the list").
+    [Fact]
+    public void In_the_inbox_look_a_line_selected_from_elsewhere_is_lit_and_scrolled_into_view() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        Enumerable.Range(1, 10).ToList().ForEach(i => t.Tasks.AddNote($"Note {i}", Maybe<Guid>.None));
+        InboxLook(t);
+        t.Bar.UpdateLayout();
+        var far = t.Tasks.Board.Pile().Single(x => x.Title == "Note 1").Id;
+        Assert.DoesNotContain(t.Lines, l => ((TaskLine)l.Tag).Id == far);
+
+        t.Bar.Selection.Select(far);
+        t.Bar.UpdateLayout();
+
+        Assert.True(t.Bar.TaskLineSelected(far));
+        Assert.Contains(t.Lines, l => ((TaskLine)l.Tag).Id == far);
+    });
 }
