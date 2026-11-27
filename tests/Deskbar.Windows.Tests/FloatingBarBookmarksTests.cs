@@ -843,6 +843,29 @@ public sealed class BookmarkIconsTests : IDisposable
         Assert.True(image.IsFrozen);
     });
 
+    // "github too dim" (task 99d92467): a black favicon comes out of Decode drawn near-white, opacity untouched, so the
+    // chip shows on the dark row. DarkArtworkTests in Core cover which favicons count as dark.
+    [Fact]
+    public void A_black_favicon_decodes_drawn_light() => StaThread.Run(() =>
+    {
+        var black = Enumerable.Range(0, 32 * 32).SelectMany(_ => new byte[] { 0x17, 0x17, 0x18, 0xFF }).ToArray();
+        var bitmap = BitmapSource.Create(32, 32, 96, 96, PixelFormats.Pbgra32, null, black, 32 * 4);
+        var encoder = new PngBitmapEncoder();
+        encoder.Frames.Add(BitmapFrame.Create(bitmap));
+        using var stream = new MemoryStream();
+        encoder.Save(stream);
+
+        var image = (BitmapSource)BookmarkIcons.Decode(stream.ToArray()).Value;
+        var pixels = new byte[32 * 32 * 4];
+        image.CopyPixels(pixels, 32 * 4, 0);
+
+        Assert.All(Enumerable.Range(0, 32 * 32), i =>
+        {
+            Assert.InRange(pixels[i * 4 + 2], (byte)0xD0, (byte)0xF0);
+            Assert.Equal(0xFF, pixels[i * 4 + 3]);
+        });
+    });
+
     // --- I1 of the Task 8 review: an app's icon is asked off the UI thread, and a miss waits ----------------------------
 
     static readonly Bookmark Calc = new(Guid.NewGuid(), "Calc", BookmarkKind.App, "Calc!App");

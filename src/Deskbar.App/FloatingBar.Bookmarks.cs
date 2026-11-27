@@ -97,8 +97,9 @@ public partial class FloatingBar
     // Frozen, as every static brush on this bar must be (CLAUDE.md, "Static WPF brushes must be frozen").
     static readonly Brush ChipOutline = Frozen(0x80, 0xFF, 0xFF, 0xFF);
     static readonly Brush ChipLinkDot = Frozen(0xC0, 0xFF, 0xFF, 0xFF);
-    // A faint lift, enough that a black favicon reads as lit on the dark row. At 0x90 it was a white tile, and Petre:
-    // "white background of github looks bad".
+    // A faint lift, enough that an opened chip reads as lit on the dark row. At 0x90 it was a white tile, and Petre:
+    // "white background of github looks bad". (GitHub's black favicon is drawn near-white since, see DarkArtwork, but
+    // the lift stays: it is what tells opened from resting for every chip.)
     static readonly Brush ChipOpenBacking = Frozen(0x38, 0xFF, 0xFF, 0xFF);
     // Bright and solid, so it reads as a bar between the windows and the chips. At 0x55 it was lost beside the dashed
     // outline 2 DIP away: Petre, on the first live try, "vertical bar between them, please".
@@ -128,7 +129,9 @@ public partial class FloatingBar
         var face = new Grid { Width = size, Height = size, Opacity = resting, IsHitTestVisible = false };
         // An open chip sits on a light rounded backing, a small lit tile. Full strength alone was not enough: the GitHub
         // favicon is black, and on the dark row it looked the same opened as at rest (Petre: "github is started vs
-        // isn't, i think it needs something"; he picked the backing, option A). Drawn first, under the picture.
+        // isn't, i think it needs something"; he picked the backing, option A). Drawn first, under the picture. A later
+        // round ("github too dim", task 99d92467) found the resting chip invisible too, and dark colourless favicons are
+        // now drawn near-white at decode (DarkArtwork); the backing still marks the opened state.
         //
         // In the bookmark's OWN colour when it has one (Petre: "let's make it the color i set"): a 0x60 tint of it, enough
         // to read as that colour, not a solid block that would bury the icon. Without one, the faint white lift. The
@@ -610,7 +613,12 @@ sealed class BookmarkIcons
             var stride = frame.PixelWidth * 4;
             var pixels = new byte[stride * frame.PixelHeight];
             converted.CopyPixels(pixels, stride, 0);
-            var image = BitmapSource.Create(frame.PixelWidth, frame.PixelHeight, 96, 96, PixelFormats.Pbgra32, null, pixels, stride);
+            // A black favicon (GitHub's octocat) is drawn near-white, or it cannot be seen on the dark row at all
+            // (DarkArtwork, task 99d92467). Any other favicon comes back as the same array, untouched. Done here, at
+            // the one place a favicon becomes pixels, so the memory cache, the store's reload and the ordinal band's
+            // fingerprint all see the same lit picture.
+            var drawn = DarkArtwork.Legible(pixels);
+            var image = BitmapSource.Create(frame.PixelWidth, frame.PixelHeight, 96, 96, PixelFormats.Pbgra32, null, drawn, stride);
             image.Freeze();
             return image;
         }
