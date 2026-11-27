@@ -418,22 +418,36 @@ internal static class MarkdownBlocks
         element.MouseLeftButtonDown += (_, e) =>
         {
             e.Handled = true;
+            // A double-click's second press is the same copy again: taken, so it selects nothing, but not repeated.
+            if (e.ClickCount > 1) return;
             copy(text);
             Flash(element);
         };
     }
 
+    // A press during a flash (a double-click's second press) only restarts the running flash: saving the background
+    // then would save the green, and the flash would put the green back for good.
+    static readonly System.Runtime.CompilerServices.ConditionalWeakTable<TextElement, System.Windows.Threading.DispatcherTimer> Flashing = new();
+
     static void Flash(TextElement element)
     {
+        if (Flashing.TryGetValue(element, out var running))
+        {
+            running.Stop();
+            running.Start();
+            return;
+        }
         var before = element.ReadLocalValue(TextElement.BackgroundProperty);
         element.Background = CopiedFill;
         var timer = new System.Windows.Threading.DispatcherTimer { Interval = CopiedFlash };
         timer.Tick += (_, _) =>
         {
             timer.Stop();
+            Flashing.Remove(element);
             if (before == DependencyProperty.UnsetValue) element.ClearValue(TextElement.BackgroundProperty);
             else element.SetValue(TextElement.BackgroundProperty, before);
         };
+        Flashing.Add(element, timer);
         timer.Start();
     }
 
