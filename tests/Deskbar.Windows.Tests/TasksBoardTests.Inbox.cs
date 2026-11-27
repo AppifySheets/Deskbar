@@ -533,6 +533,33 @@ public partial class TasksBoardTests
         Assert.All(row.Children.OfType<Button>(), b => Assert.Equal(Visibility.Visible, b.Visibility));
     });
 
+    // Task 57191c84 ("these should be buttons, as with the list"): on a page the thread's row is the Inbox list's icon
+    // buttons, not the List look's words. Each keeps its words as its name and at the start of its tooltip, and draws
+    // no text of its own.
+    [Fact]
+    public void The_pages_thread_row_is_icon_buttons_not_words() => StaThread.Run(() =>
+    {
+        using var t = Build(sessionsOf: task => task.Sessions.Select(s => new SessionView(s.Id, s.Joined, SessionState.Idle)).ToArray());
+        var k = InboxTasks(t);
+        t.Controller.Show();
+        ChooseInbox(t);
+        t.Window.ChooseInboxTab(InboxTab.Claude);
+
+        Click(LineOf(t.Window, k.Idle));
+        var row = Inside(t.Window.InboxPageContent!).OfType<WrapPanel>().Single(p => Equals(p.Tag, TasksWindow.ThreadActionsTag));
+        var buttons = row.Children.OfType<Button>().ToArray();
+        Assert.Contains(TasksWindow.OpenInWindowText, buttons.Select(AutomationProperties.GetName));
+        Assert.Contains(TasksWindow.OpenClaudeText, buttons.Select(AutomationProperties.GetName));
+        Assert.All(buttons, b =>
+        {
+            Assert.Empty(Inside(b).OfType<TextBlock>());
+            Assert.StartsWith(AutomationProperties.GetName(b), Assert.IsType<string>(b.ToolTip));
+            // A square, as on the list's line.
+            var face = Assert.IsType<Border>(b.Content);
+            Assert.Equal(face.Width, face.Height);
+        });
+    });
+
     // A finished task's page ends with Close task (six seconds of Undo, back on the list) and Not done yet.
     [Fact]
     public void A_finished_pages_close_task_closes_it_with_undo_on_the_list() => StaThread.Run(() =>

@@ -492,7 +492,13 @@ public partial class TasksWindow
         // Today's thread, every part of it, without the frame it has under a List line: the page is its frame.
         // In the Inbox's colours (ChatThread.Using): blue-black bubbles, not the List's warm ones (the PM's fix 3).
         UIElement thread;
-        using (ChatThread.Using(ChatThread.InboxLook)) thread = Thread(row);
+        // Its row of buttons as the Inbox list's icon buttons (task 57191c84, ThreadActions), not the List look's words.
+        threadOnPage = true;
+        try
+        {
+            using (ChatThread.Using(ChatThread.InboxLook)) thread = Thread(row);
+        }
+        finally { threadOnPage = false; }
         if (thread is Border frame)
         {
             frame.Background = Brushes.Transparent;
