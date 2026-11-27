@@ -292,23 +292,65 @@ jobs:
           }
           "Built $built"
 
-      - name: Did CI already test this exact commit?
-        # The same suite, on the same commit, already passed on the pull request when the merge
-        # fast-forwarded it (the commit that lands on main is the one CI tested). Then running it
-        # again here only costs time. A rebase that made new commits has no such check, so the
-        # tests run. A lookup that fails runs them too.
+      - name: Did CI already test these exact files?
+        # The same suite already passed on the pull request, and running it again here only costs
+        # time (about two and a half minutes). Two ways the commit on main can be the one CI tested:
+        #
+        # 1. The same commit: the merge fast-forwarded the pull request's head onto main.
+        # 2. The same FILES under a new commit id. GitHub's "Rebase and merge" often writes new
+        #    commits even when the pull request already sat on top of main (new committer, new
+        #    date), so the commit ids differ while the tree, the snapshot of every file, is
+        #    identical. Measured over the 20 releases before 2026-11-27: 2 matched by commit id
+        #    and 5 more only by tree, each of which ran the whole suite again for nothing.
+        #
+        # A pull request that was BEHIND main when it merged lands with a different tree (main's
+        # newer files are mixed in), so its tests still run here, which is what caught the
+        # PR 652/653 clash on 2026-11-27. A lookup that fails runs them too.
+        #
+        # Strictly, CI tests the pull request MERGED INTO main as main was then (refs/pull/N/merge),
+        # not the head alone. When the landed tree equals the head's, the head already contained
+        # main, so the two are the same files. The one exception needs main to have gone backwards
+        # (a revert of something the head contains) between CI's run and the merge.
         id: tested
         shell: pwsh
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          $passed = gh api "repos/${{ github.repository }}/commits/${{ github.sha }}/check-runs?check_name=build-and-test" --jq '[.check_runs[] | select(.conclusion == "success")] | length'
-          if ($LASTEXITCODE -eq 0 -and [int]"$passed" -gt 0) {
+          $repo = '${{ github.repository }}'
+          $sha = '${{ github.sha }}'
+          # How many build-and-test check runs passed on a commit (0 when the lookup fails). `-as [int]`
+          # gives null rather than throwing on an answer that is not a number (a proxy's error page),
+          # since a throw here would fail the build instead of running the tests.
+          function Get-Passed($commit) {
+            $n = gh api "repos/$repo/commits/$commit/check-runs?check_name=build-and-test" --jq '[.check_runs[] | select(.conclusion == "success")] | length'
+            $count = "$n".Trim() -as [int]
+            if ($LASTEXITCODE -eq 0 -and $count) { $count } else { 0 }
+          }
+          # The tree (snapshot of every file) a commit points at, empty when the lookup fails.
+          function Get-Tree($commit) {
+            $t = gh api "repos/$repo/commits/$commit" --jq '.commit.tree.sha'
+            if ($LASTEXITCODE -eq 0) { "$t".Trim() } else { '' }
+          }
+
+          $tested = $false
+          if ((Get-Passed $sha) -gt 0) {
+            $tested = $true
+            "CI's build-and-test already passed on $sha; not running the tests again."
+          } else {
+            # The pull request this commit came from, and the head commit CI ran on.
+            $head = gh api "repos/$repo/commits/$sha/pulls" --jq '.[0].head.sha // empty'
+            $head = if ($LASTEXITCODE -eq 0) { "$head".Trim() } else { '' }
+            $tree = Get-Tree $sha
+            if ($head -and $tree -and $tree -eq (Get-Tree $head) -and (Get-Passed $head) -gt 0) {
+              $tested = $true
+              "CI's build-and-test passed on the pull request's head $head, whose files are identical to $sha (tree $tree); not running the tests again."
+            }
+          }
+          if ($tested) {
             "tested=true" >> $env:GITHUB_OUTPUT
-            "CI's build-and-test already passed on ${{ github.sha }}; not running the tests again."
           } else {
             "tested=false" >> $env:GITHUB_OUTPUT
-            "No passing build-and-test on ${{ github.sha }}; the tests run here."
+            "No passing build-and-test on $sha or on a pull request head with the same files; the tests run here."
           }
           # A failed `gh api` lookup leaves $LASTEXITCODE non-zero, and GitHub's pwsh wrapper would
           # end the step with it, failing the build instead of running the tests as the comment
