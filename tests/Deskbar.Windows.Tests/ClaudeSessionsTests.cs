@@ -77,7 +77,8 @@ public class ClaudeSessionsTests
             {
                 ["agents", "--json"] => Agents?.Invoke() ?? Result.Success(Json()),
                 ["--bg", "--resume", var id, ..] => Resume?.Invoke(id) ?? Woken(id, workingDirectory),
-                ["--bg", "--model", _, "--settings", _, var message] => Start?.Invoke(message, workingDirectory) ?? Result.Failure<string>("no start scripted"),
+                // The start, with its --name=<task title> (task 3ed1c569) between the settings and the message.
+                ["--bg", "--model", _, "--settings", _, .., var message] => Start?.Invoke(message, workingDirectory) ?? Result.Failure<string>("no start scripted"),
                 ["stop", var shortId] => Stop?.Invoke(shortId) ?? Stopped(shortId),
                 _ => Result.Failure<string>($"unexpected claude call: {string.Join(" ", arguments)}"),
             });
@@ -956,9 +957,11 @@ public class ClaudeSessionsTests
 
         Assert.True(started.IsCompleted);
         Assert.Equal(fullId, (await started).Value);
-        // Task e52e33cb: the start names its model, opus while the setting is unset.
+        // Task e52e33cb: the start names its model, opus while the setting is unset. Task 3ed1c569: and the session after
+        // its task.
         var start = Assert.Single(rig.Cli.Calls, c => c.Arguments is ["--bg", "--model", ..]);
-        Assert.Equal(["--bg", "--model", "opus", "--settings", ClaudeStart.RemoteControlOff, ClaudeStart.FirstMessage(note)], start.Arguments);
+        Assert.Equal(["--bg", "--model", "opus", "--settings", ClaudeStart.RemoteControlOff, "--name=" + note.Title, ClaudeStart.FirstMessage(note)],
+            start.Arguments);
         Assert.Equal(@"E:\repos\Work", start.Folder);
         var joined = rig.Task(note.Id).Sessions.Single();
         Assert.Equal((fullId, @"E:\repos\Work"), (joined.Id, joined.Folder));

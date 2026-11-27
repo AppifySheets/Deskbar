@@ -20,10 +20,36 @@ public class ClaudeStartTests
     {
         var task = Task(taskId, "Fix the bar", Maybe<Guid>.None);
 
-        Assert.Equal(["--bg", "--model", "sonnet", "--settings", ClaudeStart.RemoteControlOff, ClaudeStart.FirstMessage(task)],
+        Assert.Equal(["--bg", "--model", "sonnet", "--settings", ClaudeStart.RemoteControlOff, "--name=Fix the bar", ClaudeStart.FirstMessage(task)],
             ClaudeStart.Arguments(task, "sonnet"));
         Assert.Equal("opus", ClaudeStart.DefaultModel);
     }
+
+    // Task 3ed1c569: the session is named after its task, so a window Claude Code titles (a console, a terminal without
+    // Deskbar's profile) shows the task's title instead of a name made up from "Deskbar task <id>: ...". The "=" form keeps
+    // a leading dash from reading as an option, and the name is the window's own text, without " · Claude".
+    [Theory]
+    [InlineData("გასვლა", "--name=გასვლა")]
+    [InlineData("--force the build", "--name=force the build")]
+    [InlineData("First line\nsecond line", "--name=First line")]
+    [InlineData("a; b", "--name=a, b")]
+    public void A_task_session_is_named_after_its_task(string title, string expected)
+    {
+        var arguments = ClaudeStart.Arguments(Task(taskId, title, Maybe<Guid>.None), "opus");
+
+        Assert.Equal(expected, arguments[^2]);
+        Assert.Equal(ClaudeStart.AttachTitle(title), ClaudeStart.SessionName(title) + ClaudeStart.TitleSuffix);
+    }
+
+    // A long title is cut as the window's title is, at 80 characters.
+    [Fact]
+    public void A_long_task_title_names_the_session_with_its_first_80_characters() =>
+        Assert.Equal(new string('x', 80), ClaudeStart.SessionName(new string('x', 200)));
+
+    // A blank title gives no --name at all, so Claude Code names the session itself, as before.
+    [Fact]
+    public void A_blank_task_title_gives_no_name() =>
+        Assert.DoesNotContain(ClaudeStart.Arguments(Task(taskId, "   ", Maybe<Guid>.None), "opus"), a => a.StartsWith("--name"));
 
     // Task 1c9eefdf: only the manager shows up in the Claude phone app, so a task session starts with a settings layer
     // that holds Remote Control off. The JSON is exact because claude parses it: one key, a JSON false, no quotes on it.
