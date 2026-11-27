@@ -247,7 +247,9 @@ public partial class TasksWindow
         FollowTranscript(row.Id);
         var body = PageBody(row);
         body.VerticalAlignment = VerticalAlignment.Bottom;
-        pageScroller = new ScrollViewer
+        // A FastScrollViewer like every other scroller in the panel (FastScrollViewer.cs, task 85df5e3f), so a page's chat
+        // scrolls as far per wheel notch as the list it was opened from.
+        pageScroller = new FastScrollViewer
         {
             VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
             HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
