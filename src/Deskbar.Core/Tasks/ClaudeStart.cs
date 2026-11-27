@@ -113,11 +113,41 @@ public static class ClaudeStart
 
     /// <summary>
     /// The arguments of `claude` that start a background session on the task: always with <c>--model</c>, Remote Control
-    /// held off (<see cref="RemoteControlOff"/>), then the first message. A plain `claude --bg --resume` keeps the model
-    /// the session started with (measured: it wakes "with its saved options"), so only the start names it.
+    /// held off (<see cref="RemoteControlOff"/>), the session named after the task (<see cref="SessionName"/>), then the
+    /// first message. A plain `claude --bg --resume` keeps the model the session started with (measured: it wakes "with
+    /// its saved options"), so only the start names it.
     /// </summary>
     public static IReadOnlyList<string> Arguments(TaskItem task, string model, bool runsSkill = false) =>
-        ["--bg", "--model", model, "--settings", RemoteControlOff, FirstMessage(task, runsSkill)];
+        ["--bg", "--model", model, "--settings", RemoteControlOff, .. NameArgument(task.Title), FirstMessage(task, runsSkill)];
+
+    // THE SESSION IS NAMED AFTER ITS TASK (task 3ed1c569, Petre: "title of terminal window should match the title of the
+    // task", with a screenshot of a session window titled "◑ deskbar task 7e106e51" over a task called something else).
+    // Without a name Claude Code makes one up from the first message, which starts "Deskbar task <id>: ...", and uses it
+    // as the terminal's title, in the /resume picker, in the prompt box and in `claude agents`. Two things keep it out of
+    // the windows Deskbar opens: Windows Terminal's "Deskbar Claude" profile (suppressApplicationTitle) and, for the
+    // console on a machine without Windows Terminal, KeepTitleVariable. A Windows Terminal that has not loaded Deskbar's
+    // profile (it reads fragments when it starts) falls back to its default profile and shows Claude's title, and so does
+    // any window someone opens on the session by hand (`claude attach`, `claude agents`). `--name` (claude's own help:
+    // "Set a display name for this session (shown in the prompt box, /resume picker, and terminal title)") makes the
+    // task's title the one Claude Code writes there, and the one every list of sessions shows. The same name on two
+    // sessions is allowed: the manager restarts under one fixed `-n` (ManagerSession).
+    //
+    // Measured 2026-11-27 with claude 2.1.332: `claude --bg "--name=Probe ნაბიჯი title" <message>` printed
+    // "backgrounded · 3ee1aedf · Probe ნაბიჯი title", `claude agents --json` listed that name, and the prompt box showed it.
+    //
+    // The "=" form keeps a title that starts with a dash from being read as another option. The name is the window
+    // title's own text (WindowText), so a window shows the same words whichever way it is titled. Only the start names
+    // the session: a resume keeps the name it was saved with, and any flag on `--bg --resume` forks the session (see
+    // RemoteControlOff), so a task renamed later keeps its first name in Claude Code. A blank title gives no flag, and
+    // Claude Code names the session itself as before.
+    static IEnumerable<string> NameArgument(string taskTitle) =>
+        SessionName(taskTitle) is { Length: > 0 } name ? [$"--name={name}"] : [];
+
+    /// <summary>
+    /// The name a task's session is started under: the task's title as its window shows it (first line, cut to 80
+    /// characters), without the " · Claude" a Deskbar window adds. Empty for a blank title.
+    /// </summary>
+    public static string SessionName(string taskTitle) => WindowText(taskTitle);
 
     /// <summary>
     /// Where to start the session, the likeliest first. A task that has had sessions starts at the REPO of its latest
@@ -327,12 +357,16 @@ public static class ClaudeStart
     // wt's options, so leading dashes and spaces go. A title can hold line breaks (the editors take Shift+Enter), which a
     // window title cannot show: its first line is used, the one the bar shows. Then the whole is cut to 80 characters,
     // stepping back over a split emoji as FirstMessage does.
-    public static string AttachTitle(string taskTitle)
+    public static string AttachTitle(string taskTitle) => WindowText(taskTitle) + TitleSuffix;
+
+    // The task's title as a window shows it, the rules above: first line, ';' as ',', no leading dashes or spaces, cut to
+    // 80 characters. Shared by AttachTitle and SessionName, so the window reads the same whoever titles it.
+    static string WindowText(string taskTitle)
     {
         var firstLine = taskTitle.Split('\n')[0].Replace('\r', ' ');
         var clean = firstLine.Replace(';', ',').TrimStart('-', ' ', '\t').Trim();
         var cut = clean.Length > MaxTitle && char.IsHighSurrogate(clean[MaxTitle - 1]) ? MaxTitle - 1 : MaxTitle;
-        return (clean.Length > MaxTitle ? clean[..cut] : clean) + TitleSuffix;
+        return clean.Length > MaxTitle ? clean[..cut] : clean;
     }
 
     /// <summary>What every <see cref="AttachTitle"/> ends with, and so what tells a session's window from other terminals.</summary>
