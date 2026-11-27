@@ -2335,36 +2335,57 @@ public partial class TasksWindow : Window
     // menus already follow (task b6f068b1). A fresh session beside an ended one still comes from the task's own window
     // (Open in window, its Sessions column) and from `deskbar task start`.
     // A WrapPanel, so on a narrow panel the buttons wrap onto a second line instead of clipping. Tagged for the tests.
+    //
+    // ON AN INBOX PAGE THEY ARE ICON BUTTONS (task 57191c84; Petre, on a screenshot of a page whose row read "Open in
+    // window  Open Claude  Reevaluate  Add subtask" in words: "these should be buttons, as with the list"). The Inbox
+    // list's line has these same actions as square icon buttons (LineButtonsOf: GlyphButton), and the page showed them as
+    // the List look's flat words, which read as links. So while a page's thread is built (threadOnPage, set by PageBody)
+    // each button is the list's own GlyphButton with the list's own picture, the words kept as its name and in its
+    // tooltip. Add subtask, which the Inbox line does not have, takes the plus. Under a List line the row is words, as
+    // before.
     (WrapPanel Row, bool HasOpenClaude) ThreadActions(TaskRowView row, bool addsSubtask)
     {
+        var icons = threadOnPage;
+        // One button of the row: the Inbox's icon button on a page, the List's words elsewhere. The name is the same in
+        // both, since FollowLine and the tests find a button by it. An icon's tooltip starts with the words it replaced
+        // (`tipSaysIt`: Reevaluate's tip already does).
+        Button Make(string icon, string words, Action press, string tip, bool tipSaysIt = false) =>
+            icons
+                ? GlyphButton(icon, words, press, tipSaysIt ? tip : $"{words}: {tip}", size: 26, ignoredWhen: ClickIgnored)
+                : Small(words, words, press, tip);
         var buttons = new List<Button>();
         if (Actions?.OpenWindow is { } openWindow)
-            buttons.Add(Small(OpenInWindowText, OpenInWindowText, () => openWindow(row.Id),
+            buttons.Add(Make("open", OpenInWindowText, () => openWindow(row.Id),
                 "Read and edit the whole task in a window of its own"));
         var openClaude = Actions is not null && OpensClaude(row);
         if (openClaude)
-            buttons.Add(Small(OpenClaudeText, OpenClaudeText, () => Actions?.Go(row.Id),
+            buttons.Add(Make("terminal", OpenClaudeText, () => Actions?.Go(row.Id),
                 "Go to this task's Claude session, resuming it first if it has ended"));
         // Not beside Open Claude (see above). A running session always has Open Claude, so this never shows beside one.
         if (!openClaude && Actions?.StartClaude is { } start && row.Status != TaskStatus.Closed && !row.Closing)
-            buttons.Add(Small(StartClaudeText, StartClaudeText, () => start(row.Id),
+            buttons.Add(Make("play", StartClaudeText, () => start(row.Id),
                 "Start a background Claude session on this task, with the task as its first message"));
         // Reevaluate (task 3dd07539), right after the Claude button, its neighbour: the task's session checks where the
         // task stands and fixes it. Only beside Open Claude, where there is a session to reach (an expired one could not
         // take the request). The line has it as an icon beside Open Claude, so FollowLine hides this one as it hides Open
         // Claude; it shows under a Matrix line (no action column) and while the line is being edited.
         if (openClaude && Reevaluates(row))
-            buttons.Add(Small(ReevaluateText, ReevaluateText, () => Actions?.Reevaluate?.Invoke(row.Id), ReevaluateTip));
+            buttons.Add(Make("refresh", ReevaluateText, () => Actions?.Reevaluate?.Invoke(row.Id), ReevaluateTip, tipSaysIt: true));
         if (addsSubtask && subtaskUnder != row.Id)
-            buttons.Add(Small(ThreadAddSubtaskText, ThreadAddSubtaskText, () => BeginSubtaskAdd(row.Id), "Add a subtask under this task"));
+            buttons.Add(Make("plus", ThreadAddSubtaskText, () => BeginSubtaskAdd(row.Id), "Add subtask under this task", tipSaysIt: true));
         var actions = new WrapPanel { Tag = ThreadActionsTag, Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 4) };
         buttons.ForEach(button =>
         {
-            button.Margin = new Thickness(0, 0, 6, 4);
+            // Icon buttons are 26 DIP squares with their own air around the picture, so they stand closer than words do.
+            button.Margin = new Thickness(0, 0, icons ? 2 : 6, 4);
             actions.Children.Add(button);
         });
         return (actions, openClaude);
     }
+
+    // Whether the thread being built is an Inbox page's (PageBody sets it around its Thread call): its row of buttons is
+    // then icon buttons (ThreadActions). A subtask's thread drawn in place inside it takes the same look.
+    bool threadOnPage;
 
     /// <summary>Tagged for tests: the row of buttons at the top of an open thread (task 1c17b7d6).</summary>
     internal const string ThreadActionsTag = "thread-actions";
