@@ -79,17 +79,36 @@ public sealed class ClaudePermissionHookInstallTests : IDisposable
 
         ClaudeSkill.Sync(on, tasks, home, Deskbar, waiter: true, permissions: permissions);
 
-        Assert.Equal("C:/mine/approve.cmd", Entries()!.Single()!["hooks"]![0]!["command"]!.GetValue<string>());
+        // The user's own entry stays first. With the task events still on, the card's entry gives way to the task
+        // script's plain one, which only notes what a permission dialog is about (task b310a649); otherwise nothing of
+        // Deskbar's is left.
+        Assert.Equal("C:/mine/approve.cmd", Entries()![0]!["hooks"]![0]!["command"]!.GetValue<string>());
+        Assert.Null(Ours());
+        Assert.Equal(on && tasks ? 2 : 1, Entries()!.Count);
+        Assert.All(Entries()!.Skip(1), e => Assert.Contains(ClaudeSkill.TaskHookScriptName, e!["hooks"]![0]!["command"]!.GetValue<string>()));
         Assert.False(File.Exists(Script));
     }
 
-    // The default: the setting is off, so a first install adds no permission entry at all.
+    // The default: the setting is off, so a first install adds no card entry and no card script. It adds the task
+    // script's plain entry, which only notes what a permission dialog is about for the task question its Notification
+    // makes (task b310a649), and one on Elicitation, both with no matcher and no timeout of their own.
     [Fact]
-    public void The_default_adds_nothing()
+    public void The_default_adds_only_the_task_scripts_noting_entries()
     {
         ClaudeSkill.Sync(true, true, home, Deskbar);
 
-        Assert.Null(Entries());
+        Assert.Null(Ours());
         Assert.False(File.Exists(Script));
+        var elicitation = JsonNode.Parse(File.ReadAllText(Settings))!["hooks"]!["Elicitation"]!.AsArray();
+        Assert.All([Entries()!.Single()!.AsObject(), elicitation.Single()!.AsObject()], entry =>
+        {
+            Assert.Null(entry["matcher"]);
+            Assert.Contains(ClaudeSkill.TaskHookScriptName, entry["hooks"]![0]!["command"]!.GetValue<string>());
+            Assert.Null(entry["hooks"]![0]!["timeout"]);
+        });
+
+        ClaudeSkill.Sync(true, false, home, Deskbar);
+        Assert.Null(Entries());
+        Assert.Null(JsonNode.Parse(File.ReadAllText(Settings))!["hooks"]!["Elicitation"]);
     }
 }

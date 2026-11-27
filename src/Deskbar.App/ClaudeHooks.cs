@@ -74,8 +74,8 @@ static class ClaudeHooks
     // session's long silences. Null leaves it out (the tests that predate it).
     //
     // `permissionCommand` runs claude-permission-hook.cmd: Deskbar's entry on PermissionRequest (Allow / Deny from a task's
-    // page; PermissionEntry), on the same terms as the task events and only while its own setting is on. Null leaves it
-    // out, and takes out one written before.
+    // page; PermissionEntry), on the same terms as the task events and only while its own setting is on. Null puts the
+    // plain task-script entry there instead, which only notes what a permission dialog is about (task b310a649).
     internal static bool Sync(bool on, bool tasks, string settingsPath, string askCommand, string taskCommand, string? imagesRule = null,
         string? waitCommand = null, string? permissionCommand = null)
     {
@@ -133,7 +133,12 @@ static class ClaudeHooks
         .. TaskEvents.Select(name => (name, (IReadOnlyList<JsonObject>)(on && tasks ? [Entry(taskCommand)] : []))),
         ("PreToolUse", on && tasks ? [DialogEntry(taskCommand)] : []),
         ("PostToolUse", on && tasks ? [.. PullRequestTools.Select(tool => ToolEntry(tool, taskCommand)), DialogEntry(taskCommand)] : []),
-        ("PermissionRequest", on && tasks && permissionCommand is not null ? [PermissionEntry(permissionCommand)] : []),
+        // PermissionRequest: the card's entry while the card is on (its verb notes the dialog's detail too), otherwise a
+        // plain task-script entry that only notes it. Elicitation: an MCP server asking for input, noted the same way.
+        // Both feed the question a dialog's Notification puts on its task (task b310a649, Core's SessionPrompt); both
+        // print nothing, which leaves Claude Code's own dialog to decide.
+        ("PermissionRequest", on && tasks ? [permissionCommand is not null ? PermissionEntry(permissionCommand) : Entry(taskCommand)] : []),
+        ("Elicitation", on && tasks ? [Entry(taskCommand)] : []),
     ];
 
     // ALLOW / DENY FROM A TASK'S PAGE (Core's PermissionDesk; ClaudeSkill.PermissionScript). One entry with no matcher, so

@@ -49,6 +49,9 @@ public sealed partial class RemoteControl
 
     ControlReply Registered(ClaudeHookRequest request, ClaudeHookEvent hook, PermissionRequest asked)
     {
+        // What the dialog is about is noted whatever happens to the card: the task question the dialog's Notification makes
+        // six seconds later names the tool and command from it (task b310a649, RemoteControl.SessionPrompts.cs).
+        NotePermission(asked);
         if (permissions is not { } desk || tasks is not { } service) return Quiet;
         // Housekeeping first, so a question held past its time is not counted as on show.
         desk.Expire();

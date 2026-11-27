@@ -44,7 +44,17 @@ Every Claude Code session works on a task in the bar's [task list](tasks.md), so
 - A resumed session keeps its task as it was; a session that ends leaves its task open, with "no live session".
 - Sessions run without anyone at them, such as `claude -p`, Agent SDK runs and scheduled agents, are told nothing and make no tasks.
 
-A finished reply or a permission prompt still only blinks the workspace; it does not change the task.
+A finished reply still only blinks the workspace; it does not change the task.
+
+A session stopped on one of Claude Code's own dialogs does change it. If a dialog has waited about six seconds without you touching it, the session's task asks you: it moves to "Waiting on you" with a question saying what the dialog wants, and it goes back to in progress within about five seconds of you answering in the session, Esc included. The questions read like this:
+
+- a permission prompt: "Allow Bash in the session: git push origin main", with the tool and the command, file or address it is about;
+- a plan to approve: "Approve the plan in the session: " and the plan's first line;
+- an MCP server asking for input: "Answer github in the session: " and the server's request;
+- anything else Claude Code stops on, such as "Session paused" (a fallback model or usage credits to choose), a sandboxed command asking for network access, or a teammate's permission question: "Answer in the session: " and Claude Code's own words;
+- Claude's multiple-choice questions, as before: "Answer in the session's terminal: " and the question with its choices.
+
+A prompt you answer straight away never reaches the task. A task already waiting on you keeps its question, a done task stays done, and while the permission card below shows a prompt, the card is the question. The idle "Claude is waiting for your input" notice does not ask: the turn ended, and the session asks through the task itself when it needs you.
 
 A session can also add a note for later to its own workspace (the one its VS Code window is on, else its own task's, else its repo's latest task's), and a script can add one with `task add`.
 
@@ -104,7 +114,7 @@ The setting is **Teach Claude Code about Deskbar**, in the Deskbar on this PC se
 - A skill at `%USERPROFILE%\.claude\skills\deskbar\SKILL.md`, rewritten when Deskbar updates.
 - Two hooks, Notification and Stop, in `%USERPROFILE%\.claude\settings.json`, beside any hooks you already have. They run `%APPDATA%\Deskbar\claude-hook.cmd`, which hands the hook's details to `deskbar.cmd claude-hook` and always exits 0. When Deskbar is not running the hook prints nothing and the session carries on.
 
-Under it, **Claude Code sessions keep their tasks in the task list** adds three more hooks, SessionStart, UserPromptSubmit and SessionEnd, running `%APPDATA%\Deskbar\claude-task-hook.cmd`. It is on by default, can be used only while the box above is ticked, and `deskbar.cmd claude-tasks on|off` sets it from a script. Unticking it takes out only those three and their script. While it is on, the skill also has a "Your task" section with the rules above.
+Under it, **Claude Code sessions keep their tasks in the task list** adds three more hooks, SessionStart, UserPromptSubmit and SessionEnd, running `%APPDATA%\Deskbar\claude-task-hook.cmd`. It is on by default, can be used only while the box above is ticked, and `deskbar.cmd claude-tasks on|off` sets it from a script. Unticking it takes out only those three and their script. The same script also runs on a few tool events (Claude's multiple-choice dialog, `gh pr create`) and on PermissionRequest and Elicitation, where it only notes what a dialog that is opening is about, so the task's question can name it; it never answers a dialog. While it is on, the skill also has a "Your task" section with the rules above.
 
 While it is on, Deskbar also keeps one permission rule in the same file, under `permissions.allow`: `Read(//c/Users/<you>/AppData/Roaming/Deskbar/task-images/**)`. That folder holds the pictures you paste into tasks (see [Tasks](tasks.md#the-tasks-window)), and it is outside every session's own folder, so a session in Claude Code's default permission mode would otherwise stop and ask you before reading one. The rule lets sessions read that one folder and nothing else; your own rules stay as they are, and unticking the box takes the rule out again.
 

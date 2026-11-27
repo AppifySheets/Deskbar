@@ -108,6 +108,29 @@ public sealed record ClaudeHookEvent(string Event, string SessionId, string Fold
     /// </summary>
     public Maybe<string> LastMessage { get; init; }
 
+    /// <summary>
+    /// A Notification hook's notification_type (permission_prompt, elicitation_dialog, idle_prompt, ...), or none. Which
+    /// ones mean a dialog is waiting on the user is SessionPrompt's list (task b310a649).
+    /// </summary>
+    public Maybe<string> NotificationType { get; init; }
+
+    /// <summary>
+    /// The hook's message: a Notification's text ("Claude needs your permission", "Session paused", ...) or an Elicitation's
+    /// request from its MCP server. None for other events.
+    /// </summary>
+    public Maybe<string> Message { get; init; }
+
+    /// <summary>An Elicitation hook's mcp_server_name: the MCP server asking for input, or none.</summary>
+    public Maybe<string> McpServer { get; init; }
+
+    /// <summary>
+    /// agent_id, present when a SUBAGENT's hook fired: its dialog is answered in its own transcript (TranscriptMark.For).
+    /// Only letters, digits, '-' and '_' are taken, since it becomes part of a file name.
+    /// </summary>
+    public Maybe<string> AgentId { get; init; }
+
+    static readonly System.Text.RegularExpressions.Regex SafeAgentId = new("^[A-Za-z0-9_-]{1,64}$");
+
     public static Result<ClaudeHookEvent> Parse(string json, string? entrypoint, string? attended, string? job = null)
     {
         try
@@ -138,6 +161,10 @@ public sealed record ClaudeHookEvent(string Event, string SessionId, string Fold
                     : Maybe<string>.None,
                 Prompt = Text(root, "prompt"),
                 LastMessage = Text(root, "last_assistant_message"),
+                NotificationType = Text(root, "notification_type"),
+                Message = Text(root, "message"),
+                McpServer = Text(root, "mcp_server_name"),
+                AgentId = Text(root, "agent_id").Where(SafeAgentId.IsMatch),
             };
         }
         catch (JsonException e)

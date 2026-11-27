@@ -172,6 +172,20 @@ public sealed class RemoteControlPermissionTests : IDisposable
         Assert.Equal(tool == "Bash", reply.Output.Length > 0);
     }
 
+    // Review focus 3 of task b310a649: while the card shows the session's permission prompt, the prompt's Notification
+    // six seconds later puts no second question on the task (RemoteControl.PromptAsked).
+    [Fact]
+    public void A_card_on_show_adds_no_dialog_question()
+    {
+        var manager = Ready();
+        Assert.NotEqual("", Registered(manager, Call(Slot(), Hook())).Output);
+        var notified = $$$"""{"session_id":"{{{Session}}}","transcript_path":"t","cwd":"C:\repos\proj1","hook_event_name":"Notification","message":"Claude needs your permission","notification_type":"permission_prompt"}""";
+
+        Control(manager).Execute(["claude-hook", "--entry", "cli", "--attended", "0", "--job", Job, "--from", Repo, "--json", notified]);
+
+        Assert.True(tasks.Board.TaskOf(Session).Value.Question.HasNoValue);
+    }
+
     // The task closed: its session has no open task, so the question stays in the terminal.
     [Fact]
     public void A_closed_task_answers_nothing()

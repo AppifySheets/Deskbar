@@ -61,6 +61,10 @@ public sealed partial class RemoteControl
         ControlArguments.ParseClaudeHook(rest)
             .Bind(request => ClaudeHookEvent.Parse(request.Json!, request.Entrypoint, request.Attended, request.Job).Map(hook => (request, hook)))
             .Tap(found => QuestionsSettledBy(found.hook))
+            // A dialog that opened is noted (its tool and command, or its MCP server's request), and a session that went
+            // on settles the dialog question it left on its task (RemoteControl.SessionPrompts.cs, task b310a649).
+            .Tap(found => PromptDetailNoted(found.request.Json!, found.hook))
+            .Tap(found => PromptsSettledBy(found.hook))
             // The manager's turn ending may be its answer to the user, which then asks for the user's attention
             // (ManagerStopped). Beside the Stop arm below, not in place of it, so a Stop from the manager is answered as before.
             .Tap(found => ManagerStopped(found.hook, found.request.From))
@@ -92,7 +96,9 @@ public sealed partial class RemoteControl
         // An empty --from (cmd passes an unset CLAUDE_PROJECT_DIR as "") is no folder at all (Folder).
         // The session's name, read from its transcript (SessionTitle), tells its window apart from others on the
         // same folder, so the right icon glows and not none of them.
-        "Notification" => Quietly(Attention(Folder(from), SessionTitle.Read(hook.Transcript.GetValueOrDefault()))),
+        // A dialog left waiting six seconds (a permission, a plan, an MCP request, "Session paused", ...) also becomes the
+        // session's task question (PromptAsked, task b310a649); the blink comes first, exactly as before.
+        "Notification" => PromptAsked(hook, from, Quietly(Attention(Folder(from), SessionTitle.Read(hook.Transcript.GetValueOrDefault())))),
         // Stop blinks exactly as before, then may ask a parked session to say so (Parked, below).
         // A question Deskbar set aside while the session worked (SetAside, below) is asked about first, since it names the
         // question; otherwise a parked session is asked to say so (Parked).
@@ -140,8 +146,8 @@ public sealed partial class RemoteControl
     {
         if (hook.ToolName != DialogQuestion.Tool || hook.DialogQuestion.HasNoValue) return Quiet;
         service.Board.TaskOf(hook.SessionId)
-            .Where(t => t.Status is not (TaskStatus.WaitingOnYou or TaskStatus.Done))
-            .Tap(t => service.Ask(t.Id, hook.DialogQuestion.Value, hook.SessionId));
+            .Where(t => t.Status is not TaskStatus.Done && (t.Status is not TaskStatus.WaitingOnYou || PlacedOn(t)))
+            .Tap(t => PlaceQuestion(service, t, hook.DialogQuestion.Value, hook));
         Attention(folder);
         return Quiet;
     }
@@ -150,10 +156,13 @@ public sealed partial class RemoteControl
     // to In progress as `task answered` takes it (Resolve). ONLY when the task still waits on the very question the
     // dialog put there: a question the session asked some other way is the session's to settle. A dialog dismissed with
     // Esc may not run this hook at all (Claude Code's docs do not say; PostToolUseFailure is documented not to fire for
-    // an interruption), and then the task keeps waiting until the session runs `task answered`, which the next prompt's
-    // reminder line asks it to do (SessionBriefing.Prompt), as for any open question.
+    // an interruption). Since task b310a649 that no longer leaves the question up: DialogAsked placed it with a
+    // transcript mark (PlaceQuestion), and the interruption's "user" line settles it on the next tick, as the session's
+    // next Stop or the user's next prompt would (PromptsSettledBy).
     ControlReply DialogAnswered(TaskService service, ClaudeHookEvent hook)
     {
+        // The dialog is closed, so its placement (and its transcript watch) goes either way.
+        prompts.Take(hook.SessionId);
         service.Board.TaskOf(hook.SessionId)
             .Where(t => t.Status == TaskStatus.WaitingOnYou && hook.DialogQuestion.HasValue && t.Question == hook.DialogQuestion)
             .Tap(t => Resolve(service, t, hook.SessionId));

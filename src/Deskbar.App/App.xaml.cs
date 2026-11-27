@@ -111,6 +111,9 @@ public partial class App : Application
     internal readonly Core.Tasks.PermissionDesk PermissionDesk = new(Path.Combine(AppPaths.NewStateDir, Core.Tasks.PermissionDesk.FolderName), () => DateTimeOffset.UtcNow);
     Core.Tasks.PermissionKeeper? permissionKeeper;
 
+    // The five-second settle of the questions sessions' dialogs put on tasks (RemoteControl.SettlePrompts, task b310a649).
+    IDisposable? promptSettle;
+
     // A merged pull request settles the question that asked for the merge (PullRequestWatch, task b7f987b4): it looks at
     // the pull requests linked in waiting questions through `gh` and takes the task off the bar once they are merged or
     // closed, without waiting for the session's `task answered`. Built beside claudeSessions; disposed with it.
@@ -2007,6 +2010,12 @@ public partial class App : Application
         // A Deskbar that just started holds no permission question, so no slot left from before can be answered: each is
         // deleted before the pipe serves, and its hook script, if still waiting, ends printing nothing (PermissionDesk).
         PermissionDesk.Sweep();
+        // Every five seconds, a question a session's dialog put on its task (a permission, a plan, an MCP request) is
+        // settled once the session's transcript shows the dialog was answered in the session (task b310a649,
+        // RemoteControl.SettlePrompts). On the UI thread, where the pipe's handler uses the same bookkeeping.
+        promptSettle = System.Reactive.Linq.Observable.Interval(Core.Tasks.PermissionKeeper.ExpireEvery,
+                new System.Reactive.Concurrency.SynchronizationContextScheduler(new System.Windows.Threading.DispatcherSynchronizationContext(Dispatcher)))
+            .Subscribe(_ => control.SettlePrompts());
         controlServer = new ControlPipeServer(ControlCommandLine.PipeName,
             args => Dispatcher.InvokeAsync(() =>
             {
@@ -3130,6 +3139,7 @@ public partial class App : Application
             commentWaker?.Dispose();
             // Every permission question released: its hook script ends printing nothing, and the terminal asks.
             permissionKeeper?.Dispose();
+            promptSettle?.Dispose();
             pullRequestWatch?.Dispose();
             runningChangeWatch?.Dispose();
             repoWatchPoll?.Dispose();
@@ -3591,6 +3601,7 @@ public partial class App : Application
         commentWaker?.Dispose();
         // Every permission question released: its hook script ends printing nothing, and the terminal asks.
         permissionKeeper?.Dispose();
+        promptSettle?.Dispose();
         pullRequestWatch?.Dispose();
         runningChangeWatch?.Dispose();
         repoWatchPoll?.Dispose();
