@@ -252,6 +252,23 @@ public partial class TasksBoardTests
         t.Window.OpenedMenu!.IsOpen = false;
     });
 
+    // A finished task's tick is its tick box too: one click closes it, with Undo, and does not open its page.
+    [Fact]
+    public void A_finished_tasks_tick_closes_it_with_undo() => StaThread.Run(() =>
+    {
+        using var t = Build(workingOf: _ => 1);
+        var k = InboxTasks(t);
+        t.Controller.Show();
+        ChooseInbox(t);
+
+        Click(ButtonNamed(LineOf(t.Window, k.Done), "Close"));
+        Assert.Equal(TaskStatus.Closed, t.Tasks.Board.Tasks.Single(x => x.Id == k.Done).Status);
+        Assert.True(t.Window.IsClosing(k.Done));
+        Assert.Null(t.Window.InboxPageContent);
+        Click(ButtonNamed(LineOf(t.Window, k.Done), "Undo"));
+        Assert.Equal(TaskStatus.Done, t.Tasks.Board.Tasks.Single(x => x.Id == k.Done).Status);
+    });
+
     // Criterion 6: the chip opens the move menu, under the chip.
     [Fact]
     public void The_chip_opens_the_move_menu() => StaThread.Run(() =>
