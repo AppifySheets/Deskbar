@@ -108,7 +108,7 @@ internal sealed class ChatStepsView : Border
         // FOLDED, A RUN OF STEPS IS ONE DIM LINE (task ac1ebd57, Petre: "make these more compact"; mockup option A): no
         // recess, no hairline, the small grey text, "› 3 steps · 9 s · 3 commands" in one line, so it sits between two
         // bubbles like a caption instead of a card. A run of steps also no longer ends an author's run of messages
-        // (ChatStreamPanel.Unnamed), so the name is not written above and below it. OPENED, it is the recessed block with
+        // (ChatStreamPanel.Signs), so the name is not written above and below it. OPENED, it is the recessed block with
         // its rows that it always was: the steps are then what is being read.
         Background = open ? Recess : null;
         BorderBrush = open ? InboxLook.Hairline : null;

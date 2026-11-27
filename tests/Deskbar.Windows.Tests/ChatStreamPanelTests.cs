@@ -233,7 +233,7 @@ public class ChatStreamPanelTests
             new(Guid.NewGuid(), "you", false, "", "words") { Who = CommentAuthor.You, Day = "Today", At = Now.AddSeconds(seconds) };
         var shown = new[] { Mine(0), Mine(5), Mine(30) };
 
-        var named = TasksWindow.GroupedInStream(shown, [Said("Between", 10)], earlierFolded: false).Select(c => c.NamesAuthor);
+        var named = TasksWindow.GroupedInStream(shown, [Said("Between", 10)], earlierFolded: false).Select(c => c.Sign == BubbleSign.Named);
 
         Assert.Equal([false, true, true], named);
     }
@@ -247,7 +247,7 @@ public class ChatStreamPanelTests
         var shown = new[] { Mine(0), Mine(30) };
 
         var named = TasksWindow.GroupedInStream(shown, [Run("r", Step("a", StepKind.Read, "A.cs", at: 10))], earlierFolded: false)
-            .Select(c => c.NamesAuthor);
+            .Select(c => c.Sign == BubbleSign.Named);
 
         Assert.Equal([false, true], named);
     }

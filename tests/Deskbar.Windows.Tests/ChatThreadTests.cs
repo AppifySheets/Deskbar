@@ -64,17 +64,60 @@ public class ChatThreadTests
             Comment(CommentAuthor.You, "Yesterday"),
             Comment(CommentAuthor.You, "Today"),
         };
-        var named = ChatThread.Grouped(comments).Select(c => c.NamesAuthor).ToArray();
+        var named = ChatThread.Grouped(comments).Select(c => c.Sign == BubbleSign.Named).ToArray();
         Assert.Equal([false, true, true, true, true, true, true], named);
     }
 
+    // Petre (task da1e1188): "you and time, both can be merged". Inside a run, a bubble the next one follows within
+    // five minutes has no line under it (Bare); one followed later keeps its time alone (Timed); the last is Named.
     [Fact]
-    public void A_bubble_inside_a_run_shows_its_time_without_the_authors_name() => StaThread.Run(() =>
+    public void A_run_shares_its_last_time_only_while_its_bubbles_come_close_together()
     {
-        var comment = Comment(CommentAuthor.You, "Today") with { NamesAuthor = false };
+        var start = new DateTimeOffset(2026, 11, 27, 19, 2, 0, TimeSpan.FromHours(4));
+        var comments = new[] { 0, 1, 7, 30, 31 }
+            .Select(minutes => Comment(CommentAuthor.You, "Today") with { At = start.AddMinutes(minutes) })
+            .ToArray();
+        var signs = ChatThread.Grouped(comments).Select(c => c.Sign).ToArray();
+        Assert.Equal([BubbleSign.Bare, BubbleSign.Timed, BubbleSign.Timed, BubbleSign.Bare, BubbleSign.Named], signs);
+
+        // Four minutes apart, 19:02 to 19:10: the stretch is measured from its first bubble, not bubble to bubble, so
+        // 19:06 keeps its time instead of all three hanging on "19:10".
+        var chained = new[] { 0, 4, 8 }
+            .Select(minutes => Comment(CommentAuthor.You, "Today") with { At = start.AddMinutes(minutes) })
+            .ToArray();
+        Assert.Equal([BubbleSign.Bare, BubbleSign.Timed, BubbleSign.Named], ChatThread.Grouped(chained).Select(c => c.Sign).ToArray());
+    }
+
+    [Fact]
+    public void A_timed_bubble_shows_its_time_without_the_authors_name() => StaThread.Run(() =>
+    {
+        var comment = Comment(CommentAuthor.You, "Today") with { Sign = BubbleSign.Timed };
         var texts = Inside(ChatThread.Message(comment, new Border(), [])).OfType<TextBlock>().ToArray();
-        Assert.DoesNotContain(texts, t => Equals(t.Tag, ChatThread.AuthorTag));
-        Assert.Contains(texts, t => t.Text == "10:00");
+        Assert.DoesNotContain(texts, t => Equals(t.Tag, ChatThread.AuthorTag) && t.Visibility == Visibility.Visible);
+        Assert.Contains(texts, t => t.Text == "10:00" && t.Visibility == Visibility.Visible);
+    });
+
+    // A bare bubble has no line under it: its author and time are out of the layout, and its time waits beside the
+    // bubble, shown on hover (with the actions, where the thread has room for them; Signing.Refresh).
+    [Fact]
+    public void A_bare_bubble_has_no_line_under_it_and_keeps_its_time_beside_it() => StaThread.Run(() =>
+    {
+        var comment = Comment(CommentAuthor.You, "Today") with { Sign = BubbleSign.Bare };
+        var edit = new Button { Content = "Edit" };
+        var row = ChatThread.Message(comment, new Border(), [edit]);
+        var side = Inside(row).OfType<Border>().Single(b => Equals(b.Tag, ChatThread.SideTag));
+        Assert.Equal(Visibility.Collapsed, side.Visibility);
+        Assert.Contains(Inside(side).OfType<TextBlock>(), t => t.Text == "10:00");
+        Assert.Contains(edit, Inside(row));
+        var under = ((StackPanel)((Grid)row).Children[0]).Children[1];
+        Assert.Equal(Visibility.Collapsed, under.Visibility);
+
+        // Signed again in place (the Inbox's stream does this when a run ends): the line comes back, the actions with it.
+        ChatThread.Sign(row, BubbleSign.Named);
+        Assert.Equal(Visibility.Visible, under.Visibility);
+        Assert.Contains(edit, Inside(under));
+        Assert.Contains(Inside(under).OfType<TextBlock>(), t => Equals(t.Tag, ChatThread.AuthorTag) && t.Visibility == Visibility.Visible);
+        Assert.Contains(Inside(under).OfType<TextBlock>(), t => t.Text == "· 10:00");
     });
 
     static IEnumerable<object> Inside(object node) =>
