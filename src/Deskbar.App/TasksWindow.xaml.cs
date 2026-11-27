@@ -3094,12 +3094,14 @@ public partial class TasksWindow : Window
         // A closed task's title is not edited: it is history, and Reopen brings it back first.
         if (row.Status != TaskStatus.Closed && !row.Closing)
         {
-            menu.Items.Add(Item("Edit", () => BeginRename(id)));
+            // Every top-level item wears an icon (TaskMenuIcons, task e3f94ead), the line's own picture where it has one.
+            menu.Items.Add(Item("Edit", () => BeginRename(id)).WithIcon(TaskMenuIcons.Edit));
             // OPEN IN WINDOW (task dca4ebeb): the task in a window of its own, for a long one (TasksBoard.OpenWindow). Right
             // after Edit, its sibling: both are about reading and writing the task itself. Not a double-click on the line,
             // which goes to the task's workspace (Ruling 54).
             if (Actions?.OpenWindow is { } openWindow)
-                menu.Items.Add(Item(OpenInWindowText, () => Dispatcher.BeginInvoke(() => openWindow(id), System.Windows.Threading.DispatcherPriority.Input)));
+                menu.Items.Add(Item(OpenInWindowText, () => Dispatcher.BeginInvoke(() => openWindow(id), System.Windows.Threading.DispatcherPriority.Input))
+                    .WithIcon(TaskMenuIcons.OpenInWindow));
             // OPEN CLAUDE (task 7f61af2e; Petre: "make it possible to open claude without opening the task first"): the
             // double-click's go (Actions.Go: the task's workspace, then its session's window) without the single click
             // that picks the task and opens its thread first (Ruling 54). Only on a Claude task, which has a session to
@@ -3107,7 +3109,8 @@ public partial class TasksWindow : Window
             // window it brings forward does not come up under an open menu.
             // Only while the click can open the session (OpensClaude, task 6a57f59b); otherwise Start Claude on this below.
             if (OpensClaude(row))
-                menu.Items.Add(Item(OpenClaudeText, () => Dispatcher.BeginInvoke(() => Actions?.Go(id), System.Windows.Threading.DispatcherPriority.Input)));
+                menu.Items.Add(Item(OpenClaudeText, () => Dispatcher.BeginInvoke(() => Actions?.Go(id), System.Windows.Threading.DispatcherPriority.Input))
+                    .WithClaude(hasSession: true));
             // Task 9: handing the task to Claude, right after Edit (the spec, "Where the clicks are"). Run once this menu
             // has closed: it may ask a question or open a pick list of folders at the pointer.
             // ONE CLAUDE ITEM PER MENU (task b6f068b1; Petre: "open claude and start claude , no need for both"): only on
@@ -3115,24 +3118,27 @@ public partial class TasksWindow : Window
             // thread follows the same rule (ThreadActions, task 5e02e99f), and so does the bar's menu
             // (FloatingBar.OpenTaskLineMenu).
             else if (Actions?.StartClaude is { } start)
-                menu.Items.Add(Item(StartClaudeText, () => Dispatcher.BeginInvoke(() => start(id), System.Windows.Threading.DispatcherPriority.Input)));
+                menu.Items.Add(Item(StartClaudeText, () => Dispatcher.BeginInvoke(() => start(id), System.Windows.Threading.DispatcherPriority.Input))
+                    .WithClaude(hasSession: false));
             // Subtasks (Petre's pick A): the add box with this line's task as the parent (a sibling on a subtask's line),
             // once this menu has closed so the box can take the keyboard.
             if (Actions?.SubtaskParent is not null)
-                menu.Items.Add(Item(FloatingBar.AddSubtaskText, () => Dispatcher.BeginInvoke(() => BeginSubtaskAdd(id), System.Windows.Threading.DispatcherPriority.Input)));
+                menu.Items.Add(Item(FloatingBar.AddSubtaskText, () => Dispatcher.BeginInvoke(() => BeginSubtaskAdd(id), System.Windows.Threading.DispatcherPriority.Input))
+                    .WithIcon(TaskMenuIcons.AddSubtask));
         }
         // OPEN PARENT (task 54b39c4c): on a subtask's line, the parent shown, picked and opened, as the thread's "Subtask
         // of" does, without opening this line's thread first. Right after "Add subtask…", its family neighbour. On a
         // closed subtask too, since the parent is still worth reaching from it. Run once this menu has closed.
         if (row.ParentId is { } parentId && Actions?.OpenParent is { } openParent)
-            menu.Items.Add(Item(OpenParentText, () => Dispatcher.BeginInvoke(() => openParent(parentId), System.Windows.Threading.DispatcherPriority.Input)));
+            menu.Items.Add(Item(OpenParentText, () => Dispatcher.BeginInvoke(() => openParent(parentId), System.Windows.Threading.DispatcherPriority.Input))
+                .WithIcon(TaskMenuIcons.OpenParent));
         // COPY LINK (task 5016d533; Petre: "create a link to the task and include it in github pr / issues / elsewhere so
         // that when i click on it, it opens the task in deskbar"): the markdown link to the task (TaskLinkClipboard), for
         // a pull request, an issue or a message. On every line, a closed one too: a link to history still opens it.
-        menu.Items.Add(Item(TaskLinkClipboard.CopyLinkText, () => TaskLinkClipboard.Copy(id)));
+        menu.Items.Add(Item(TaskLinkClipboard.CopyLinkText, () => TaskLinkClipboard.Copy(id)).WithIcon(TaskMenuIcons.CopyLink));
         if (menu.Items.Count > 0) menu.Items.Add(new Separator());
 
-        var status = Item("Status");
+        var status = Item("Status").WithIcon(TaskMenuIcons.Status);
         SettableStatuses.ToList().ForEach(s =>
         {
             var item = Item(TaskViews.StatusName(s), () => Actions?.SetStatus(id, s));
@@ -3141,27 +3147,27 @@ public partial class TasksWindow : Window
         });
         menu.Items.Add(status);
         menu.Items.Add(row.Status == TaskStatus.Closed && !row.Closing
-            ? Item("Reopen", () => Actions?.Reopen(id))
-            : Item("Close", () => Actions?.Close(id)));
+            ? Item("Reopen", () => Actions?.Reopen(id)).WithIcon(TaskMenuIcons.Reopen)
+            : Item("Close", () => Actions?.Close(id)).WithIcon(TaskMenuIcons.Close));
         // MARK DEPLOYED (task 8470d176, phase 2; RunningChanges' header). A Done task whose pull request in another
         // repository is merged keeps its hollow ring until a deploy is reported, and Deskbar cannot see that app's
         // servers. When the session could not check (or the deploy came later), Petre can: the ring fills with
         // "Marked deployed by hand" as the evidence. Next to Close, its neighbour in finishing a task. Only while the
         // item would change something (row.CanMarkDeployed); `task deployed <id> <note>` is its remote twin.
         if (row.CanMarkDeployed && !row.Closing && Actions?.MarkDeployed is { } markDeployed)
-            menu.Items.Add(Item(MarkDeployedText, () => markDeployed(id)));
+            menu.Items.Add(Item(MarkDeployedText, () => markDeployed(id)).WithIcon(TaskMenuIcons.MarkDeployed));
         // Snooze (task 6da8d7eb): the moon's lengths as a submenu, for every open line, waiting ones included, so a Matrix
         // line, which has no moon, reaches it too.
         if (Actions?.Snooze is not null && row.Status != TaskStatus.Closed && !row.Closing)
         {
-            var snooze = Item(row.SnoozedUntil is null ? "Snooze" : "Snoozed");
+            var snooze = Item(row.SnoozedUntil is null ? "Snooze" : "Snoozed").WithIcon(TaskMenuIcons.Snooze);
             SnoozeItems(id).ForEach(item => snooze.Items.Add(item));
             menu.Items.Add(snooze);
         }
         // Repeat (task 0b78269e, RepeatMenu): the five schedules, Custom… and, while it repeats, Off. Open lines only.
         if (Actions?.Repeat is { } repeat && row.Status != TaskStatus.Closed && !row.Closing)
         {
-            var repeats = Item(RepeatMenu.Header(row.RepeatText));
+            var repeats = Item(RepeatMenu.Header(row.RepeatText)).WithIcon(TaskMenuIcons.Repeat);
             // Run once this menu has closed, as "Start Claude on this" does: the folder pick opens a menu of its own, and one
             // opened from inside a click of this menu closes with it (review fix, task 0b78269e).
             RepeatMenu.Items(id, row.RepeatText,
@@ -3173,11 +3179,11 @@ public partial class TasksWindow : Window
         // opened under the line's "⋯" once this one has closed: the compact chip menu is a context menu of its own, not
         // a submenu.
         // Who the task is on (Ruling 57), here and nowhere on the bar: Me or Claude, the task's own ticked.
-        var assign = Item(AssignToText);
+        var assign = Item(AssignToText).WithIcon(TaskMenuIcons.AssignTo);
         AssignItems(id).ForEach(item => assign.Items.Add(item));
         menu.Items.Add(assign);
         menu.Items.Add(Item(MoveToText, () => Dispatcher.BeginInvoke(() => OpenMoveMenu(id, row.Place.Workspace),
-            System.Windows.Threading.DispatcherPriority.Input)));
+            System.Windows.Threading.DispatcherPriority.Input)).WithIcon(TaskMenuIcons.MoveTo));
         // TASK LINKS (Petre's pick: a menu item with a search picker; TasksWindow.Links.cs). Each opens the picker in the
         // task's thread once this menu has closed, so its box can take the keyboard. "Duplicate of…" on any line not
         // waiting out its undo, closed ones too (a closed task can still turn out to be a duplicate); a task already a
@@ -3185,20 +3191,22 @@ public partial class TasksWindow : Window
         if (Actions?.LinkCandidates is not null && !row.Closing)
         {
             if (row.DuplicateOfTitle is null)
-                menu.Items.Add(Item(DuplicateOfText, () => Dispatcher.BeginInvoke(() => BeginLink(id, duplicate: true), System.Windows.Threading.DispatcherPriority.Input)));
-            menu.Items.Add(Item(RelatedToText, () => Dispatcher.BeginInvoke(() => BeginLink(id, duplicate: false), System.Windows.Threading.DispatcherPriority.Input)));
+                menu.Items.Add(Item(DuplicateOfText, () => Dispatcher.BeginInvoke(() => BeginLink(id, duplicate: true), System.Windows.Threading.DispatcherPriority.Input))
+                    .WithIcon(TaskMenuIcons.DuplicateOf));
+            menu.Items.Add(Item(RelatedToText, () => Dispatcher.BeginInvoke(() => BeginLink(id, duplicate: false), System.Windows.Threading.DispatcherPriority.Input))
+                .WithIcon(TaskMenuIcons.RelatedTo));
         }
         // The goal the task counts toward (goals plan, Task 6): a plain submenu, only while goals exist (ruling G1).
         if (latest?.ShowsGoals == true)
         {
-            var goal = Item("Goal");
+            var goal = Item("Goal").WithIcon(TaskMenuIcons.Goal);
             GoalItems(id, row.Goal).ForEach(item => goal.Items.Add(item));
             menu.Items.Add(goal);
         }
         menu.Items.Add(new Separator());
         // Delete cannot be undone, so it takes a second, deliberate step: a submenu item rather than a dialog, which
         // would be one more window to answer for a menu choice already made.
-        var delete = Item(DeleteText);
+        var delete = Item(DeleteText).WithIcon(TaskMenuIcons.Delete);
         delete.Items.Add(Item("Delete for good", () => Actions?.Delete(id)));
         menu.Items.Add(delete);
         OpenMenu(menu);

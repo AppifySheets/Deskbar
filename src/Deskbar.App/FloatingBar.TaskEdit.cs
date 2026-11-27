@@ -91,12 +91,14 @@ public partial class FloatingBar
         if (taskService is null || line is null || line.Closing) return null;
         // The bar as its target, for the bar's screen scaling (OwnMenus.AtPointer; task 4b6cc9a9).
         var menu = OwnMenus.AtPointer(this);
-        menu.Items.Add(TaskMenuItem("Edit", () => BeginTaskEdit(id)));
+        // Every item but the checkable Important and Urgent wears an icon, the same as the panel's menu (TaskMenuIcons,
+        // task e3f94ead): their tick takes the column an icon would.
+        menu.Items.Add(TaskMenuItem("Edit", () => BeginTaskEdit(id)).WithIcon(TaskMenuIcons.Edit));
         // OPEN IN WINDOW (task dca4ebeb): the task in a window of its own (the App's TasksBoard.OpenWindow), right after
         // Edit as in the panel's menu. Run once this menu has closed, so the new window is not activated under it.
         if (OpenTaskWindow is { } openWindow)
             menu.Items.Add(TaskMenuItem(TasksWindow.OpenInWindowText, () => Dispatcher.BeginInvoke(() => openWindow(id),
-                System.Windows.Threading.DispatcherPriority.Input)));
+                System.Windows.Threading.DispatcherPriority.Input)).WithIcon(TaskMenuIcons.OpenInWindow));
         // OPEN CLAUDE (task 7f61af2e; Petre: "make it possible to open claude without opening the task first"). A line's
         // single click opens the task in the tasks panel (Ruling 54), so the double-click that reaches the session opened
         // the panel on its first press, and the panel's strip moved every window on the screen on the way. This item is
@@ -108,7 +110,7 @@ public partial class FloatingBar
         // removed or whose transcript is gone gets Start Claude on this below instead, rather than an item that does nothing.
         if (line.Claudes && line.OpensSession)
             menu.Items.Add(TaskMenuItem(TasksWindow.OpenClaudeText, () => Dispatcher.BeginInvoke(() => OnTaskLineGo(line),
-                System.Windows.Threading.DispatcherPriority.Input)));
+                System.Windows.Threading.DispatcherPriority.Input)).WithClaude(hasSession: true));
         // Task 9: handing the task to Claude, right after Edit (the spec, "Where the clicks are"). Run once this menu has
         // closed, as "Move to workspace…" is: it may ask first, and may open a pick list of folders at the pointer, which
         // holds the bar still the way the bar's own menus do.
@@ -122,38 +124,39 @@ public partial class FloatingBar
             menu.Items.Add(TaskMenuItem(TasksWindow.StartClaudeText, () => Dispatcher.BeginInvoke(() =>
             {
                 if (start(id) is { } pick) HoldFadeWhileOpen(pick);
-            }, System.Windows.Threading.DispatcherPriority.Input)));
+            }, System.Windows.Threading.DispatcherPriority.Input)).WithClaude(hasSession: false));
         // Subtasks (spec "Making subtasks", Petre's pick A): after "Start Claude on this", the add box with this line's task
         // as the parent, a sibling on a subtask's line. Run once this menu has closed, so the box can take the keyboard.
         menu.Items.Add(TaskMenuItem(AddSubtaskText, () => Dispatcher.BeginInvoke(() => BeginSubtaskAdd(id),
-            System.Windows.Threading.DispatcherPriority.Input)));
+            System.Windows.Threading.DispatcherPriority.Input)).WithIcon(TaskMenuIcons.AddSubtask));
         // REEVALUATE (task 3dd07539), after "Add subtask…" as in the panel's menu (TasksWindow.OpenMenuFor), on a Claude
         // task: its session checks where the task stands and fixes its question, status and status line. A refusal (a
         // closed task) is reported as the bar's other refusals are.
         if (line.Claudes)
-            menu.Items.Add(TaskMenuItem(TasksWindow.ReevaluateText, () => Report(taskService.Reevaluate(id))));
+            menu.Items.Add(TaskMenuItem(TasksWindow.ReevaluateText, () => Report(taskService.Reevaluate(id))).WithIcon(TaskMenuIcons.Reevaluate));
         // OPEN PARENT (task 54b39c4c; Petre: "subtask should show its parent and have a way to open the parent easily"):
         // a subtask's line on the bar shows only "↳", so this item reaches the parent, shown in the tasks panel with its
         // thread open, as the panel's own "Open parent" does. Run once this menu has closed, as the items above are.
         if (line.ParentId is { } parentId && OpenParentTask is { } openParent)
             menu.Items.Add(TaskMenuItem(TasksWindow.OpenParentText, () => Dispatcher.BeginInvoke(() => openParent(parentId),
-                System.Windows.Threading.DispatcherPriority.Input)));
+                System.Windows.Threading.DispatcherPriority.Input)).WithIcon(TaskMenuIcons.OpenParent));
         // COPY LINK (task 5016d533): the markdown link that opens this task in Deskbar from a pull request, an issue or
         // anywhere else (TaskLinkClipboard), as the panel's line menu has it.
-        menu.Items.Add(TaskMenuItem(TaskLinkClipboard.CopyLinkText, () => TaskLinkClipboard.Copy(id)));
+        menu.Items.Add(TaskMenuItem(TaskLinkClipboard.CopyLinkText, () => TaskLinkClipboard.Copy(id)).WithIcon(TaskMenuIcons.CopyLink));
         menu.Items.Add(new Separator());
         menu.Items.Add(TaskMenuItem("Important", () => taskService?.SetFlag(id, TaskFlag.Important, !line.Important), line.Important));
         menu.Items.Add(TaskMenuItem("Urgent", () => taskService?.SetFlag(id, TaskFlag.Urgent, !line.Urgent), line.Urgent));
         // The workspace menu is a menu of its own, opened once this one has closed (as the window's "Move to…" does).
         menu.Items.Add(TaskMenuItem("Move to workspace…", () => Dispatcher.BeginInvoke(() => OpenTaskMoveMenu(id, LineButtonOf(id)),
-            System.Windows.Threading.DispatcherPriority.Input)));
+            System.Windows.Threading.DispatcherPriority.Input)).WithIcon(TaskMenuIcons.MoveTo));
         menu.Items.Add(new Separator());
-        menu.Items.Add(TaskMenuItem("Close", () => CloseWithUndo(line)));
+        menu.Items.Add(TaskMenuItem("Close", () => CloseWithUndo(line)).WithIcon(TaskMenuIcons.Close));
         // MARK DEPLOYED (task 8470d176, phase 2), as on the tasks panel's line menu (TasksWindow.OpenMenuFor): a Done task
         // whose pull request in another repository is merged but not reported running gets its ring filled by hand, with
         // TaskService.MarkedByHand as the evidence. Only while it would change something (TaskService.CanMarkDeployed).
         if (taskService.Board.Tasks.FirstOrDefault(t => t.Id == id) is { } task && taskService.CanMarkDeployed(task))
-            menu.Items.Add(TaskMenuItem(TasksWindow.MarkDeployedText, () => Report(taskService.MarkDeployed(id, TaskService.MarkedByHand))));
+            menu.Items.Add(TaskMenuItem(TasksWindow.MarkDeployedText, () => Report(taskService.MarkDeployed(id, TaskService.MarkedByHand)))
+                .WithIcon(TaskMenuIcons.MarkDeployed));
         HoldFadeWhileOpen(menu);
         TaskLineMenu = menu;
         menu.IsOpen = true;

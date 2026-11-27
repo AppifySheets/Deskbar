@@ -2190,6 +2190,28 @@ public class TasksBoardTests
         Assert.Null(RepeatMarkOf(t.Window));
     });
 
+    // ICONS ON THE LINE MENU (task e3f94ead, TaskMenuIcons): every top-level item has one, an action that is also a button
+    // on the line wears the line's own picture, and the items inside a submenu, which carry ticks, have none.
+    [Fact]
+    public void Every_top_level_line_menu_item_has_an_icon_and_shares_the_line_buttons_picture() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var id = t.Tasks.AddNote("a", t.Gepha).Value.Id;
+        t.Controller.Show();
+
+        var menu = t.Window.OpenMenuFor(id);
+        menu.IsOpen = false;
+        var items = menu.Items.OfType<MenuItem>().ToArray();
+
+        Assert.NotEmpty(items);
+        Assert.All(items, item => Assert.NotNull(item.Icon));
+        static string? GlyphOf(MenuItem item) => (item.Icon as TextBlock)?.Text;
+        Assert.Equal(TaskMenuIcons.Edit, GlyphOf(items.Single(i => Words(i) == "Edit")));
+        Assert.Equal(TaskMenuIcons.MoveTo, GlyphOf(items.Single(i => Words(i) == TasksWindow.MoveToText)));
+        Assert.Equal(TaskMenuIcons.Delete, GlyphOf(items.Single(i => Words(i) == TasksWindow.DeleteText)));
+        Assert.All(items.SelectMany(i => i.Items.OfType<MenuItem>()), sub => Assert.Null(sub.Icon));
+    });
+
     [Fact]
     public void The_line_menu_has_Repeat_with_five_choices_custom_and_no_off_on_a_plain_task() => StaThread.Run(() =>
     {
