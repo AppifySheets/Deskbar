@@ -1993,6 +1993,9 @@ public partial class App : Application
                 // The manager's reply asks for the user's attention unless its window was in front as the turn ended
                 // (task 2c5de076, ManagerQuestion.AfterStop). Read on the UI thread, where pipe requests run.
                 ManagerInFront = () => ManagerWindowAt(new WindowHandle(NativeMethods.GetForegroundWindow())),
+                // "The current task" in the user's message to the manager is the task open in the Inbox (task fcdf47f1,
+                // ManagerSession.OpenTaskLine). Read on the UI thread when the prompt hook arrives, like ManagerInFront.
+                InboxPage = () => tasksBoard?.OpenInboxPage ?? Maybe<Guid>.None,
             },
             // `claude-wait`, the comment waiter registering, and SessionEnd forgetting a session's inbox (a comment wakes
             // its session).

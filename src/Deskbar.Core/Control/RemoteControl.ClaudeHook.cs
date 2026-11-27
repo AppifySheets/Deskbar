@@ -115,10 +115,11 @@ public sealed partial class RemoteControl
     //
     // THE MANAGER SESSION IS LEFT OUT OF TASKS (manager session design, Task 6): a hook from the manager's own folder is
     // answered before Attended runs, so the keeper never adopts it (HeardAttended is never called), SessionStart gets the
-    // two-line SessionBriefing.Manager instead of the offer to join or create a task, and a prompt gets nothing at all, so
-    // it costs no tokens per message. SessionEnd stays as for any session (it marks nothing for a session with no task).
-    // A prompt there is still read for one thing (task 61e4d143, ManagerQuestion.AfterPrompt): the user's reply to the
-    // manager clears the manager's open question, so its line leaves "Waiting on you". Still silent.
+    // two-line SessionBriefing.Manager instead of the offer to join or create a task, and a prompt gets nothing, so it
+    // costs no tokens per message, except one line naming the task open in the Inbox while one is (task fcdf47f1,
+    // ManagerPrompted). SessionEnd stays as for any session (it marks nothing for a session with no task).
+    // A prompt there is also read for one thing (task 61e4d143, ManagerQuestion.AfterPrompt): the user's reply to the
+    // manager clears the manager's open question, so its line leaves "Waiting on you".
     ControlReply TaskEvent(TaskService service, ClaudeHookEvent hook, string? folder) => hook.Event switch
     {
         "SessionStart" when IsManagerFolder(folder) => Said(SessionBriefing.Manager(hook.SessionId)),
@@ -187,11 +188,18 @@ public sealed partial class RemoteControl
     // A prompt reached the manager (see TaskEvent): when it is the user's message to the stored manager, its question and
     // any unread answer are cleared and the turn is marked as a reply to the user (task 2c5de076, ManagerStopped reads
     // that when it ends); a Deskbar wake marks the turn as no reply; another session in the folder changes nothing.
+    //
+    // The one thing the hook SAYS (task fcdf47f1): when the user's message arrives while a task's page is open in the
+    // Inbox, a line naming that task (ManagerSession.OpenTaskLine), which Claude Code adds to the message, so "the current
+    // task" means the task the user was looking at as they sent it. Nothing otherwise, so most messages still cost no tokens.
+    // A page whose task is gone from the board names nothing. TaskEvent runs only with the task service, so `tasks` is set.
     ControlReply ManagerPrompted(ClaudeHookEvent hook)
     {
         ManagerQuestion.AfterPrompt(Maybe.From(manager.State.Manager), hook.SessionId, hook.Prompt)
             .Tap(manager.SetManagerSession);
-        return Quiet;
+        var open = (taskSessions?.InboxPage() ?? Maybe<Guid>.None)
+            .Bind(id => tasks is { } service ? service.Board.Tasks.TryFirst(t => t.Id == id) : Maybe<TaskItem>.None);
+        return ManagerSession.OpenTaskLine(hook.Prompt, open).Match(Said, () => Quiet);
     }
 
     // The manager's turn ended (task 2c5de076): when the turn answered the user's message, the reply's first line goes on

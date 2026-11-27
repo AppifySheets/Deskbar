@@ -474,6 +474,14 @@ public sealed partial class TasksBoard : IDisposable
     /// <summary>Whether the panel is open: the user's word, as TasksPanel keeps it (open from Show to Hide).</summary>
     public bool IsOpen => panel.IsShown;
 
+    /// <summary>
+    /// The task whose page the Inbox shows right now (task fcdf47f1: "current is the task open in the inbox"), for the
+    /// manager's prompt hook (ManagerSession.OpenTaskLine). None while the panel is closed (a closed panel keeps its last
+    /// page id until the next open folds it) or while it draws a list rather than a page.
+    /// </summary>
+    public Maybe<Guid> OpenInboxPage =>
+        IsOpen && window.InboxPageContent is not null && window.InboxPageShown is { } id ? id : Maybe<Guid>.None;
+
     // The panel's saved state (AppState.TasksPanel), or the default for a file that never had one: closed, 460 DIP.
     TasksPanelState PanelState => manager.State.TasksPanel ?? TasksPanelState.Default;
 

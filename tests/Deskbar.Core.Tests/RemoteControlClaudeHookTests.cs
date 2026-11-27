@@ -1365,13 +1365,15 @@ public class RemoteControlClaudeHookTests
 
     // A hook run from the manager's own folder, against a control that knows where that is.
     // `inFront`: whether the manager's window is the one in front (task 2c5de076, TaskSessionCommands.ManagerInFront).
+    // `inboxPage`: the task whose page is open in the Inbox (task fcdf47f1, TaskSessionCommands.InboxPage).
     string ManagerHook(WorkspaceManager manager, string hookEvent, string session = "mgr", string source = "startup", string extra = "",
-        bool inFront = false) =>
+        bool inFront = false, Guid? inboxPage = null) =>
         new RemoteControl(manager, tasks: tasks, longPath: LongPath,
                 taskSessions: new TaskSessionCommands(_ => Result.Success(), _ => [], (_, _, _) => Result.Success(), (_, _) => Result.Success())
                 {
                     ManagerFolder = ManagerDir,
                     ManagerInFront = () => inFront,
+                    InboxPage = () => inboxPage is { } id ? id : Maybe<Guid>.None,
                 })
             .Execute(["claude-hook", "--entry", "claude-vscode", "--attended", "1", "--from", ManagerDir,
                 "--json", HookOf(hookEvent, session, source, extra)]).Output;
@@ -1394,6 +1396,31 @@ public class RemoteControlClaudeHookTests
     [Fact]
     public void Manager_prompt_gets_nothing() =>
         Assert.Equal("", ManagerHook(Started(), "UserPromptSubmit"));
+
+    // Task fcdf47f1, "current is the task open in the inbox": the user's message to the manager gets one line naming the
+    // task whose page the Inbox showed as it was sent; a Deskbar wake does not, and a page whose task is gone names nothing.
+    [Fact]
+    public void Manager_prompt_from_the_user_names_the_task_open_in_the_inbox()
+    {
+        var manager = Started();
+        var open = tasks.AddNote("add file download", IdOf(manager, "Deskbar")).Value;
+
+        var line = ManagerHook(manager, "UserPromptSubmit", extra: ",\"prompt\":\"why is the current task not done\"", inboxPage: open.Id);
+
+        Assert.StartsWith(ManagerSession.OpenTaskOpening, line);
+        Assert.Contains($"{open.Id.ToString()[..8]} \"add file download\"", line);
+    }
+
+    [Fact]
+    public void Manager_prompt_names_no_task_for_a_wake_or_a_task_that_is_gone()
+    {
+        var manager = Started();
+        var open = tasks.AddNote("add file download", IdOf(manager, "Deskbar")).Value;
+
+        Assert.Equal("", ManagerHook(manager, "UserPromptSubmit", extra: $",\"prompt\":\"{ManagerWakes.Prefix} Since your last look:\"", inboxPage: open.Id));
+        Assert.Equal("", ManagerHook(manager, "UserPromptSubmit", extra: ",\"prompt\":\"hi\"", inboxPage: Guid.NewGuid()));
+        Assert.Equal("", ManagerHook(manager, "UserPromptSubmit", extra: ",\"prompt\":\"hi\""));
+    }
 
     // The user's reply to the manager clears its open question (task 61e4d143, ManagerQuestion.AfterPrompt); the hook
     // still answers nothing, so a prompt costs no tokens.

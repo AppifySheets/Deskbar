@@ -288,6 +288,56 @@ public class ManagerSessionTests
         Assert.True(text.Split('\n').Length < 40);
     }
 
+    // Task fcdf47f1: "current is the task open in the inbox". The briefing says what the per-message line means and what
+    // its absence means, still under the 40 line cap; the line itself names the task by short id and one-line title.
+    [Fact]
+    public void Briefing_says_current_task_is_the_one_open_in_the_inbox()
+    {
+        var text = ManagerSession.Briefing(Shim);
+
+        Assert.Contains($"mean the one named after \"{ManagerSession.OpenTaskOpening}\"", text);
+        Assert.Contains("with no such line none was open: ask which.", text);
+        Assert.Contains("Never use Monitor", text);
+        Assert.True(text.Split('\n').Length < 40);
+    }
+
+    static TaskItem OpenTask(string title) =>
+        new(Guid.Parse("de6bb23e-0000-0000-0000-000000000000"), title, Maybe<Guid>.None, Deskbar.Core.Tasks.TaskStatus.InProgress, "",
+            Maybe<string>.None, DateTimeOffset.UnixEpoch, DateTimeOffset.UnixEpoch, DateTimeOffset.UnixEpoch, [], []);
+
+    [Fact]
+    public void The_open_task_line_names_the_task_for_the_users_message_only()
+    {
+        var task = OpenTask("add file download");
+
+        var line = ManagerSession.OpenTaskLine(Maybe.From("why still a question mark"), Maybe.From(task));
+
+        Assert.Equal($"{ManagerSession.OpenTaskOpening} de6bb23e \"add file download\". "
+                     + "\"Current task\", \"this task\" or \"the open task\" in the message means this one.", line.Value);
+        Assert.True(ManagerSession.OpenTaskLine(Maybe.From($"{ManagerWakes.Prefix} Since your last look:"), Maybe.From(task)).HasNoValue);
+        Assert.True(ManagerSession.OpenTaskLine(Maybe.From(ManagerSession.FirstMessage), Maybe.From(task)).HasNoValue);
+        Assert.True(ManagerSession.OpenTaskLine(Maybe.From("hi"), Maybe<TaskItem>.None).HasNoValue);
+    }
+
+    [Fact]
+    public void The_open_task_line_keeps_a_long_title_to_one_short_line()
+    {
+        var line = ManagerSession.OpenTaskLine(Maybe.From("hi"), Maybe.From(OpenTask("first line\nsecond " + new string('x', 200)))).Value;
+
+        Assert.DoesNotContain("\n", line);
+        Assert.Contains("\"first line second xxx", line);
+        Assert.Contains("…\"", line);
+    }
+
+    // Review of the branch: a cut that falls inside an emoji steps back over its surrogate pair.
+    [Fact]
+    public void The_open_task_line_never_splits_an_emoji()
+    {
+        var line = ManagerSession.OpenTaskLine(Maybe.From("hi"), Maybe.From(OpenTask(new string('x', 78) + "😀 tail"))).Value;
+
+        Assert.Contains($"\"{new string('x', 78)}…\"", line);
+    }
+
     // Task f171bca6: the manager's own window (violet icon and ring, glow, pinned to every desktop) is the Windows Terminal
     // window titled "Deskbar manager · Claude", and no task session's window is.
     const string Terminal = @"C:\Program Files\WindowsApps\Microsoft.WindowsTerminal_1.25.3131.0_x64__8wekyb3d8bbwe\WindowsTerminal.exe";

@@ -757,4 +757,12 @@ public sealed record TaskSessionCommands(
     /// reason as Transcript; the default says no, so every reply to the user gets its line.
     /// </summary>
     public Func<bool> ManagerInFront { get; init; } = () => false;
+
+    /// <summary>
+    /// The task whose page is open in the tasks panel's Inbox right now (TasksBoard.OpenInboxPage in the app), none while
+    /// the panel is closed or shows a list. Read when the user's message reaches the manager (task fcdf47f1,
+    /// ManagerSession.OpenTaskLine), so "the current task" in it can be told. An init property for the same reason as
+    /// Transcript; the default says none is open, and the manager then hears nothing about one.
+    /// </summary>
+    public Func<Maybe<Guid>> InboxPage { get; init; } = () => Maybe<Guid>.None;
 }
