@@ -45,6 +45,8 @@ public class ClaudeTaskActionsTests
         public List<Maybe<string>> Models { get; } = [];
         public List<string> Asked { get; } = [];
         public List<string> Told { get; } = [];
+        // The background starts confirmed (task 7b17a573, StartedInBackground): the task and its folder.
+        public List<(Guid Task, string Folder)> Confirmed { get; } = [];
         public List<string> Forgotten { get; } = [];
         // `claude stop <short id>` calls, for "Stop Claude and close" (task 37cd7081), and what each answers.
         public List<string> Stopped { get; } = [];
@@ -111,6 +113,7 @@ public class ClaudeTaskActionsTests
                 ClaudeInstalled = () => Installed,
                 SkillsKept = folder => Kept(folder),
                 Tell = Told.Add,
+                StartedInBackground = (task, folder) => Confirmed.Add((task.Id, folder)),
                 Forget = Forgotten.Add,
                 Stop = shortId =>
                 {
@@ -592,6 +595,55 @@ public class ClaudeTaskActionsTests
         Assert.Empty(rig.Asked);
         Assert.Empty(rig.Launches);
     }
+
+    // Task 7b17a573 (Petre: "only start a task and don't open a terminal. confirm it has started as a mild notification,
+    // don't even take me away from my current thread"): the add boxes' Ctrl+Enter starts through OfferInBackground. The
+    // session starts in the task's one folder, but no terminal is attached and the desktop stays where it was; the start
+    // is confirmed through StartedInBackground instead, and nothing is told or asked.
+    [Fact]
+    public void A_background_start_opens_no_window_stays_on_this_desktop_and_confirms_the_start() => StaThread.Run(() =>
+    {
+        using var rig = new Rig();
+        var task = rig.ClaudeTask();
+        rig.Listed();
+        var before = rig.Harness.Desktops.CurrentId;
+
+        Assert.Null(rig.Actions.OfferInBackground(task.Id));
+        rig.Settle();
+
+        Assert.Equal([("Fix the bar", Folder)], rig.Starts);
+        Assert.Equal([(task.Id, Folder)], rig.Confirmed);
+        Assert.Empty(rig.Launches);
+        Assert.Empty(rig.Consoles);
+        Assert.Empty(rig.BroughtForward);
+        Assert.Equal(before, rig.Harness.Desktops.CurrentId);
+        Assert.Empty(rig.Told);
+        Assert.Empty(rig.Asked);
+
+        // The menu's Start Claude on this, by contrast, still opens the session's window and confirms nothing.
+        Assert.Null(rig.Actions.Offer(task.Id));
+        rig.Settle();
+        Assert.Single(rig.Launches);
+        Assert.Single(rig.Confirmed);
+    });
+
+    // A background start that fails is told as a clicked start's failure is (task 7b17a573): Petre asked for it, and with
+    // no window coming, nothing else would say that nothing runs. No confirmation goes out.
+    [Fact]
+    public void A_failed_background_start_is_told_and_not_confirmed() => StaThread.Run(() =>
+    {
+        using var rig = new Rig();
+        var task = rig.ClaudeTask();
+        rig.Listed();
+        rig.StartAnswer = _ => Result.Failure<string>("claude exited with code 1.");
+
+        Assert.Null(rig.Actions.OfferInBackground(task.Id));
+        rig.Settle();
+
+        Assert.Contains("claude exited with code 1.", Assert.Single(rig.Told), StringComparison.Ordinal);
+        Assert.Empty(rig.Confirmed);
+        Assert.Empty(rig.Launches);
+    });
 
     // PickFolder is Offer's folder half, which a repeat set from the menu uses too (task 0b78269e): one folder is the
     // answer at once, with no menu.

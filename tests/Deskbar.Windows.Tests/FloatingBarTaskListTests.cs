@@ -111,7 +111,7 @@ public partial class FloatingBarTaskListTests
         Func<TaskItem, Maybe<string>>? goalTitle = null, IObservable<System.Reactive.Unit>? goalChanges = null,
         Func<Guid, ContextMenu?>? startClaude = null, IObservable<bool>? panelShown = null, string? stateDir = null,
         Action<Guid>? openParent = null, Action? openManager = null, Func<ManagerAsk?>? managerAsks = null,
-        Func<TaskItem, bool>? opensClaudeSession = null)
+        Func<TaskItem, bool>? opensClaudeSession = null, Func<Guid, ContextMenu?>? startClaudeInBackground = null)
     {
         var harness = Harness.Build();
         var minutes = 0;
@@ -147,6 +147,7 @@ public partial class FloatingBarTaskListTests
             GoalTitle = goalTitle ?? (_ => Maybe<string>.None),
             GoalChanges = goalChanges,
             StartClaude = startClaude,
+            StartClaudeInBackground = startClaudeInBackground,
             OpensClaudeSession = opensClaudeSession,
             OpenParentTask = openParent,
             // Pictures pasted into the add box are written here, never into the real profile.
@@ -3727,6 +3728,42 @@ public partial class FloatingBarTaskListTests
 
         using var plain = Build();
         Assert.Equal(Visibility.Collapsed, plain.Bar.TaskAddStartClaudeButton!.Visibility);
+    });
+
+    // Task 7b17a573 (Petre: "only start a task and don't open a terminal. confirm it has started as a mild notification,
+    // don't even take me away from my current thread"): with the App's background start wired, the add box's start goes
+    // there and not to the line menu's StartClaude, and the note is not selected, so the selection the tasks panel shares
+    // stays on the task Petre had picked. The keyboard goes back to where he was typing.
+    [Fact]
+    public void The_add_rows_start_runs_in_the_background_and_leaves_the_selection_alone() => StaThread.Run(() =>
+    {
+        var clicked = new List<Guid>();
+        var background = new List<Guid>();
+        var handedBack = new List<nint>();
+        using var t = Build(handedBack: handedBack,
+            startClaude: id =>
+            {
+                clicked.Add(id);
+                return null;
+            },
+            startClaudeInBackground: id =>
+            {
+                background.Add(id);
+                return null;
+            });
+        var picked = t.Tasks.AddNote("The thread I am reading", t.Gepha).Value.Id;
+        t.Bar.Selection.Select(picked);
+
+        ClickBox(t);
+        t.Box.Text = "Fix the build";
+        Click(t.Bar.TaskAddStartClaudeButton!);
+        t.Bar.Dispatcher.Invoke(() => { }, DispatcherPriority.ApplicationIdle);
+
+        var task = t.Tasks.Board.Tasks.Single(x => x.Title == "Fix the build");
+        Assert.Equal([task.Id], background);
+        Assert.Empty(clicked);
+        Assert.Equal(picked, t.Bar.Selection.Current.Value);
+        Assert.Equal([Editor], handedBack);
     });
 
     // Task 7f61af2e (Petre: "make it possible to open claude without opening the task first"): a Claude line's menu has

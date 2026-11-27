@@ -260,7 +260,7 @@ public sealed partial class TasksBoard : IDisposable
         Func<Maybe<Guid>, Maybe<Guid>, Task<IReadOnlyList<SkillChoice>>>? workspaceSkills = null,
         Func<TaskItem, Action<string>, ContextMenu?>? pickFolder = null, Func<Guid, Result>? runNow = null,
         Func<Guid, Task<IReadOnlyList<SkillChoice>>>? taskSkills = null,
-        Func<TaskSession, Maybe<string>>? transcriptOf = null)
+        Func<TaskSession, Maybe<string>>? transcriptOf = null, Action<Guid>? startClaudeInBackground = null)
     {
         this.pickFolder = pickFolder;
         this.runNow = runNow;
@@ -328,7 +328,9 @@ public sealed partial class TasksBoard : IDisposable
             // A comment box's "/" list of Claude Code skills (task 29bdd158, SkillCompletion): none, no list.
             TaskSkills = taskSkills,
             // The add box's Start Claude button (task 3c40dec9): none, as StartClaude, while Claude cannot be started.
-            AddNoteAndStartClaude = startClaude is { } start
+            // Since task 7b17a573 it starts in the background (`startClaudeInBackground`, no window, a silent tray
+            // notification) when the App gives that; the tests give only `startClaude`.
+            AddNoteAndStartClaude = (startClaudeInBackground ?? startClaude) is { } start
                 ? (title, workspace, quadrant, describe) => AddNoteAndStartClaude(start, title, workspace, quadrant, describe)
                 : null,
             // The manager line's click (task 61e4d143): the Manager button's own click, read when it happens, since the
@@ -1218,11 +1220,11 @@ public sealed partial class TasksBoard : IDisposable
     /// Claude through it.
     /// </summary>
     public Result AddNote(string title, Maybe<Guid> workspace, Quadrant quadrant = Quadrant.IV, Maybe<Guid> parent = default,
-        Func<Guid, Result<string>>? describe = null, Action<Guid>? added = null) =>
+        Func<Guid, Result<string>>? describe = null, Action<Guid>? added = null, bool show = true) =>
         Report((describe is null
             ? tasks.AddNote(title, workspace, quadrant, parent)
             : tasks.AddNote(title, workspace, quadrant, parent, describe))
-            .Tap(task => ShowAdded(task.Id))
+            .Tap(task => { if (show) ShowAdded(task.Id); })
             .Tap(task => added?.Invoke(task.Id))
             .Bind(_ => Result.Success()));
 
@@ -1234,7 +1236,9 @@ public sealed partial class TasksBoard : IDisposable
     // pick list. Whether the add worked, as AddNote answers it: a refused note starts nothing.
     bool AddNoteAndStartClaude(Action<Guid> startClaude, string title, Maybe<Guid> workspace, Quadrant quadrant,
         Func<Guid, Result<string>>? describe) =>
-        AddNote(title, workspace, quadrant, describe: describe,
+        // Not selected or scrolled to (show: false, task 7b17a573; Petre: "don't even take me away from my current
+        // thread"): the panel stays on the thread he has open, and the tray's "Claude started" confirms the start.
+        AddNote(title, workspace, quadrant, describe: describe, show: false,
             added: id => window.Dispatcher.BeginInvoke(() => startClaude(id), System.Windows.Threading.DispatcherPriority.Input)).IsSuccess;
 
     /// <summary>

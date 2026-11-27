@@ -523,6 +523,7 @@ public partial class App : Application
         // on the new version -- so a missing balloon is a missed glance, not a missed update.
         try
         {
+            balloonClicked = OnUpdateNotificationClicked;
             trayIcon!.ShowNotification(
                 title: $"Deskbar {version} is available",
                 message: $"You are running {UpdateService.DisplayVersion}. Click here to update.");
@@ -533,6 +534,43 @@ public partial class App : Application
             // Never worth losing the app over, and never worth losing the menu item over either: it is
             // already set by the time we get here.
             ClickTrace.Write($"update {version} announced: menu item set, balloon threw {e.GetType().Name}: {e.Message}");
+        }
+    }
+
+    // What a click on the tray's notification does: the last one shown sets it (Announce: the update offer;
+    // NotifyClaudeStarted: the session). Nothing until a notification has been shown.
+    Action balloonClicked = () => { };
+
+    // "CLAUDE STARTED", the add boxes' Ctrl+Enter confirmation (task 7b17a573; Petre: "only start a task and don't open
+    // a terminal. confirm it has started as a mild notification, don't even take me away from my current thread").
+    // A tray notification, because it is the one thing Windows shows without taking the foreground or the keyboard
+    // from anything: the bar and the panel stay as they were, and so does whatever Petre was typing in. Mild on
+    // purpose: no sound, and it respects Focus Assist (respectQuietTime). Clicking it is asking for the session after
+    // all, so the click goes to it as a double-click on the task's line does (ClaudeTaskActions.Go: its workspace,
+    // then its window). Best effort, as the update balloon is: a shell that drops it loses a confirmation, not the
+    // session, which is running and shows in the tasks panel's Claude block either way.
+    void NotifyClaudeStarted(Core.Tasks.TaskItem task)
+    {
+        var id = task.Id;
+        balloonClicked = () =>
+        {
+            if (tasks?.Board.Tasks.FirstOrDefault(t => t.Id == id) is { } current)
+                claudeActions?.Go(current).TapError(e => ClickTrace.Write($"claude started notification: open refused: {e}"));
+        };
+        // The shell cuts a notification's text at 255 characters; a long title is cut here, with an ellipsis, instead.
+        var title = task.Title.Length > 180 ? task.Title[..180] + "…" : task.Title;
+        try
+        {
+            trayIcon?.ShowNotification(
+                title: "Claude started",
+                message: $"{title}\nClick to open the session.",
+                sound: false,
+                respectQuietTime: true);
+            ClickTrace.Write($"claude started notification for {id}");
+        }
+        catch (Exception e)
+        {
+            ClickTrace.Write($"claude started notification for {id} threw {e.GetType().Name}: {e.Message}");
         }
     }
 
@@ -2218,6 +2256,8 @@ public partial class App : Application
                 OfferInstall = message => MessageBox.Show(message, "Deskbar", MessageBoxButton.YesNo, MessageBoxImage.Question) == MessageBoxResult.Yes,
                 ClaudeInstalled = () => Deskbar.Windows.Claude.ClaudeLocator.Find().HasValue,
                 Tell = message => MessageBox.Show(message, "Deskbar", MessageBoxButton.OK, MessageBoxImage.Information),
+                // The add boxes' Ctrl+Enter (task 7b17a573): a silent tray notification says the session started.
+                StartedInBackground = (task, _) => NotifyClaudeStarted(task),
                 // A double-click that brings back a task the keeper gave up on clears the give-up's resume count.
                 Forget = claudeSessions.Forget,
                 // "Stop Claude and close" (task 37cd7081): the same `claude stop` the comment wake uses.
@@ -2329,7 +2369,9 @@ public partial class App : Application
         // Clicking the notification is what a notification saying "click here to update" has to do.
         // Subscribed ONCE, here, rather than alongside each ShowNotification: routed-event handlers
         // accumulate, so re-adding it per check would run the flow twice after the second check.
-        trayIcon.TrayBalloonTipClicked += (_, _) => OnUpdateNotificationClicked();
+        // Since task 7b17a573 the tray shows a second kind of notification ("Claude started"), so the click runs what
+        // the LAST notification shown offers (balloonClicked), not always the update's.
+        trayIcon.TrayBalloonTipClicked += (_, _) => balloonClicked();
 
         // AFTER ForceCreate, necessarily: a balloon needs a registered shell icon to come out of,
         // and announcing an update into a tray icon that does not exist yet is a silent no-op.
@@ -2497,6 +2539,9 @@ public partial class App : Application
                 SessionWindow = SessionWindowOf,
                 // A line menu's "Start Claude on this" (Task 9): ClaudeTaskActions.Offer, which may open a pick list.
                 StartClaude = id => claudeActions?.Offer(id),
+                // The add box's Ctrl+Enter and play button (task 7b17a573): the same start in the background, with no
+                // window and a silent tray notification.
+                StartClaudeInBackground = id => claudeActions?.OfferInBackground(id),
                 // The row menu's "Folder…" and the New workspace dialog's folder (task 50b61120): store, trust, and a
                 // terminal running claude there.
                 ChooseClaudeFolder = id => claudeActions?.ChooseWorkspaceFolder(id),
@@ -2919,6 +2964,9 @@ public partial class App : Application
                 // line menu and in the thread, and a redraw whenever `claude agents --json` gives a new list.
                 sessionsOf: task => claudeActions?.SessionsOf(task) ?? [],
                 startClaude: id => claudeActions?.Offer(id),
+                // The add box's Ctrl+Enter and play button (task 7b17a573): the same start in the background, with no
+                // window and a silent tray notification.
+                startClaudeInBackground: id => claudeActions?.OfferInBackground(id),
                 // The add box's "/" list of skills (task 3a872301), as the bar's (WorkspaceSkillsOf).
                 workspaceSkills: WorkspaceSkillsOf,
                 // The comment boxes' "/" list of skills (task 29bdd158): the skills where the task's session runs.

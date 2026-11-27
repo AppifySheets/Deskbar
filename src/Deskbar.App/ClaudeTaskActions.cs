@@ -489,7 +489,19 @@ public sealed class ClaudeTaskActions : IDisposable
     /// running session, then starts in the one folder, or opens the pick list at the pointer and answers it (for the bar,
     /// which holds itself still while it is open, and the tests). A refusal is told (a message box in the app).
     /// </summary>
-    public ContextMenu? Offer(Guid id)
+    public ContextMenu? Offer(Guid id) => Offer(id, background: false);
+
+    /// <summary>
+    /// <see cref="Offer"/> for the add boxes' Ctrl+Enter and play button (task 7b17a573; Petre: "only start a task and
+    /// don't open a terminal. confirm it has started as a mild notification, don't even take me away from my current
+    /// thread"). Everything up to the start is Offer's (the refusals, the folder pick list when there are several), but
+    /// the session then runs in the background: no window is attached to it, and
+    /// <see cref="ClaudeTaskSeams.StartedInBackground"/> (a silent tray notification in the app) says it started. A failed
+    /// start is still told the loud way, as Offer's is, since it needs Petre: nothing runs and nothing else would say so.
+    /// </summary>
+    public ContextMenu? OfferInBackground(Guid id) => Offer(id, background: true);
+
+    ContextMenu? Offer(Guid id, bool background)
     {
         if (tasks.Board.Tasks.FirstOrDefault(t => t.Id == id) is not { } task) return null;
         if (!manager.State.ClaudeTasksInEffect)
@@ -504,7 +516,7 @@ public sealed class ClaudeTaskActions : IDisposable
             return null;
         }
         if (HasRunningSession(task) && !seams.Confirm(AnotherSessionQuestion)) return null;
-        return PickFolder(task, folder => Told(Start(task, folder)));
+        return PickFolder(task, folder => Told(Start(task, folder, background: background)));
     }
 
     /// <summary>
@@ -556,8 +568,15 @@ public sealed class ClaudeTaskActions : IDisposable
     /// thread, and nothing else is said. A recurring task's scheduled run (RecurringRunner; task 0b78269e, spec
     /// docs/superpowers/specs/2026-11-26-recurring-tasks-design.md) gives one, because its failure is a note of its own
     /// plus a question that holds the next runs back, and the line here would say the same thing twice.
+    ///
+    /// <paramref name="background"/> is the start Petre asked for but does not want to watch (task 7b17a573, the add
+    /// boxes' Ctrl+Enter through <see cref="OfferInBackground"/>): like <paramref name="quiet"/> it opens no window, but a
+    /// failure is told as a clicked start's is, and a success is confirmed through
+    /// <see cref="ClaudeTaskSeams.StartedInBackground"/>, since he asked and is owed an answer that does not take him
+    /// anywhere.
     /// </summary>
-    public Result Start(TaskItem task, string folder, Maybe<string> model = default, bool quiet = false, Action<string>? failed = null)
+    public Result Start(TaskItem task, string folder, Maybe<string> model = default, bool quiet = false, Action<string>? failed = null,
+        bool background = false)
     {
         if (!manager.State.ClaudeTasksInEffect) return Result.Failure(FeatureOff);
         // A closed task takes no session (TaskBoard refuses the join), so `claude --bg` would run for nothing (final
@@ -576,7 +595,10 @@ public sealed class ClaudeTaskActions : IDisposable
                     sessionId =>
                     {
                         ClearGiveUp(task.Id);
-                        Current(task.Id).Where(_ => !quiet).Tap(t =>
+                        // A background start (task 7b17a573) is confirmed, never attached: the window is what Petre
+                        // asked not to get. A quiet one gets neither; a clicked one gets its window.
+                        if (background) Current(task.Id).Tap(t => seams.StartedInBackground(t, folder));
+                        else Current(task.Id).Where(_ => !quiet).Tap(t =>
                             Attach(t, new ClaudeAgent(sessionId, Maybe<string>.None, folder, Background: true, Busy: false, Name: "")));
                     },
                     Failed),
@@ -773,6 +795,13 @@ public sealed record ClaudeTaskSeams(
 
     /// <summary>A refusal or a failure said to Petre at once (the feature is off, `claude` or `wt` missing).</summary>
     public Action<string> Tell { get; init; } = _ => { };
+
+    /// <summary>
+    /// A background start went through (task 7b17a573, ClaudeTaskActions.OfferInBackground): the task as the board has it
+    /// now and the folder the session runs in. The app shows a silent tray notification that takes no focus; nothing by
+    /// default.
+    /// </summary>
+    public Action<TaskItem, string> StartedInBackground { get; init; } = (_, _) => { };
 
     /// <summary>
     /// Forget a session's past resumes (ClaudeSessions.Forget), when a click brings back a task the keeper had given up

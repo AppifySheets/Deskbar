@@ -50,6 +50,16 @@ public partial class FloatingBar
     internal Func<Guid, ContextMenu?>? StartClaude { get; init; }
 
     /// <summary>
+    /// The add box's Ctrl+Enter and play button (task 7b17a573): the App's ClaudeTaskActions.OfferInBackground, which
+    /// starts the session with no window and confirms it with a silent tray notification. Unset (the tests), the add box
+    /// falls back to <see cref="StartClaude"/>.
+    /// </summary>
+    internal Func<Guid, ContextMenu?>? StartClaudeInBackground { get; init; }
+
+    // What the add box's start runs: the background start when the App gave one, else the line menu's.
+    Func<Guid, ContextMenu?>? AddedTaskStarter => StartClaudeInBackground ?? StartClaude;
+
+    /// <summary>
     /// The add box's "/" list (task 3a872301, SkillCompletion): the Claude Code skills of the folders a task on this
     /// workspace, under this parent, would start in, as the App's SkillCatalog has them. Unset, typing "/" lists nothing.
     /// </summary>
