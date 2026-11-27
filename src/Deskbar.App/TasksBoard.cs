@@ -1605,6 +1605,7 @@ public sealed partial class TasksBoard : IDisposable
         NextRun = task.NextRun.Map(next => (DateTimeOffset?)next).GetValueOrDefault(),
         RepeatModel = task.Repeat.Map(r => r.Model).GetValueOrDefault(),
         PullRequests = task.PullRequests,
+        DeployPullRequests = task.DeployPullRequests,
         // Whether a Done task's change runs in this Deskbar yet: the ring and the outlined chip until it does (task 8470d176).
         Delivery = tasks.DeliveryOf(task),
         // Whether its menu offers "Mark deployed": merged, and a pull request outside this build's repository not
@@ -1951,6 +1952,12 @@ internal sealed record TaskRowView(Guid Id, string Title, string Detail, TaskSta
     /// "Pull requests" section, one link each.
     /// </summary>
     public IReadOnlyList<PullRequestLink> PullRequests { get; init; } = [];
+
+    /// <summary>
+    /// The task's deploy pull requests (task 1565789d, TaskItem.DeployPullRequests), oldest first: the task window lists
+    /// them in a section of their own, so the deploy step is told apart from the task's own work.
+    /// </summary>
+    public IReadOnlyList<PullRequestLink> DeployPullRequests { get; init; } = [];
 
     /// <summary>
     /// Whether a Done task's change runs in this Deskbar yet (task 8470d176, RunningChanges): Shipping draws the hollow

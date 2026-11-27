@@ -362,6 +362,29 @@ public sealed record TaskItem(
     public IReadOnlyList<PullRequestLink> PullRequests { get; init; } = [];
 
     /// <summary>
+    /// The task's DEPLOY pull requests, oldest first, each once (task 1565789d). Petre, on an iam.ge task whose release
+    /// build opened a pull request in the stacks repository that he had to merge before redeploying in Portainer: "we need
+    /// to watch that pr as the deploy pr". Such a pull request is not the task's own work: the session did not open it
+    /// (CI did, so the `gh pr create` hook never saw it), it lives in another repository, and its merge is the step BEFORE
+    /// the deploy, not the deploy. So it is kept apart from <see cref="PullRequests"/>: the minute poll (RepoWatch) asks
+    /// GitHub about it and tells the session once when it is merged or closed, even when it was merged already by the time
+    /// it was registered, but never asks the session to rebase it, never follows its merge commit's runs, never counts it
+    /// for the merged ring or a deploy report (RunningChanges, DeployNotices), and its merge does not settle the question
+    /// that links it, since that question usually goes on to ask for the redeploy (AskedPullRequests.Watched). Added by
+    /// `task pr &lt;url&gt; --deploy`, through TaskBoard.AddDeployPullRequest; stored as an optional `deployPullRequests`
+    /// list of URLs.
+    /// </summary>
+    public IReadOnlyList<PullRequestLink> DeployPullRequests { get; init; } = [];
+
+    /// <summary>
+    /// The keys (PullRequestLink.Key) of the <see cref="DeployPullRequests"/> whose merge or close the session has been
+    /// told (task 1565789d). Saved, unlike the minute poll's memory, so a restart of Deskbar does not tell the session the
+    /// same merge again: a told deploy pull request leaves the poll for good. Written by TaskBoard.DeployPullRequestsEnded;
+    /// stored as an optional `deployPullRequestsEnded` list.
+    /// </summary>
+    public IReadOnlyList<string> DeployPullRequestsEnded { get; init; } = [];
+
+    /// <summary>
     /// The recorded pull requests reported running where their app is deployed, oldest first, each once (task 8470d176,
     /// phase 2; Petre: "it's not about deskbar only, but all other software tasks"). Deskbar checks its own repository by
     /// itself against the build it runs, but it cannot see another app's servers, so the session that did the work checks

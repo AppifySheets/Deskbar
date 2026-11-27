@@ -155,6 +155,11 @@ public static class ControlUsage
             new("task", "pr <url> --session <session>",
                 "a pull request the session opened, on its own task, so the tasks panel's search finds the task by its\n"
                 + "      number. A `gh pr create` is recorded by itself; this is for one opened another way"),
+            // Task 1565789d: a deploy pull request, one the session did not open, watched for its merge (TaskItem.DeployPullRequests).
+            new("task", "pr <url> --deploy --session <session>",
+                "a pull request you ask the user to merge but did not open (a release's pull request in a stacks\n"
+                + "      repository), as the deploy step of your own task: Deskbar tells you once when it is merged or\n"
+                + "      closed, and its merge settles no question, since the deploy still follows"),
             // Task 8470d176, phase 2: a session reports the deploy it checked (RunningChanges, TaskBoard.MarkDeployed).
             new("task", "deployed <note>|- --session <session>",
                 "the session's own task's change runs where its app is deployed: the note is the evidence (the version\n"
@@ -221,6 +226,7 @@ public static class ControlUsage
                 + "      question already answered, mark finished work done, rewrite an old status line. It reaches an idle\n"
                 + "      or ended session as a comment does; a task no session worked on is refused"),
             new("task", "pr <id> <url>", "put a GitHub pull request on a task, so the tasks panel's search finds the task by its number"),
+            new("task", "pr <id> <url> --deploy", "put a deploy pull request on a task: its Claude session is told once when it is merged or closed"),
             new("task", "deployed <id> <note>|-",
                 "record that a task's change runs where its app is deployed, as \"Mark deployed\" on a line's menu does;\n"
                 + "      the note says how you know. Needs a pull request recorded on the task (task pr)"),

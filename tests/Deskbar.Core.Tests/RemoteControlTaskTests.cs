@@ -1181,6 +1181,8 @@ public class RemoteControlTaskTests
              "subtask <title>|- [--no-start] [--model <model>] --session <session>",
              // Task e7aa49b1: a pull request the session opened another way than gh pr create.
              "pr <url> --session <session>",
+             // Task 1565789d: a deploy pull request the session did not open.
+             "pr <url> --deploy --session <session>",
              // Task 8470d176, phase 2: a session reports the deploy it checked.
              "deployed <note>|- --session <session>",
              "family --session <session>",
@@ -1200,6 +1202,8 @@ public class RemoteControlTaskTests
              "reevaluate <id>",
              // Task e7aa49b1: a pull request on a task by hand.
              "pr <id> <url>",
+             // Task 1565789d: a deploy pull request on a task by hand.
+             "pr <id> <url> --deploy",
              // Task 8470d176, phase 2: "Mark deployed"'s twin.
              "deployed <id> <note>|-"],
             ControlUsage.All.Where(c => c.Verb == "task").Select(c => c.Arguments));

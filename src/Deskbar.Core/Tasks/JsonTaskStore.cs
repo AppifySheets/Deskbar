@@ -183,7 +183,15 @@ public sealed class JsonTaskStore(string baseDirectory, Action<string>? trace = 
         // version 2: an older build's reader skips a property it does not know (the options never fail the load; see the
         // header), and drops it on its next save, which costs the buttons of one open question and never a task.
         [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull), JsonConverter(typeof(TolerantStringListConverter))]
-        IReadOnlyList<string>? QuestionOptions = null);
+        IReadOnlyList<string>? QuestionOptions = null,
+        // TaskItem.DeployPullRequests (task 1565789d): the task's deploy pull requests as URLs, read like PullRequests; and
+        // TaskItem.DeployPullRequestsEnded, the keys of those whose merge or close the session was told. Both left out of
+        // the file while empty and read tolerantly. Still version 2: an older build drops them on its next save, which
+        // costs the watch of a deploy pull request (the session watches it as before) and never a task.
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull), JsonConverter(typeof(TolerantStringListConverter))]
+        IReadOnlyList<string>? DeployPullRequests = null,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull), JsonConverter(typeof(TolerantStringListConverter))]
+        IReadOnlyList<string>? DeployPullRequestsEnded = null);
 
     // TaskItem.Repeat as stored: the schedule's canonical text (RepeatSchedule.Text), the model and the folder. Every part
     // is nullable because the reader fills what it finds and FromDto decides whether that is a repeat.
@@ -301,7 +309,9 @@ public sealed class JsonTaskStore(string baseDirectory, Action<string>? trace = 
             // The schedule is stored as its canonical text, which TaskRepeats.Parse reads back to the same schedule.
             t.Repeat.HasValue ? new RepeatDto(t.Repeat.Value.Schedule.Text, t.Repeat.Value.Model, t.Repeat.Value.Folder) : null,
             t.NextRun.HasValue ? t.NextRun.Value.ToUniversalTime() : null,
-            t.QuestionOptions.Count > 0 ? t.QuestionOptions : null);
+            t.QuestionOptions.Count > 0 ? t.QuestionOptions : null,
+            t.DeployPullRequests.Count > 0 ? t.DeployPullRequests.Select(p => p.Url).ToArray() : null,
+            t.DeployPullRequestsEnded.Count > 0 ? t.DeployPullRequestsEnded : null);
 
     static TaskItem FromDto(TaskDto d) =>
         new(d.Id, d.Title ?? "",
@@ -337,6 +347,10 @@ public sealed class JsonTaskStore(string baseDirectory, Action<string>? trace = 
             // Each stored URL read back as a link; a hand-edited entry that is no pull request link is dropped, and two
             // spellings of one pull request are one.
             PullRequests = (d.PullRequests ?? []).SelectMany(AskedPullRequests.In).DistinctBy(p => p.Key).ToArray(),
+            // The deploy pull requests read the same way (task 1565789d); their told keys are kept as written, lower case.
+            DeployPullRequests = (d.DeployPullRequests ?? []).SelectMany(AskedPullRequests.In).DistinctBy(p => p.Key).ToArray(),
+            DeployPullRequestsEnded = (d.DeployPullRequestsEnded ?? []).Where(k => !string.IsNullOrWhiteSpace(k))
+                .Select(k => k.ToLowerInvariant()).Distinct().ToArray(),
             DuplicateOf = d.DuplicateOf is { } original ? original : Maybe<Guid>.None,
             Related = (d.Related ?? []).Distinct().ToArray(),
             // Each pull request once, its first report kept (MarkDeployed never records one twice; a hand edit might).
