@@ -29,8 +29,23 @@ public partial class TasksBoardTests
     // The switch's Inbox, as a click on it calls it.
     static void ChooseInbox(Board t) => t.Window.Actions!.ShowInbox!(true);
 
+    // The Inbox is the default (task 43a11881): a panel state that never left it, which is a fresh profile's, opens on the
+    // Inbox. Build() starts these tests on the List (the open helper picks it, as the older tests need), so the fresh
+    // state is saved here. The List, once picked, is what the panel opens on.
     [Fact]
-    public void A_panel_state_without_the_key_keeps_todays_view() => StaThread.Run(() =>
+    public void A_fresh_panel_state_opens_on_the_inbox() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        InboxTasks(t);
+        Assert.True(t.Harness.Manager.SaveTasksPanel(Deskbar.Core.Persistence.TasksPanelState.Default with { Width = Wide }).IsSuccess);
+
+        t.Controller.Show();
+
+        Assert.NotNull(t.Window.InboxShown);
+    });
+
+    [Fact]
+    public void A_picked_list_is_what_the_panel_opens_on() => StaThread.Run(() =>
     {
         using var t = Build();
         InboxTasks(t);

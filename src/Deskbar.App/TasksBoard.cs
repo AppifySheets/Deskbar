@@ -153,7 +153,8 @@ public sealed partial class TasksBoard : IDisposable
     // The three-way Claude switch (task 10b49554), off by default, kept across opens (AppState.TasksPanel.ClaudeFilter).
     ClaudeSessionFilter claudeFilter;
     // Whether the Stats view shows in place of the List or the Matrix (task 521d2b07, TasksWindow.Stats.cs). Not
-    // remembered: a fresh open starts on the List or the Matrix, whichever AppState.TasksMatrix says, as before.
+    // remembered: a fresh open starts on the Inbox (the default, task 43a11881), or on the List or the Matrix, whichever
+    // AppState.TasksMatrix says, once one of them was picked over it (TasksPanelState.Inbox).
     bool statsShown;
     // THE REFUSAL ON A TASK'S OWN LINE (task 41f08dba; Petre: "show error on the task, not at the top of the bar"). The
     // last action's refusal, when the action was on one task (Report's `task`): that task and the words. Its line draws
@@ -459,7 +460,7 @@ public sealed partial class TasksBoard : IDisposable
     string ShownStateKey() =>
         string.Join('|', manager.State.Workspaces.Select(w => $"{w}"))
         + "|" + string.Join('|', manager.State.Groups.Select(g => $"{g}"))
-        + $"|{manager.CurrentWorkspaceId}|{manager.State.TasksMatrix}|{manager.State.TasksPanel?.Inbox}"
+        + $"|{manager.CurrentWorkspaceId}|{manager.State.TasksMatrix}|{manager.State.TasksInbox}"
         // The manager's question (task 61e4d143): `task ask`, `task answered` and the user's reply change only
         // AppState.Manager, so without this the open panel would drop their pulse and show the line late.
         + $"|{manager.State.Manager?.Question}|{manager.State.Manager?.AskedAt}"

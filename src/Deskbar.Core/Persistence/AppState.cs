@@ -553,6 +553,13 @@ public sealed record AppState(
     // read it as TasksPanelState.Default (closed, default width) via `State.TasksPanel ?? TasksPanelState.Default`.
     public TasksPanelState? TasksPanel { get; init; }
 
+    // Whether the tasks panel's view is the Inbox, with no panel state read as the default, which is the Inbox (task
+    // 43a11881). The one way to ask outside the panel's own code: a `TasksPanel?.Inbox ?? false` or a
+    // `{ TasksPanel.Inbox: true }` pattern reads a profile that never touched the panel as the List, and the review of
+    // that change found exactly that miss in the permission hook. Not written to the file.
+    [JsonIgnore]
+    public bool TasksInbox => (TasksPanel ?? TasksPanelState.Default).Inbox;
+
     // The width of the manager's dock (task f171bca6, ManagerDockLayout), in DIPs, as the user last dragged it. Null
     // until the first drag, which is every state.json written before this key: read it as ManagerDockLayout.DefaultWidth.
     public double? ManagerDockWidth { get; init; }
@@ -897,11 +904,27 @@ public sealed record TasksPanelState(bool Open, double Width)
     // The widths the lines are drawn with: the saved ones, or the defaults.
     [JsonIgnore] public Tasks.TaskColumnWidths ColumnWidths => Columns ?? Tasks.TaskColumnWidths.Default;
 
-    // Whether the panel shows the Inbox view (Deskbar task 740a2231: three tabs, Needs you, Claude and Notes, over the
-    // List's own lines) instead of List or Matrix. Opt in: an older file, and every profile that never picked it, keep
-    // the view they had (AppState.TasksMatrix), so a new build changes nobody's panel by itself. Picking Inbox sets it,
-    // picking List or Matrix clears it; Stats is not remembered either way, as before.
-    public bool Inbox { get; init; }
+    // Whether List or Matrix was picked over the Inbox view (Deskbar task 740a2231 made the Inbox: three tabs, Needs you,
+    // Claude and Notes, over the List's own lines). THE INBOX IS THE DEFAULT (task 43a11881, Petre: "make Inbox the
+    // default, not the List"), so what is stored is leaving it: false, which is a fresh profile, a file written before
+    // this key, and a panel state saved without it, means the Inbox. Picking List or Matrix sets it, picking Inbox
+    // clears it; Stats is not remembered either way, as before.
+    //
+    // The key is new on purpose. Until this change the file stored `Inbox`, opt in, and every save wrote it, so each
+    // profile that had never picked the Inbox carries "Inbox": false. Reading that as "List chosen" would keep all of them
+    // on the List, which is the opposite of the ask; nobody had chosen the List over an Inbox that was a day old, it was
+    // only the old default. So the old key is not read at all (Inbox below is JsonIgnore) and every profile starts on the
+    // Inbox once, the Matrix ones too: AppState.TasksMatrix still remembers the Matrix, and its button brings it back.
+    public bool InboxLeft { get; init; }
+
+    // The view as everything reads and sets it: the Inbox unless List or Matrix was picked. Not written to the file
+    // (InboxLeft is), so `with { Inbox = on }` keeps working for every caller.
+    [JsonIgnore]
+    public bool Inbox
+    {
+        get => !InboxLeft;
+        init => InboxLeft = !value;
+    }
 
     // What an absent AppState.TasksPanel means: closed, at the default width. Callers use this, not their own copy.
     public static readonly TasksPanelState Default = new(false, Tasks.TasksPanelLayout.DefaultWidth);

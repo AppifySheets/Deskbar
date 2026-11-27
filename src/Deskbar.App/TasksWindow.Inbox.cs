@@ -107,8 +107,8 @@ public partial class TasksWindow
         // of the list as well"). The one control, InboxFooterOf, at the bottom of List, Matrix and Stats too, with the view
         // on show on its pill; its clicks are the Inbox's own. It is also now the List's one way into the Inbox: the
         // toolbar's Inbox chip this PR had added is gone, so the Inbox has one entry and the toolbar is main's again
-        // (List, Matrix, Stats, "+ Add", ×). That is why the foot shows for everyone, the Inbox never picked included: the
-        // Inbox is opt in (TasksPanelState.Inbox), and someone who has never picked it can only find it here. Only a
+        // (List, Matrix, Stats, "+ Add", ×). That is why the foot shows for everyone, the Inbox left for the List included:
+        // the Inbox is the default (TasksPanelState.Inbox), and someone who has left it can only find it again here. Only a
         // window with no controller that can show the Inbox (Actions.ShowInbox unset: the tests' bare windows) draws no
         // foot outside the Inbox, as it drew no Inbox chip. An open Inbox page still hides it (DrawInboxPage).
         var foot = on || Actions?.ShowInbox is not null;

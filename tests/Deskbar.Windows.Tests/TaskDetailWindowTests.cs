@@ -48,7 +48,7 @@ public class TaskDetailWindowTests
 #pragma warning disable WPF0001 // ThemeMode is experimental: the app runs under ThemeMode="System" (App.xaml), so the window tests do too
         var panel = new TasksWindow { ThemeMode = ThemeMode.System, Quiet = true, Now = () => Start.AddHours(1), StateDir = scratch, OpenImage = _ => { } };
 #pragma warning restore WPF0001
-        Assert.True(harness.Manager.SaveTasksPanel(new TasksPanelState(false, 1000)).IsSuccess);
+        Assert.True(harness.Manager.SaveTasksPanel(new TasksPanelState(false, 1000) { Inbox = false }).IsSuccess);
         var rig = new TasksPanelRig(panel).Docked("right", null);
         var brought = new List<nint>();
         var opened = new List<Uri>();

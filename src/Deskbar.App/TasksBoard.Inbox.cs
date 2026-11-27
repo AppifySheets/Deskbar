@@ -9,9 +9,9 @@ namespace Deskbar.App;
 // the list. The board decides, the window draws (TasksWindow.Inbox*.cs), as for every other view.
 //
 // WHAT THE BOARD ADDS, and nothing more:
-//   * whether the Inbox shows: the remembered choice (TasksPanelState.Inbox, opt in), and not while Stats shows. While
-//     it shows the view's Matrix is off, so the List's groups stay the one list of lines every lookup reads (DrawnRows,
-//     RowFor, OpenMenuFor, Draws): the Inbox draws those very rows;
+//   * whether the Inbox shows: the remembered choice (TasksPanelState.Inbox, the default since task 43a11881), and not
+//     while Stats shows. While it shows the view's Matrix is off, so the List's groups stay the one list of lines
+//     every lookup reads (DrawnRows, RowFor, OpenMenuFor, Draws): the Inbox draws those very rows;
 //   * the three tabs (InboxTabs.Split in Core) from the List's own groups and nesting, with the two facts the List does
 //     not group by: handed back (TaskItem.HandedBack) and stopped on the usage limit (the status line ClaudeSessions
 //     writes, LimitLine);

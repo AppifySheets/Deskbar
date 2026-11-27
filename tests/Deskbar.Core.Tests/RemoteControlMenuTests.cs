@@ -595,13 +595,16 @@ public class RemoteControlMenuTests
     }
 
     // Task 740a2231: `tasks-window inbox` is the switch's Inbox button's twin, remembered with the panel's state; list and
-    // matrix leave the Inbox as their buttons do. Nothing else of the panel's state moves.
+    // matrix leave the Inbox as their buttons do. Nothing else of the panel's state moves. A fresh profile is already on
+    // the Inbox (the default since task 43a11881), so the List is picked first.
     [Fact]
     public void Tasks_window_inbox_is_remembered_and_list_or_matrix_leave_it()
     {
         var manager = Started();
         var control = new RemoteControl(manager, setTasksWindow: _ => Result.Success());
-        Assert.False((manager.State.TasksPanel ?? TasksPanelState.Default).Inbox);
+        Assert.True((manager.State.TasksPanel ?? TasksPanelState.Default).Inbox);
+        Ok(control.Execute(["tasks-window", "list"]));
+        Assert.False(manager.State.TasksPanel!.Inbox);
 
         var inbox = control.Execute(["tasks-window", "inbox"]);
         Ok(inbox);
