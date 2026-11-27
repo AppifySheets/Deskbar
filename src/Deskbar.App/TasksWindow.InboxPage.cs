@@ -481,6 +481,18 @@ public partial class TasksWindow
             Margin = new Thickness(4, 1, 10, 0), VerticalAlignment = VerticalAlignment.Top, ToolTip = InboxMarks.WordsOf(mark),
             Child = Centred(InboxMarks.Icon(InboxMarks.IconOf(mark), 16, InboxMarks.InkOf(mark), InboxLook.Raised, turning: mark == InboxMark.Working)),
         };
+        // The tile asks the session to recheck the state on a click (task c980f8c0, RecheckButton), as a line's does.
+        // The icon leaves the tile first: an element has one parent, and the button is about to take it as its content.
+        var tileIcon = tile.Child;
+        tile.Child = null;
+        if (RecheckButton(row, tileIcon, InboxMarks.WordsOf(mark)) is not { } recheckTile) tile.Child = tileIcon;
+        else
+        {
+            recheckTile.Width = 28;
+            recheckTile.Height = 28;
+            recheckTile.HorizontalAlignment = HorizontalAlignment.Stretch;
+            tile.Child = recheckTile;
+        }
         DockPanel.SetDock(tile, Dock.Left);
         first.Children.Add(tile);
         if (!row.Closing)
@@ -511,9 +523,21 @@ public partial class TasksWindow
         AutomationProperties.SetName(words, "State");
         // Waiting for his deploy (task 1565789d, option A): the steps instead of the words, done ones ticked, his in amber.
         // A deploy its session cannot check (task 485ba96b): the steps too, the last one dashed.
-        second.Children.Add(mark == InboxMark.WaitsForDeploy ? DeployTrack(row)
+        var state = mark == InboxMark.WaitsForDeploy ? DeployTrack(row)
             : mark == InboxMark.DeployUnchecked ? UncheckedTrack(row)
-            : words);
+            : words;
+        // The state words (or the track) ask the session to recheck them on a click too (task c980f8c0, RecheckButton). The
+        // button takes the state's margin less its padding, and drops FlatButton's 1 DIP border, so the words stay where they were.
+        if (RecheckButton(row, state, PageStateWords(row, mark)) is { } recheckState)
+        {
+            recheckState.BorderThickness = new Thickness(0);
+            recheckState.Padding = new Thickness(4, 0, 4, 0);
+            recheckState.Margin = new Thickness(state.Margin.Left - 4, state.Margin.Top, state.Margin.Right - 4, state.Margin.Bottom);
+            recheckState.VerticalAlignment = VerticalAlignment.Top;
+            state.Margin = new Thickness(0);
+            second.Children.Add(recheckState);
+        }
+        else second.Children.Add(state);
         if (InboxChip(row) is FrameworkElement chip)
         {
             chip.Margin = new Thickness(0, 0, 10, 4);

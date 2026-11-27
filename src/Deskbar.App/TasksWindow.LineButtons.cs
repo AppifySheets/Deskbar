@@ -75,6 +75,30 @@ public partial class TasksWindow
                 ReevaluateText, () => Actions?.Reevaluate?.Invoke(row.Id), ReevaluateTip)
             : null;
 
+    // THE STATE ITSELF ASKS FOR A RECHECK (task c980f8c0). Petre, on a screenshot of a page's "Claude is idle": "clicking a
+    // chip should tell the session to refresh, re-fetch, etc and potentially update the status", then "in the inbox list
+    // as well as the task view". So the state a task shows is also the way to ask whether it is still true: the mark's
+    // tile on an Inbox line and on the page, and the page's state words (or its deploy track), press Reevaluate, the same
+    // TaskService.Reevaluate the refresh icon calls, which wakes the session to look again and posts "Asked Claude to
+    // reevaluate the task." in the thread. Only where Reevaluate is offered (Reevaluates: an open task a session worked on);
+    // elsewhere the state stays plain. A line's tile that is a tick box (a note, a finished task) stays one: there a click
+    // closes (MarkTile). Named apart from the refresh icon, so a search for that button still finds exactly one.
+    internal const string RecheckStateName = "Reevaluate from the state";
+
+    // The tooltip: the state first, as the plain tile's tooltip had it, then what a click does.
+    static string RecheckTip(string state) =>
+        $"{state}. Click to ask Claude to check where this task really stands: settle a question already answered, mark finished work done, rewrite an old status line";
+
+    // The state's face (an icon, the words, the deploy track) inside a quiet button that presses Reevaluate; null where
+    // Reevaluate is not offered, so the caller keeps the face as it was.
+    Button? RecheckButton(TaskRowView row, UIElement face, string state)
+    {
+        if (!Reevaluates(row)) return null;
+        var button = Small(face, RecheckStateName, () => Actions?.Reevaluate?.Invoke(row.Id), RecheckTip(state));
+        button.Padding = new Thickness(0);
+        return button;
+    }
+
     /// <summary>The words of the menu item and the line's button, which open the assignee's choices.</summary>
     internal const string AssignToText = "Assign to";
 

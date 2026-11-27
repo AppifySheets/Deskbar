@@ -175,7 +175,20 @@ public partial class TasksWindow
             close.HorizontalAlignment = HorizontalAlignment.Stretch;
             tile.Child = close;
         }
-        else tile.Child = Centred(icon);
+        // Any other state asks the session to recheck it on a click (task c980f8c0, RecheckButton), where there is one to ask.
+        // The face is made once: the icon can have one parent, so a second Centred(icon) after a refusal would throw.
+        else
+        {
+            var face = Centred(icon);
+            if (RecheckButton(row, face, InboxMarks.WordsOf(line.Mark)) is { } recheck)
+            {
+                recheck.Width = 36;
+                recheck.Height = 36;
+                recheck.HorizontalAlignment = HorizontalAlignment.Stretch;
+                tile.Child = recheck;
+            }
+            else tile.Child = face;
+        }
         return tile;
     }
 
