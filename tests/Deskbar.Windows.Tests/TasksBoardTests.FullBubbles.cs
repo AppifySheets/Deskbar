@@ -31,7 +31,7 @@ public partial class TasksBoardTests
 
     // Natural height: a text under the forty-line guard is laid out at its own height (no three-line cap), nothing scrolls inside
     // the box, and no resize grip, Show more or Show all is on the bubble.
-    static void AssertWhole(object page, RichTextBox box, double size = 11.5)
+    static void AssertWhole(object page, RichTextBox box, double size = InboxLook.ChatText)
     {
         Assert.Equal(FullBubble.GuardHeight(size), box.MaxHeight);
         Assert.True(box.ExtentHeight < box.MaxHeight, $"extent {box.ExtentHeight} under the guard {box.MaxHeight}");
@@ -84,6 +84,26 @@ public partial class TasksBoardTests
     });
 
     [Fact]
+    public void A_comment_is_13_and_a_half_on_the_Inbox_page_and_11_and_a_half_on_the_List() => StaThread.Run(() =>
+    {
+        using var t = Build(width: 460);
+        var id = SessionTaskWithComments(t, ("s1", "A short made-up comment."));
+        t.Controller.Show();
+        Click(LineOf(t.Window, id));
+        t.Window.UpdateLayout();
+        Assert.Null(t.Window.InboxPageContent);
+        Assert.Equal(11.5, BoxWith(t.Window, "A short made-up").Document.FontSize);
+
+        using var inbox = Build(width: 460);
+        var inboxId = SessionTaskWithComments(inbox, ("s1", "A short made-up comment."));
+        inbox.Controller.Show();
+        ChooseInbox(inbox);
+        inbox.Controller.ShowTask(inboxId);
+        inbox.Window.UpdateLayout();
+        Assert.Equal(InboxLook.ChatText, BoxWith(inbox.Window.InboxPageContent!, "A short made-up").Document.FontSize);
+    });
+
+    [Fact]
     public void A_monster_comment_is_cut_at_the_guard_and_show_all_opens_it_for_good_through_a_redraw() => StaThread.Run(() =>
     {
         using var t = Build(width: 460);
@@ -96,7 +116,7 @@ public partial class TasksBoardTests
         var box = BoxWith(page, "Paragraph 70 of a made-up");
 
         Assert.False(double.IsPositiveInfinity(box.MaxHeight));
-        Assert.Equal(FullBubble.GuardHeight(11.5), box.MaxHeight);
+        Assert.Equal(FullBubble.GuardHeight(InboxLook.ChatText), box.MaxHeight);
         var showAll = ButtonNamed(page, FullBubble.ShowAllName);
         Assert.Equal(Visibility.Visible, showAll.Visibility);
         Assert.Equal(ScrollBarVisibility.Disabled, InnerScroller(box).VerticalScrollBarVisibility);
@@ -153,7 +173,7 @@ public partial class TasksBoardTests
 
         AssertWhole(page, BoxWith(page, "Paragraph 16 of a made-up"));
         var monster = BoxWith(page, "Paragraph 75 of a made-up");
-        Assert.Equal(FullBubble.GuardHeight(11.5), monster.MaxHeight);
+        Assert.Equal(FullBubble.GuardHeight(InboxLook.ChatText), monster.MaxHeight);
         // Only the monster has a visible "Show all"; the long message is under the guard, so its button is collapsed.
         Click(Inside(page).OfType<Button>().Single(b => AutomationProperties.GetName(b) == FullBubble.ShowAllName && b.Visibility == Visibility.Visible));
         Assert.True(double.IsPositiveInfinity(monster.MaxHeight));

@@ -112,11 +112,11 @@ internal sealed class ChatStepsView : Border
         // Two text blocks side by side, not one with two runs: a text block's Text is empty while it holds inlines, and
         // the words are what a test and a screen reader read.
         var heading = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
-        heading.Children.Add(new TextBlock { Text = title, FontSize = 12.5, FontWeight = FontWeights.SemiBold, Foreground = InboxLook.Ink });
-        if (duration.Length > 0) heading.Children.Add(new TextBlock { Text = " · " + duration, FontSize = 12.5, Foreground = InboxLook.Ink2 });
+        heading.Children.Add(new TextBlock { Text = title, FontSize = InboxLook.ChatText, FontWeight = FontWeights.SemiBold, Foreground = InboxLook.Ink });
+        if (duration.Length > 0) heading.Children.Add(new TextBlock { Text = " · " + duration, FontSize = InboxLook.ChatText, Foreground = InboxLook.Ink2 });
         var summary = new TextBlock
         {
-            Text = SummaryOf(steps, live), FontSize = 12, Foreground = InboxLook.Ink3, TextTrimming = TextTrimming.CharacterEllipsis,
+            Text = SummaryOf(steps, live), FontSize = 13, Foreground = InboxLook.Ink3, TextTrimming = TextTrimming.CharacterEllipsis,
             VerticalAlignment = VerticalAlignment.Center, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(10, 0, 0, 0),
         };
         var chevron = InboxMarks.Icon(open ? "chevD" : "chevR", 12, InboxLook.Ink2);
@@ -164,8 +164,8 @@ internal sealed class ChatStepsView : Border
         /// <summary>Whether a step with no result was drawn as running (its run is the newest of a live session).</summary>
         public bool Running { get; private set; }
         public Grid Element { get; } = new();
-        readonly TextBlock text = new() { FontSize = 12.5, Foreground = InboxLook.Ink, TextTrimming = TextTrimming.CharacterEllipsis, VerticalAlignment = VerticalAlignment.Center };
-        readonly TextBlock word = new() { FontSize = 12, Foreground = InboxLook.Ink2, FontWeight = FontWeights.SemiBold, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(8, 0, 0, 0) };
+        readonly TextBlock text = new() { FontSize = InboxLook.ChatText, Foreground = InboxLook.Ink, TextTrimming = TextTrimming.CharacterEllipsis, VerticalAlignment = VerticalAlignment.Center };
+        readonly TextBlock word = new() { FontSize = 13, Foreground = InboxLook.Ink2, FontWeight = FontWeights.SemiBold, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(8, 0, 0, 0) };
         readonly Border kind = new() { Width = 14, Height = 14, VerticalAlignment = VerticalAlignment.Center };
         readonly Border state = new() { Width = 14, Height = 14, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(8, 0, 0, 0) };
 

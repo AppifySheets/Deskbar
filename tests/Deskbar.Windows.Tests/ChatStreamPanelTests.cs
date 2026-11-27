@@ -409,7 +409,7 @@ public class ChatStreamPanelTests
         panel.Arrange(new Rect(0, 0, 500, panel.DesiredSize.Height));
         panel.UpdateLayout();
 
-        Assert.Equal(FullBubble.GuardHeight(11.5), box.MaxHeight);
+        Assert.Equal(FullBubble.GuardHeight(InboxLook.ChatText), box.MaxHeight);
         Assert.True(box.ExtentHeight < box.MaxHeight);
         Assert.Equal(box.ExtentHeight, box.ActualHeight, 1);
         Assert.Equal(Visibility.Collapsed, Inside(panel).OfType<Button>().Single(b => AutomationProperties.GetName(b) == "Show all").Visibility);
@@ -429,7 +429,7 @@ public class ChatStreamPanelTests
         panel.UpdateLayout();
         var created = panel.Created;
 
-        Assert.Equal(FullBubble.GuardHeight(11.5), box.MaxHeight);
+        Assert.Equal(FullBubble.GuardHeight(InboxLook.ChatText), box.MaxHeight);
         Assert.Equal(Visibility.Visible, all.Visibility);
         Click(all);
 

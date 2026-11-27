@@ -270,7 +270,7 @@ internal sealed class ChatStreamPanel : StackPanel
     // scroll offset moves by what the stream grew above it.
     Button EarlierButton()
     {
-        earlierWords = new TextBlock { FontSize = 10.5, Foreground = InboxLook.Ink2, TextAlignment = TextAlignment.Center, TextWrapping = TextWrapping.Wrap };
+        earlierWords = new TextBlock { FontSize = InboxLook.ChatSmall, Foreground = InboxLook.Ink2, TextAlignment = TextAlignment.Center, TextWrapping = TextWrapping.Wrap };
         var button = deps.Button(earlierWords, "Show earlier", ShowMoreEarlier);
         button.Tag = EarlierTag;
         button.HorizontalAlignment = HorizontalAlignment.Center;
@@ -299,7 +299,7 @@ internal sealed class ChatStreamPanel : StackPanel
     TextBlock Dim(string tag) => new()
     {
         Tag = tag,
-        FontSize = 10.5,
+        FontSize = InboxLook.ChatSmall,
         Foreground = InboxLook.Ink3,
         HorizontalAlignment = HorizontalAlignment.Center,
         TextAlignment = TextAlignment.Center,
@@ -327,7 +327,7 @@ internal sealed class ChatStreamPanel : StackPanel
         if (message.Text.Trim().Length > 0)
         {
             var document = MarkdownBlocks.Render(message.Text, deps.OpenLink);
-            document.FontSize = 11.5;
+            document.FontSize = InboxLook.ChatText;
             document.Foreground = InboxLook.Ink;
             var body = new RichTextBox
             {
@@ -347,7 +347,7 @@ internal sealed class ChatStreamPanel : StackPanel
             ChatThread.FitWidth(body);
             // IN FULL (the owner, 2026-11-27): no clip to three lines, no inner scroll; only a message taller than about
             // forty lines is cut, with "Show all" under it (FullBubble.Guard), opened for good by the stream's state.
-            var showAll = FullBubble.Guard(body, 11.5, deps.State.OpenMessages, message.Id, deps.Button);
+            var showAll = FullBubble.Guard(body, InboxLook.ChatText, deps.State.OpenMessages, message.Id, deps.Button);
             parts.Children.Add(body);
             parts.Children.Add(showAll);
         }
@@ -357,7 +357,7 @@ internal sealed class ChatStreamPanel : StackPanel
             chip.Children.Add(InboxMarks.Icon("image", 13, InboxLook.Ink3));
             chip.Children.Add(new TextBlock
             {
-                Text = message.Images == 1 ? "1 picture" : $"{message.Images} pictures", FontSize = 11, Foreground = InboxLook.Ink3,
+                Text = message.Images == 1 ? "1 picture" : $"{message.Images} pictures", FontSize = InboxLook.ChatSmall, Foreground = InboxLook.Ink3,
                 Margin = new Thickness(5, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center,
             });
             parts.Children.Add(chip);
@@ -374,7 +374,7 @@ internal sealed class ChatStreamPanel : StackPanel
         var view = new TaskCommentView(Guid.Empty, "Deskbar", false, "", words) { Who = CommentAuthor.Deskbar, Time = at?.ToString("HH:mm") ?? "" };
         var body = new TextBlock
         {
-            Text = at is null ? words : $"{words} · {view.Time}", FontSize = 10.5, Foreground = InboxLook.Ink3,
+            Text = at is null ? words : $"{words} · {view.Time}", FontSize = InboxLook.ChatSmall, Foreground = InboxLook.Ink3,
             TextAlignment = TextAlignment.Center, TextWrapping = TextWrapping.Wrap, HorizontalAlignment = HorizontalAlignment.Center,
         };
         return ChatThread.Event(view, body, timeInBody: true, []);
