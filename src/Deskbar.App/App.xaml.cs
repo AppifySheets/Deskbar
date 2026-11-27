@@ -2115,6 +2115,11 @@ public partial class App : Application
             {
                 Confirm = question => MessageBox.Show(question, "Deskbar", MessageBoxButton.YesNo, MessageBoxImage.Question) == MessageBoxResult.Yes,
                 PickFolder = PickClaudeFolder,
+                // The folder the workspace was given in the New workspace dialog (task 6edcc65a), read at each start so
+                // a folder set a moment ago counts; the one in front for a free task, as for the editors above.
+                WorkspaceFolder = workspace => workspace.Or(manager.CurrentWorkspaceId)
+                    .Bind(id => manager.State.Workspaces.TryFirst(w => w.Id == id))
+                    .Bind(w => Maybe.From(w.Folder)),
                 // A task titled "/<skill>" starts in a folder that has the skill (task 3a872301).
                 SkillsKept = skillCatalog.Kept,
                 OfferTrustTerminal = message => MessageBox.Show(message, "Deskbar", MessageBoxButton.YesNo, MessageBoxImage.Warning) == MessageBoxResult.Yes,

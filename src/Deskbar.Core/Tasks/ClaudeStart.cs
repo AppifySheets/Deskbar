@@ -124,21 +124,27 @@ public static class ClaudeStart
     /// one (a new session starts at the repo, not in an old worktree, because worktrees are deleted after the merge).
     /// A task with none offers, after its parent's latest repo when it is a subtask (ParentRepo), the repos of every
     /// session of every task on its workspace (a free task matches only free tasks), the most recently used first, then
-    /// the folders the workspace's editors have open.
+    /// the folders the workspace's editors have open. The workspace's own folder (Workspace.Folder, task 6edcc65a), when
+    /// it has one, comes right after the parent's repo: the user named it, so it beats every guess.
     /// </summary>
-    public static IReadOnlyList<string> Folders(TaskItem task, TaskBoard board, IEnumerable<string> editorFolders) =>
+    public static IReadOnlyList<string> Folders(TaskItem task, TaskBoard board, IEnumerable<string> editorFolders,
+        Maybe<string> workspaceFolder = default) =>
         task.Sessions.Where(s => s.Folder != "").OrderByDescending(s => s.Joined).FirstOrDefault() is { } latest
             ? [RepoOf(latest.Folder)]
-            : NewTaskFolders(task.WorkspaceId, task.ParentId, board, editorFolders);
+            : NewTaskFolders(task.WorkspaceId, task.ParentId, board, editorFolders, workspaceFolder);
 
     /// <summary>
     /// The folders a task with no session yet would start in (the second half of <see cref="Folders"/>), for a task on
     /// <paramref name="workspaceId"/> under <paramref name="parentId"/>. Also what the add box asks before the task
     /// exists, to list the skills of the workspace on its chip (ClaudeSkills, task 3a872301).
     /// </summary>
+    //
+    // A subtask's parent repo stays ahead of the workspace's folder: it is the more particular answer (the subtask
+    // continues that piece of work), while the workspace's folder is the default for work with no history yet.
     public static IReadOnlyList<string> NewTaskFolders(Maybe<Guid> workspaceId, Maybe<Guid> parentId, TaskBoard board,
-        IEnumerable<string> editorFolders) =>
+        IEnumerable<string> editorFolders, Maybe<string> workspaceFolder = default) =>
         ParentRepo(parentId, board)
+            .Concat(workspaceFolder.Where(f => !string.IsNullOrWhiteSpace(f)).Map(f => new[] { f }).GetValueOrDefault([]))
             .Concat(board.Tasks
                 .Where(other => other.WorkspaceId.Equals(workspaceId))
                 .SelectMany(other => other.Sessions)
