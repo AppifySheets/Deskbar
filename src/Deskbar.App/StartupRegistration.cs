@@ -20,6 +20,15 @@ public static class StartupRegistration
     public static bool IsEnabled =>
         Registry.CurrentUser.OpenSubKey(RunKey)?.GetValue(Name) is not null;
 
+    // The exe the login entry starts, without the quotes Enable writes round it, or null when there is no entry.
+    // Read-only. A test build uses its folder to find the installed releases it can restart into (App.TestBuildMenu,
+    // Deskbar task 7dd83c89): only a published build ever writes the entry (ReassertIfEnabled), so its folder is where
+    // the releases live, wherever the person put them.
+    internal static string? RegisteredExe =>
+        Registry.CurrentUser.OpenSubKey(RunKey)?.GetValue(Name) is string value && value.Trim().Trim('"') is { Length: > 0 } exe
+            ? exe
+            : null;
+
     // Read-only, so the test host may ask it: RenameMigrator.Gather does, for the plan's facts.
     internal static bool LegacyIsSet =>
         Registry.CurrentUser.OpenSubKey(RunKey)?.GetValue(LegacyName) is not null;

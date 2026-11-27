@@ -25,6 +25,27 @@ public class TrayMenuTests
     });
 
     // Clicking it has to actually reach the app, which is the half a header assertion cannot see.
+    // Deskbar task 7dd83c89: a test build is marked first, the marking is a fact and not a command, and the item under
+    // it restarts into the installed release. With no release installed the marking stands alone.
+    [Fact]
+    public void A_test_build_is_marked_first_and_offers_the_restart_into_a_release() => StaThread.Run(() =>
+    {
+        var restarts = 0;
+        var menu = TrayMenu.Build(compatibilityMode: false, () => { }, () => { }, () => { },
+            testBuild: new TestBuildItems("Test build 2.6.208 (topic), gets no updates", ("Restart into Deskbar 2.6.58", () => restarts++)));
+
+        Assert.Equal(["⚠ Test build 2.6.208 (topic), gets no updates", "⟳ Restart into Deskbar 2.6.58", "Manage…", "Check for updates…", "Exit"],
+            Headers(menu));
+        Assert.False(menu.Items.OfType<MenuItem>().First().IsEnabled);
+
+        menu.Items.OfType<MenuItem>().ElementAt(1).RaiseEvent(new System.Windows.RoutedEventArgs(MenuItem.ClickEvent));
+        Assert.Equal(1, restarts);
+
+        var alone = TrayMenu.Build(compatibilityMode: false, () => { }, () => { }, () => { },
+            testBuild: new TestBuildItems("Test build 2.6.208, gets no updates", null));
+        Assert.Equal(["⚠ Test build 2.6.208, gets no updates", "Manage…", "Check for updates…", "Exit"], Headers(alone));
+    });
+
     [Fact]
     public void The_update_check_item_invokes_the_check() => StaThread.Run(() =>
     {

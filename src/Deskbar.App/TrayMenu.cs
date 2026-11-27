@@ -50,9 +50,19 @@ public static class TrayMenu
     // that one takes seconds, closes folders and fixes the taskbar, none of which a stale Deskbar needs.
     public static ContextMenu Build(bool compatibilityMode, Action openManage, Action exit, Action checkNow,
         (string Label, Action Open)? update = null, (string Label, Action Toggle)? bar = null, Action? report = null,
-        Action? restart = null)
+        Action? restart = null, TestBuildItems? testBuild = null)
     {
         var menu = new ContextMenu();
+
+        // A TEST BUILD says so first (Deskbar task 7dd83c89; TestBuild in Core has the story): a copy a session
+        // started from its worktree updates nothing, and nothing on screen used to tell it apart from a release.
+        // The marking is disabled, like the compatibility line below, because it is a fact, not a command; the
+        // restart under it starts the newest installed release, which then updates itself the ordinary way.
+        if (testBuild is { } test)
+        {
+            AddTestBuildItems(menu, test, (glyph, header) => new MenuItem { Header = $"{glyph} {header}" });
+            menu.Items.Add(new Separator());
+        }
 
         // Informational, not a command, and disabled: it exists so the user is not left
         // wondering why nothing moves between desktops on a Windows build whose COM API we
@@ -111,4 +121,23 @@ public static class TrayMenu
 
         return menu;
     }
+
+    // The two test-build lines, shared by the tray menu and the bar's background menu (FloatingBar.FillBarMenu) so
+    // the two cannot word them differently. `item` makes a menu item in the caller's style: the tray puts the glyph
+    // in the header, the bar in its icon column.
+    public static void AddTestBuildItems(ItemsControl menu, TestBuildItems test, Func<string, string, MenuItem> item)
+    {
+        var marking = item("⚠", test.Marking);
+        marking.IsEnabled = false;
+        menu.Items.Add(marking);
+        if (test.Regular is not { } regular) return;
+        var restart = item("⟳", regular.Label);
+        restart.Click += (_, _) => regular.Restart();
+        menu.Items.Add(restart);
+    }
 }
+
+// What a test build shows at the top of its menus: the marking ("Test build 2.6.208 (add-box-skills), gets no updates")
+// and, when an installed release exists, the item that restarts into it ("Restart into Deskbar 2.6.58"). Regular is
+// null when no release is installed: the marking still shows, with nothing to restart into.
+public sealed record TestBuildItems(string Marking, (string Label, Action Restart)? Regular);
