@@ -1990,5 +1990,5 @@ MI1. Click Manager on the bar: the panel comes forward on the Inbox with the man
 MI2. Type a message and press Enter: your bubble shows at once and the box empties; the manager's reply arrives in the chat as it would on a task's page. No "Manager answered" line appears while the page shows.
 MI3. Open a task's page, then click Manager and ask "is the current task stuck?": the manager names that task. The back arrow returns to the task's page; from the list, back returns to the list where it was scrolled.
 MI4. Press Esc with the keyboard in the box: the page stays. Click outside the box and press Esc: back.
-MI5. "⋯", Open in terminal: the manager's terminal opens docked beside the panel, as the button did before. `deskbar.cmd task manager` opens that terminal too.
+MI5. The Claude button left of the manager's box (the one a task's page has there; no "⋯" at the top any more): the manager's terminal opens docked beside the panel, as the button did before. `deskbar.cmd task manager` opens that terminal too.
 MI6. Close the manager's session (`claude stop <id>`), then send a message from the page: it is resumed with your message, and your bubble shows once, not twice.

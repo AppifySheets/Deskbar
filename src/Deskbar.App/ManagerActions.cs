@@ -167,7 +167,7 @@ public sealed class ManagerActions : IDisposable
     /// Whether the click ends in the manager's terminal window (ClaudeTaskActions.AttachTo). Since task 6c4c067f the Manager
     /// button and the manager line open the manager's PAGE in the tasks panel and call this with false: the same steps make
     /// sure today's manager exists (attach to it, resume, start or claim it), and no window opens. True, the default, is
-    /// the page's "Open in terminal" and the pipe's `task manager`, which has no panel to look at.
+    /// the page's Claude button (task d04cf9f0) and the pipe's `task manager`, which has no panel to look at.
     /// </param>
     public Result Open(bool attach = true)
     {

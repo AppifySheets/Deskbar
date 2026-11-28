@@ -82,7 +82,7 @@ public partial class TasksWindow
                 Padding = new Thickness(10, 6, 10, 8),
                 BorderBrush = InboxLook.Hairline,
                 BorderThickness = new Thickness(0, 1, 0, 0),
-                Child = WithClaudeButton(row, box),
+                Child = WithClaudeButton(ClaudeAction(row), box),
             });
         }
         dockedBox = null;
@@ -114,16 +114,18 @@ public partial class TasksWindow
     const double DockedClaudeGap = 3;
 
     // The comment box with the task's Claude button on its left (task 625405cc), or the box alone when the task has none
-    // (a note, a closed task, or no StartClaude wired). Left, as a messenger's extra button sits left of the box, so it is
-    // never mistaken for send, which is inside the box at its right end.
+    // (a note, a closed task, or no StartClaude wired). The manager's page puts its own Claude button here the same way
+    // (task d04cf9f0, ManagerBoxArea): the choice comes in, so both pages draw one button by one rule. Left, as a
+    // messenger's extra button sits left of the box, so it is never mistaken for send, which is inside the box at its
+    // right end.
     //
     // The button stays level with the box's last line, as send does: the box grows upward with its text (up to a third of
     // the page), and the button follows its bottom edge, 3 DIP above it like send. In a one-line box that centres it. It
     // keys on the box's rounded field, the first part of CommentBox's stack, and not on the whole stack, whose pictures
     // waiting to go with the comment sit under the field and would push the button below it.
-    UIElement WithClaudeButton(TaskRowView row, UIElement box)
+    UIElement WithClaudeButton(ClaudeChoice? choice, UIElement box)
     {
-        if (ClaudeAction(row) is not { } claude) return box;
+        if (choice is not { } claude) return box;
         // The page's icon button (GlyphButton), so it looks like the row's buttons it came from; its tooltip starts with its
         // words, as theirs do.
         var button = GlyphButton(claude.Icon, claude.Words, claude.Press, $"{claude.Words}: {claude.Tip}", size: DockedClaudeSize,

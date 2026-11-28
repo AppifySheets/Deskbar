@@ -1108,7 +1108,7 @@ public partial class App : Application
     // THE MANAGER BUTTON AND LINE OPEN THE MANAGER'S PAGE (task 6c4c067f; spec
     // docs/superpowers/specs/2026-11-28-manager-inbox-page-design.md): the tasks panel comes forward on the Inbox with the
     // manager's page, and today's manager is made sure of without a window (Open with attach false: attached to, resumed,
-    // started or claimed as the click did before). The terminal is the page's "Open in terminal" and the pipe's
+    // started or claimed as the click did before). The terminal is the page's Claude button (task d04cf9f0) and the pipe's
     // `task manager`, both still ManagerActions.Open with its window.
     Result OpenManagerPage()
     {
@@ -3040,7 +3040,7 @@ public partial class App : Application
                 // The manager line's click (task 61e4d143): the Manager button's own, the manager's page (task 6c4c067f);
                 // a refusal shows on the panel's problem line.
                 OpenManager = OpenManagerPage,
-                // The manager's page (task 6c4c067f): its box sends through ManagerActions.Send, "Open in terminal" is the
+                // The manager's page (task 6c4c067f): its box sends through ManagerActions.Send, its Claude button (task d04cf9f0) is the
                 // button's old click (Open with its window), and its chat reads today's manager's transcript.
                 SendToManager = (text, task) => managerActions?.Send(text, task) ?? Result.Failure(ClaudeActionsNotReady),
                 OpenManagerTerminal = () => managerActions?.Open() ?? Result.Failure(ClaudeActionsNotReady),
