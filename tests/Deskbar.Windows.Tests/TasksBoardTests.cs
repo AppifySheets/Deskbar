@@ -7890,8 +7890,8 @@ public partial class TasksBoardTests
 
         Assert.Contains(fromSession, t.Window.Keys);
     });
-    // A task he closes himself leaves at the end of its undo window, as it always did, while the list still holds for the
-    // thread he has open: that move is his own.
+    // A task he closes himself leaves a held list once its undo window is over and the panel has gone idle, while the list
+    // still holds for the thread he has open: the line he closed does not keep the rest of the list back.
     [Fact]
     public void His_own_close_still_leaves_a_held_list_after_the_undo_window() => StaThread.Run(() =>
     {
@@ -7906,12 +7906,78 @@ public partial class TasksBoardTests
         Assert.True(t.Controller.Close(closing).IsSuccess);
         Assert.Contains(closing, t.Window.Keys);
 
-        // The undo window ends (and the idle timer ticks once, finding the touch, so the list still holds).
+        // The undo window ends while he is still at the panel (the idle timer ticks once, finding the touch): the line
+        // he closed stays too (task af38579b).
         t.Timers.FireAll();
+        Assert.Contains(closing, t.Window.Keys);
+        Assert.DoesNotContain(fromSession, t.Window.Keys);
+
+        // Untouched for the idle time: everything is drawn as the board has it.
+        t.Timers.FireAll();
+        Assert.DoesNotContain(closing, t.Window.Keys);
+        Assert.Contains(fromSession, t.Window.Keys);
+        Assert.Contains(reading, t.Window.Keys);
+    });
+
+    // TASK af38579b (Petre: "when i mark the task as done, don't hide it if i'm on that screen, going through tasks, so
+    // they don't jump up and down, which could result in me pressing the wrong thing"). Going down the list ticking one
+    // task after another, no thread open: each line he ticked stays in its place, struck through with Undo, past the six
+    // seconds, so the line under his pointer is still the one he was about to tick. They all leave together once the
+    // panel has gone untouched for the idle time.
+    [Fact]
+    public void Lines_he_closes_stay_in_place_while_he_is_at_the_panel() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var first = t.Tasks.AddNote("Dishwasher tablets", Maybe<Guid>.None).Value.Id;
+        var second = t.Tasks.AddNote("Old errand", Maybe<Guid>.None).Value.Id;
+        var third = t.Tasks.AddNote("Store screenshots", Maybe<Guid>.None).Value.Id;
+        t.Controller.Show();
+        var before = t.Window.Keys.ToArray();
+
+        TouchPanel(t.Window);
+        Assert.True(t.Controller.Close(first).IsSuccess);
+        // The six seconds end; the idle timer finds the touch and runs on.
+        t.Timers.FireAll();
+        Assert.Equal(before, t.Window.Keys);
+        Assert.True(t.Window.IsClosing(first));
+
+        TouchPanel(t.Window);
+        Assert.True(t.Controller.Close(second).IsSuccess);
+        t.Timers.FireAll();
+        Assert.Equal(before, t.Window.Keys);
+        Assert.True(t.Window.IsClosing(first));
+        Assert.True(t.Window.IsClosing(second));
+
+        // Undo still works on a line past its six seconds: nothing he can see said otherwise.
+        Click(ButtonNamed(LineOf(t.Window, first), "Undo"));
+        Assert.NotEqual(TaskStatus.Closed, t.Tasks.Board.Tasks.Single(x => x.Id == first).Status);
+        Assert.False(t.Window.IsClosing(first));
+
+        // Untouched for the idle time: the line he closed leaves, the one he undid stays.
+        t.Timers.FireAll();
+        Assert.DoesNotContain(second, t.Window.Keys);
+        Assert.Contains(first, t.Window.Keys);
+        Assert.Contains(third, t.Window.Keys);
+    });
+
+    // Hiding the panel lets the lines he closed go, so the next open does not show them struck through.
+    [Fact]
+    public void Hiding_the_panel_lets_the_lines_he_closed_go() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var closing = t.Tasks.AddNote("Old errand", Maybe<Guid>.None).Value.Id;
+        var other = t.Tasks.AddNote("Dishwasher tablets", Maybe<Guid>.None).Value.Id;
+        t.Controller.Show();
+        TouchPanel(t.Window);
+        Assert.True(t.Controller.Close(closing).IsSuccess);
+        t.Timers.FireAll();
+        Assert.Contains(closing, t.Window.Keys);
+
+        t.Controller.Hide();
+        t.Controller.Show();
 
         Assert.DoesNotContain(closing, t.Window.Keys);
-        Assert.DoesNotContain(fromSession, t.Window.Keys);
-        Assert.Contains(reading, t.Window.Keys);
+        Assert.Contains(other, t.Window.Keys);
     });
     // His own move on another line (here a flag toggle, which takes the task to another quadrant) is drawn at once while
     // the list holds for the thread he has open: a drop or a toggle that stayed put would look like it failed (review).
