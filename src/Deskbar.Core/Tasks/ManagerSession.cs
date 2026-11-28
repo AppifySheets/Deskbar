@@ -205,8 +205,9 @@ public static class ManagerSession
     /// <summary>What the waiter's copy of a page message adds, asking the manager to repeat the user's words first.</summary>
     public static readonly string EchoRequest =
         "Deskbar's hook brought you this, so your terminal showed the user only \"Deskbar\", not their words. Begin your "
-        + $"reply with one line, \"{EchoMarker} \" followed by their words copied unchanged on that one line (cut with … "
-        + "after 200 characters), then a blank line and your answer. Deskbar hides that line on your page and in the Inbox.";
+        + $"reply with one line, \"{EchoMarker} \" followed by their words copied unchanged on that one line (their lines "
+        + "joined with \" / \", cut with … after 200 characters), then a blank line and your answer. Deskbar hides that line "
+        + "on your page and in the Inbox.";
 
     /// <summary>
     /// A message as the comment waiter delivers it: a page message gets EchoRequest after it (once), anything else (a
@@ -218,14 +219,27 @@ public static class ManagerSession
             : message;
 
     /// <summary>
-    /// The manager's reply without its echo lines (EchoMarker) and the blank lines around them at its start; a reply that
-    /// does not open with one is returned as it is. Several page messages claimed in one wake may give several echo lines.
+    /// The manager's reply without its echo at its start: the EchoMarker lines, the quote lines (">") that continue one
+    /// without a blank line between (a multi-line message quoted the markdown way despite the request), and the blank lines
+    /// around them. A reply that does not open with the marker is returned as it is. Several page messages claimed in one
+    /// wake may give several echo lines.
     /// </summary>
-    public static string WithoutEcho(string reply) =>
-        reply.TrimStart().StartsWith(EchoMarker, StringComparison.Ordinal)
-            ? string.Join('\n', reply.Split('\n')
-                .SkipWhile(line => line.Trim().Length == 0 || line.TrimStart().StartsWith(EchoMarker, StringComparison.Ordinal)))
-            : reply;
+    public static string WithoutEcho(string reply)
+    {
+        if (!reply.TrimStart().StartsWith(EchoMarker, StringComparison.Ordinal)) return reply;
+        var lines = reply.Split('\n');
+        // TakeWhile keeps every earlier line an echo line, so a quote line counts only straight after the marker or after
+        // another quote line that continued it; a quote of the manager's own after a blank line stays.
+        var echoed = Enumerable.Range(0, lines.Length)
+            .TakeWhile(i => lines[i].Trim().Length == 0 || IsEchoStart(lines[i])
+                            || IsQuote(lines[i]) && i > 0 && (IsEchoStart(lines[i - 1]) || IsQuote(lines[i - 1])))
+            .Count();
+        return string.Join('\n', lines.Skip(echoed));
+    }
+
+    static bool IsEchoStart(string line) => line.TrimStart().StartsWith(EchoMarker, StringComparison.Ordinal);
+
+    static bool IsQuote(string line) => line.TrimStart().StartsWith('>');
 
     /// <summary>The record with one more page message, keeping only the newest MessagesKept.</summary>
     public static ManagerRecord WithMessage(ManagerRecord record, ManagerMessage message) =>
