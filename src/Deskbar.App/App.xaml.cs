@@ -2078,7 +2078,9 @@ public partial class App : Application
         PermissionDesk.Sweep();
         // Every five seconds, a question a session's dialog put on its task (a permission, a plan, an MCP request) is
         // settled once the session's transcript shows the dialog was answered in the session (task b310a649,
-        // RemoteControl.SettlePrompts). On the UI thread, where the pipe's handler uses the same bookkeeping.
+        // RemoteControl.SettlePrompts), and a dialog question that named the task's page gets the terminal's lead back once
+        // its card has left the page (task 28fd8550, RemoteControl.CardsGone). On the UI thread, where the pipe's handler
+        // uses the same bookkeeping.
         promptSettle = System.Reactive.Linq.Observable.Interval(Core.Tasks.PermissionKeeper.ExpireEvery,
                 new System.Reactive.Concurrency.SynchronizationContextScheduler(new System.Windows.Threading.DispatcherSynchronizationContext(Dispatcher)))
             .Subscribe(_ => control.SettlePrompts());

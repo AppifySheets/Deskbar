@@ -481,6 +481,8 @@ static class ClaudeSkill
           makes it clickable, and the bar shows the link's words. A file on this machine is a link too,
           `[text](file:///C:/path/page.html)`: a page, picture, PDF or text file opens, anything else is shown in
           Explorer.
+          The user answers a `task ask` on the task's page, with an answer button or a comment, so never tell them to
+          answer in your terminal: the words send them to a window they do not need to open.
           A choice you put through the multiple-choice dialog (AskUserQuestion) needs no `task ask` beside it:
           Deskbar puts the dialog's questions on your task, and the user can answer them there. A `task ask` that only
           points at the dialog keeps the dialog's own question off the task.

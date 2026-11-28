@@ -144,15 +144,34 @@ public sealed partial class RemoteControl
     // dialog's would replace a `task ask` (say, a pull request to merge, which PullRequestWatch settles by that very
     // text) and the dialog's answer would then settle it unseen; and a Done task stays Done, since a dialog in a finished
     // session is not the work resuming, the same reasoning as a prompt not reopening it. The workspace still blinks.
+    //
+    // WHICH LEAD (task 28fd8550, DialogQuestion's header): the page's when the card will draw this dialog, the terminal's
+    // otherwise. PreToolUse comes a moment BEFORE the PermissionRequest that registers the card, so this cannot ask the
+    // desk; it asks what the desk's own gate asks (Registered, RemoteControl.Permission.cs): a desk in this copy, the
+    // setting in effect with the Inbox look on, an attended session, and a dialog the card can draw. The manager has no
+    // task, so it never gets here. Should the card still not arrive, CardsGone rewords the question to the terminal's.
     ControlReply DialogAsked(TaskService service, ClaudeHookEvent hook, string? folder)
     {
         if (hook.ToolName != DialogQuestion.Tool || hook.DialogQuestion.HasNoValue) return Quiet;
+        var text = CardDraws(hook) ? hook.DialogQuestionOnPage.GetValueOrDefault(hook.DialogQuestion.Value) : hook.DialogQuestion.Value;
         service.Board.TaskOf(hook.SessionId)
             .Where(TakesDialogQuestion)
-            .Tap(t => PlaceQuestion(service, t, hook.DialogQuestion.Value, hook));
+            .Tap(t => PlaceQuestion(service, t, text, hook));
         Attention(folder);
         return Quiet;
     }
+
+    // Whether the card on the task's page will take this dialog (see DialogAsked).
+    bool CardDraws(ClaudeHookEvent hook) =>
+        permissions is not null
+        && manager.State is { ClaudePermissionsInEffect: true, TasksInbox: true }
+        && hook is { Headless: false }
+        && hook.DialogQuestionOnPage.HasValue;
+
+    // A dialog question either lead may have put on the task: the page's, or the terminal's (placed so, or reworded to it).
+    static bool IsDialogQuestion(TaskItem task, ClaudeHookEvent hook) =>
+        task.Question.HasValue
+        && (hook.DialogQuestion == task.Question || hook.DialogQuestionOnPage == task.Question);
 
     // POSTTOOLUSE for AskUserQuestion: the dialog returned, so Petre answered it in the terminal, and the task goes back
     // to In progress as `task answered` takes it (Resolve). ONLY when the task still waits on the very question the
@@ -171,7 +190,7 @@ public sealed partial class RemoteControl
         hook.DialogAnswers.Tap(summary => service.Board.TaskOf(hook.SessionId)
             .Tap(task => service.Note(task.Id, DialogAsk.ThreadLine(summary))));
         service.Board.TaskOf(hook.SessionId)
-            .Where(t => t.Status == TaskStatus.WaitingOnYou && hook.DialogQuestion.HasValue && t.Question == hook.DialogQuestion)
+            .Where(t => t.Status == TaskStatus.WaitingOnYou && IsDialogQuestion(t, hook))
             .Tap(t => Resolve(service, t, hook.SessionId));
         return Quiet;
     }

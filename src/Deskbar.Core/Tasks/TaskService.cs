@@ -121,6 +121,10 @@ public sealed class TaskService(ITaskStore store, Func<DateTimeOffset> now, Func
     public Result Ask(Guid id, string question, Maybe<string> by = default, IReadOnlyList<string>? options = null, bool deploy = false) =>
         Apply(Board.Ask(id, question, now(), by.Map(asker => (asker, makeId())), options, deploy));
 
+    // The open question reworded in place (task 28fd8550, TaskBoard.RewordQuestion): no new ask, so no new bubble, no move
+    // to the top. A task no longer waiting on `from` saves and pulses nothing.
+    public Result RewordQuestion(Guid id, string from, string to) => ApplyIfChanged(Board.RewordQuestion(id, from, to, now()));
+
     // A pull request the task's session opened (task e7aa49b1); one it already lists saves and pulses nothing.
     public Result AddPullRequest(Guid id, PullRequestLink link) => ApplyIfChanged(Board.AddPullRequest(id, link, now()));
 
