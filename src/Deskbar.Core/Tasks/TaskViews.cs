@@ -404,15 +404,21 @@ public static class TaskViews
     /// parent is snoozed is not nested, because the parent is off the list, yet it folds with the same two exceptions,
     /// and never out of the pinned block or the Claude working block (FamilyFolds).
     /// </para>
+    /// <para>
+    /// A subtask that blocks a Done parent's close never folds either (task 29d4a541, <see cref="BlocksFinishedParent"/>).
+    /// </para>
     public static IReadOnlyList<TaskGroup> FoldSubtasks(IReadOnlyList<TaskGroup> groups, IReadOnlySet<Guid> nested, Maybe<Guid> keep = default,
-        IReadOnlySet<Guid>? snoozedFamily = null) =>
-        groups.Select(g => g with
+        IReadOnlySet<Guid>? snoozedFamily = null)
+    {
+        var finished = FinishedIds(groups.SelectMany(g => g.Tasks));
+        return groups.Select(g => g with
             {
                 Tasks = g.Tasks.Where(t => !(nested.Contains(t.Id) || FamilyFolds(snoozedFamily, t))
-                    || t.Status == TaskStatus.WaitingOnYou || Kept(keep, t)).ToArray(),
+                    || t.Status == TaskStatus.WaitingOnYou || Kept(keep, t) || BlocksFinishedParent(finished, t)).ToArray(),
             })
             .Where(g => g.Tasks.Count > 0)
             .ToArray();
+    }
 
     /// <summary>
     /// The Matrix's cells with every open subtask left out whose parent is in some cell, unless it waits on Petre or is
@@ -425,8 +431,10 @@ public static class TaskViews
         IReadOnlySet<Guid>? snoozedFamily = null)
     {
         var shown = cells.SelectMany(c => c.Tasks).Select(t => t.Id).ToHashSet();
+        // The List's exception for a Done parent (task 29d4a541) holds here too: its open subtask is what its close waits on.
+        var finished = FinishedIds(cells.SelectMany(c => c.Tasks));
         bool Folds(TaskItem t) =>
-            t.IsOpen && t.Status != TaskStatus.WaitingOnYou && !Kept(keep, t)
+            t.IsOpen && t.Status != TaskStatus.WaitingOnYou && !Kept(keep, t) && !BlocksFinishedParent(finished, t)
             && ((t.ParentId is { HasValue: true } p && p.Value != t.Id && shown.Contains(p.Value))
                 || FamilyFolds(snoozedFamily, t));
         return cells.Select(c => c with { Tasks = c.Tasks.Where(t => !Folds(t)).ToArray() }).ToArray();
@@ -467,6 +475,27 @@ public static class TaskViews
 
     // Whether the task is the one the folding keeps on show (the panel's selected task, task b0526e18).
     static bool Kept(Maybe<Guid> keep, TaskItem t) => keep.HasValue && keep.Value == t.Id;
+
+    // A SUBTASK THAT HOLDS UP A FINISHED PARENT NEVER FOLDS (task 29d4a541; Petre, with a screenshot of a Done parent's
+    // Inbox line saying "Close its open subtask first", the subtask nowhere on the list: "subtask should be there for me
+    // to interact with, under that task"). A Done task is finished work whose one remaining step is Petre's close, and
+    // TaskBoard.OpenSubtasks refuses that close while any subtask is open. With the Subtasks box unticked such a subtask
+    // folded into the parent like any other, so the one thing between him and the close had no line to tick, open or
+    // close; only the parent's page reached it (task 2106492b). It is his next move as much as a question is, the reason
+    // a question never folds, so it keeps its line, drawn under the parent in the pinned block (NestsUnder lets a plain
+    // subtask follow a pinned parent) and in the Inbox's Finished section with it. The bar keeps its own rule (task
+    // 4c01747c: no subtask lines on the bar with the box unticked); this is the panel's List, Inbox and Matrix.
+
+    // The ids of the Done tasks among those listed: the parents whose open subtasks keep their lines.
+    static IReadOnlySet<Guid> FinishedIds(IEnumerable<TaskItem> listed) =>
+        listed.Where(t => t.Status == TaskStatus.Done).Select(t => t.Id).ToHashSet();
+
+    /// <summary>
+    /// Whether <paramref name="task"/> is an open subtask of a Done task in <paramref name="finished"/>, so it stands
+    /// between that parent and its close and keeps its own line when subtasks fold (task 29d4a541).
+    /// </summary>
+    public static bool BlocksFinishedParent(IReadOnlySet<Guid> finished, TaskItem task) =>
+        task.IsOpen && task.ParentId is { HasValue: true } p && p.Value != task.Id && finished.Contains(p.Value);
 
     // THE SNOOZED PARENT (task 4c01747c, Petre with a screenshot: "unselected subtasks still shows subtasks in the main
     // bar"). He had snoozed the Warehouse parent until the next morning, which takes it off the bar and off the panel's

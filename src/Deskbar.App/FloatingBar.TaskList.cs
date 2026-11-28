@@ -613,7 +613,9 @@ public partial class FloatingBar
     // THE "SUBTASKS" CHECKBOX UNTICKED (task 173ef268): every line UnderParents drew under its parent (ShownIn set) goes,
     // and the parent's "· N subtasks" says they are there. The panel's rule, TaskViews.FoldSubtasks: a subtask whose
     // parent is not on the bar (a Claude task the bar leaves out) was never nested, so it stays, and a subtask waiting on
-    // Petre stays, because a question must stay findable. Ticked, the lines are as they were.
+    // Petre stays, because a question must stay findable. Ticked, the lines are as they were. (The panel also keeps an
+    // open subtask of a Done parent, task 29d4a541, TaskViews.BlocksFinishedParent; the bar does not take that exception,
+    // as task 4c01747c below wants no subtask lines on it with the box unticked.)
     // TASK 4c01747c overrules the first half of that for the bar: with the box unticked Petre expects no subtask lines on
     // the bar at all. His screenshots: eight subtasks of a SNOOZED parent, then "↳ test" under a parent assigned to
     // Claude, both on the bar because their parent never is. So every subtask with an open parent (`underOpenParent`,

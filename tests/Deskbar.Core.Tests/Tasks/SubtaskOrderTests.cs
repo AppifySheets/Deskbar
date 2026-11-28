@@ -217,6 +217,28 @@ public class SubtaskOrderTests
         Assert.Equal(["Asking", "Parent", "Orphan"], Titles(folded[3].Tasks));
     }
 
+    // Task 29d4a541 (Petre: "subtask should be there for me to interact with, under that task"): a Done parent's close
+    // waits on its open subtasks, so with the box unticked those keep their lines, drawn under the parent in the pinned
+    // block, in the List and the Matrix alike; a plain parent's subtask still folds.
+    [Fact]
+    public void Unticked_an_open_subtask_of_a_done_parent_stays_under_it()
+    {
+        var done = Task("Done parent", status: TaskStatus.Done);
+        var blocking = Task("Blocking", done.Id);
+        var plain = Task("Plain parent");
+        var child = Task("Child", plain.Id);
+        var groups = new[] { new TaskGroup(TaskGroupKind.WaitingOnYou, [done]), new TaskGroup(TaskGroupKind.IV, [blocking, plain, child]) };
+        var (under, nested) = TaskViews.UnderParents(groups);
+
+        var folded = TaskViews.FoldSubtasks(under, nested);
+        var cells = TaskViews.FoldSubtasks(
+            [new TaskCell(Quadrant.I, []), new TaskCell(Quadrant.II, []), new TaskCell(Quadrant.III, []), new TaskCell(Quadrant.IV, [done, blocking, plain, child])]);
+
+        Assert.Equal(["Done parent", "Blocking"], Titles(folded[0].Tasks));
+        Assert.Equal(["Plain parent"], Titles(folded[1].Tasks));
+        Assert.Equal(["Done parent", "Blocking", "Plain parent"], Titles(cells[3].Tasks));
+    }
+
     // Task b0526e18 (Petre: "i can't interact with the subtask"): the subtask kept (the one selected in the panel, shown
     // from its parent's thread) never folds, in the List or the Matrix; its folded siblings stay folded.
     [Fact]
