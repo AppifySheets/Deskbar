@@ -2994,6 +2994,16 @@ public partial class TasksWindow : Window
     {
         var text = CommentDraft(id);
         if (string.IsNullOrWhiteSpace(text) && PendingImages(id).Count == 0 || Actions is null) return false;
+        // A dialog waits on the user (TasksWindow.DialogCard): the typed words go to it as the answer instead of into the
+        // thread, where the session, blocked on the dialog, would read them only after it is answered (task c047d0a0, a
+        // case measured by task c49adbe0: a reply sat ten hours in the chat). Only words, no pictures; when the dialog
+        // has ended, the words post as a comment as ever.
+        if (PendingImages(id).Count == 0 && text.Trim().Length > 0 && AnsweredDialogWith(id, text))
+        {
+            drafts.Remove(id);
+            if (commentBoxes.TryGetValue(id, out var answered)) answered.Text = "";
+            return true;
+        }
         if (CommentWithPictures(id, text.Trim().Length == 0 ? "" : text) is not { } comment) return false;
         drafts.Remove(id);
         if (commentBoxes.TryGetValue(id, out var box)) box.Text = "";

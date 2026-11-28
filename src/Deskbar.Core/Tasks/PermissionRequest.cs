@@ -22,21 +22,33 @@ namespace Deskbar.Core.Tasks;
 //   AgentId     agent_id, when a SUBAGENT asked (the hooks reference lists it among the fields of a hook fired inside one).
 //               A subagent writes its turns to its own transcript, so the question is watched there (TranscriptMark.For).
 //               Only letters, digits, '-' and '_' are taken, since it becomes part of a file name.
+//   Input       tool_input exactly as Claude Code sent it, as JSON text ("" when there was none). An AskUserQuestion
+//               dialog answered from the task's page must echo its questions back unchanged (DialogAsk, task c047d0a0),
+//               and re-serialising the parsed fields could alter them; so the raw text is kept, in memory only, like the
+//               rest of the request (PermissionDesk).
 //
 // Only a hook whose hook_event_name is PermissionRequest and that names a session and a tool is taken; anything else is
 // refused, and the verb that reads it then answers nothing, which leaves Claude Code's own terminal dialog.
 public sealed record PermissionRequest(string SessionId, string Tool, string Folder, Maybe<string> Mode,
-    IReadOnlyList<PermissionField> Fields, Maybe<string> AgentId = default)
+    IReadOnlyList<PermissionField> Fields, Maybe<string> AgentId = default, string Input = "")
 {
     public const string Event = "PermissionRequest";
 
     // AskUserQuestion and ExitPlanMode are dialogs, not permissions: their "allow" needs an updatedInput carrying the
     // user's choice (the hooks reference, "PermissionRequest decision control"), which a plain Allow would not give. The
-    // PM's ruling (Q8): Deskbar never handles them, and for those two the hook prints nothing.
+    // PM's ruling (Q8) kept both off the card. AskUserQuestion has its own card since task c047d0a0, which sends the
+    // picks as that updatedInput (DialogAsk; measured 2026-11-28 in a background session: Claude read "Pick a
+    // colour"="Blue" from the hook's answer and the dialog never needed the terminal). ExitPlanMode still prints nothing.
     static readonly string[] DialogTools = [DialogQuestion.Tool, "ExitPlanMode"];
 
-    /// <summary>Whether this is one of Claude Code's own dialogs, which Deskbar never answers.</summary>
+    /// <summary>
+    /// Whether this is one of Claude Code's own dialogs, which a plain Allow cannot answer. AskUserQuestion is answered
+    /// with the user's picks since task c047d0a0 (DialogAsk), so RemoteControl.Permission takes that one apart.
+    /// </summary>
     public bool IsDialog => DialogTools.Contains(Tool, StringComparer.Ordinal);
+
+    /// <summary>Whether this is Claude Code's multiple-choice dialog, answered from a card of its own (DialogAsk).</summary>
+    public bool IsAskUserQuestion => Tool == DialogQuestion.Tool;
 
     static readonly JsonSerializerOptions Indented = new()
     {
@@ -65,7 +77,8 @@ public sealed record PermissionRequest(string SessionId, string Tool, string Fol
                     : [new PermissionField("input", ValueText(input))];
 
             return new PermissionRequest(session.Value, tool.Value, Text(root, "cwd").GetValueOrDefault(""),
-                Text(root, "permission_mode"), fields, Text(root, "agent_id").Where(SafeAgentId.IsMatch));
+                Text(root, "permission_mode"), fields, Text(root, "agent_id").Where(SafeAgentId.IsMatch),
+                root.TryGetProperty("tool_input", out var raw) ? raw.GetRawText() : "");
         }
         catch (JsonException e)
         {

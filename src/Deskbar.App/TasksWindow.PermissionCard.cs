@@ -67,7 +67,11 @@ public partial class TasksWindow
         var stack = new StackPanel { Margin = new Thickness(10, 6, 10, 8) };
         if (note is not null)
             stack.Children.Add(Text(note, 12, InboxLook.Ink2, margin: new Thickness(2, 0, 2, 6)).Wrapped());
-        foreach (var question in questions) stack.Children.Add(PermissionCard(row.Id, question));
+        // A multiple-choice dialog gets the dialog card (task c047d0a0, TasksWindow.DialogCard); anything else the Allow / Deny card.
+        foreach (var question in questions)
+            stack.Children.Add(DialogAsk.Of(question.Request) is { HasValue: true } dialog
+                ? DialogCard(row.Id, question, dialog.Value)
+                : PermissionCard(row.Id, question));
         return new Border
         {
             BorderBrush = InboxLook.Hairline,
@@ -197,9 +201,9 @@ public partial class TasksWindow
     }
 }
 
-file static class PermissionTextBlocks
+static class PermissionTextBlocks
 {
-    // Wrapped in full, as every text of the card is.
+    // Wrapped in full, as every text of the permission card and the dialog card is.
     public static TextBlock Wrapped(this TextBlock block)
     {
         block.TextWrapping = TextWrapping.Wrap;

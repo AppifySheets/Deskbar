@@ -96,6 +96,15 @@ public sealed record ClaudeHookEvent(string Event, string SessionId, string Fold
     public Maybe<string> DialogQuestion { get; init; }
 
     /// <summary>
+    /// An AskUserQuestion PostToolUse hook's answers in the task's thread wording ("Header: answer", one per line;
+    /// DialogAsk.Summary), whether they were picked in the terminal or on the task's card (task c047d0a0), or none. Read
+    /// from tool_response.answers, which maps each question's text to its answer: the tool's result as the 2026-11-28
+    /// probe's transcript recorded it, {"questions": [...], "answers": {"Pick a colour": "Blue"}}. A multi-select answer
+    /// given as an array is joined with ", ".
+    /// </summary>
+    public Maybe<string> DialogAnswers { get; init; }
+
+    /// <summary>
     /// A UserPromptSubmit hook's prompt: the message submitted, or none. Read so Deskbar can leave its own resume message
     /// out of the replies that set a waiting task's question aside (RepliedTasks, task 8bd18246).
     /// </summary>
@@ -158,6 +167,14 @@ public sealed record ClaudeHookEvent(string Event, string SessionId, string Fold
                 ToolName = Text(root, "tool_name"),
                 DialogQuestion = Text(root, "tool_name") == Tasks.DialogQuestion.Tool && root.TryGetProperty("tool_input", out var asked)
                     ? Tasks.DialogQuestion.From(asked)
+                    : Maybe<string>.None,
+                DialogAnswers = Text(root, "tool_name") == Tasks.DialogQuestion.Tool
+                                && Text(root, "hook_event_name") == "PostToolUse"
+                                && root.TryGetProperty("tool_input", out var dialogInput)
+                                && root.TryGetProperty("tool_response", out var dialogResult)
+                    ? DialogAsk.AnswersIn(dialogResult).Bind(answers =>
+                        DialogAsk.Parse(dialogInput.GetRawText()).Map(dialog => dialog.Summary(answers)))
+                        .Where(summary => summary.Length > 0)
                     : Maybe<string>.None,
                 Prompt = Text(root, "prompt"),
                 LastMessage = Text(root, "last_assistant_message"),

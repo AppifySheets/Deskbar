@@ -166,6 +166,10 @@ public sealed partial class RemoteControl
         // The dialog is closed, so its placement (and its transcript watch) goes, settling the question it placed; the
         // older rule below still settles a dialog question placed before this Deskbar started (same text).
         Settle(service, prompts.Take(hook.SessionId));
+        // What was picked goes in the task's thread as Deskbar's line (task c047d0a0), whether it was answered in the
+        // terminal or on the task's card, so the chat keeps the decision. A Deskbar line wakes no session (TaskService.Note).
+        hook.DialogAnswers.Tap(summary => service.Board.TaskOf(hook.SessionId)
+            .Tap(task => service.Note(task.Id, DialogAsk.ThreadLine(summary))));
         service.Board.TaskOf(hook.SessionId)
             .Where(t => t.Status == TaskStatus.WaitingOnYou && hook.DialogQuestion.HasValue && t.Question == hook.DialogQuestion)
             .Tap(t => Resolve(service, t, hook.SessionId));

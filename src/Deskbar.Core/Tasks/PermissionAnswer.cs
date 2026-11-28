@@ -29,6 +29,13 @@ public enum PermissionDecision
 // NOTHING, and a PermissionRequest hook that prints nothing leaves Claude Code's own terminal dialog (spike, run B5: in a
 // background session the dialog stays). No path prints allow by default.
 //
+// A DIALOG'S SLOT is the one exception to "never text built from data" (task c047d0a0): the answer to AskUserQuestion
+// is the picked labels and typed text, so its line cannot be a literal of the script. Deskbar writes it as one line of
+// pure-ASCII JSON in the slot's dialog file (DialogAsk.AnswerLine), and the script prints that file with `type`, which
+// never parses it, only after the same code check, and only for a slot whose registration said it is a dialog's. A
+// process that knows the code could put JSON of its own there; such a process could equally answer Allow to a tool
+// permission, and the code's boundary is the one PermissionDesk's header states.
+//
 // The three lines are the ones measured to work in the spike (runs 1, 2 and 10). The deny message is fixed (the PM's
 // ruling Q9: no free text, which would have to travel through a file and cmd into JSON). "Allow and stop asking for
 // edits" switches the mode with destination "session" only: the hooks reference says that one is in memory, so nothing
@@ -47,6 +54,32 @@ public static class PermissionAnswer
 
     public const string AllowEditsLine =
         """{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"allow","updatedPermissions":[{"type":"setMode","mode":"acceptEdits","destination":"session"}]}}}""";
+
+    /// <summary>
+    /// The word that answers a multiple-choice dialog (AskUserQuestion, task c047d0a0): the line printed is then the slot's
+    /// <see cref="PermissionDesk.DialogFile"/>, which Deskbar wrote just before (DialogAsk.AnswerLine). Taken only by a slot
+    /// registered as a dialog's (<see cref="DialogKind"/>), and a dialog's slot takes no other word: a plain allow is not
+    /// an answer to a dialog, and the dialog file is never printed for a tool permission.
+    /// </summary>
+    public const string DialogWord = "dialog";
+
+    /// <summary>The second word of the registration's reply for a dialog's slot: "&lt;code&gt; dialog" (RemoteControl.Permission).</summary>
+    public const string DialogKind = "dialog";
+
+    /// <summary>
+    /// The line the hook prints for an answer file's text, when the hook was handed <paramref name="code"/>: for a tool
+    /// permission's slot (<paramref name="dialogFile"/> has no value) as <see cref="LineFor(string,string)"/> says; for a
+    /// dialog's slot, what its dialog file holds ("" when there is none), for exactly "&lt;code&gt; dialog" only.
+    /// </summary>
+    public static Maybe<string> LineFor(string answerText, string code, Maybe<string> dialogFile) =>
+        dialogFile.HasNoValue
+            ? LineFor(answerText, code)
+            : Code.IsMatch(code)
+              && answerText.TrimEnd('\r', '\n').Split(' ') is [var given, DialogWord]
+              && given == code
+              && dialogFile.Value.TrimEnd('\r', '\n') is { Length: > 0 } line
+                ? line
+                : Maybe<string>.None;
 
     /// <summary>A code as PermissionDesk makes it: 32 lowercase hex digits.</summary>
     public static readonly Regex Code = new("^[0-9a-f]{32}$", RegexOptions.Compiled);
