@@ -5,6 +5,7 @@ using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using CSharpFunctionalExtensions;
 using Deskbar.Core.Domain;
+using Deskbar.Core.Imaging;
 using Deskbar.Core.Rehydration;
 using Deskbar.Core.Tasks;
 using Deskbar.Windows.Monitoring;
@@ -388,11 +389,17 @@ public static class IconCache
     internal static bool IsBlank(PinImage image) =>
         Enumerable.Range(0, image.Pixels.Length / 4).All(i => image.Pixels[i * 4 + 3] == 0);
 
-    // Moved here from FloatingBar.Pins.cs unchanged. Called on the UI thread only: a BitmapSource made on any other
-    // thread gives that thread a Dispatcher and a hidden window (see AskShell).
+    // Moved here from FloatingBar.Pins.cs. Called on the UI thread only: a BitmapSource made on any other thread gives
+    // that thread a Dispatcher and a hidden window (see AskShell).
+    //
+    // Every picture the shell hands over for an app (a pin, a bookmark chip, a media player, a store app's window)
+    // comes through here, so this is where a light plate is lifted off it (LightPlate, task 61a62df7): Outlook's logo
+    // came as artwork on an opaque white square and stood out as a white tile on the dark row. One place, so the same
+    // app looks the same as a pin, a chip and a window. A logo without a light plate is drawn from its own pixels.
     internal static ImageSource ToImageSource(PinImage image)
     {
-        var source = BitmapSource.Create(image.Width, image.Height, 96, 96, PixelFormats.Pbgra32, null, image.Pixels, image.Width * 4);
+        var pixels = LightPlate.Lifted(image.Pixels, image.Width, image.Height);
+        var source = BitmapSource.Create(image.Width, image.Height, 96, 96, PixelFormats.Pbgra32, null, pixels, image.Width * 4);
         source.Freeze();
         return source;
     }
