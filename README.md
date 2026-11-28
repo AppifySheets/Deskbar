@@ -523,7 +523,7 @@ add it anywhere, press Ctrl+Enter instead (it asks for the workspace the same wa
 blue for a moment, so you can see where it landed. The play button after the flag toggles starts Claude as Enter does,
 and asks for a folder when the workspace has none; the tasks panel's own add box works the same. When Claude starts, no
 terminal opens and nothing moves: the keyboard goes back to where you
-were typing, and a small "Claude started" card shows for a few seconds in the corner of the screen, without taking focus (click it to open the session). The camera beside the flag toggles does the same with a picture of the window you were working in: the task gets the picture and the window's name, and Claude starts on it. Type `/` at the start of the box to pick one of the repo's own Claude Code
+were typing, and a small "Claude started" card shows for a few seconds in the corner of the screen, without taking focus (click it to open the task in the tasks panel; in the Inbox view that is its page with Claude's chat). The camera beside the flag toggles does the same with a picture of the window you were working in: the task gets the picture and the window's name, and Claude starts on it. Type `/` at the start of the box to pick one of the repo's own Claude Code
 skills for that workspace, the ones its repos keep in `.claude/skills` (the list comes from Claude Code itself), and the session starts by running it. A line on the bar has no tick box, so a long title
 gets its whole second row; click a line to open its task in the tasks panel, and close it there or
 with Close in the line's right-click menu, with six seconds to undo. In the tasks panel a line you close
