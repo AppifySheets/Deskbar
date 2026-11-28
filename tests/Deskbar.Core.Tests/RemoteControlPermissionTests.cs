@@ -132,6 +132,47 @@ public sealed class RemoteControlPermissionTests : IDisposable
         Assert.Null(held.Mark);
     }
 
+    // A WELL-FORMED AskUserQuestion IS NOW A QUESTION DESKBAR SHOWS (task c047d0a0, on purpose: it used to answer nothing):
+    // the reply is the code and the word "dialog", which tells the script to print the dialog's answer file. Hook()'s own
+    // tool_input is a Bash command, so the dialog's is built here.
+    static string DialogHook(string input = """{"questions":[{"question":"Pick a colour","header":"Colour","options":[{"label":"Red","description":"warm"},{"label":"Blue","description":"cool"}],"multiSelect":false}]}""") =>
+        $$$"""{"session_id":"{{{Session}}}","transcript_path":"t","cwd":"C:\\repos\\proj1","permission_mode":"default","hook_event_name":"PermissionRequest","tool_name":"AskUserQuestion","tool_input":{{{input}}}}""";
+
+    [Fact]
+    public void A_well_formed_dialog_is_held_and_the_reply_is_its_code_and_dialog()
+    {
+        var reply = Registered(Ready(), Call(Slot(), DialogHook()));
+
+        Assert.Matches("^[0-9a-f]{32} dialog\r\n$", reply.Output);
+        var held = desk.Of(Session).Single();
+        Assert.True(held.Request.IsAskUserQuestion);
+        Assert.True(DialogAsk.Of(held.Request).HasValue);
+        Assert.Equal("req-1-2", held.Slot);
+    }
+
+    // The hook's reply and the answer file agree: answering the dialog from the desk is what the script then prints.
+    [Fact]
+    public void The_dialog_replys_code_is_the_one_the_answer_file_names()
+    {
+        var reply = Registered(Ready(), Call(Slot(), DialogHook()));
+        var code = reply.Output.Split(' ')[0];
+
+        Assert.True(desk.AnswerDialog("req-1-2", new Dictionary<string, string> { ["Pick a colour"] = "Blue" }).IsSuccess);
+
+        Assert.Equal($"{code} dialog\n", File.ReadAllText(Path.Combine(box, "req-1-2", PermissionDesk.AnswerFile)));
+    }
+
+    [Theory]
+    [InlineData("""{"questions":[]}""")]
+    [InlineData("""{"questions":[{"question":"Q?","options":[]}]}""")]
+    [InlineData("""{"questions":[{"question":"Q?","options":[{"label":"a"}]},{"question":"Q?","options":[{"label":"b"}]}]}""")]
+    [InlineData("""{"command":"x"}""")]
+    public void A_malformed_dialog_answers_nothing(string input)
+    {
+        Assert.Equal("", Registered(Ready(), Call(Slot(), DialogHook(input))).Output);
+        Assert.Empty(desk.All);
+    }
+
     // Every case that is not a question Deskbar can show answers NOTHING: the script then prints nothing, and the terminal
     // dialog stays. Never an allow, never a code.
     public static TheoryData<string> Refusals =>
@@ -150,6 +191,7 @@ public sealed class RemoteControlPermissionTests : IDisposable
         string[] call = why switch
         {
             "headless" => ["claude-permission", "--entry", "sdk-cli", "--attended", "0", "--from", Repo, "--slot", slot, "--json", Hook()],
+            // Hook()'s tool_input is a Bash command, not the questions: a malformed AskUserQuestion stays in the terminal.
             "ask dialog" => Call(slot, Hook("AskUserQuestion")),
             "plan dialog" => Call(slot, Hook("ExitPlanMode")),
             "not a permission hook" => Call(slot, Hook(hookEvent: "PreToolUse")),

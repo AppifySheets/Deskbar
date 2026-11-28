@@ -120,6 +120,47 @@ public sealed class DialogQuestionTests
         Assert.Equal("Merge the pull request", Task().Question.Value);
     }
 
+    // THE PICKS ON THE THREAD (task c047d0a0): when the dialog closes, wherever it was answered, its PostToolUse carries the
+    // answers in tool_response, and Deskbar puts one note with them on the session's task.
+    ControlReply AnsweredWith(WorkspaceManager manager, string session, object response) =>
+        Ran(manager, "claude-hook", "--entry", "claude-vscode", "--attended", "1", "--from", @"C:\repos\TaskSpaces", "--json",
+            JsonSerializer.Serialize(new
+            {
+                session_id = session,
+                cwd = @"C:\repos\TaskSpaces",
+                hook_event_name = "PostToolUse",
+                tool_name = DialogQuestion.Tool,
+                tool_input = new { questions = new[] { Question("Pick a colour", "Red", "Blue") } },
+                tool_response = response,
+            }));
+
+    [Fact]
+    public void An_answered_dialog_leaves_a_deskbar_note_with_the_picks()
+    {
+        var manager = Started();
+        Ran(manager, "task", "new", "Task links", "--session", "s1", "--from", @"C:\repos\TaskSpaces");
+
+        var reply = AnsweredWith(manager, "s1", new { answers = new Dictionary<string, string> { ["Pick a colour"] = "Blue" } });
+
+        Assert.Equal((ControlReply.Ok, ""), (reply.ExitCode, reply.Output));
+        var note = Assert.Single(Task().Comments, c => c.ByDeskbar);
+        Assert.Equal("Answered Claude's question:\n- Duplicate: Blue", note.Markdown);
+    }
+
+    // No answers in the result (Esc, a result of another shape), another session, or another tool: no note.
+    [Fact]
+    public void A_dialog_closed_without_answers_leaves_no_note()
+    {
+        var manager = Started();
+        Ran(manager, "task", "new", "Task links", "--session", "s1", "--from", @"C:\repos\TaskSpaces");
+
+        AnsweredWith(manager, "s1", new { answers = new Dictionary<string, string>() });
+        AnsweredWith(manager, "s1", "User declined to answer questions");
+        AnsweredWith(manager, "s2", new { answers = new Dictionary<string, string> { ["Pick a colour"] = "Blue" } });
+
+        Assert.DoesNotContain(Task().Comments, c => c.ByDeskbar && c.Markdown.StartsWith("Answered Claude's question"));
+    }
+
     // A Done task stays Done when its session opens a dialog.
     [Fact]
     public void A_done_task_stays_done()
