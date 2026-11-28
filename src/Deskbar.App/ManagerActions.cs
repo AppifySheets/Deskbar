@@ -333,7 +333,8 @@ public sealed class ManagerActions : IDisposable
         var session = new TaskSession(sessionId, folder, DateTimeOffset.MinValue, Maybe<DateTimeOffset>.None);
         return CommentWake.PlanFor([session], listed.ToList(), sessions.TranscriptExists, inbox!.Lapsed) switch
         {
-            WakePlan.Inbox => Observable.Return(inbox.Deliver(sessionId, delivered)),
+            // The waiter's road: the terminal shows only "Deskbar" for it, so the manager is asked to echo the words (task fa99f981).
+            WakePlan.Inbox => Observable.Return(inbox.Deliver(sessionId, ManagerSession.ByWaiter(delivered))),
             WakePlan.Resume => ResumedWith(sessionId, delivered),
             WakePlan.StopThenResume => StopFirst(listed.TryFirst(a => a.SessionId == sessionId)).SelectMany(_ => ResumedWith(sessionId, delivered)),
             WakePlan.Nothing nothing => Observable.Return(Result.Failure(nothing.Why)),
@@ -489,9 +490,10 @@ public sealed class ManagerActions : IDisposable
             : checks > 1 ? Observable.Timer(ResumePause, scheduler).SelectMany(_ => Gone(sessionId, checks - 1))
             : Observable.Return(false));
 
-    // The wake left in the inbox when it could not be resumed with it.
+    // The wake left in the inbox when it could not be resumed with it. A page message waiting there reaches the manager
+    // through the waiter too, so it carries the echo request (ManagerSession.ByWaiter, task fa99f981); a wake stays as it is.
     Result Waits(string sessionId, string message, string why) =>
-        inbox!.Deliver(sessionId, message).Tap(() => trace?.Invoke($"manager: not resumed ({why}), the wake waits in its inbox"));
+        inbox!.Deliver(sessionId, ManagerSession.ByWaiter(message)).Tap(() => trace?.Invoke($"manager: not resumed ({why}), the wake waits in its inbox"));
 
     // After a wake: the record stored onto the same session only (a click may have started another meanwhile). A wake
     // that could not be delivered still moves Since, or every tick would try again; it just sets no dot. Nor does it

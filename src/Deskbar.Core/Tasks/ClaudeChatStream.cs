@@ -41,6 +41,11 @@ public static class ClaudeChatStream
     /// </summary>
     public static IReadOnlyList<ChatItem> Visible(IEnumerable<ChatItem> items) =>
         items.Where(item => item is not ChatMessage { Role: ChatRole.User } message || !DeliveredByDeskbar(message.Text))
+            // The manager's echo of a page message (task fa99f981, ManagerSession.WithoutEcho) sits right under the stored
+            // bubble with the same words, so the page drops it; a reply that held nothing else is not drawn at all.
+            .SelectMany(item => item is ChatMessage { Role: ChatRole.Claude } reply && ManagerSession.WithoutEcho(reply.Text) is var shown && shown != reply.Text
+                ? shown.Trim().Length > 0 ? new ChatItem[] { reply with { Text = shown } } : []
+                : new[] { item })
             .Select(item => item is ChatSteps run && run.Steps.Any(s => s.Housekeeping) ? run with { Steps = run.Steps.Where(s => !s.Housekeeping).ToList() } : item)
             .Where(item => item is not ChatSteps { Steps.Count: 0 })
             .ToList();

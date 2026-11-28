@@ -36,6 +36,43 @@ public sealed class ManagerPageTests : IDisposable
         Assert.Equal(ManagerSession.PageMessageOpening + "\n\nhello", text);
     }
 
+    // THE ECHO (task fa99f981): the waiter's wake shows only "Deskbar" in the manager's terminal, so the waiter's copy of a
+    // page message asks the manager to repeat the words, and the page and the Inbox line hide that repeat again.
+    [Fact]
+    public void ByWaiter_adds_the_echo_request_to_a_page_message_once()
+    {
+        var page = ManagerSession.PageMessage("PR 599 needs rebasing", Maybe<string>.None);
+        var once = ManagerSession.ByWaiter(page);
+
+        Assert.Equal(page + "\n\n" + ManagerSession.EchoRequest, once);
+        Assert.Equal(once, ManagerSession.ByWaiter(once));
+    }
+
+    [Fact]
+    public void ByWaiter_leaves_a_wake_alone() =>
+        Assert.Equal("Deskbar wake. Two tasks handed back.", ManagerSession.ByWaiter("Deskbar wake. Two tasks handed back."));
+
+    [Theory]
+    [InlineData("> From your page: PR 599 needs rebasing\n\nRebased.", "Rebased.")]
+    [InlineData("\n> From your page: one\n> From your page: two\n\nBoth done.\n\nDetails.", "Both done.\n\nDetails.")]
+    [InlineData("> From your page: only the echo", "")]
+    [InlineData("Rebased.\n\n> From your page: later in the reply", "Rebased.\n\n> From your page: later in the reply")]
+    [InlineData("> a quote of my own\n\nRebased.", "> a quote of my own\n\nRebased.")]
+    public void WithoutEcho_drops_only_the_echo_lines_at_the_start(string reply, string shown) =>
+        Assert.Equal(shown, ManagerSession.WithoutEcho(reply));
+
+    [Fact]
+    public void The_page_draws_the_reply_without_its_echo_and_skips_an_echo_alone()
+    {
+        var replied = new ChatMessage("c1", ChatRole.Claude, $"{ManagerSession.EchoMarker} hello\n\nHi.", 0, false, at);
+        var echoOnly = new ChatMessage("c2", ChatRole.Claude, $"{ManagerSession.EchoMarker} hello", 0, false, at);
+        var plain = new ChatMessage("c3", ChatRole.Claude, "Plain.", 0, false, at);
+
+        var visible = ClaudeChatStream.Visible([replied, echoOnly, plain]);
+
+        Assert.Equal([replied with { Text = "Hi." }, plain], visible);
+    }
+
     [Fact]
     public void WithMessage_keeps_the_newest_100()
     {

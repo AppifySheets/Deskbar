@@ -655,7 +655,9 @@ public class ManagerActionsTests
         Assert.True(rig.Manager.Send("what is stuck?", Maybe<TaskItem>.None).IsSuccess);
         rig.Settle();
 
-        Assert.Equal(ManagerSession.PageMessage("what is stuck?", Maybe<string>.None) + "\n", InboxText(rig));
+        // The waiter's copy asks the manager to echo the words, since its terminal shows only "Deskbar" (task fa99f981).
+        Assert.Equal(ManagerSession.ByWaiter(ManagerSession.PageMessage("what is stuck?", Maybe<string>.None)) + "\n", InboxText(rig));
+        Assert.EndsWith(ManagerSession.EchoRequest + "\n", InboxText(rig));
         Assert.Empty(rig.Cli.Acts);
     }
 
