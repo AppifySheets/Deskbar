@@ -2203,7 +2203,8 @@ public partial class TasksWindow : Window
         : string.Join(',', row.SessionList.Select(s => s.Id)) + "/"
           // Whether there is a session to open decides which Claude button is in the row at the thread's top (task
           // 5e02e99f: Open Claude, or "Start Claude on this" once the session has expired). The two differ in width, so
-          // the swap moves "Add subtask" beside them and must start the guard, or a click meant for it lands elsewhere.
+          // the swap moves "Add subtask" beside them and must start the guard, or a click meant for it lands elsewhere. (On a
+          // page the button is beside the docked box, task 625405cc, so there the guard is only a harmless extra.)
           + (row.OpensSession ? "opens" : "") + "/"
           // A subtask open in place (task 0eb943d8) puts its whole thread inside this one.
           + string.Join(',', row.Subtasks.Select(c => $"{c.Id}" + (c.Row is { } open ? "[" + ThreadLayoutKey(open) + "]" : ""))) + "/"
@@ -2348,7 +2349,8 @@ public partial class TasksWindow : Window
     //   Open Claude           a Claude task's session, the line's own Open Claude button and its double-click (Actions.Go,
     //                         task 7f61af2e), here so the thread has it too; tagged so the session line can leave its Open
     //                         off. Only while there is a session it can open (TaskRowView.OpensSession, the line's own
-    //                         rule since task 6a57f59b): running, or ended, which it resumes;
+    //                         rule since task 6a57f59b): running, or ended, which it resumes. On a task's page it (or
+    //                         Start Claude, its other face) sits beside the docked comment box instead (task 625405cc);
     //   Start Claude on this  only where Open Claude is not: a task no session has joined, or one whose session has
     //                         expired, so nothing is left to open;
     //   Reevaluate            beside Open Claude (task 3dd07539, "move it as a button at the top"): the session checks
@@ -2387,17 +2389,16 @@ public partial class TasksWindow : Window
             buttons.Add(Make("open", OpenInWindowText, () => openWindow(row.Id),
                 "Read and edit the whole task in a window of its own"));
         var openClaude = Actions is not null && OpensClaude(row);
-        if (openClaude)
-            buttons.Add(Make("terminal", OpenClaudeText, () => Actions?.Go(row.Id),
-                "Go to this task's Claude session, resuming it first if it has ended"));
-        // Not beside Open Claude (see above). A running session always has Open Claude, so this never shows beside one.
-        if (!openClaude && Actions?.StartClaude is { } start && row.Status != TaskStatus.Closed && !row.Closing)
-            buttons.Add(Make("play", StartClaudeText, () => start(row.Id),
-                "Start a background Claude session on this task, with the task as its first message"));
+        // The one Claude button (ClaudeAction), here unless the task's page docks it beside the comment box at the bottom
+        // (task 625405cc, DockBottom). It still counts as the thread's Open Claude there (the returned HasOpenClaude), so
+        // the one session line keeps leaving its own Open off: the same click is a button away at the bottom.
+        if (!BoxDocks(row.Id) && ClaudeAction(row) is { } claude)
+            buttons.Add(Make(claude.Icon, claude.Words, claude.Press, claude.Tip));
         // Reevaluate (task 3dd07539), right after the Claude button, its neighbour: the task's session checks where the
         // task stands and fixes it. Only beside Open Claude, where there is a session to reach (an expired one could not
         // take the request). The line has it as an icon beside Open Claude, so FollowLine hides this one as it hides Open
-        // Claude; it shows under a Matrix line (no action column) and while the line is being edited.
+        // Claude; it shows under a Matrix line (no action column) and while the line is being edited. On a page it stays in
+        // this row while the Claude button has moved down beside the comment box (task 625405cc).
         if (openClaude && Reevaluates(row))
             buttons.Add(Make("refresh", ReevaluateText, () => Actions?.Reevaluate?.Invoke(row.Id), ReevaluateTip, tipSaysIt: true));
         if (addsSubtask && subtaskUnder != row.Id)
@@ -2411,6 +2412,22 @@ public partial class TasksWindow : Window
         });
         return (actions, openClaude);
     }
+
+    // A Claude button's picture, words (its automation name, which the tests and FollowLine find it by), press and tooltip.
+    sealed record ClaudeChoice(string Icon, string Words, Action Press, string Tip);
+
+    // THE THREAD'S ONE CLAUDE BUTTON (task 5e02e99f, never both): Open Claude while the task has a session it can open
+    // (OpensClaude: running, or ended, which it resumes), else "Start Claude on this" on a task that is still open, else
+    // none. A running session always has Open Claude, so Start never shows beside one. ThreadActions puts it in the row at
+    // the thread's top; on a task's page DockBottom puts it beside the docked comment box instead (task 625405cc).
+    ClaudeChoice? ClaudeAction(TaskRowView row) =>
+        Actions is null ? null
+        : OpensClaude(row) ? new ClaudeChoice("terminal", OpenClaudeText, () => Actions?.Go(row.Id),
+            "Go to this task's Claude session, resuming it first if it has ended")
+        : Actions.StartClaude is { } start && row.Status != TaskStatus.Closed && !row.Closing
+            ? new ClaudeChoice("play", StartClaudeText, () => start(row.Id),
+                "Start a background Claude session on this task, with the task as its first message")
+        : null;
 
     // Whether the thread being built is an Inbox page's (PageBody sets it around its Thread call): its row of buttons is
     // then icon buttons (ThreadActions). A subtask's thread drawn in place inside it takes the same look.

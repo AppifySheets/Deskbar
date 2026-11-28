@@ -24,6 +24,12 @@ namespace Deskbar.App;
 // and looked low with more room above than below. On a page the box has no minimum, so a one-line box is as tall as the
 // button and the button is centred, its gap to the right edge the same as to the top and the bottom (the rounded frame's
 // padding, 3 DIP, all round); in a taller box it stays at the bottom right with the same gap.
+//
+// THE CLAUDE BUTTON SITS LEFT OF THE BOX (task 625405cc; the owner: "move the open in claude button to the bottom, where i can
+// easily click it if i need to"). Open Claude (or Start Claude on this, its other face) was in the row of buttons at the top
+// of the thread, which is inside the scroller: on a long chat, opened at its end, it was a scroll away. On a page it now
+// stands beside the docked box (WithClaudeButton), always in view, and the row at the top leaves it out (ThreadActions,
+// BoxDocks). The List's thread keeps it in its row, which a capped thread holds in view anyway.
 public partial class TasksWindow
 {
     /// <summary>The Tag of the page's docked bottom area, for the tests.</summary>
@@ -36,11 +42,15 @@ public partial class TasksWindow
     UIElement? dockedBox;
     Guid dockedBoxFor;
 
+    // Whether this task's comment box goes to the page's docked bottom: the thread being built is its own page's. One rule
+    // for the box and for the Claude button that stands beside it (ThreadActions leaves the button out of its row then).
+    bool BoxDocks(Guid id) => inboxPage == id;
+
     // Thread's one hook: the box Thread just built goes to the page's bottom on a page's own thread (true: keep it out of the
     // thread), else (false) Thread adds it to the thread as before.
     bool KeepBoxForDock(UIElement box, Guid id)
     {
-        if (inboxPage != id) return false;
+        if (!BoxDocks(id)) return false;
         // The box of a page has no minimum height and no padding of the theme's (a one-line box was 27 DIP tall, taller than the 24 DIP\r\n        // button, which sat low in it): a one-line box is as tall as the button and the button is centred.
         if (commentBoxes.TryGetValue(id, out var text))
         {
@@ -72,7 +82,7 @@ public partial class TasksWindow
                 Padding = new Thickness(10, 6, 10, 8),
                 BorderBrush = InboxLook.Hairline,
                 BorderThickness = new Thickness(0, 1, 0, 0),
-                Child = box,
+                Child = WithClaudeButton(row, box),
             });
         }
         dockedBox = null;
@@ -94,5 +104,43 @@ public partial class TasksWindow
             var wasAtEnd = e.VerticalOffset - e.VerticalChange >= e.ExtentHeight - e.ExtentHeightChange - (e.ViewportHeight - e.ViewportHeightChange) - 1;
             if (wasAtEnd) scroller.ScrollToEnd();
         };
+    }
+
+    // The docked Claude button's square, the size of the icon buttons in the page's row at the top (ThreadActions).
+    const double DockedClaudeSize = 26;
+
+    // The gap from the button's bottom to the box's rounded edge: the send button's own gap inside the box (its frame's
+    // 3 DIP padding), so the two buttons stand on one line.
+    const double DockedClaudeGap = 3;
+
+    // The comment box with the task's Claude button on its left (task 625405cc), or the box alone when the task has none
+    // (a note, a closed task, or no StartClaude wired). Left, as a messenger's extra button sits left of the box, so it is
+    // never mistaken for send, which is inside the box at its right end.
+    //
+    // The button stays level with the box's last line, as send does: the box grows upward with its text (up to a third of
+    // the page), and the button follows its bottom edge, 3 DIP above it like send. In a one-line box that centres it. It
+    // keys on the box's rounded field, the first part of CommentBox's stack, and not on the whole stack, whose pictures
+    // waiting to go with the comment sit under the field and would push the button below it.
+    UIElement WithClaudeButton(TaskRowView row, UIElement box)
+    {
+        if (ClaudeAction(row) is not { } claude) return box;
+        // The page's icon button (GlyphButton), so it looks like the row's buttons it came from; its tooltip starts with its
+        // words, as theirs do.
+        var button = GlyphButton(claude.Icon, claude.Words, claude.Press, $"{claude.Words}: {claude.Tip}", size: DockedClaudeSize,
+            ignoredWhen: ClickIgnored);
+        button.VerticalAlignment = VerticalAlignment.Top;
+        var grid = new Grid { Children = { button, box } };
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        Grid.SetColumn(box, 1);
+        void Level(double fieldHeight, double above) =>
+            button.Margin = new Thickness(0, Math.Max(0, above + fieldHeight - DockedClaudeGap - DockedClaudeSize), 6, 0);
+        if (box is StackPanel { Children.Count: > 0 } stack && stack.Children[0] is FrameworkElement field)
+        {
+            // Before the first layout: a one-line field (the send button's 24 DIP, its frame's 3 DIP padding and 1 DIP edge).
+            Level(24 + 2 * 3 + 2, stack.Margin.Top);
+            field.SizeChanged += (_, e) => Level(e.NewSize.Height, stack.Margin.Top);
+        }
+        return grid;
     }
 }
