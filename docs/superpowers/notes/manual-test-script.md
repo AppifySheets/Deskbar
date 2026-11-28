@@ -1928,3 +1928,12 @@ DH1. From the session, `task ask - --deploy` with "Redeploy the test stack". The
 DH2. `task deployed -` with "seen in the logs" from the session: the note leaves Waiting on you and goes back to in progress at once, with no `task answered`.
 DH3. A plain `task ask` whose text says "redeploy": the command's reply carries a `handOverHint`.
 DH4. Ask with `--deploy`, reply in the comment box so the question is set aside, and let the session stop: its nudge names `task ask - --deploy`, and a question restored without a new ask still shows the deploy mark.
+
+## A deploy the session cannot check
+
+A session that cannot see where its change runs says so with `task deployed - --unknown`, the reason on stdin ([Deskbar task 485ba96b](https://deskbar.app/task#485ba96b-031d-4549-946e-ada7fc6c1d99)). A throwaway note joined by a session, with a merged pull request in a repository other than Deskbar registered on it (`task pr <url> --session <id>`), and the note marked done.
+
+DU1. From the session, `task deployed - --unknown` with "no access to the test server's logs". The bar's tick turns into a dashed ring, the List's chip says "Can't check" in a dashed grey pill, and the Inbox line has the dashed ring with "Can't check the deploy: no access to the test server's logs" as its text.
+DU2. Open the note's page: the header says "Finished. Can't check the deploy", the track reads Merged › Deploy: can't check (the last step dashed), and the reason sits under it with "Check it yourself and close the task, or use Mark deployed."
+DU3. "Mark deployed" on the line's menu: the dashed ring fills to the disc and the chip says "Done".
+DU4. `task deployed --unknown` with no text, from the session: refused with "needs the reason", and nothing is stored.
