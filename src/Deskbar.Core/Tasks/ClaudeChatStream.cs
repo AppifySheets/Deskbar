@@ -47,7 +47,10 @@ public static class ClaudeChatStream
 
     /// <summary>Whether a user message is one Deskbar wrote (a comment delivered by a resume, a request, the first message).</summary>
     internal static bool DeliveredByDeskbar(string text) =>
-        SessionBriefing.DeliveredByDeskbar(text) || text.TrimStart().StartsWith("Deskbar task ", StringComparison.Ordinal);
+        SessionBriefing.DeliveredByDeskbar(text) || text.TrimStart().StartsWith("Deskbar task ", StringComparison.Ordinal)
+        // A message from the manager's page that a resume delivered as a prompt (task 6c4c067f): the page draws the
+        // stored copy (ManagerRecord.Messages), so the transcript's would be the same bubble twice.
+        || text.TrimStart().StartsWith(ManagerSession.PageMessageOpening, StringComparison.Ordinal);
 
     /// <summary>
     /// The page's stream: <paramref name="items"/> (ClaudeChat's, any order of kinds, in file order) and the thread's
