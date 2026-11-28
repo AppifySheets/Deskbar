@@ -651,6 +651,12 @@ public sealed class TaskService(ITaskStore store, Func<DateTimeOffset> now, Func
     /// <summary>The messages the watch sends to sessions. They leave no thread line, delivered or not.</summary>
     public IObservable<WatchNudge> WatchNudges => watchNudges;
 
+    /// <summary>
+    /// Sends a message to a task's session on the watch's quiet road (CommentWaker), from outside the repository watch:
+    /// the app's ClaudeSessions wakes a session that stopped on a usage limit's wrap_up note this way (task e948b383).
+    /// </summary>
+    public void SendWatchNudge(WatchNudge nudge) => watchNudges.OnNext(nudge);
+
     /// <summary>The failed runs on followed merge commits that were not yet a day old, the newest 50 (ManagerWakes reads them).</summary>
     public IReadOnlyList<RedRun> RedRuns => redRuns;
 

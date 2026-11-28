@@ -823,6 +823,14 @@ outside, so you type in it. A
 comment on such a task reaches the session straight away, even before the limit resets. The same goes for a
 session Claude Code still lists after its process has ended: a comment stops and resumes it with the comment,
 instead of leaving it in an inbox nothing reads.
+The reset time is only the latest the limit can last. If you lift it sooner (usage credits, for example), Deskbar
+notices within five minutes: while a session is stopped on the limit, it asks Claude every five minutes with the
+smallest request there is (a one-word Haiku reply that saves no session), and resumes the stopped sessions on the
+first answer, a few seconds apart. A refused request costs no usage, so the asking costs only that one answer, and
+it stops as soon as no session is stopped on the limit. When another session of yours gets past the limit first,
+Claude Code's own note in its transcript tells Deskbar sooner. A session that Claude Code warned about the limit and
+that finished its turn and stopped by itself is woken too, with a message telling it to carry on, once the limit is
+lifted or resets. One whose task waits on your answer is left for your answer.
 A session that keeps stopping straight after being woken, whose transcript Claude Code no longer keeps, or
 whose resume fails (Claude's message goes into the thread), is left alone and its task waits on you with the
 reason until you act on it: set its status and it tries again, or double-click it to bring the session back

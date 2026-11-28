@@ -524,11 +524,11 @@ Manage ticked. Use a throwaway folder Claude Code already trusts, not a real rep
 86. Stop a session in the middle of a long reply (kill its `claude.exe` from Task Manager while it is working). Its
     resume says "its last turn was cut off, so it was told to continue", and the session carries on by itself.
 86a. A session stopped on the usage limit (task daeaa26c). Hard to stage on purpose: wait for a background task session
-    to hit a limit. Its thread gets "Stopped on the usage limit. Deskbar resumes it once the limit resets at HH:mm."
+    to hit a limit. Its thread gets "Stopped on the usage limit. Deskbar resumes it once the limit resets at HH:mm, or sooner if it is lifted."
     once, and its status line on the bar reads "Stopped on the usage limit until HH:mm". Comment on the task before
     the reset: the session is stopped and resumed with the comment at once (`claude agents` shows the same id, not a
     copy); it hits the limit again, and the thread gets no second "Stopped on the usage limit" line. A few minutes after the reset, with no window
-    open on it: the thread says "Resumed, since the usage limit it stopped on has reset", and the session carries on
+    open on it: the thread says "Resumed, since the usage limit it stopped on is over", and the session carries on
     and writes its own status line.
 86b. A listed session without a process (task daeaa26c). In `claude agents --json`, find a task session listed with no
     `pid` and no `status` (a background session whose process Claude Code ended). Comment on its task: within a few
@@ -536,9 +536,18 @@ Manage ticked. Use a throwaway folder Claude Code already trusts, not a real rep
     comment", never "a comment is in ...'s inbox".
 86c. Step 86a with its Deskbar window open (task 2eeb5589). Before the reset the thread says "... resets at HH:mm, and
     opens its window again." A few minutes after the reset, with the window open behind another window: the window
-    closes, the thread says "Resumed, since the usage limit it stopped on has reset", and within half a minute the
+    closes, the thread says "Resumed, since the usage limit it stopped on is over", and within half a minute the
     window opens again on its workspace, on the same session, carrying on. With the window in front while you work,
     nothing happens until you click into another window or leave the machine alone for two minutes.
+86d. A usage limit lifted early (task e948b383). With a background task session stopped on the limit as in 86a, lift
+    the limit before its reset (usage credits) and touch no other session. Within five minutes the trace says "the
+    usage limit probe was answered", and the stopped session is restarted: the thread says "Resumed, since the usage
+    limit it stopped on is over", hours before the reset time its status line named. Before the lift the trace shows
+    one "probe was not answered" line every five minutes, and none at all once no session is stopped on the limit.
+86e. A session that stopped on Claude Code's wrap_up note (task e948b383). When a session is warned mid-turn that the
+    limit is reached, it may finish its turn and stop by itself, saying so, with no "Stopped on the usage limit" line
+    from Deskbar. Once the limit is lifted (86d) or resets, its thread says "The usage limit it stopped on is over, so
+    it was told to carry on", and the session carries on with its task. A task waiting on your answer is not woken.
 87. Untick the resume box and stop a task's session: the task shows the session ended and nothing resumes it; start a
     new `claude --bg` in another folder and it still gets a task. Tick the box again: the ended session is resumed at
     the next poll (once it has been gone two minutes).

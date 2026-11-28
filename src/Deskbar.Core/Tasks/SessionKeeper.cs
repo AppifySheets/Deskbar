@@ -136,6 +136,11 @@ public static class SessionKeeper
     /// When the session's last turn died on a usage limit, that error (ClaudeTranscript.LastTurnError, with its reset
     /// moment); None otherwise, and None for an error that names no reset. Left out, no session is limited.
     /// </param>
+    /// <param name="limitLifted">
+    /// The latest moment any transcript shows the API answering outside the usage limit (LimitSigns.Lifted, task
+    /// e948b383). A session whose limit error is older than that is woken now, before the reset its error named: Petre
+    /// lifted the limit early. Left out, only the reset moment wakes.
+    /// </param>
     public static IReadOnlyList<KeeperStep> Plan(
         TaskBoard board,
         IReadOnlyCollection<ClaudeAgent> live,
@@ -144,7 +149,8 @@ public static class SessionKeeper
         Func<TaskSession, bool> cutOff,
         DateTimeOffset now,
         Func<string, DateTimeOffset>? absentSince = null,
-        Func<TaskSession, Maybe<TurnError>>? limitedUntil = null)
+        Func<TaskSession, Maybe<TurnError>>? limitedUntil = null,
+        Maybe<DateTimeOffset> limitLifted = default)
     {
         var listed = live.Select(agent => agent.SessionId).ToHashSet();
         var missingSince = absentSince ?? (_ => DateTimeOffset.MinValue);
@@ -169,7 +175,7 @@ public static class SessionKeeper
             .Where(pair => !pair.Session.Replaced)
             // Ruling 18: missing for less than Settle, it may still come back by itself.
             .Where(pair => now - missingSince(pair.Session.Id) >= Settle)
-            .Select(pair => StepFor(pair.Task, pair.Session, ledger, transcriptExists, cutOff, limited, now))
+            .Select(pair => StepFor(pair.Task, pair.Session, ledger, transcriptExists, cutOff, limited, limitLifted, now))
             .Where(step => step.HasValue)
             .Select(step => step.Value);
 
@@ -188,7 +194,7 @@ public static class SessionKeeper
             .Select(pair => (pair.Task, pair.Session, Agent: live.FirstOrDefault(agent => agent.SessionId == pair.Session.Id)))
             .Where(triple => triple.Agent is { Background: true, Busy: false, ShortId.HasValue: true })
             .DistinctBy(triple => triple.Session.Id)
-            .Select(triple => RestartFor(triple.Task, triple.Session, triple.Agent!, ledger, limited, now))
+            .Select(triple => RestartFor(triple.Task, triple.Session, triple.Agent!, ledger, limited, limitLifted, now))
             .Where(step => step.HasValue)
             .Select(step => step.Value);
 
@@ -313,7 +319,7 @@ public static class SessionKeeper
     static Maybe<KeeperStep> StepFor(
         TaskItem task, TaskSession session, ResumeLedger ledger,
         Func<TaskSession, bool> transcriptExists, Func<TaskSession, bool> cutOff,
-        Func<TaskSession, Maybe<TurnError>> limited, DateTimeOffset now)
+        Func<TaskSession, Maybe<TurnError>> limited, Maybe<DateTimeOffset> lifted, DateTimeOffset now)
     {
         // Sticky: a task the keeper has given up on gets no step at all, not even a resume once the loop window has
         // passed and the ledger's count has fallen. It waits for Petre; see the comment on Forget.
@@ -322,7 +328,7 @@ public static class SessionKeeper
         var limit = limited(session);
         // Woken before its usage limit resets, it only hits the limit again (and three of those in ten minutes would end
         // in a loop give-up). It waits, and the first poll after the reset wakes it.
-        if (limit.Map(error => !MayWake(error, session, ledger, now)).GetValueOrDefault(false)) return Maybe<KeeperStep>.None;
+        if (limit.Map(error => !MayWake(error, session, ledger, lifted, now)).GetValueOrDefault(false)) return Maybe<KeeperStep>.None;
         return string.IsNullOrEmpty(session.Folder) ? GiveUp(task, NoFolder)
             : !transcriptExists(session) ? GiveUp(task, TranscriptGone)
             : ledger.Within(session.Id, now, LoopWindow) >= MaxResumesInWindow ? GiveUp(task, LoopGaveUp)
@@ -333,23 +339,82 @@ public static class SessionKeeper
     // until later; the same grace and loop guard as a resume, since a restart is a resume with a stop before it.
     static Maybe<KeeperStep> RestartFor(
         TaskItem task, TaskSession session, ClaudeAgent agent, ResumeLedger ledger,
-        Func<TaskSession, Maybe<TurnError>> limited, DateTimeOffset now)
+        Func<TaskSession, Maybe<TurnError>> limited, Maybe<DateTimeOffset> lifted, DateTimeOffset now)
     {
         if (GivenUp(task) || ledger.Within(session.Id, now, Grace) > 0) return Maybe<KeeperStep>.None;
-        if (!limited(session).Map(error => MayWake(error, session, ledger, now)).GetValueOrDefault(false)) return Maybe<KeeperStep>.None;
+        if (!limited(session).Map(error => MayWake(error, session, ledger, lifted, now)).GetValueOrDefault(false)) return Maybe<KeeperStep>.None;
         return string.IsNullOrEmpty(session.Folder) ? GiveUp(task, NoFolder)
             : ledger.Within(session.Id, now, LoopWindow) >= MaxResumesInWindow ? GiveUp(task, LoopGaveUp)
             : new KeeperStep.Resume(task.Id, session, SendContinue: true) { StopFirst = agent.ShortId, AfterLimit = true };
     }
 
-    // A session stopped on a usage limit may be woken once the limit has reset (plus LimitMargin), and only if it has not
+    // A session stopped on a usage limit may be woken once the limit has reset (plus LimitMargin), or as soon as a
+    // transcript shows the API answering again after the error was written (`lifted`, task e948b383: the limit was lifted
+    // before its reset moment, UsageLimitSigns), and only if it has not
     // been woken since the error was written: a wake that worked writes to the transcript, so the same error still last
     // means the wake has not taken effect yet, and a second one would stop a session that is only starting up (the
     // restart's `claude stop` on a resume in progress). The ledger keeps resumes for LoopWindow, so a wake that truly
     // wrote nothing is tried again ten minutes later, not every Grace.
-    static bool MayWake(TurnError error, TaskSession session, ResumeLedger ledger, DateTimeOffset now) =>
-        error.ResetsAt.Map(resetsAt => now >= WakeAfterLimit(resetsAt)).GetValueOrDefault(false)
+    static bool MayWake(TurnError error, TaskSession session, ResumeLedger ledger, Maybe<DateTimeOffset> lifted, DateTimeOffset now) =>
+        (error.ResetsAt.Map(resetsAt => now >= WakeAfterLimit(resetsAt)).GetValueOrDefault(false) || (!error.IgnoreLift && LiftedSince(error, lifted)))
         && error.At.Map(at => ledger.Within(session.Id, now, now - at) == 0).GetValueOrDefault(true);
+
+    /// <summary>
+    /// The API has answered outside the usage limit since this error was written (task e948b383), so the limit it names
+    /// is over whatever its reset moment says. An error with no timestamp cannot be placed, and waits for its reset.
+    /// Public so the app and the tests ask the same question as the wake.
+    /// </summary>
+    public static bool LiftedSince(TurnError error, Maybe<DateTimeOffset> lifted) =>
+        error.At.HasValue && lifted.HasValue && lifted.Value > error.At.Value;
+
+    // --- sessions that stopped on a wrap_up note (task e948b383) ------------------------------------------------------
+    //
+    // A session warned that the limit was reached often finishes its turn properly and stops (UsageLimitSigns'
+    // header). Its Stop hook ran, so Deskbar's comment waiter is alive and a message wakes it, whether it runs in the
+    // background, in a VS Code panel or in a terminal; no restart is needed. NoteStopWakes says which sessions to send
+    // that message to, and the app sends each one once per stop.
+    //
+    // WHEN. Its note names no reset, so the moment comes from elsewhere, in this order:
+    //   * the API answered outside the limit after the note (limitSigns.Lifted): at once;
+    //   * the latest limit error anywhere was written around the note (from NoteErrorReach before it on) and names a
+    //     reset after it, so it is this same limit: that reset plus LimitMargin, as for a session that stopped on the
+    //     error itself. An older error belongs to an earlier limit, perhaps one lifted since;
+    //   * nothing known: NoteStopFallback after the note. The five-hour limit is over by then; a longer one makes the
+    //     woken turn hit it, which writes an error with its reset, and the keeper's own rule takes over from there.
+    // WHICH. The latest session of an open Claude task, listed and idle, not replaced by /clear, on a task that is not
+    // waiting on Petre (a session that asked him something waits for his answer, limit or no limit, and his answer wakes
+    // it), not one the keeper has given up on and not a recurring task between runs (LeftAlone). A session missing from
+    // the list is the keeper's: it resumes it by its own rule.
+
+    /// <summary>How long before a wrap_up note a limit error may be written and still be taken for the same limit.</summary>
+    public static readonly TimeSpan NoteErrorReach = TimeSpan.FromMinutes(15);
+
+    /// <summary>How long after a wrap_up stop with no reset known anywhere its session is woken anyway.</summary>
+    public static readonly TimeSpan NoteStopFallback = TimeSpan.FromHours(5);
+
+    /// <summary>The sessions stopped on a wrap_up note that may be woken now (see the comment above).</summary>
+    /// <param name="stoppedOnNote">UsageLimitSigns.StoppedOnNote for a session's transcript.</param>
+    public static IReadOnlyList<NoteStopWake> NoteStopWakes(
+        TaskBoard board, IReadOnlyCollection<ClaudeAgent> live, Func<TaskSession, Maybe<DateTimeOffset>> stoppedOnNote,
+        LimitSigns limitSigns, DateTimeOffset now) =>
+        board.Tasks
+            .Where(task => task.IsClaudes && task.Status is TaskStatus.Backlog or TaskStatus.InProgress)
+            .Where(task => !LeftAlone(task) && !GivenUp(task))
+            .Where(task => task.Sessions.Count > 0)
+            .Select(task => (Task: task, Session: task.Sessions.MaxBy(session => session.Joined)!))
+            .Where(pair => !pair.Session.Replaced)
+            .Where(pair => live.Any(agent => agent.SessionId == pair.Session.Id && !agent.Busy))
+            .DistinctBy(pair => pair.Session.Id)
+            .Select(pair => (pair.Task, pair.Session, StoppedAt: stoppedOnNote(pair.Session)))
+            .Where(item => item.StoppedAt.HasValue && NoteStopDue(item.StoppedAt.Value, limitSigns, now))
+            .Select(item => new NoteStopWake(item.Task.Id, item.Session.Id, item.StoppedAt.Value))
+            .ToList();
+
+    static bool NoteStopDue(DateTimeOffset stoppedAt, LimitSigns signs, DateTimeOffset now) =>
+        signs.LiftedSince(stoppedAt)
+        || signs.LatestError
+            .Where(error => error.ResetsAt > stoppedAt && error.At >= stoppedAt - NoteErrorReach)
+            .Match(error => now >= WakeAfterLimit(error.ResetsAt), () => now >= stoppedAt + NoteStopFallback);
 
     static Maybe<KeeperStep> GiveUp(TaskItem task, string reason) => new KeeperStep.GiveUp(task.Id, reason);
 
@@ -427,3 +492,9 @@ public sealed record ResumeLedger(IReadOnlyDictionary<string, IReadOnlyList<Date
         Resumes.GetValueOrDefault(sessionId, Array.Empty<DateTimeOffset>())
             .Count(at => at > now - span && at <= now);
 }
+
+/// <summary>
+/// A session that stopped on a wrap_up note (SessionKeeper.NoteStopWakes) and may be woken now; <see cref="StoppedAt"/>
+/// is the note's moment, so the app sends one wake per stop.
+/// </summary>
+public sealed record NoteStopWake(Guid TaskId, string SessionId, DateTimeOffset StoppedAt);
