@@ -34,8 +34,10 @@ namespace Deskbar.Core.Control;
 // session's to settle.
 //
 // KNOWN LIMIT: while the Allow / Deny card shows a tool permission, its Notification places nothing (the card is the
-// question). If the card is held past PermissionDesk.HeldFor (about ten minutes) and taken off while the terminal still
-// waits, nothing on the task says so: the Notification fired once, six seconds in. The workspace blinked then.
+// question). If the card is held past PermissionDesk.HeldFor (about a day since task ca73633d, ten minutes before it) and
+// taken off while the terminal still waits, nothing on the task says so: the Notification fired once, six seconds in.
+// The workspace blinked then. The same holds for an AskUserQuestion asked while its task waits on the session's own
+// `task ask`: no dialog question was placed, so none is reworded when the card goes (PermissionDesk.ScriptWait).
 public sealed partial class RemoteControl
 {
     // The dialogs sessions wait on: details noted and questions placed. Its clock is the task service's, so tests can

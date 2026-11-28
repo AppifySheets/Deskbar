@@ -59,8 +59,21 @@ public sealed class PermissionDesk(string folder, Func<DateTimeOffset> now)
     /// An interactive terminal session behaves the same (measured 2026-11-27, TranscriptMark): its dialog is drawn the
     /// moment the hook starts, and answering it there runs the tool at once while the hook sleeps on.
     /// So the terminal is always a parallel way to answer, and the card can stay as long as a person might take to look.
+    ///
+    /// A DAY, NOT TEN MINUTES (task ca73633d, "question not asked in the chat"). Petre runs many sessions and comes back
+    /// to one later, and ten minutes was shorter than that: on 2026-11-28 a session asked an AskUserQuestion at 13:06, its
+    /// card left the page at 13:16 when the hold ran out, and at 13:19 the task's page showed nothing of the dialog that
+    /// still waited in the terminal. The session had run its own `task ask` ten seconds before the dialog, and a task
+    /// waiting on a `task ask` keeps that question (RemoteControl.SessionPrompts, TakesDialogQuestion), so no dialog
+    /// question had been placed that could be reworded to the terminal's lead once the card went.
+    ///
+    /// The length costs nothing while the question waits: the script looks at its slot once a second, and every way the
+    /// question ends without a click (the session's next event, its transcript moving on, Deskbar starting with the slot
+    /// swept) deletes the slot, which ends the script within a second. Claude Code puts no ceiling on a command hook's
+    /// timeout (2.1.332 computes it as `timeout*1000` with no cap; only remote tool hooks are clamped), and a day in
+    /// milliseconds is far below the 2^31 limit of a JavaScript timer.
     /// </summary>
-    public static readonly TimeSpan ScriptWait = TimeSpan.FromMinutes(10);
+    public static readonly TimeSpan ScriptWait = TimeSpan.FromHours(24);
 
     /// <summary>How long Deskbar offers a question: the script's wait less a margin, so a click always lands while it reads.</summary>
     public static readonly TimeSpan HeldFor = ScriptWait - TimeSpan.FromSeconds(10);
@@ -72,8 +85,10 @@ public sealed class PermissionDesk(string folder, Func<DateTimeOffset> now)
     /// The hook entry's "timeout", in seconds: the script's wait plus room for ticks that run slow, so Claude Code never
     /// kills the script while it prints. Were it killed, nothing would be lost: Claude Code drops a killed hook's output
     /// and keeps its own dialog (the spike's run B5), and the slot is deleted when the question expires.
+    /// The room grows with the wait (a tenth of it, plus two minutes): the script counts ticks, not the clock, and over a
+    /// day of ticks that each run a little over a second the drift is minutes, not seconds.
     /// </summary>
-    public static int HookTimeoutSeconds => ScriptSeconds + 120;
+    public static int HookTimeoutSeconds => ScriptSeconds + ScriptSeconds / 10 + 120;
 
     /// <summary>Raised after a question is added or taken off, so the page and the bar can redraw.</summary>
     public event Action? Changed;
