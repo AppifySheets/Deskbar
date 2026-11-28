@@ -256,6 +256,8 @@ internal static class InboxLook
     internal static readonly Brush Amber = Frozen(0xFF, 0xC2, 0x5A);
     internal static readonly Brush Blue = Frozen(0x8A, 0xB4, 0xFF);
     internal static readonly Brush Violet = Frozen(0xB9, 0xA2, 0xFF);
+    // The dialog card's "Recommended" tag (TasksWindow.DialogCard): Claude's own pick, told apart from the user's (blue).
+    internal static readonly Brush Green = Frozen(0x7F, 0xD6, 0xA0);
     internal static readonly Brush AskEdge = Frozen(0xFF, 0xC2, 0x5A);
     // The question bubble's fill is the plain surface, not a warm tint: in this look amber alone says "needs you" (its
     // edge and its caption), and a brown fill beside it is the orange-on-brown mix the redesign set out to remove.

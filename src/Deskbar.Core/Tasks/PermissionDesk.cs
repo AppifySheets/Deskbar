@@ -81,6 +81,12 @@ public sealed class PermissionDesk(string folder, Func<DateTimeOffset> now)
     /// <summary>The answer file's name inside a slot.</summary>
     public const string AnswerFile = "answer.txt";
 
+    /// <summary>
+    /// The file a dialog's answer line goes in, inside its slot (AskUserQuestion, task c047d0a0): written BEFORE the answer
+    /// file, so the script that sees "&lt;code&gt; dialog" always finds it complete (PermissionAnswer.DialogWord).
+    /// </summary>
+    public const string DialogFile = "dialog.json";
+
     /// <summary>A slot's name as the script makes it: req-%RANDOM%-%RANDOM%, each number 0 to 32767.</summary>
     public static readonly Regex SlotName = new(@"^req-\d{1,5}-\d{1,5}$", RegexOptions.Compiled);
 
@@ -140,26 +146,62 @@ public sealed class PermissionDesk(string folder, Func<DateTimeOffset> now)
     /// script never reads half a line), and the question taken off the desk. Refused, with nothing written, for a
     /// question that is not on show: never asked, already answered, expired or ended.
     /// </summary>
-    public Result Answer(string slot, PermissionDecision decision)
+    public Result Answer(string slot, PermissionDecision decision) =>
+        // A dialog's slot takes its answers (AnswerDialog) or Pass; Allow and Deny are not answers to a dialog, and its
+        // script would print nothing for them anyway (PermissionAnswer.LineFor).
+        held.Any(h => h.Pending.Slot == slot && h.Pending.Request.IsAskUserQuestion) && decision != PermissionDecision.Pass
+            ? Result.Failure("This question takes its answers, not Allow or Deny.")
+            : Handed(slot, (path, code) => Write(path, AnswerFile, $"{code} {PermissionAnswer.WordOf(decision)}\n"));
+
+    /// <summary>
+    /// The user's answers to a multiple-choice dialog (question text to answer, DialogAsk): the hook's line written to the
+    /// slot's <see cref="DialogFile"/>, then "&lt;code&gt; dialog" to its answer file, each atomically, and the question
+    /// taken off the desk. Refused, with nothing written and the question left on show, for answers that do not cover
+    /// every question; refused like <see cref="Answer"/> for a question no longer on show.
+    /// </summary>
+    public Result AnswerDialog(string slot, IReadOnlyDictionary<string, string> answers)
+    {
+        var found = held.FirstOrDefault(h => h.Pending.Slot == slot).Pending;
+        if (found is null) return Result.Failure(Ended);
+        return DialogAsk.Of(found.Request).ToResult("This question is not a dialog Deskbar can answer. Answer it in the terminal.")
+            .Bind(dialog => dialog.AnswerLine(answers))
+            .Bind(line => Handed(slot, (path, code) =>
+            {
+                Write(path, DialogFile, line + "\n");
+                Write(path, AnswerFile, $"{code} {PermissionAnswer.DialogWord}\n");
+            }));
+    }
+
+    const string Ended = "This question has ended. Answer it in the terminal.";
+
+    // Takes the question off the desk and hands its answer to the script by `write` (the slot's folder and the code), or
+    // says why it cannot: not on show, held past its time, or the slot gone.
+    Result Handed(string slot, Action<string, string> write)
     {
         var index = held.FindIndex(h => h.Pending.Slot == slot);
-        if (index < 0) return Result.Failure("This question has ended. Answer it in the terminal.");
+        if (index < 0) return Result.Failure(Ended);
         var (pending, code) = held[index];
         held.RemoveAt(index);
         Changed?.Invoke();
         if (now() >= pending.Until)
         {
             Delete(slot);
-            return Result.Failure("This question has ended. Answer it in the terminal.");
+            return Result.Failure(Ended);
         }
         return Result.Try(() =>
         {
             var path = SlotPath(slot);
             if (!Directory.Exists(path)) throw new IOException("the slot is gone");
-            var temporary = Path.Combine(path, "answer.tmp");
-            File.WriteAllText(temporary, $"{code} {PermissionAnswer.WordOf(decision)}\n");
-            File.Move(temporary, Path.Combine(path, AnswerFile), overwrite: false);
+            write(path, code);
         }, e => $"The answer could not be handed to Claude Code ({e.GetType().Name}). Answer it in the terminal.");
+    }
+
+    // A file of the slot written atomically: a temporary file moved into place, so the script never reads half of it.
+    static void Write(string path, string name, string text)
+    {
+        var temporary = Path.Combine(path, name + ".tmp");
+        File.WriteAllText(temporary, text);
+        File.Move(temporary, Path.Combine(path, name), overwrite: false);
     }
 
     /// <summary>Questions held past <see cref="HeldFor"/> taken off, their slots deleted. True when any went.</summary>

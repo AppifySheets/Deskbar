@@ -293,7 +293,11 @@ static class ClaudeSkill
     // Deskbar's own executable before it writes the request (PipeTrust.CheckServerImage, the re-review's N1), so a program
     // that serves the pipe's name while Deskbar is closed gets nothing, and this script prints nothing.
     //
-    // Every path but the three answers ends in `exit /b 0` with nothing on stdout: Claude Code then keeps its own dialog
+    // A DIALOG'S SLOT (AskUserQuestion, task c047d0a0): the registration's reply is "<code> dialog", and such a slot takes
+    // only "<code> dialog", for which the script prints the slot's dialog file with `type` (PermissionAnswer explains the
+    // one exception to printing literals). Any other second word in the reply counts as no code.
+    //
+    // Every path but the answers ends in `exit /b 0` with nothing on stdout: Claude Code then keeps its own dialog
     // (and never sees exit 2, which is not a decision on this event anyway).
     //
     // A late answer is harmless by construction: when the user answered in the terminal first, Claude Code has its
@@ -316,11 +320,12 @@ static class ClaudeSkill
         "@set \"slot=%box%\\%name%\"",
         "@mkdir \"%slot%\" >nul 2>&1 || goto pick",
         "@set \"code=\"",
+        "@set \"kind=\"",
         "@if defined CLAUDE_PROJECT_DIR goto from",
-        $"@for /f \"usebackq tokens=1\" %%a in (`{call} 2^>nul`) do @if not defined code set \"code=%%a\"",
+        $"@for /f \"usebackq tokens=1,2\" %%a in (`{call} 2^>nul`) do @if not defined code (set \"code=%%a\" & set \"kind=%%b\")",
         "@goto called",
         ":from",
-        $"@for /f \"usebackq tokens=1\" %%a in (`{call} --from \"%CLAUDE_PROJECT_DIR%\" 2^>nul`) do @if not defined code set \"code=%%a\"",
+        $"@for /f \"usebackq tokens=1,2\" %%a in (`{call} --from \"%CLAUDE_PROJECT_DIR%\" 2^>nul`) do @if not defined code (set \"code=%%a\" & set \"kind=%%b\")",
         ":called",
         "@if not defined code goto done",
         // The code is 32 hex digits or nothing counts (PermissionAnswer.Code). Checked inside a setlocal of its own, so
@@ -331,6 +336,8 @@ static class ClaudeSkill
         "@set \"rest=x!code!\"",
         "@for %%h in (0 1 2 3 4 5 6 7 8 9 a b c d e f) do @set \"rest=!rest:%%h=!\"",
         "@if not \"!rest!\"==\"x\" set \"ok=\"",
+        // The slot's kind is nothing (a tool permission) or exactly the dialog word (AskUserQuestion); anything else counts as no code.
+        $"@if defined kind if not \"!kind!\"==\"{Core.Tasks.PermissionAnswer.DialogKind}\" set \"ok=\"",
         "@endlocal & set \"ok=%ok%\"",
         "@if not defined ok goto done",
         $"@set /a left={seconds ?? Core.Tasks.PermissionDesk.ScriptSeconds}",
@@ -345,12 +352,28 @@ static class ClaudeSkill
         "@set \"line=\"",
         "@set /a lines=0",
         $"@for /f \"usebackq delims=\" %%a in (\"%slot%\\{Core.Tasks.PermissionDesk.AnswerFile}\") do @(set \"line=%%a\" & set /a lines+=1 >nul)",
-        "@rd /s /q \"%slot%\" >nul 2>&1",
-        "@if not \"%lines%\"==\"1\" exit /b 0",
+        "@if not \"%lines%\"==\"1\" goto done",
+        // The verdict is reached under delayed expansion and only the verdict leaves it, so the slot's path (which may
+        // hold a "!") is only ever used with delayed expansion off. A dialog's slot takes the dialog word and nothing
+        // else; any other slot takes allow, deny or edits and never the dialog word (PermissionAnswer.LineFor).
         "@setlocal EnableDelayedExpansion",
-        "@if \"!line!\"==\"!code! allow\" goto allow",
-        "@if \"!line!\"==\"!code! deny\" goto deny",
-        "@if \"!line!\"==\"!code! edits\" goto edits",
+        "@set \"verdict=\"",
+        "@if not defined kind if \"!line!\"==\"!code! allow\" set \"verdict=allow\"",
+        "@if not defined kind if \"!line!\"==\"!code! deny\" set \"verdict=deny\"",
+        "@if not defined kind if \"!line!\"==\"!code! edits\" set \"verdict=edits\"",
+        $"@if defined kind if \"!line!\"==\"!code! {Core.Tasks.PermissionAnswer.DialogWord}\" set \"verdict=dialog\"",
+        "@endlocal & set \"verdict=%verdict%\"",
+        "@if \"%verdict%\"==\"dialog\" goto dialog",
+        "@rd /s /q \"%slot%\" >nul 2>&1",
+        "@if \"%verdict%\"==\"allow\" goto allow",
+        "@if \"%verdict%\"==\"deny\" goto deny",
+        "@if \"%verdict%\"==\"edits\" goto edits",
+        "@exit /b 0",
+        // The dialog's answer: the line Deskbar wrote (DialogAsk.AnswerLine, pure ASCII JSON), printed by `type`, which
+        // never parses it, then the slot goes.
+        ":dialog",
+        $"@type \"%slot%\\{Core.Tasks.PermissionDesk.DialogFile}\" 2>nul",
+        "@rd /s /q \"%slot%\" >nul 2>&1",
         "@exit /b 0",
         ":allow",
         $"@echo {Core.Tasks.PermissionAnswer.AllowLine}",
@@ -454,6 +477,9 @@ static class ClaudeSkill
           makes it clickable, and the bar shows the link's words. A file on this machine is a link too,
           `[text](file:///C:/path/page.html)`: a page, picture, PDF or text file opens, anything else is shown in
           Explorer.
+          A choice you put through the multiple-choice dialog (AskUserQuestion) needs no `task ask` beside it:
+          Deskbar puts the dialog's questions on your task, and the user can answer them there. A `task ask` that only
+          points at the dialog keeps the dialog's own question off the task.
           A pull request ready to merge is an ask, never a comment and `task done`: done sits below the waiting
           tasks, so the merge would wait where the user does not look. A reply finishing is not an ask; do not ask for
           routine progress.

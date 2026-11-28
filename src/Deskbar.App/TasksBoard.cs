@@ -400,7 +400,7 @@ public sealed partial class TasksBoard : IDisposable
             Reevaluate = id => Report(tasks.Reevaluate(id), id),
             ShowInbox = ShowInbox,
             OpenPage = OpenPage,
-            PermissionsOf = PermissionsOf, AnswerPermission = AnswerPermission,
+            PermissionsOf = PermissionsOf, AnswerPermission = AnswerPermission, AnswerDialog = AnswerDialog,
             AnswerWithOption = AnswerWithOption,
         };
 
