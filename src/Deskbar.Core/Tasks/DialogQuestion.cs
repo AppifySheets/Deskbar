@@ -24,8 +24,8 @@ namespace Deskbar.Core.Tasks;
 // needed. Worse, sessions copied the words: a `task ask` is answered on the task's page by its nature, yet other sessions
 // began their asks with "Answer in the session's terminal:", "Decide in ..." and "Pick in ...", having read the lead on
 // other tasks. So there are two leads now: PageLead while the card can draw the dialog (RemoteControl.DialogAsked decides,
-// from the same rules the card's hook uses), Lead when only the terminal can. The card is held for about ten minutes
-// (PermissionDesk.HeldFor) and can be handed back; once it is gone while the dialog still waits, the question is reworded
+// from the same rules the card's hook uses), Lead when only the terminal can. The card is held for about a day
+// (PermissionDesk.HeldFor, ten minutes until task ca73633d) and can be handed back; once it is gone while the dialog still waits, the question is reworded
 // to Lead (ToTerminal, RemoteControl.CardsGone), so neither lead ever points where the answer cannot go.
 public static class DialogQuestion
 {

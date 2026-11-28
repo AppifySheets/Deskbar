@@ -1980,6 +1980,7 @@ DQ4. Open another dialog and write a reply in the page's comment box instead: it
 DQ5. Open another dialog and answer it in the terminal: the card leaves within a few seconds and the chat still gets the "Answered" line.
 DQ6. Answer in the terminal on the card: the card goes and the terminal's dialog still waits for you.
 DQ7. A session in VS Code: the card shows, and answering it closes VS Code's dialog. (Not measured yet.)
+DQ8. Open a dialog and leave it alone for more than ten minutes (task ca73633d): the card is still on the page, and Send still closes the terminal's dialog. Also with a session that ran `task ask` just before its dialog: the card stays beside that question.
 PL1. Start a session on a task in plan mode (`claude --permission-mode plan`, or Shift+Tab to plan mode) and ask for a small change. When it asks for the plan's approval, the task's page shows a "CLAUDE'S PLAN, FOR YOUR APPROVAL" card with the whole plan as formatted text, a note box, and Approve, Approve and accept edits, Keep planning (off) and Answer in the terminal. About six seconds later the task is under Needs you with "Approve Claude's plan: " and the plan's first line, not under "Asks permission".
 PL2. Approve: the terminal's dialog closes on its own, the session starts on the plan and asks before its first edit (an Allow / Deny card), the plan card leaves, and the chat gets "Approved Claude's plan."
 PL3. Another plan, Approve and accept edits: the session edits without asking, and the chat gets "Approved Claude's plan, with edits accepted from now on."
