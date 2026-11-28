@@ -433,7 +433,7 @@ public partial class FloatingBar
 //   * one FaviconFetcher for the app's life (it owns an HttpClient), handed in by the composition root;
 //   * an origin already stored is never fetched again;
 //   * <origin>/favicon.ico first, and only when that does not decode, the icon the bookmarked page declares on its own
-//     origin (FaviconFetcher.FetchDeclared; three requests at most, see Fetch below);
+//     origin, following one same-origin redirect of the page (FaviconFetcher.FetchDeclared; four requests at most);
 //   * the bytes come back to the UI thread and are decoded THERE, BOUNDED (Decode): the header is read first and an
 //     image whose frames are all larger than 256 px is refused before a pixel is decoded, so a 256 KB PNG that
 //     declares 60000 x 60000 cannot expand to gigabytes. Then one frame, the one nearest 32 px, is decoded: at most

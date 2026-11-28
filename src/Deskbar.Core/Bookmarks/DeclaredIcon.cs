@@ -17,7 +17,7 @@ namespace Deskbar.Core.Bookmarks;
 //   * an svg is refused (by its extension or a type of image/svg+xml), because WPF cannot decode one, and fetching
 //     what cannot be shown is a request for nothing;
 //   * the first <link> in page order that passes all of that wins, so a refused mask-icon does not hide the PNG after
-//     it. Still only ONE icon is fetched, so the whole fetch stays at three requests at most.
+//     it. Still only ONE icon is fetched, so the whole fetch stays at four requests at most (RedirectOf, below).
 //
 // A tolerant scan, not an HTML parser: the page is untrusted, may be cut off at the read cap, and all that is wanted
 // from it is one attribute of one tag. Pure, so the decision has tests of its own (DeclaredIconTests).
@@ -78,6 +78,29 @@ public static class DeclaredIcon
         && string.Equals(icon.Scheme, page.Scheme, StringComparison.OrdinalIgnoreCase)
         && string.Equals(icon.IdnHost, page.IdnHost, StringComparison.OrdinalIgnoreCase)
         && icon.Port == page.Port;
+
+    // THE ONE REDIRECT THE FALLBACK FOLLOWS (Petre's Headplane, 2026-11-28). A bookmark usually points deep into an app
+    // (http://100.65.0.4:33000/admin/acls), and the fetch sends no cookies, so every app behind a sign-in answers that
+    // page with a 302 to its login page. The login page is exactly where the logo is declared (Headplane names
+    // /admin/favicon.ico there, and its /favicon.ico is a 404), so refusing the redirect left the chip on its letter.
+    //
+    // The page answered `status` with a Location of `location`; the page to read instead, or none. Taken only when:
+    //   * the status is a redirect (301, 302, 303, 307, 308) and a Location came with it;
+    //   * the target, resolved against the page, is on the SAME scheme, host and port: the privacy page's promise that
+    //     a bookmark only ever talks to its own site holds for the redirect too;
+    //   * it carries no user:password, and it is not the page itself (a redirect to itself would only repeat it).
+    // The fragment is dropped as for the page. The caller follows the answer ONCE: a redirect from the login page is
+    // not followed again, so the whole fetch stays at four requests at most.
+    public static Maybe<Uri> RedirectOf(Uri page, int status, Uri? location) =>
+        status is 301 or 302 or 303 or 307 or 308
+        && location is not null
+        && Uri.TryCreate(page, location, out var target)
+        && SameOrigin(target, page)
+        && target.UserInfo.Length == 0
+        && PageOf(target) is var next
+        && next != PageOf(page)
+            ? next
+            : Maybe<Uri>.None;
 
     static bool IsSvg(Uri icon, string? type) =>
         icon.AbsolutePath.EndsWith(".svg", StringComparison.OrdinalIgnoreCase)
