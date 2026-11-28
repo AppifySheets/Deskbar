@@ -195,6 +195,11 @@ public class ManagerSessionTests
     public void ResumeArguments_are_bare_because_flags_on_a_resume_fork_a_copy() =>
         Assert.Equal(["--bg", "--resume", Id], ManagerSession.ResumeArguments(Id));
 
+    // Task fdfa49d9: the button's resume is the same bare resume with a prompt after `--` (not a flag), so it takes a turn.
+    [Fact]
+    public void ClickResumeArguments_are_the_bare_resume_with_a_prompt() =>
+        Assert.Equal(["--bg", "--resume", Id, "--", ManagerSession.ResumedMessage], ManagerSession.ClickResumeArguments(Id));
+
     [Fact]
     public void Briefing_names_the_refused_verbs_and_the_quote_marker()
     {

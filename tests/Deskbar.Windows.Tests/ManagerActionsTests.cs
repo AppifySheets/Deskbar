@@ -411,7 +411,7 @@ public class ManagerActionsTests
         rig.Settle();
 
         var resume = Assert.Single(rig.Cli.Acts);
-        Assert.Equal(ManagerSession.ResumeArguments(Earlier), resume.Arguments);
+        Assert.Equal(ManagerSession.ClickResumeArguments(Earlier), resume.Arguments);
         Assert.Equal(rig.Folder, resume.Folder);
         AssertAttachedOnTheWorkspaceInFront(rig, Earlier);
         Assert.Equal(new ManagerRecord(Earlier, Today), rig.Harness.Manager.State.Manager);
@@ -514,7 +514,7 @@ public class ManagerActionsTests
 
         rig.Manager.Open();
         rig.Settle();
-        Assert.Equal(ManagerSession.ResumeArguments(rig.Cli.NextId), rig.Cli.Acts[^1].Arguments);
+        Assert.Equal(ManagerSession.ClickResumeArguments(rig.Cli.NextId), rig.Cli.Acts[^1].Arguments);
         Assert.Equal(ManagerSession.Briefing(rig.ShimForward), File.ReadAllText(rig.BriefingPath));
     }
 
@@ -695,6 +695,46 @@ public class ManagerActionsTests
 
         Assert.Equal(["stop", Earlier[..8]], rig.Cli.Acts[0].Arguments);
         Assert.Equal(["--bg", "--resume", Earlier, "--", ManagerSession.PageMessage("hello", Maybe<string>.None)], rig.Cli.Acts[1].Arguments);
+    }
+
+    // Task fdfa49d9, as measured on 2026-11-28: the page's open resumed an ended manager while the waiter its last turn
+    // started (orphaned with that process) still stood in the gen file, so the next page message went into the inbox and
+    // the orphan swallowed it. The resume retires that waiter and carries ManagerSession.ResumedMessage, so the manager
+    // takes a turn whose Stop starts a fresh waiter; a message sent after that goes into the inbox for the NEW waiter,
+    // and nothing stops the manager (which would close a terminal the user attached to it).
+    [Fact]
+    public void A_page_open_that_resumes_the_manager_retires_its_old_waiter()
+    {
+        using var rig = PageRig(listed: false);
+
+        Assert.True(rig.Manager.Open(attach: false).IsSuccess);
+        rig.Settle();
+
+        Assert.Equal(ManagerSession.ClickResumeArguments(Earlier), Assert.Single(rig.Cli.Acts).Arguments);
+        Assert.True(rig.Inbox.Lapsed(Earlier));
+
+        // The resumed turn ends and its Stop hook registers a new waiter, as Claude Code does.
+        Assert.True(rig.Inbox.Register(Earlier).IsSuccess);
+        rig.Manager.Send("are all sessions awake?", Maybe<TaskItem>.None);
+        rig.Settle();
+
+        Assert.StartsWith(ManagerSession.PageMessageOpening, InboxText(rig));
+        Assert.Single(rig.Cli.Acts);
+    }
+
+    // The same for a wake's resume (ResumedWith): the old waiter is retired before the manager is resumed with the message.
+    [Fact]
+    public void A_wake_that_resumes_the_manager_retires_its_old_waiter()
+    {
+        using var rig = WakeRig();
+        rig.WriteTranscript(Earlier);
+        Assert.True(rig.Inbox.Register(Earlier).IsSuccess);
+
+        rig.Manager.Tick([]);
+        rig.Settle();
+
+        Assert.Equal(["--bg", "--resume", Earlier, "--"], Assert.Single(rig.Cli.Acts).Arguments.Take(4));
+        Assert.True(rig.Inbox.Lapsed(Earlier));
     }
 
     [Fact]
