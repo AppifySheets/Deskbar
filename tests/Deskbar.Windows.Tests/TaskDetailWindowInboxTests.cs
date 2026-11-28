@@ -501,6 +501,36 @@ public partial class TaskDetailWindowInboxTests
         Assert.DoesNotContain(Inside(window).OfType<TextBlock>(), b => b.Text == "That did not work" && b.Visibility == Visibility.Visible);
     });
 
+    // Task 2106492b, in a task window: a refused close on a parent that is not finished shows its words on the window's own
+    // line, once, and the page's header lists the open subtask under it, whatever the panel draws. Another refusal on the
+    // same parent brings no subtask list, and the list goes when the line clears.
+    [Fact]
+    public void A_refused_close_in_a_window_lists_the_open_subtask_at_the_top() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var parent = t.Tasks.AddNote("Headplane logo", Maybe<Guid>.None).Value.Id;
+        var child = t.Tasks.AddNote("Privacy page", Maybe<Guid>.None).Value.Id;
+        Assert.True(t.Tasks.SetParent(child, Maybe.From(parent)).IsSuccess);
+        var (window, _) = Open(t, parent);
+        IEnumerable<Button> SubtaskLinks() => Inside(window).OfType<Button>().Where(b => Equals(b.Tag, TasksWindow.OpenSubtaskLinkTag));
+        Assert.Empty(SubtaskLinks());
+
+        window.ShowProblem(TaskViews.CloseSubtasksFirst(["Privacy page"]));
+
+        Assert.Equal(["Privacy page"], SubtaskLinks().Select(b => AutomationProperties.GetName(b)));
+        // Once on screen: the window's line. (The old header's problem line holds it too, but that header is collapsed
+        // while the page shows, so IsVisible, which reads the ancestors, leaves it out; Visibility alone would not.)
+        window.UpdateLayout();
+        Assert.Single(Inside(window).OfType<TextBlock>(), b => b.Text == "Close its open subtask first: \"Privacy page\"" && b.IsVisible);
+        Assert.DoesNotContain(Inside(window.PageRenderer!.InboxPageContent!).OfType<TextBlock>(), b => Equals(b.Tag, TasksWindow.ProblemTag));
+
+        window.ShowProblem("That did not work");
+        Assert.Empty(SubtaskLinks());
+
+        window.ShowProblem(null);
+        Assert.Empty(SubtaskLinks());
+    });
+
     // Stats laid over the Inbox does not flip a window: the look follows the chosen view, not what is on top of it.
     [Fact]
     public void Stats_over_the_inbox_leaves_the_window_as_it_is() => StaThread.Run(() =>

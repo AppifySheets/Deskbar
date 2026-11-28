@@ -676,7 +676,9 @@ public partial class TasksWindow : Window
     // A row's subtask entries, and the whole row of each one open in place (task 0eb943d8). The Matrix's cells read it too:
     // a subtask folded there is in no cell, so opening it in its parent's thread changed nothing the cells' signature
     // read, and the draw never came (review).
+    // The open subtasks a page shows at its top (task 2106492b) come first, so a subtask renamed, moved on or closed redraws it.
     static string SubtasksSignature(TaskRowView r) =>
+        string.Join('\u0004', r.OpenSubtasks.Select(c => $"{c.Id}{c.Title}{c.Status}")) + "\u0005" +
         string.Join('\u0004', r.Subtasks.Select(c => $"{c.Id}{c.Title}{c.Status}{c.StatusLine}{c.HasLine}{c.Closing}{c.TickTip}{c.Quadrant}" + (c.Row is { } open ? "{" + ListRowSignature(open) + "}" : "")));
 
     static string PlaceSignature(TaskPlaceChoice place) => $"{place.Workspace}{place.Name}{(place.Colour as SolidColorBrush)?.Color}";

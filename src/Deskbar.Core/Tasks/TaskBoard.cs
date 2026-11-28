@@ -1232,7 +1232,14 @@ public sealed record TaskBoard(IReadOnlyList<TaskItem> Tasks)
 
     /// <summary>The titles of a task's open subtasks, in board order: what Close's refusal names (task 452487b4).</summary>
     public IReadOnlyList<string> OpenSubtaskTitles(Guid id) =>
-        Tasks.Where(t => t.ParentId == id && t.IsOpen).Select(t => t.Title).ToArray();
+        OpenSubtasks(id).Select(t => t.Title).ToArray();
+
+    /// <summary>
+    /// A task's open subtasks, in board order (task 2106492b): the ones that stand between it and its close. The same
+    /// set Close's refusal names, so a task's page can show them by the refusal, at its top, where they are seen.
+    /// </summary>
+    public IReadOnlyList<TaskItem> OpenSubtasks(Guid id) =>
+        Tasks.Where(t => t.ParentId == id && t.IsOpen).ToArray();
 
     // A task's subtasks: open ones in the pile's order, then closed ones latest closed first (closing stamps UpdatedAt),
     // the same orders `task list` and `task list --closed` print them in.

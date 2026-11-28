@@ -27,6 +27,23 @@ public partial class TasksWindow
     // Whether this is a task window's page (ShowPage sets it, once, and nothing clears it: the window is made for this).
     bool pageInWindow;
 
+    // THE WINDOW'S PROBLEM LINE, as the page needs it (task 2106492b). A refused close shows on the task window's own line
+    // above the page (TaskDetailWindow.InboxProblem), and the row the page draws carries it only when the panel also
+    // draws the task's line, so the window hands the text over here: the page's header (CloseBlockers) then lists the
+    // open subtasks under that line whatever the panel shows. The view last shown is kept to draw again with it.
+    string? windowProblem;
+    TasksView? windowPageView;
+
+    /// <summary>The text on the task window's problem line, or null: the page draws again when it changes.</summary>
+    internal void ShowWindowProblem(string? text)
+    {
+        var now = string.IsNullOrEmpty(text) ? null : text;
+        if (now == windowProblem) return;
+        windowProblem = now;
+        // Part of InboxPageSignature, so this Present draws the page again rather than skipping an unchanged view.
+        if (windowPageView is { } view && inboxPage is { } id) ShowPage(view, id);
+    }
+
     /// <summary>For the tests: whether this window is only the renderer of a task window's page.</summary>
     internal bool PageInWindow => pageInWindow;
 
@@ -40,6 +57,7 @@ public partial class TasksWindow
     {
         pageInWindow = true;
         inboxPage = id;
+        windowPageView = view;
         if (view.Groups.SelectMany(g => g.Rows).FirstOrDefault(r => r.Id == id) is { } row)
         {
             earlierOpen.Add(id);

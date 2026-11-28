@@ -750,6 +750,42 @@ public partial class TasksBoardTests
         Assert.True(HasButtonNamed(LineOf(t.Window, k.Done), "Undo"));
     });
 
+    // Task 2106492b (Petre, on a finished parent's page after Close task: "can't close because it has a subtask? show the
+    // subtask clearly at the top and show me that message inside the task, not only on the list"). The page's header, which
+    // is docked and never scrolls, names the open subtask before the click and carries the refusal after it; the subtask's
+    // link there opens its page.
+    [Fact]
+    public void A_finished_parents_page_shows_its_open_subtask_and_the_refusal_at_the_top() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var parent = t.Tasks.Create("Headplane logo", t.Gepha, Session("s1")).Value.Id;
+        var child = t.Tasks.Create("Privacy page", t.Gepha, Session("s2")).Value.Id;
+        t.Tasks.SetParent(child, Maybe.From(parent));
+        t.Tasks.MarkDone(parent);
+        t.Controller.Show();
+        ChooseInbox(t);
+        t.Controller.ShowTask(parent);
+        Assert.Equal(parent, t.Window.InboxPageShown);
+
+        // In the header: outside the page's scroller, so it is in sight however long the chat is.
+        FrameworkElement Blockers() => Inside(t.Window.InboxPageContent!).OfType<StackPanel>().Single(p => Equals(p.Tag, TasksWindow.CloseBlockersTag));
+        Assert.DoesNotContain(Ancestors(Blockers()), a => a is ScrollViewer);
+        Assert.Contains(Inside(Blockers()).OfType<Button>(), b => Equals(b.Tag, TasksWindow.OpenSubtaskLinkTag) && AutomationProperties.GetName(b) == "Privacy page");
+        Assert.DoesNotContain(Inside(Blockers()).OfType<TextBlock>(), b => Equals(b.Tag, TasksWindow.ProblemTag));
+
+        Click(ButtonNamed(t.Window.InboxPageContent!, TasksWindow.CloseTaskPageText));
+
+        Assert.Equal(TaskStatus.Done, t.Tasks.Board.Tasks.Single(x => x.Id == parent).Status);
+        Assert.Equal(parent, t.Window.InboxPageShown);
+        var refusal = Assert.Single(Inside(Blockers()).OfType<TextBlock>(), b => Equals(b.Tag, TasksWindow.ProblemTag));
+        Assert.Equal("Close its open subtask first: \"Privacy page\"", refusal.Text);
+        // Once, in the header: the body no longer draws it.
+        Assert.Single(Inside(t.Window.InboxPageContent!).OfType<TextBlock>(), b => Equals(b.Tag, TasksWindow.ProblemTag));
+
+        Click(Inside(Blockers()).OfType<Button>().Single(b => Equals(b.Tag, TasksWindow.OpenSubtaskLinkTag)));
+        Assert.Equal(child, t.Window.InboxPageShown);
+    });
+
     // Criterion 11, and Stats: a task shown from outside (a click on the bar, a Stats line) lands on its page, in its tab.
     [Fact]
     public void A_task_shown_from_the_bar_or_stats_lands_on_its_page_in_its_tab() => StaThread.Run(() =>
