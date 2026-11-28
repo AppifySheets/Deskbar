@@ -59,8 +59,11 @@ public partial class FloatingBar
             VerticalAlignment = VerticalAlignment.Center,
             Margin = new Thickness(2, 1, 2, 1),
         };
+        // The second press of a double-click is dropped (DoubleClickIgnored): the first has already added the task and
+        // emptied the box, and without the guard the second would take a new picture and start a second session.
         var button = TaskButton(AddFromWindowText, glyph, AddFromWindowInFront,
-            "Add from this window: takes a picture of the window you were in, adds it as a task and starts Claude on it");
+            "Add from this window: takes a picture of the window you were in, adds it as a task and starts Claude on it",
+            ignoredWhen: DoubleClickIgnored);
         button.Visibility = Visibility.Collapsed;
         return button;
     }
@@ -70,9 +73,12 @@ public partial class FloatingBar
     void AddFromWindowInFront()
     {
         if (taskService is null || taskAddBox is null) return;
-        var wasTyping = taskTyping;
         if (!taskTyping) BeginTyping();
-        var window = taskReturnTo != 0 ? taskReturnTo : WindowBeforeDeskbar;
+        // The window noted when the box opened, while it still exists and is on the desktop in front: Petre may have
+        // switched desktops since he started typing, and a picture of a window left behind (PrintWindow renders a cloaked
+        // one) would be filed in the workspace in front (review of task 494d34ee). Failing that, the last outside window.
+        var noted = taskReturnTo;
+        var window = noted != 0 && WindowAlive(noted) && OnCurrentDesktop(noted) ? noted : WindowBeforeDeskbar;
         var shot = ShootWindow(window);
         ClickTrace.Write(shot.IsSuccess
             ? $"task list: picture of 0x{window:X} for a new task"
@@ -82,10 +88,21 @@ public partial class FloatingBar
             CommitTaskNote(startClaude: true, shot: shot.Value);
             return;
         }
-        // Refused: said first (a modal box owned by the bar), then an idle, empty box the press opened goes back to idle
-        // and hands the keyboard back, so the refusal leaves things as they were; a box Petre was already typing in
-        // keeps its draft and the keyboard.
+        // Refused: said first, in a modal box owned by the bar. That box takes the foreground, so the bar's OnDeactivated
+        // ends typing (EndTyping with clear false) and forgets the window to hand the keyboard back to. So it is kept
+        // here and put back afterwards (review of task 494d34ee): an empty box goes back to idle and hands the keyboard to
+        // that window, so the refusal leaves things as they were; a draft (text, pictures or a subtask's parent) keeps the
+        // box open with the keyboard, and Enter later still hands it back to where Petre was.
         Report(Result.Failure(shot.Error));
-        if (!wasTyping && taskAddBox.Text.Length == 0 && taskAddImages.Count == 0) EndTyping(clear: true);
+        if (taskAddBox.Text.Length > 0 || taskAddImages.Count > 0 || taskAddParent.HasValue)
+        {
+            BeginTyping();
+            taskReturnTo = noted;
+        }
+        else
+        {
+            taskReturnTo = noted;
+            EndTyping(clear: true);
+        }
     }
 }
