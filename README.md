@@ -511,10 +511,12 @@ More in [Quick find](docs/features/quick-find.md).
 
 The bottom of the bar carries a short task list, for the things you want to remember while you work.
 Type a note into the box at its top and press Enter (Shift+Enter starts a new line, which goes into
-the note's description), and it lands on the workspace you are on (or on
-none, or another one, by the chip under the box). The new note is selected and glows blue for a moment,
+the note's description). Enter first opens the workspace menu under the box, with the keyboard on
+the workspace you are on (or on the one picked by the chip under the box), so you see where the note
+will land before it does: Enter again adds it there, the arrows or the first letters of another
+workspace's name move to that one, and Esc goes back to the text without adding anything. The new note is selected and glows blue for a moment,
 so you can see where it landed; the tasks panel's own add box does the same. To hand the note to Claude
-straight away, press the play button after the flag toggles, or Ctrl+Enter, instead of Enter: the note is
+straight away, press the play button after the flag toggles, or Ctrl+Enter, instead of Enter (Ctrl+Enter asks for the workspace the same way): the note is
 added and Claude starts on it in the background. No terminal opens and nothing moves: the keyboard goes back to where you
 were typing, and a small "Claude started" card shows for a few seconds in the corner of the screen, without taking focus (click it to open the session). The camera beside the flag toggles does the same with a picture of the window you were working in: the task gets the picture and the window's name, and Claude starts on it. Type `/` at the start of the box to pick one of the repo's own Claude Code
 skills for that workspace, the ones its repos keep in `.claude/skills` (the list comes from Claude Code itself), and the session starts by running it. A line on the bar has no tick box, so a long title

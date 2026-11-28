@@ -203,7 +203,15 @@ public partial class FloatingBarTaskListTests
         Click(button);
     }
 
-    static void Press(FloatingBar bar, UIElement target, Key key) =>
+    // Enter in the add box asks for the workspace first (task 6184e8bf), so a press of Enter here is Enter, Enter, as
+    // Petre presses it: the second takes the chip the menu opened on. A test of the menu itself presses with PressOnly.
+    static void Press(FloatingBar bar, UIElement target, Key key)
+    {
+        PressOnly(bar, target, key);
+        if (key == Key.Enter && bar.TaskAddPickMenu is { } menu) WorkspaceChipMenu.StartChip(menu).Tap(Click);
+    }
+
+    static void PressOnly(FloatingBar bar, UIElement target, Key key) =>
         target.RaiseEvent(new KeyEventArgs(Keyboard.PrimaryDevice, PresentationSource.FromVisual(bar), 0, key) { RoutedEvent = Keyboard.PreviewKeyDownEvent });
 
     // What a line says, its runs joined: the title, then its status line or question.
@@ -1141,6 +1149,61 @@ public partial class FloatingBarTaskListTests
         Click(WorkspaceChipMenu.Chips(menu).Single(c => AutomationProperties.GetName(c) == name));
         menu.IsOpen = false;
     }
+
+    // THE WORKSPACE ASKED AT ENTER (task 6184e8bf). Enter with a note in the box adds nothing yet: it opens the chip's
+    // workspace menu with the keyboard on where the note would go (here GEPHA, the workspace in front). A pick of
+    // another chip adds the note there.
+    [Fact]
+    public void Enter_opens_the_workspace_menu_on_the_target_and_the_pick_adds_the_note_there() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var sparrow = t.Harness.Manager.State.Workspaces.Single(w => w.Name == "Sparrow").Id;
+        ClickBox(t);
+        t.Box.Text = "Renew the domain";
+
+        PressOnly(t.Bar, t.Box, Key.Enter);
+
+        var menu = Assert.IsAssignableFrom<ContextMenu>(t.Bar.TaskAddPickMenu);
+        Assert.Equal("GEPHA", AutomationProperties.GetName(WorkspaceChipMenu.StartChip(menu).Value));
+        Assert.DoesNotContain(t.Tasks.Board.Tasks, x => x.Title == "Renew the domain");
+
+        Click(WorkspaceChipMenu.Chips(menu).Single(c => AutomationProperties.GetName(c) == "Sparrow"));
+
+        Assert.Equal(sparrow, t.Tasks.Board.Tasks.Single(x => x.Title == "Renew the domain").WorkspaceId.Value);
+        Assert.Null(t.Bar.TaskAddPickMenu);
+        Assert.Equal("", t.Box.Text);
+    });
+
+    // Esc (or a click away) closes the menu without a pick: nothing is added and the text stays in the box.
+    [Fact]
+    public void A_menu_closed_without_a_pick_adds_nothing_and_keeps_the_text() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        ClickBox(t);
+        t.Box.Text = "Renew the domain";
+        PressOnly(t.Bar, t.Box, Key.Enter);
+
+        t.Bar.TaskAddPickMenu!.IsOpen = false;
+        PumpBar(t);
+
+        Assert.DoesNotContain(t.Tasks.Board.Tasks, x => x.Title == "Renew the domain");
+        Assert.Equal("Renew the domain", t.Box.Text);
+        Assert.Null(t.Bar.TaskAddPickMenu);
+    });
+
+    // An empty box has nothing to place, so Enter opens no menu (and the board refuses the empty note, as before).
+    [Fact]
+    public void Enter_on_an_empty_box_opens_no_menu() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        ClickBox(t);
+        var before = t.Tasks.Board.Tasks.Count;
+
+        PressOnly(t.Bar, t.Box, Key.Enter);
+
+        Assert.Null(t.Bar.TaskAddPickMenu);
+        Assert.Equal(before, t.Tasks.Board.Tasks.Count);
+    });
 
     [Fact]
     public void The_chip_row_is_one_chip_naming_the_current_workspace_with_no_on_before_it() => StaThread.Run(() =>
@@ -4027,7 +4090,7 @@ public partial class FloatingBarTaskListTests
         Assert.Equal(Visibility.Visible, ParentChip(t).Visibility);
         Assert.Contains("Ship the release", string.Concat(Inside(ParentChip(t)).OfType<TextBlock>().Select(b => b.Text)));
         Assert.Equal(other, t.Bar.TaskAddTarget.Value);
-        Assert.Equal("A subtask: Enter adds it, Esc drops the parent", Placeholder(t).Text);
+        Assert.Equal("A subtask: Enter asks where, then adds it; Esc drops the parent", Placeholder(t).Text);
     });
 
     // Final review, finding 2: an empty subtask box keeps the parent's workspace through a click away and a desktop

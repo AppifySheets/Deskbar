@@ -216,6 +216,14 @@ The task list at the bottom of the bar (spec `docs/superpowers/specs/2026-11-22-
     box empty and idle, click a chip: it starts a note, as a click in the box does.
 46. Click in the box, then the "other..." chip, and pick a workspace: the chip takes its name and is ticked,
     the text stays, and Enter files the note there.
+46a. Enter asks for the workspace (task 6184e8bf). Click in the box, type "probe", press Enter: nothing is added
+    yet; the workspace menu opens under the chip with the white keyboard edge on the workspace you are on. Enter
+    again: the note lands there. Type "probe 2", Enter, then type "sp" (or the first letters of another
+    workspace): the keyboard edge jumps to it; Enter files the note there. Type "probe 3", Enter, then Esc: the
+    menu closes, nothing is added, "probe 3" is still in the box with the caret in it. Hold Enter down for a
+    second on "probe 4": only the menu opens, nothing is picked by the repeats. Ctrl+Enter on "probe 5": the
+    menu opens, Enter picks, and Claude starts on it. In the tasks panel's + Add box, Enter, Enter and Esc do
+    the same.
 47. Click a line of a note on another workspace: the tasks panel opens (or comes forward, and takes the foreground) on that task, selected,
     scrolled into view and expanded to its comments, and you stay where you are. Double-click the line: you go to
     its workspace (only when both presses land on the same line: click one line and double-click the line beside

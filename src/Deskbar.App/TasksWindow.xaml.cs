@@ -205,7 +205,7 @@ public partial class TasksWindow : Window
                 : Task.FromResult<IReadOnlyList<SkillChoice>>([]),
             () => Actions?.WorkspaceSkills is not null && Actions?.AddNoteAndStartClaude is not null,
             new SkillCompletion.Look(Frozen(0xFF, 0x15, 0x16, 0x1A), PickedEdge, Ink, DimInk, SelectedFill));
-        AddBox.PreviewKeyDown += (_, e) => e.Handled = PressInAdd(e.Key, Keyboard.Modifiers) != KeyOutcome.Ignored;
+        AddBox.PreviewKeyDown += (_, e) => e.Handled = PressInAdd(e.Key, Keyboard.Modifiers, e.IsRepeat) != KeyOutcome.Ignored;
         // The panel resized (or the add row laid out for the first time): the chips go beside the box or under it
         // again, whichever leaves room to type (FitAddEnd, task f212d886). Only a width change can change that answer.
         AddLine.SizeChanged += (_, e) => { if (e.WidthChanged) FitAddEnd(); };
@@ -3523,7 +3523,7 @@ public partial class TasksWindow : Window
     // task 0eb943d8, Petre: "a new textbox appears at the top of the bar; make it right there, at the add subtask
     // button"). The add box at the top adds plain notes only.
 
-    const string NotePlaceholder = "A note: Enter adds it, Esc closes the box";
+    const string NotePlaceholder = "A note: Enter asks where, then adds it; Esc closes the box";
 
     internal string AddPlaceholderText => AddPlaceholder.Text;
 
@@ -3583,31 +3583,77 @@ public partial class TasksWindow : Window
         // menu now opens from Flat's press itself.
         // The chip is the workspace's name and the arrow, no "on" before it, as on the bar's add row (task 47398c0f,
         // Petre: "drop on; make it compact").
-        Button? chip = null;
-        chip = Flat(new TextBlock { Text = $"{target.Name} ▾", Foreground = Ink, FontSize = 11 }, "Add to workspace", () =>
-        {
-            var places = latest?.Places ?? [];
-            OpenMenu(WorkspaceChipMenu.Build(places, target.Workspace,
-                workspace =>
-                {
-                    addChosen = places.Where(p => !p.IsGroup && p.Workspace.Equals(workspace))
-                        .Select(p => new TaskPlaceChoice(p.Workspace, p.Name, p.Colour))
-                        .FirstOrDefault();
-                    PaintAddPlace();
-                    AddBox.Focus();
-                }, chip));
-        }, new Thickness(8, 2, 8, 2));
-        chip.Margin = new Thickness(8, 0, 0, 0);
-        AddEnd.Children.Add(chip);
+        addChip = Flat(new TextBlock { Text = $"{target.Name} ▾", Foreground = Ink, FontSize = 11 }, "Add to workspace",
+            () => OpenAddPlaceMenu(target, then: null), new Thickness(8, 2, 8, 2));
+        addChip.Margin = new Thickness(8, 0, 0, 0);
+        AddEnd.Children.Add(addChip);
     }
 
-    KeyOutcome PressInAdd(Key key, ModifierKeys modifiers)
+    // The add box's workspace chip as last painted: where its menu opens, from its own press or from Enter.
+    Button? addChip;
+
+    // The add chip's menu (WorkspaceChipMenu), opened on `target`. A pick becomes the chip's choice (addChosen) and then
+    // runs `then`, Enter's add (task 6184e8bf), or with none just gives the box the keyboard back. A menu closed without
+    // a pick (Esc, a click away) gives the box the keyboard back too, its text untouched. Closed comes late, from the
+    // popup's destroy timer (up to 150 ms with the menu fade on), so after a pick it finds `picked` set; and it leaves
+    // the keyboard alone while a newer menu is open (Esc then a quick Enter), whose type-ahead would otherwise type
+    // into the note.
+    ContextMenu OpenAddPlaceMenu(TaskPlaceChoice target, Action? then)
+    {
+        var places = latest?.Places ?? [];
+        var picked = false;
+        var menu = WorkspaceChipMenu.Build(places, target.Workspace,
+            workspace =>
+            {
+                picked = true;
+                AddPickMenu = null;
+                addChosen = places.Where(p => !p.IsGroup && p.Workspace.Equals(workspace))
+                    .Select(p => new TaskPlaceChoice(p.Workspace, p.Name, p.Colour))
+                    .FirstOrDefault();
+                PaintAddPlace();
+                if (then is null) AddBox.Focus();
+                else then();
+            }, addChip);
+        menu.Closed += (_, _) => Dispatcher.BeginInvoke(() =>
+        {
+            if (AddPickMenu == menu) AddPickMenu = null;
+            if (!picked && AddBoxShown && AddPickMenu is null && openMenu is null) AddBox.Focus();
+        }, System.Windows.Threading.DispatcherPriority.Input);
+        OpenMenu(menu);
+        return menu;
+    }
+
+    /// <summary>The workspace menu Enter opened and nothing has been picked from yet, for the tests.</summary>
+    internal ContextMenu? AddPickMenu { get; private set; }
+
+    KeyOutcome PressInAdd(Key key, ModifierKeys modifiers, bool isRepeat)
     {
         // Shift+Enter is a line break, which the box makes itself (AcceptsReturn), as in the comment boxes.
         if (key is not (Key.Enter or Key.Return) || modifiers.HasFlag(ModifierKeys.Shift)) return KeyOutcome.Ignored;
+        // A held Enter repeats; only the first press counts, so it cannot also pick from the menu it opened.
+        if (isRepeat) return KeyOutcome.NewLine;
         // Ctrl+Enter is the Start Claude button's key (task 3c40dec9).
-        return AddFromBox(startClaude: modifiers.HasFlag(ModifierKeys.Control)) ? KeyOutcome.Posted : KeyOutcome.NewLine;
+        var startClaude = modifiers.HasFlag(ModifierKeys.Control);
+        // THE WORKSPACE ASKED AT ENTER (task 6184e8bf; Petre: "when i press enter, open a workspace selection which i
+        // can select with the keyboard so that i don't accidentally create a task in the wrong workspace"). With
+        // something to add, Enter opens the chip's menu with the keyboard on where the note would go now; a second
+        // Enter takes it, the arrows or a name's first letters move to another, and the pick adds the note there (with
+        // Claude started when this press was Ctrl+Enter). Esc adds nothing and leaves the text. The bar's add box does
+        // the same (FloatingBar.AskTaskTarget). An empty box is refused as before, with no menu.
+        if ((AddBox.Text.Trim().Length > 0 || AddBoxImages.Count > 0) && (addChosen ?? latest?.AddTarget) is { } target)
+        {
+            AddPickMenu = OpenAddPlaceMenu(target, () =>
+            {
+                addPickAdded = AddFromBox(startClaude);
+                if (!addPickAdded && AddBoxShown) AddBox.Focus();
+            });
+            return KeyOutcome.Posted;
+        }
+        return AddFromBox(startClaude) ? KeyOutcome.Posted : KeyOutcome.NewLine;
     }
+
+    // Whether the last pick from Enter's menu added its note, for the tests (TypeNote).
+    bool addPickAdded;
 
     // The box's note added, where the chip says with the flags the toggles say, and the box closed; whether it was added.
     // With `startClaude` (the Start Claude button or Ctrl+Enter) the note is then handed to Claude through the
@@ -3683,10 +3729,24 @@ public partial class TasksWindow : Window
     }
 
     // For the tests: types into the add box and presses a key.
+    // Enter asks for the workspace (task 6184e8bf), so this presses Enter a second time as Petre would: the menu's
+    // pick of the chip it opened on, and the answer is whether that added the note. Tests that need the menu itself
+    // press with PressNote.
     internal bool TypeNote(string text, Key key, ModifierKeys modifiers = ModifierKeys.None)
     {
+        addPickAdded = false;
+        if (!PressNote(text, key, modifiers)) return false;
+        if (AddPickMenu is not { } menu) return true;
+        WorkspaceChipMenu.StartChip(menu).Tap(chip => chip.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent)));
+        return addPickAdded;
+    }
+
+    // For the tests: types into the add box and presses a key, and no more; whether the press was taken as an add,
+    // which with a note in the box means Enter's workspace menu is open (AddPickMenu).
+    internal bool PressNote(string text, Key key, ModifierKeys modifiers = ModifierKeys.None, bool isRepeat = false)
+    {
         AddBox.Text = text;
-        return PressInAdd(key, modifiers) == KeyOutcome.Posted;
+        return PressInAdd(key, modifiers, isRepeat) == KeyOutcome.Posted;
     }
 
     /// <summary>

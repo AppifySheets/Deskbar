@@ -199,8 +199,8 @@
                             <TextBox x:Name="AddBox" FontSize="12" Foreground="#FFE6E6E6" Background="Transparent"
                                      BorderThickness="0" CaretBrush="White" Padding="0" Template="{StaticResource BareTextBox}"
                                      TextWrapping="Wrap" AcceptsReturn="True" MaxLines="6"
-                                     ToolTip="Enter adds the task, Ctrl+Enter adds it and starts Claude on it, Shift+Enter starts a new line. The first line is the title, the rest the description"/>
-                            <TextBlock x:Name="AddPlaceholder" Text="A note: Enter adds it, Esc closes the box" FontSize="12"
+                                     ToolTip="Enter asks which workspace, then adds the task; Ctrl+Enter does the same and starts Claude on it; Shift+Enter starts a new line. The first line is the title, the rest the description"/>
+                            <TextBlock x:Name="AddPlaceholder" Text="A note: Enter asks where, then adds it; Esc closes the box" FontSize="12"
                                        Foreground="#FF8B8F99" IsHitTestVisible="False" Margin="2,0,0,0"/>
                         </Grid>
                     </Border>

@@ -611,6 +611,36 @@ public partial class TasksBoardTests
         Assert.False(t.Window.AddBoxShown);
     });
 
+    // THE WORKSPACE ASKED AT ENTER (task 6184e8bf): Enter with a note opens the chip's workspace menu on where the note
+    // would go and adds nothing yet; a pick of another chip adds it there. A menu closed without a pick adds nothing,
+    // and the text stays. A held Enter's repeat opens nothing.
+    [Fact]
+    public void Enter_asks_for_the_workspace_before_adding() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        t.Controller.Show();
+        Click(ButtonNamed(t.Window, "Add"));
+
+        Assert.False(t.Window.PressNote("Call the bank", Key.Enter, isRepeat: true));
+        Assert.Null(t.Window.AddPickMenu);
+
+        Assert.True(t.Window.PressNote("Call the bank", Key.Enter));
+        var menu = Assert.IsAssignableFrom<ContextMenu>(t.Window.AddPickMenu);
+        Assert.Equal("GEPHA", AutomationProperties.GetName(WorkspaceChipMenu.StartChip(menu).Value));
+        Assert.Empty(t.Tasks.Board.Tasks);
+
+        menu.IsOpen = false;
+        t.Window.Dispatcher.Invoke(() => { }, System.Windows.Threading.DispatcherPriority.Background);
+        Assert.Empty(t.Tasks.Board.Tasks);
+        Assert.Null(t.Window.AddPickMenu);
+        Assert.True(t.Window.AddBoxShown);
+
+        Assert.True(t.Window.PressNote("Call the bank", Key.Enter));
+        Click(WorkspaceChipMenu.Chips(t.Window.AddPickMenu!).Single(c => AutomationProperties.GetName(c) == "Sparrow"));
+        Assert.Equal(t.Sparrow, Assert.Single(t.Tasks.Board.Tasks).WorkspaceId.Value);
+        Assert.False(t.Window.AddBoxShown);
+    });
+
     // Task ee75f046, option 3 of the mockup: the panel's add box highlights what it adds as the bar's does. The new task
     // is picked (in both views, one selection), its line glows while Windows' animations are on (TaskGlow), and a
     // search that would hide it is cleared so the line is there to see.
