@@ -389,6 +389,51 @@ public partial class TasksBoardTests
         Assert.Equal(t.Sparrow, t.Tasks.Board.Tasks.Single(x => x.Id == k.Asking).WorkspaceId.Value);
     });
 
+    // Task 9966ab91 ("buttons cover the workspace"): the line's buttons come out over its right end, where the chip ends the
+    // title's first row, so the hover that showed them used to hide the chip. With the buttons out (the selected line shows
+    // them, as the pointer does), the chip sits wholly left of them, and the line is no taller than before: the title
+    // ends in "…" sooner rather than wrapping to a new row.
+    [Fact]
+    public void The_buttons_never_cover_the_chip_and_the_line_keeps_its_height() => StaThread.Run(() =>
+    {
+        var selection = new TaskSelection();
+        using var t = Build(selection: selection);
+        // A title that fits one row on the whole line but would need a second once the chip moves in beside the buttons,
+        // so the height check below has something to catch (both halves are asserted, not assumed).
+        const string words = "Clicking on those chips should open that, the two items that are high risk or need your attention today before the lunch break";
+        var id = t.Tasks.Create(words, t.Gepha, Session("s1")).Value.Id;
+        t.Controller.Show();
+        ChooseInbox(t);
+        t.Window.ChooseInboxTab(InboxTab.All);
+        t.Window.UpdateLayout();
+        var line = t.Window.InboxLineButton(id)!;
+        var height = line.ActualHeight;
+        // "task-title" is TasksWindow.TitleTag, the tag the Inbox's title carries.
+        var title = InboxDescendants(line).OfType<TextBlock>().Single(e => Equals(e.Tag, "task-title"));
+        var oneRow = new TextBlock { Text = words, FontSize = title.FontSize, FontWeight = title.FontWeight, FontFamily = title.FontFamily };
+        oneRow.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+        Assert.True(oneRow.DesiredSize.Width <= title.ActualWidth, $"the title needs {oneRow.DesiredSize.Width} but has {title.ActualWidth}: it is not one row to start with");
+
+        selection.Select(id);
+        t.Controller.Reveal();
+        t.Window.UpdateLayout();
+        line = t.Window.InboxLineButton(id)!;
+        title = InboxDescendants(line).OfType<TextBlock>().Single(e => Equals(e.Tag, "task-title"));
+        var buttons = InboxDescendants(line).OfType<FrameworkElement>().Single(e => Equals(e.Tag, TasksWindow.InboxButtonsTag));
+        var chip = ButtonNamed(line, TasksWindow.PlaceChipName);
+
+        Assert.Equal(Visibility.Visible, buttons.Visibility);
+        var chipRight = chip.TranslatePoint(new Point(chip.ActualWidth, 0), line).X;
+        var buttonsLeft = buttons.TranslatePoint(new Point(0, 0), line).X;
+        Assert.True(chipRight <= buttonsLeft, $"the chip ends at {chipRight}, under the buttons that start at {buttonsLeft}");
+        Assert.True(oneRow.DesiredSize.Width > title.ActualWidth, $"the title needs {oneRow.DesiredSize.Width} and still has {title.ActualWidth}: it would not wrap, so the height check proves nothing");
+        Assert.Equal(height, line.ActualHeight, 0.5);
+    });
+
+    static IEnumerable<DependencyObject> InboxDescendants(DependencyObject node) =>
+        Enumerable.Range(0, VisualTreeHelper.GetChildrenCount(node)).Select(i => VisualTreeHelper.GetChild(node, i))
+            .SelectMany(child => new[] { child }.Concat(InboxDescendants(child)));
+
     // Task c980f8c0 ("clicking a chip should tell the session to refresh, re-fetch, etc and potentially update the status",
     // "in the inbox list as well as the task view"): the state asks the session to recheck. On a line the mark's tile, on
     // the page the tile and the state words, press Reevaluate (Reevaluations hears the task), and the line's tile does not

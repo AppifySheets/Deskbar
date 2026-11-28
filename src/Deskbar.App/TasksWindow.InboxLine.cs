@@ -37,7 +37,8 @@ public partial class TasksWindow
 {
     // The lines on show: the line, its mark's square and its buttons, so the selection is painted in place
     // (PaintInboxSelection); and each line's time, rewritten once a minute.
-    readonly Dictionary<Guid, (Button Line, Border Tile, FrameworkElement Buttons)> inboxLines = [];
+    // Fit puts the chip beside the buttons, or back at the end, after the buttons' visibility is set (KeepChipBesideButtons).
+    readonly Dictionary<Guid, (Button Line, Border Tile, FrameworkElement Buttons, Action Fit)> inboxLines = [];
     readonly Dictionary<Guid, (TextBlock Text, DateTimeOffset Since)> inboxTimes = [];
 
     internal const string InboxMarkTag = "inbox-mark";
@@ -93,6 +94,9 @@ public partial class TasksWindow
         Grid.SetColumn(buttons, 1);
         Grid.SetColumnSpan(buttons, 2);
         grid.Children.Add(buttons);
+        // A line being renamed keeps its editor where it is: its boxes are not texts that can be held to a height, and a
+        // pointer crossing the line would resize them under the user's typing.
+        var fit = renaming == row.Id ? () => { } : KeepChipBesideButtons(grid, middle, (FrameworkElement)chip, right, buttons);
 
         // A line in its undo window is quiet, all but its Undo.
         if (row.Closing) grid.Children.OfType<UIElement>().Where(part => !ReferenceEquals(part, tile)).ToList().ForEach(part => part.Opacity = 0.45);
@@ -114,9 +118,17 @@ public partial class TasksWindow
         };
         AutomationProperties.SetName(button, row.Title);
         AutomationProperties.SetItemStatus(button, InboxMarks.WordsOf(line.Mark));
-        inboxLines[row.Id] = (button, tile, buttons);
-        button.MouseEnter += (_, _) => buttons.Visibility = Visibility.Visible;
-        button.MouseLeave += (_, _) => buttons.Visibility = Picked(row.Id) ? Visibility.Visible : Visibility.Hidden;
+        inboxLines[row.Id] = (button, tile, buttons, fit);
+        button.MouseEnter += (_, _) =>
+        {
+            buttons.Visibility = Visibility.Visible;
+            fit();
+        };
+        button.MouseLeave += (_, _) =>
+        {
+            buttons.Visibility = Picked(row.Id) ? Visibility.Visible : Visibility.Hidden;
+            fit();
+        };
         // The List line's press (TasksWindow.Line): a double-click goes to the task's workspace and session, a single press
         // arms the drag, and the click guard counts the press.
         button.PreviewMouseLeftButtonDown += (_, e) =>
@@ -340,6 +352,70 @@ public partial class TasksWindow
         };
     }
 
+    // THE BUTTONS NEVER COVER THE CHIP (task 9966ab91, "buttons cover the workspace"). The buttons are drawn over the line's
+    // right end, which is where the workspace chip ends the title's first row, so the hover that brought the buttons out
+    // also hid the chip, and the chip could never be clicked. While the buttons show, the middle column (title, chip, text)
+    // ends where they begin, a small gap before them, so the chip sits just left of the buttons and keeps its move menu.
+    //
+    // THE LINE KEEPS ITS HEIGHT. A narrower title could wrap to a second row and grow the line under the pointer, which
+    // moves every line below it on each hover. So each wrapping text in the middle is held to the height it had before
+    // and ends in "…" sooner instead; it gets its own height back when the buttons go.
+    //
+    // THE TITLE KEEPS A FLOOR. On a narrow panel the buttons are wider than the room the title and chip share, and moving
+    // the chip all the way would leave the title no width at all. So the title always keeps TitleFloor; past that the chip
+    // stops moving and the buttons overlap its right end, as they did everywhere before.
+    //
+    // It is run (the Action returned) wherever the buttons' visibility is set: the pointer entering and leaving the line,
+    // and the selection (PaintInboxSelection). It is not hung on IsVisibleChanged, because a visibility set while the panel
+    // is hidden raises nothing there, and the line would stay narrowed with its buttons gone. It also follows the sizes of
+    // the buttons, the chip and the time column, since all are known only after layout and the time's width changes once a
+    // minute.
+    const double TitleFloor = 48;
+
+    static Action KeepChipBesideButtons(Grid grid, StackPanel middle, FrameworkElement chip, FrameworkElement right, FrameworkElement buttons)
+    {
+        var rest = middle.Margin;
+        // Each wrapping text's own height cap and trimming, to give back (the title's is two rows, a problem line has none).
+        var wraps = middle.Children.OfType<FrameworkElement>()
+            .SelectMany(part => part is DockPanel row ? row.Children.OfType<TextBlock>() : new[] { part }.OfType<TextBlock>())
+            .Where(text => text.TextWrapping == TextWrapping.Wrap)
+            .Select(text => (Text: text, text.MaxHeight, text.TextTrimming))
+            .ToList();
+        var held = false;
+        void Fit()
+        {
+            var shown = buttons.Visibility == Visibility.Visible && buttons.ActualWidth > 0;
+            // The buttons' left edge, measured from the grid's right edge (their margin pulls them 4 DIP outside it), less
+            // the room the time column and the middle's own right margin already leave; 6 DIP of air before the buttons.
+            var wanted = shown ? Math.Max(0, buttons.ActualWidth + buttons.Margin.Right + 6 - right.ActualWidth - rest.Right) : 0;
+            // The middle's width with no room taken (the grid less the mark's 36 DIP column, the time column and the
+            // middle's own margins), less the chip and TitleFloor: the most the chip may move.
+            var whole = grid.ActualWidth - grid.ColumnDefinitions[0].ActualWidth - right.ActualWidth - rest.Left - rest.Right;
+            var needed = Math.Max(0, Math.Min(wanted, whole - chip.ActualWidth - chip.Margin.Left - TitleFloor));
+            // A text not laid out yet has no height to hold (0 would hide it), so it is left free.
+            if (needed > 0 && !held)
+                wraps.Where(wrap => wrap.Text.ActualHeight > 0).ToList().ForEach(wrap =>
+                {
+                    wrap.Text.MaxHeight = Math.Min(wrap.MaxHeight, wrap.Text.ActualHeight);
+                    wrap.Text.TextTrimming = TextTrimming.CharacterEllipsis;
+                });
+            else if (needed == 0 && held)
+                wraps.ForEach(wrap =>
+                {
+                    wrap.Text.MaxHeight = wrap.MaxHeight;
+                    wrap.Text.TextTrimming = wrap.TextTrimming;
+                });
+            held = needed > 0;
+            var margin = new Thickness(rest.Left, rest.Top, rest.Right + needed, rest.Bottom);
+            if (middle.Margin != margin) middle.Margin = margin;
+        }
+        buttons.SizeChanged += (_, _) => Fit();
+        chip.SizeChanged += (_, _) => Fit();
+        right.SizeChanged += (_, _) => Fit();
+        grid.SizeChanged += (_, _) => Fit();
+        return Fit;
+    }
+
     // A TASK JUST ADDED FROM THE PANEL (the tester's L1; TasksBoard.ShowAdded calls Glow, then ScrollToSelected). In the
     // List its line is picked, glows and is scrolled to; in the Inbox it may be in another tab than the one on show, so:
     //   - no page open: the tab that holds it comes on show, and its line glows (TaskGlow, on the Inbox's selected fill)
@@ -417,6 +493,7 @@ public partial class TasksWindow
             pair.Value.Line.Background = picked ? InboxLook.Raised : Brushes.Transparent;
             pair.Value.Tile.Background = picked ? InboxLook.RaisedHot : InboxLook.Raised;
             pair.Value.Buttons.Visibility = picked || pair.Value.Line.IsMouseOver ? Visibility.Visible : Visibility.Hidden;
+            pair.Value.Fit();
         });
 
     // Each line's time, once a minute (RefreshAges calls this).
