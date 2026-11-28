@@ -155,6 +155,35 @@ public class SetAsideStopHookTests
         Assert.Contains("task status-line - --session", message);
     }
 
+    // Task 4712d013: a press also follows the task up. The open pull requests come first, with what to do for each state
+    // (rebase when behind or conflicting, fix a failed check, answer review comments), and the message no longer tells
+    // the session to stop after relabelling, so a press while it works leaves that work going.
+    [Fact]
+    public void Reevaluate_message_follows_up_the_open_pull_requests()
+    {
+        var task = new TaskItem(Guid.NewGuid(), "usage limit", Guid.NewGuid(), TaskStatus.WaitingOnYou, "PR open",
+            Maybe<string>.From("Merge #599"), clock, clock, clock, [], [])
+        {
+            PullRequests = [new PullRequestLink("AppifySheets", "Deskbar", 599)],
+            DeployPullRequests = [new PullRequestLink("AppifySheets", "stacks", 12)],
+        };
+
+        var message = SessionBriefing.Reevaluate(task);
+
+        Assert.Contains("follow up on whatever is happening with it", message);
+        Assert.Contains("deploy pull requests: https://github.com/AppifySheets/stacks/pull/12", message);
+        Assert.Contains("behind its base or conflicting: rebase it onto the latest base", message);
+        Assert.Contains("push with --force-with-lease; CI runs the tests", message);
+        Assert.Contains("a failed check: read the failure", message);
+        Assert.Contains("review comments not answered yet", message);
+        // The pull requests come before the board's bullets, so a rebase is not skipped once the board looks right.
+        Assert.True(message.IndexOf("rebase it onto", StringComparison.Ordinal) < message.IndexOf("task answered --session", StringComparison.Ordinal));
+        Assert.DoesNotContain("then stop", message);
+        Assert.Contains("go on with the task", message);
+        // Still Deskbar's, not the user replying.
+        Assert.True(SessionBriefing.DeliveredByDeskbar(message));
+    }
+
     // The openings of prompts Claude Code delivers itself, copied from this machine's transcripts (task b846f5ad): a
     // subagent's hand-back, a background shell's notice, a Monitor event.
     static readonly IReadOnlyList<string> ClaudeCodePrompts =

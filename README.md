@@ -862,8 +862,10 @@ trust prompt yourself. A task's thread lists its sessions, newest first, as work
 each but the expired ones with Open. `deskbar.cmd task go|start|open-session` do the same from a script.
 When a Claude task looks stale, say it still asks you to merge a pull request you merged an hour ago, press
 Reevaluate. The task's session wakes up (an idle or ended one too, the way a comment reaches it), checks where the
-task really stands with gh and git, and puts right what is out of date: it settles a question that is already
-answered, marks finished work done and rewrites an old status line. The button is the refresh icon right after the
+task really stands with gh and git, and follows it up. It looks at what is in each open pull request and does its
+part: it rebases one that fell behind its base or conflicts, fixes a failed check and answers review comments. Then it
+puts right what is out of date: it settles a question that is already answered, marks finished work done and
+rewrites an old status line. The button is the refresh icon right after the
 orange Claude icon on a Claude task's line in the tasks panel, and "Reevaluate" is on the bar's right-click menu of a
 Claude task. In the Inbox the state itself does it too: click the state mark at the left of a line, or the mark or
 the state words ("Claude is idle") at the top of a task's page. A note's box and a finished task's tick still close

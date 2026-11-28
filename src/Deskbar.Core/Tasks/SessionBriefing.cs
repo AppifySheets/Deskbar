@@ -214,14 +214,39 @@ public static class SessionBriefing
     // it out. The button is his one-click "look again". The message carries what Deskbar shows now (status, question,
     // status line, pull requests), so the session compares the board with the truth instead of with its memory, and names
     // the one command for each thing that can be stale. It asks for a check with gh and git, not a recollection.
+    //
+    // FOLLOW UP, NOT ONLY RELABEL (task 4712d013). Petre: "when i nudge a task by clicking its chip, it should also check
+    // what's in the pr and do rebase if needed, basically follow up with whatever's happening with it". The first version
+    // only put the board right and ended with "change nothing ... then stop", so a pull request left behind its base, red
+    // or with unanswered review comments stayed that way after a press. Now the open pull requests come first: the session
+    // reads what is in each and where it stands on GitHub, and does its own part at once (rebase, fix a failed check,
+    // answer review comments, watch running checks), the way the briefing's "keep it on top of its base" rule asks. Only
+    // then does it square the board. A rebase pushes after a quick build at most and leaves the tests to CI, as the
+    // briefing says. A press while the session is mid-work arrives at its next waiter, so the last line says to go on
+    // with that work rather than stop.
     public static string Reevaluate(TaskItem task) =>
-        $"{ReevaluateOpening}{task.Id.ToString()[..8]} \"{Cut(task.Title)}\": check where it really stands now and fix what Deskbar shows about it.\n\n"
+        $"{ReevaluateOpening}{task.Id.ToString()[..8]} \"{Cut(task.Title)}\": check where it really stands now, follow up on whatever is happening with it, and fix what Deskbar shows about it.\n\n"
         + "What Deskbar shows now:\n"
         + $"- status: {StatusText(task.Status)}\n"
         + (task.Question.HasValue ? $"- your question: \"{Cut(task.Question.Value, QuestionLength)}\"\n" : "")
         + (task.StatusLine.Length > 0 ? $"- status line: \"{task.StatusLine}\"\n" : "- status line: none\n")
         + (task.PullRequests.Count > 0 ? $"- pull requests: {string.Join(", ", task.PullRequests.Select(p => p.Url))}\n" : "")
-        + "\nCheck each against the facts (gh pr view, gh run list, git log), not from memory, then:\n"
+        // The deploy pull requests (another repository's change that ships this task's) are listed apart: the session
+        // follows their merge for the deploy, it does not rebase them unless it opened them.
+        + (task.DeployPullRequests.Count > 0 ? $"- deploy pull requests: {string.Join(", ", task.DeployPullRequests.Select(p => p.Url))}\n" : "")
+        + "\nCheck each against the facts (gh pr view, gh pr checks, gh run list, git log), not from memory.\n"
+        + "\nFirst, each pull request of yours that is still open: look at what is in it and where it stands "
+        + "(gh pr view <url> --json state,mergeable,mergeStateStatus,baseRefName,reviewDecision,statusCheckRollup, its review comments, and whether its base moved), then do your part now:\n"
+        + "- behind its base or conflicting: rebase it onto the latest base (main, or the branch of the pull request below it in a stack), resolve the conflicts, run a quick build at most and push with --force-with-lease; CI runs the tests (use the repository's own skill for this if it has one, such as refresh-pr)\n"
+        + "- a failed check: read the failure (gh run view <run id> --log-failed), fix it and push\n"
+        + "- review comments not answered yet: address them and push\n"
+        // Review finding: a resumed session's prompt also gets WatchedHint ("do not run your own watch loop") when Deskbar
+        // polls the pull request, so this bullet defers to it, in the words of the briefing's own rule.
+        + "- checks still running: watch them to the end, unless your prompt line says Deskbar watches your pull request\n"
+        + "- something in it no longer belongs (work the task dropped, a change another pull request already made): take it out, or say so in your question\n"
+        + $"- up to date, green and waiting only on the user's merge: make sure your question asks for exactly that, with the pull request as a link ({Shim} task ask - --session <your session id>)\n"
+        + "- closed without being merged: find out why (its comments, a pull request that replaced it) and carry on from there\n"
+        + "\nThen what Deskbar shows:\n"
         + $"- a question that is already settled (its pull request merged or closed, the decision made): run {Shim} task answered --session <your session id>\n"
         + $"- a question that still holds but no longer says what the user must do now: ask again with {Shim} task ask - --session <your session id>, the text on stdin\n"
         // Task 59d0aac1: a merged change that has to run is not finished until it does (the briefing's order).
@@ -229,7 +254,8 @@ public static class SessionBriefing
         + $"- work that is finished and deployed (or has nothing to deploy) with nothing waiting on the user: run {Shim} task done --session <your session id>, with what to try in the status line\n"
         + $"- a task marked done whose work is not finished after all: run {Shim} task join {task.Id.ToString()[..8]} --session <your session id> and carry on\n"
         + $"- a status line that no longer says where the task stands: rewrite it with {Shim} task status-line - --session <your session id>\n"
-        + "If everything is already right, change nothing. Say in one short line what you changed, then stop.\n";
+        + "If everything is already right and nothing is left for you to do, change nothing and end your turn. Otherwise do what is left now, "
+        + "say in one short line what you did, and go on with the task (or with what you were doing when this came).\n";
 
     // How much of the question the Reevaluate message quotes: enough to recognise it, short enough not to bury the steps.
     const int QuestionLength = 300;

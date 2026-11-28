@@ -1644,6 +1644,11 @@ RE7. (Task c980f8c0.) Switch to the Inbox. Point at the state mark at the left o
 RE8. Open the waiting task's page. The mark at the top and the state words under the title ("Waits for your answer")
      each do the same on a click, with a faint fill on hover; the words stay where they were before the change. On a
      task waiting for your deploy the Merged, Built, Deploy, Running track is the button.
+RE9. (Task 4712d013.) Take a Claude task whose open pull request is behind main (merge something else first) and
+     click its state mark. Within a few minutes the session rebases the branch and pushes it ("force-with-lease" in its
+     terminal), and GitHub no longer says the branch is out of date. On a task whose pull request has a failed check,
+     the session reads the failed run and pushes a fix. A task whose pull request is green and up to date only gets its
+     question checked: nothing is pushed.
 
 ## Results (2026-08-01)
 
