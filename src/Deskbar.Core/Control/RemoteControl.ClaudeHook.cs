@@ -333,7 +333,10 @@ public sealed partial class RemoteControl
     public const string HandOverHintText =
         "Your question mentions a deploy. If your change is merged and built and only the user's deploy is left, that is not a question: "
         + "ask it again with deskbar.cmd task ask - --deploy --session <your session id>, so the task shows as merged and waiting for the deploy; "
-        + "your task deployed report then settles it.";
+        + "your task deployed report then settles it. If instead you cannot see whether it deployed (no access to its logs, health page or deploy output), "
+        // Task 485ba96b (review finding): "did it deploy? I can't see the logs" is not a hand-over either, and the hint
+        // used to send it there, drawing the amber "waiting for your deploy" for a deploy nobody had to make.
+        + "do not ask: run deskbar.cmd task answered --session <your session id>, then deskbar.cmd task deployed - --unknown --session <your session id> with what you lack.";
 
     static Maybe<string> HandOverHint(TaskItem task) =>
         !task.QuestionIsDeploy && task.Question.GetValueOrDefault("").Contains("deploy", StringComparison.OrdinalIgnoreCase)

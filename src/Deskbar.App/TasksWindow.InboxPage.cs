@@ -381,7 +381,7 @@ public partial class TasksWindow
     static InboxMark MarkOfRow(TaskRowView row) =>
         row.Status == TaskStatus.Closed ? InboxMark.Closed
         : row.SnoozedUntil is not null ? InboxMark.Snoozed
-        : DeployWait.Waits(row.Status, row.Delivery.Shipping, row.QuestionOptions.Count, row.AwaitsDeploy) ? InboxMark.WaitsForDeploy
+        : DeployWait.Waits(row.Status, row.Delivery.Shipping && !row.Delivery.Unchecked, row.QuestionOptions.Count, row.AwaitsDeploy) ? InboxMark.WaitsForDeploy
         // Only a merge asked (task b99e5596, AskedPullRequests.AsksMerge): the merge glyph, as the task's Inbox line has.
         : row.AsksMerge ? InboxMark.ReadyToMerge
         : row.Status == TaskStatus.WaitingOnYou ? InboxMark.Asks

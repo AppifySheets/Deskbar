@@ -101,7 +101,48 @@ public sealed class DeployUnknownTests : IDisposable
         Assert.True(delivery.Shipping);
         Assert.True(delivery.Unchecked);
         Assert.Equal("Can't check the deploy: " + NoLogs, delivery.Note);
-        Assert.Equal(InboxMark.DeployUnchecked, InboxTabs.MarkOf(task, _ => false, hollow: t => RunningChanges.Of(t, Build, MergedFacts()).Shipping));
+        Assert.Equal(InboxMark.DeployUnchecked, InboxTabs.MarkOf(task, _ => false, hollow: t => RunningChanges.Of(t, Build, MergedFacts()).Shipping,
+            @unchecked: t => RunningChanges.Of(t, Build, MergedFacts()).Unchecked));
+    }
+
+    // Review finding: the Inbox mark follows the delivery, not the raw field, so a task with a pull request still open
+    // keeps "finished, not running yet" as its chip and tick do.
+    [Fact]
+    public void The_inbox_mark_follows_the_delivery()
+    {
+        var (board, id) = Merged(TaskStatus.Done);
+        var task = Of(board.MarkDeployUnknown(id, NoLogs, Now).Value, id);
+        var open = new Dictionary<string, PullRequestArrival> { [Code.Key] = new PullRequestArrival(PullRequestState.Open, false) };
+
+        Assert.Equal(InboxMark.FinishedNotRunning, InboxTabs.MarkOf(task, _ => false, hollow: t => RunningChanges.Of(t, Build, open).Shipping,
+            @unchecked: t => RunningChanges.Of(t, Build, open).Unchecked));
+    }
+
+    // Review finding: a pull request recorded after the report is not covered by it, so the reason goes.
+    [Fact]
+    public void A_new_pull_request_ends_it()
+    {
+        var (board, id) = Merged(TaskStatus.Done);
+        var unknown = board.MarkDeployUnknown(id, NoLogs, Now).Value;
+
+        Assert.True(Of(unknown.AddPullRequest(id, Code, Now).Value, id).DeployUnknown.HasValue);
+        Assert.True(Of(unknown.AddPullRequest(id, new PullRequestLink("AppifySheets", "iam.ge", 540), Now).Value, id).DeployUnknown.HasNoValue);
+        Assert.True(Of(unknown.AddDeployPullRequest(id, Code, Now).Value, id).DeployUnknown.HasValue);
+        Assert.True(Of(unknown.AddDeployPullRequest(id, new PullRequestLink("AppifySheets", "stacks", 9), Now).Value, id).DeployUnknown.HasNoValue);
+    }
+
+    // Review finding: this build's own pull requests are decided by the running build, never by a session's report.
+    [Fact]
+    public void Deskbars_own_pull_request_is_never_unchecked()
+    {
+        var own = new PullRequestLink("AppifySheets", "Deskbar", 700);
+        var made = TaskBoard.Empty.Create("Deskbar change", Maybe<Guid>.None,
+            new TaskSession("s1", @"C:\repos\TaskSpaces", Now.AddHours(-2), Maybe<DateTimeOffset>.None), Now.AddHours(-2), Guid.NewGuid()).Value;
+        var board = made.Board.AddPullRequest(made.Task.Id, own, Now).Value.SetStatus(made.Task.Id, TaskStatus.Done, Now).Value
+            .MarkDeployUnknown(made.Task.Id, NoLogs, Now).Value;
+        var facts = new Dictionary<string, PullRequestArrival> { [own.Key] = new PullRequestArrival(PullRequestState.Merged, false) };
+
+        Assert.Equal(DeliveryStage.Merged, RunningChanges.Of(Of(board, made.Task.Id), Build, facts).Stage);
     }
 
     // An open task shows Unchecked too, as it shows Merged (RunningChanges.Of), and one still open on GitHub stays Open:

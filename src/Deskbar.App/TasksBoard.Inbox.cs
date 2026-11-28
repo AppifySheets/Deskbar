@@ -58,7 +58,8 @@ public sealed partial class TasksBoard
         var inbox = InboxTabs.Split(listed, nested, tasks.Board, InboxMarks.StoppedOnLimit,
             busy: knowsActivity() ? Busy : null,
             hollow: t => tasks.DeliveryOf(t).Shipping,
-            tabbed: InboxTabs.TabsApply(filter, search.IsBlank, foundById), asksPermission: AsksPermission);
+            tabbed: InboxTabs.TabsApply(filter, search.IsBlank, foundById), asksPermission: AsksPermission,
+            @unchecked: t => tasks.DeliveryOf(t).Unchecked);
         return view with
         {
             Inbox = inbox,
@@ -80,7 +81,7 @@ public sealed partial class TasksBoard
         var inbox = InboxTabs.Split([group], new HashSet<Guid>(), tasks.Board, InboxMarks.StoppedOnLimit,
             busy: knowsActivity() ? Busy : null,
             hollow: t => tasks.DeliveryOf(t).Shipping,
-            tabbed: false, asksPermission: AsksPermission);
+            tabbed: false, asksPermission: AsksPermission, @unchecked: t => tasks.DeliveryOf(t).Unchecked);
         var page = new TasksView([], "", where, detail.Places, [new TaskGroupView(group.Kind, "", [detail.Row])], "",
             PlaceOf(manager.CurrentWorkspaceId))
         {

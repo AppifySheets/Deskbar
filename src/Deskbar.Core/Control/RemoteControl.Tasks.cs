@@ -124,9 +124,13 @@ public sealed partial class RemoteControl
             ["ask", _, "--deploy"] or ["ask", "--deploy", _] when byManager => ControlReply.Fail("The manager's task ask takes no --deploy: a deploy hand-over is a session's, on its own task"),
             ["ask", var question] when byManager => ManagerAsked(ManagerQuestion.Ask(Maybe.From(manager.State.Manager), question, service.Now)),
             ["answered"] when byManager => ManagerAsked(ManagerQuestion.Answered(Maybe.From(manager.State.Manager))),
+            // `task deployed <x> --unknown` without --session is either the session's form or the by-id form with the
+            // reason forgotten (task 485ba96b, review finding), so the refusal names both rather than only the session's.
+            ["deployed", _, "--unknown"] or ["deployed", "--unknown", _] => ControlReply.Fail(
+                "task deployed <reason> --unknown is a session's form and needs --session <id>; for a task by its id it is task deployed <id> <reason>|- --unknown"),
             // A session's form typed without its --session: it cannot know whose task is meant.
             ["done"] or ["answered"] or ["join", _] or ["new", _] or ["status-line", _] or ["ask", _] or ["ask", _, "--deploy"] or ["ask", "--deploy", _] or ["later", _] or ["subtask", ..] or ["pr", _] or ["pr", _, "--deploy"]
-                or ["duplicate-of", _] or ["relate", _] or ["unrelate", _] or ["deployed", _] or ["deployed", _, "--unknown"] or ["deployed", "--unknown", _] =>
+                or ["duplicate-of", _] or ["relate", _] or ["unrelate", _] or ["deployed", _] =>
                 ControlReply.Fail($"task {args[0]} is a session's form and needs --session <id>"),
             // In the bar's order, the Done tasks' full discs before their hollow rings (task a1debf34, TaskBoard.Pinned).
             ["list"] => Success(service.Board.Pile(t => service.DeliveryOf(t).Shipping).Select(Listed).ToArray()),
