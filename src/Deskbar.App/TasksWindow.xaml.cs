@@ -188,7 +188,7 @@ public partial class TasksWindow : Window
         PreviewKeyDown += (_, e) =>
         {
             pressSource = e.OriginalSource;
-            try { e.Handled = Press(e.Key == Key.System ? e.SystemKey : e.Key, Keyboard.Modifiers); }
+            try { e.Handled = Press(Unwrapped(e), Keyboard.Modifiers); }
             finally { pressSource = null; }
         };
         // Never in Alt+Tab: WS_EX_TOOLWINDOW, for the reason the bar gives in its own OnSourceInitialized
@@ -3837,6 +3837,11 @@ public partial class TasksWindow : Window
     /// selected line) and Ctrl+F (the search box). Internal so the tests can press Ctrl+F, whose modifier a synthetic key
     /// event cannot carry.
     /// </summary>
+    // Only Shift+F10 and Alt+letter are unwrapped from Key.System: Alt+Esc (Windows' send-to-back) and Alt+F2 must stay
+    // Windows' and never reach Escape or EditSelected, which do not look at the modifiers.
+    static Key Unwrapped(KeyEventArgs e) =>
+        e.Key == Key.System && (e.SystemKey == Key.F10 || e.SystemKey is >= Key.A and <= Key.Z) ? e.SystemKey : e.Key;
+
     internal bool Press(Key key, ModifierKeys modifiers) =>
         (key == Key.Escape && Escape())
         || (key == Key.F2 && EditSelected())
