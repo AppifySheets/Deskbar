@@ -104,6 +104,22 @@ public class SessionKeeperLimitLiftTests
         Assert.Empty(Wakes(task, [], LiftedAt(Now)));
     }
 
+    // A session holding itself on a limit its own replies prove gone is woken at once, with no proof from elsewhere.
+    [Fact]
+    public void A_self_held_session_is_woken_at_once()
+    {
+        var task = Task(TaskStatus.InProgress, Session("s1"));
+        var wake = Assert.Single(SessionKeeper.NoteStopWakes(new TaskBoard([task]), [Background("s1")], _ => Maybe<DateTimeOffset>.None,
+            LimitSigns.None, Now, _ => StoppedAt));
+        Assert.True(wake.Held);
+        Assert.Equal((task.Id, "s1", StoppedAt), (wake.TaskId, wake.SessionId, wake.StoppedAt));
+    }
+
+    [Fact]
+    public void A_self_held_session_waiting_on_petre_is_not_woken() =>
+        Assert.Empty(SessionKeeper.NoteStopWakes(new TaskBoard([Task(TaskStatus.WaitingOnYou, Session("s1"))]), [Background("s1")],
+            _ => Maybe<DateTimeOffset>.None, LimitSigns.None, Now, _ => StoppedAt));
+
     [Theory]
     [InlineData(TaskStatus.Done)]
     [InlineData(TaskStatus.Closed)]

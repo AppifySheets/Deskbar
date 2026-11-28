@@ -557,6 +557,10 @@ Manage ticked. Use a throwaway folder Claude Code already trusts, not a real rep
     limit is reached, it may finish its turn and stop by itself, saying so, with no "Stopped on the usage limit" line
     from Deskbar. Once the limit is lifted (86d) or resets, its thread says "The usage limit it stopped on is over, so
     it was told to carry on", and the session carries on with its task. A task waiting on your answer is not woken.
+86f. A session that holds itself on a lifted limit (task e948b383). After a lift, a session stopped on the limit's
+    error that something else woke (a comment, the stalled-task ask) may answer that it waits for the reset time and
+    stop again. Within a poll of that answer its thread says "It was waiting for the usage limit to reset, but its own
+    requests have gone through since, so it was told to carry on", and it carries on with its task.
 87. Untick the resume box and stop a task's session: the task shows the session ended and nothing resumes it; start a
     new `claude --bg` in another folder and it still gets a task. Tick the box again: the ended session is resumed at
     the next poll (once it has been gone two minutes).

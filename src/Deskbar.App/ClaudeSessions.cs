@@ -842,20 +842,36 @@ public sealed class ClaudeSessions : IDisposable
     // THE WRAP_UP STOPS (task e948b383, SessionKeeper.NoteStopWakes): a session that finished its turn after Claude Code
     // warned it about the limit has a live comment waiter, so it is woken with a message on the watch's quiet road, once
     // per stop, and the thread says so in one line.
+    //
+    // A SELF-HELD SESSION (UsageLimitSigns.HeldAfterLift) rides the same road, with its own words. It needs no scan (its
+    // own replies are the proof), so it is woken even while the wrap_up stops wait for the first scan to land. Not one the
+    // keeper resumed within the loop window: a session woken with LimitContinueMessage that then finishes its turn has a
+    // reply after its error too, and was told already.
     void WakeNoteStops(IReadOnlyCollection<ClaudeAgent> keeperView, DateTimeOffset now, bool resuming)
     {
-        if (!resuming || !limitScanLanded) return;
-        SessionKeeper.NoteStopWakes(tasks.Board, keeperView, StoppedOnLimitNote, limitSigns with { Lifted = LimitLifted }, now)
+        if (!resuming) return;
+        SessionKeeper.NoteStopWakes(tasks.Board, keeperView,
+                limitScanLanded ? StoppedOnLimitNote : _ => Maybe<DateTimeOffset>.None,
+                limitSigns with { Lifted = LimitLifted }, now,
+                session => HeldAfterLift(session, now))
             .Where(wake => !noteStopWoken.Contains((wake.SessionId, wake.StoppedAt)))
+            .Where(wake => !wake.Held || ledger.Within(wake.SessionId, now, SessionKeeper.LoopWindow) == 0)
             .ToList()
             .ForEach(wake =>
             {
                 noteStopWoken = noteStopWoken.Add((wake.SessionId, wake.StoppedAt));
-                trace?.Invoke($"claude sessions: {wake.SessionId} stopped on the usage limit's wrap_up note at {wake.StoppedAt:O}, told to carry on");
-                Say(wake.TaskId, "The usage limit it stopped on is over, so it was told to carry on.");
-                tasks.SendWatchNudge(new WatchNudge(wake.TaskId, NoteStopNudge));
+                trace?.Invoke(wake.Held
+                    ? $"claude sessions: {wake.SessionId} holds itself on the usage limit of {wake.StoppedAt:O} although its requests go through, told to carry on"
+                    : $"claude sessions: {wake.SessionId} stopped on the usage limit's wrap_up note at {wake.StoppedAt:O}, told to carry on");
+                Say(wake.TaskId, wake.Held
+                    ? "It was waiting for the usage limit to reset, but its own requests have gone through since, so it was told to carry on."
+                    : "The usage limit it stopped on is over, so it was told to carry on.");
+                tasks.SendWatchNudge(new WatchNudge(wake.TaskId, wake.Held ? HeldNudge : NoteStopNudge));
             });
     }
+
+    /// <summary>What a session holding itself on a limit its own replies prove gone is told (SessionKeeper.HeldNudge).</summary>
+    public const string HeldNudge = SessionKeeper.HeldNudge;
 
     /// <summary>What a session that stopped on a wrap_up note is told once the limit is over (task e948b383).</summary>
     public const string NoteStopNudge =
@@ -1032,6 +1048,29 @@ public sealed class ClaudeSessions : IDisposable
         }
     }
 
+    // WHETHER THE SESSION HOLDS ITSELF ON A LIMIT THAT IS GONE (UsageLimitSigns.HeldAfterLift), cached like LastTurnError.
+    // The cache keeps the error (its moment and reset) and the clock is applied on each ask: only a reset still ahead holds.
+    readonly System.Collections.Concurrent.ConcurrentDictionary<string, (long Length, DateTime Written, Maybe<LimitErrorSign> Error)> heldStops = new();
+
+    Maybe<DateTimeOffset> HeldAfterLift(TaskSession session, DateTimeOffset now)
+    {
+        try
+        {
+            if (TranscriptOf(session).GetValueOrDefault() is not { } path) return Maybe<DateTimeOffset>.None;
+            var file = new FileInfo(path);
+            var (length, written) = (file.Length, file.LastWriteTimeUtc);
+            var error = heldStops.TryGetValue(path, out var known) && known.Length == length && known.Written == written
+                ? known.Error
+                : UsageLimitSigns.HeldAfterLift(Tail(path));
+            heldStops[path] = (length, written, error);
+            return error.Where(e => e.ResetsAt > now).Map(e => e.At);
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            return Maybe<DateTimeOffset>.None;
+        }
+    }
+
     // WHETHER THE SESSION STOPPED ON A WRAP_UP NOTE (UsageLimitSigns.StoppedOnNote), cached like LastTurnError.
     readonly System.Collections.Concurrent.ConcurrentDictionary<string, (long Length, DateTime Written, Maybe<DateTimeOffset> At)> noteStops = new();
 
@@ -1173,7 +1212,7 @@ public sealed class ClaudeSessions : IDisposable
                 if (resume.StopFirst.HasValue && await cli.Run(["stop", resume.StopFirst.Value], null, LaunchTimeout) is { IsFailure: true } stop)
                     return (CutOff: cutOff, Result: Result.Failure<string>(stop.Error), Stopped: false);
                 retireWaiter(session.Id);
-                return (CutOff: cutOff, Result: await cli.Run(ResumeArguments(session.Id, cutOff), session.Folder, LaunchTimeout), Stopped: true);
+                return (CutOff: cutOff, Result: await cli.Run(ResumeArguments(session.Id, cutOff, resume.AfterLimit), session.Folder, LaunchTimeout), Stopped: true);
             })
             .Subscribe(
                 answer =>
@@ -1277,8 +1316,10 @@ public sealed class ClaudeSessions : IDisposable
             .TapError(e => trace?.Invoke($"claude sessions: no comment on {taskId}: {e}"));
 
 
-    static IReadOnlyList<string> ResumeArguments(string sessionId, bool cutOff) =>
-        cutOff ? ["--bg", "--resume", sessionId, ContinueMessage] : ["--bg", "--resume", sessionId];
+    // A session stopped on the usage limit is told the limit is over (SessionKeeper.LimitContinueMessage, task e948b383).
+    static IReadOnlyList<string> ResumeArguments(string sessionId, bool cutOff, bool afterLimit = false) =>
+        afterLimit ? ["--bg", "--resume", sessionId, SessionKeeper.LimitContinueMessage]
+        : cutOff ? ["--bg", "--resume", sessionId, ContinueMessage] : ["--bg", "--resume", sessionId];
 
     // Waiting in the queue, or being resumed right now.
     bool Queued(string sessionId) =>

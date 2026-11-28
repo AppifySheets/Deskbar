@@ -65,6 +65,77 @@ public static class UsageLimitSigns
             ? wrapUp.At
             : Maybe<DateTimeOffset>.None;
 
+    /// <summary>
+    /// A session that HOLDS ITSELF on a limit that is gone (task e948b383, measured 2026-11-28 on session a8c3dd64): its
+    /// turn died on the limit's error naming 14:10; from 07:40 on Deskbar's stalled-task asks woke it and every reply went
+    /// through, yet each time it answered "It's waiting for the usage limit to lift at 14:10" and stopped, because the
+    /// error's text was still in its conversation. Its last turn finished, so neither the keeper (no error last) nor
+    /// StoppedOnNote (no wrap_up note) sees it. The proof is its own: a real reply AFTER the error in its own transcript
+    /// means its requests are answered again (a new turn under the limit is refused at once, never answered, and the
+    /// grace allowance belongs to a turn already running when the limit came, which the error ends).
+    /// That error (its moment and reset) when: a reply that is not an error, not a subagent's and not made up by Claude
+    /// Code follows the latest limit error, and the last turn finished with no API error. None otherwise. The caller
+    /// keeps only one whose reset is still ahead: past it, nothing holds the session back.
+    /// </summary>
+    public static Maybe<LimitErrorSign> HeldAfterLift(IReadOnlyList<string> jsonLines)
+    {
+        var lastError = jsonLines
+            .Select((line, index) => (Line: line, Index: index))
+            .Where(item => item.Line.Contains("isApiErrorMessage", StringComparison.Ordinal))
+            .Select(item => (Sign: Sign(item.Line), item.Index))
+            .LastOrDefault(item => item.Sign is { Kind: SignKind.LimitError });
+        if (lastError.Sign is not { } error) return Maybe<LimitErrorSign>.None;
+        var after = jsonLines.Skip(lastError.Index + 1).ToList();
+        // The last real reply's text, when it has some (a reply that only calls a tool has none).
+        var lastWords = after.Select(ReplyText).LastOrDefault(text => !string.IsNullOrWhiteSpace(text));
+        // Second review, findings 1 and 2: a reply after the error alone is also what a session that WORKED after a lift
+        // writes (one the keeper resumed, one Petre typed into), and the held nudge's own answer is one more reply, so the
+        // rule would fire on healthy sessions and again after every Deskbar restart. So it fires only when the session's
+        // last words are about the limit (measured: "It's waiting for the usage limit to lift at 14:10"), and never once
+        // the session has been told the limit is over since the error: Deskbar's resume or held nudge (they share
+        // ToldMarker) or Claude Code's own release note.
+        return lastWords is { } words && words.Contains("limit", StringComparison.OrdinalIgnoreCase)
+            && !after.Any(line => line.Contains(ToldMarker, StringComparison.OrdinalIgnoreCase))
+            && !Signs(after).Any(sign => sign.Kind == SignKind.Release)
+            && !ClaudeTranscript.WasCutOff(jsonLines)
+            && ClaudeTranscript.LastTurnError(jsonLines).HasNoValue
+                ? new LimitErrorSign(error.At, error.ResetsAt!.Value)
+                : Maybe<LimitErrorSign>.None;
+    }
+
+    /// <summary>
+    /// The words every message of Deskbar's that says the limit is over carries (SessionKeeper.LimitContinueMessage and
+    /// SessionKeeper.HeldNudge), so a transcript shows the session was told (HeldAfterLift).
+    /// </summary>
+    public const string ToldMarker = "not wait for the reset time its message named";
+
+    // A real reply's text: an assistant entry that is not an API error, not a subagent's and not made up ("<synthetic>"),
+    // its text blocks joined. Null for anything else; "" for a real reply with no text.
+    static string? ReplyText(string line)
+    {
+        if (!line.Contains("\"assistant\"", StringComparison.Ordinal) || line.Contains("isApiErrorMessage", StringComparison.Ordinal)) return null;
+        try
+        {
+            using var document = JsonDocument.Parse(line);
+            var root = document.RootElement;
+            var real = root.ValueKind == JsonValueKind.Object
+                && root.TryGetProperty("type", out var type) && type.ValueKind == JsonValueKind.String && type.GetString() == "assistant"
+                && !ClaudeTranscript.IsTrue(root, "isSidechain")
+                && ClaudeTranscript.At(root, "message", "model") is { ValueKind: JsonValueKind.String } model
+                && model.GetString() != "<synthetic>";
+            return !real ? null
+                : ClaudeTranscript.At(root, "message", "content") is { ValueKind: JsonValueKind.Array } content
+                    ? string.Join(" ", content.EnumerateArray()
+                        .Where(block => block.ValueKind == JsonValueKind.Object && block.TryGetProperty("text", out var text) && text.ValueKind == JsonValueKind.String)
+                        .Select(block => block.GetProperty("text").GetString()))
+                    : "";
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
     enum SignKind { WrapUp, Release, LimitError }
 
     sealed record SignLine(SignKind Kind, DateTimeOffset At, DateTimeOffset? ResetsAt = null);

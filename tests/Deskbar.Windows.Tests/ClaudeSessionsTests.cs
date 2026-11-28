@@ -1205,7 +1205,7 @@ public class ClaudeSessionsTests
         rig.RunTo(TimeSpan.FromHours(1) + SessionKeeper.LimitMargin + TimeSpan.FromMinutes(1));
         Assert.Equal(["stop", sessionId[..8]], Assert.Single(rig.Cli.Stops).Arguments);
         var resume = Assert.Single(rig.Cli.Resumes);
-        Assert.Equal(["--bg", "--resume", sessionId, ContinueText], resume.Arguments);
+        Assert.Equal(["--bg", "--resume", sessionId, SessionKeeper.LimitContinueMessage], resume.Arguments);
         Assert.Contains(rig.Task(taskId).Comments, c => c.ByDeskbar && c.Markdown.StartsWith("Resumed, since the usage limit", StringComparison.Ordinal));
     }
 
@@ -1274,7 +1274,7 @@ public class ClaudeSessionsTests
 
         rig.RunTo(TimeSpan.FromMinutes(30) + SessionKeeper.LimitMargin + TimeSpan.FromMinutes(1));
         Assert.Single(rig.Cli.Stops);
-        Assert.Equal(["--bg", "--resume", sessionId, ContinueText], Assert.Single(rig.Cli.Resumes).Arguments);
+        Assert.Equal(["--bg", "--resume", sessionId, SessionKeeper.LimitContinueMessage], Assert.Single(rig.Cli.Resumes).Arguments);
         var reopened = Assert.Single(rig.Reopened);
         Assert.Equal((taskId, sessionId), (reopened.TaskId, reopened.SessionId));
         // Not while the old window was still closing: it would only have been brought forward, and then closed.
@@ -1315,7 +1315,7 @@ public class ClaudeSessionsTests
         rig.RunTo(ClaudeSessions.Poll + SessionKeeper.Spacing + Seconds(1));
 
         Assert.Equal(["stop", sessionId[..8]], Assert.Single(rig.Cli.Stops).Arguments);
-        Assert.Equal(["--bg", "--resume", sessionId, ContinueText], Assert.Single(rig.Cli.Resumes).Arguments);
+        Assert.Equal(["--bg", "--resume", sessionId, SessionKeeper.LimitContinueMessage], Assert.Single(rig.Cli.Resumes).Arguments);
         Assert.Contains(rig.Task(taskId).Comments, c => c.ByDeskbar && c.Markdown.StartsWith("Resumed, since the usage limit", StringComparison.Ordinal));
     }
 
@@ -1386,7 +1386,7 @@ public class ClaudeSessionsTests
 
         Assert.Equal(3, rig.Cli.Probes.Count);
         Assert.Equal(["stop", sessionId[..8]], Assert.Single(rig.Cli.Stops).Arguments);
-        Assert.Equal(["--bg", "--resume", sessionId, ContinueText], Assert.Single(rig.Cli.Resumes).Arguments);
+        Assert.Equal(["--bg", "--resume", sessionId, SessionKeeper.LimitContinueMessage], Assert.Single(rig.Cli.Resumes).Arguments);
     }
 
     // Second review, finding A: should the probe be wrong about the stopped session's limit (one Haiku does not share), it
@@ -1424,6 +1424,61 @@ public class ClaudeSessionsTests
 
         Assert.Single(rig.Cli.Resumes);
         Assert.Equal(probes, rig.Cli.Probes.Count);
+    }
+
+    // Session a8c3dd64, 2026-11-28: its turn died on the limit naming 14:10, Deskbar's asks woke it and its replies went
+    // through, yet it kept saying it waited for 14:10. Its own replies prove the limit gone, so it is told to carry on,
+    // once, with no probe or transcript scan needed.
+    [Fact]
+    public void A_session_holding_itself_on_a_limit_its_replies_prove_gone_is_told_to_carry_on()
+    {
+        using var rig = new Rig();
+        var (taskId, sessionId) = rig.Running("limits");
+        var nudges = new List<WatchNudge>();
+        using var watching = rig.Tasks.WatchNudges.Subscribe(nudges.Add);
+        var path = ClaudeTranscript.PathOf(rig.Home, @"E:\repos\Work", sessionId);
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        File.WriteAllLines(path,
+        [
+            """{"type":"user","message":{"role":"user","content":"start"}}""",
+            "{\"type\":\"assistant\",\"timestamp\":\"" + (Origin - TimeSpan.FromMinutes(60)).ToString("O") + "\",\"isApiErrorMessage\":true,\"apiErrorParams\":{\"rate_limit_info\":{\"resetsAt\":"
+                + (Origin + TimeSpan.FromHours(5)).ToUnixTimeSeconds() + "}},\"message\":{\"role\":\"assistant\",\"stop_reason\":\"stop_sequence\"}}",
+            """{"type":"user","message":{"role":"user","content":"Deskbar: no session has worked on your task"}}""",
+            "{\"type\":\"assistant\",\"timestamp\":\"" + (Origin - TimeSpan.FromMinutes(5)).ToString("O") + "\",\"message\":{\"model\":\"claude-opus-5-5\",\"role\":\"assistant\",\"stop_reason\":\"end_turn\",\"content\":[{\"type\":\"text\",\"text\":\"Waiting for the usage limit to lift at 14:10.\"}]}}",
+        ]);
+        rig.Begin();
+
+        rig.RunTo(TimeSpan.FromMinutes(5));
+
+        Assert.Equal((taskId, ClaudeSessions.HeldNudge), (Assert.Single(nudges).TaskId, nudges[0].Text));
+        Assert.Single(rig.Task(taskId).Comments, c => c.ByDeskbar && c.Markdown.StartsWith("It was waiting for the usage limit to reset", StringComparison.Ordinal));
+        Assert.Empty(rig.Cli.Resumes);
+        Assert.Empty(rig.Cli.Probes);
+    }
+
+    // Second review, finding 2: after a Deskbar restart the session that was told already is not told again, though its
+    // answer to the nudge is one more reply after the error and its reset is still ahead.
+    [Fact]
+    public void A_session_already_told_the_limit_is_over_is_not_told_again()
+    {
+        using var rig = new Rig();
+        var (_, sessionId) = rig.Running("limits");
+        var nudges = new List<WatchNudge>();
+        using var watching = rig.Tasks.WatchNudges.Subscribe(nudges.Add);
+        var path = ClaudeTranscript.PathOf(rig.Home, @"E:\repos\Work", sessionId);
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        File.WriteAllLines(path,
+        [
+            "{\"type\":\"assistant\",\"timestamp\":\"" + (Origin - TimeSpan.FromMinutes(60)).ToString("O") + "\",\"isApiErrorMessage\":true,\"apiErrorParams\":{\"rate_limit_info\":{\"resetsAt\":"
+                + (Origin + TimeSpan.FromHours(5)).ToUnixTimeSeconds() + "}},\"message\":{\"role\":\"assistant\",\"stop_reason\":\"stop_sequence\"}}",
+            "{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":\"Deskbar's watch, about your task: " + ClaudeSessions.HeldNudge + "\"}}",
+            "{\"type\":\"assistant\",\"timestamp\":\"" + (Origin - TimeSpan.FromMinutes(5)).ToString("O") + "\",\"message\":{\"model\":\"claude-opus-5-5\",\"role\":\"assistant\",\"stop_reason\":\"end_turn\",\"content\":[{\"type\":\"text\",\"text\":\"Carrying on; the usage limit is over.\"}]}}",
+        ]);
+        rig.Begin();
+
+        rig.RunTo(TimeSpan.FromMinutes(5));
+
+        Assert.Empty(nudges);
     }
 
     // The probe is only for a stopped session: with none, Claude is never asked, and it costs nothing.

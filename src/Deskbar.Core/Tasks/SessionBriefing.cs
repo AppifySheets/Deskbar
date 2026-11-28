@@ -129,7 +129,8 @@ public static class SessionBriefing
             // So is the request to write a set-aside question afresh (task 0cac3082). Counted as a reply, it would only
             // matter to a task waiting on the user, which a set-aside task is not, but it is not the user either way.
             || (text.StartsWith(RegenerateOpening, StringComparison.Ordinal) && text.Contains("Deskbar will not put your old question back", StringComparison.Ordinal))
-            || text.TrimEnd() == SessionKeeper.ContinueMessage);
+            || text.TrimEnd() == SessionKeeper.ContinueMessage
+            || text.TrimEnd() == SessionKeeper.LimitContinueMessage);
 
     // How Claude Code opens the prompts it delivers itself (task b846f5ad). Each one fires UserPromptSubmit like a message
     // the user typed, with the text below as the hook's `prompt` (measured on 2026-11-26 in this machine's transcripts: a
