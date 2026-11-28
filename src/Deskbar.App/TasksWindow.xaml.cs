@@ -177,9 +177,20 @@ public partial class TasksWindow : Window
         // A page on show gets the keyboard in its box when the panel comes back in front with nothing focused
         // (TasksWindow.PageFocus.cs, task 64744611).
         Activated += (_, _) => RefocusPageBox();
+        // The list gets the keyboard too, so its arrows work with no click first (TasksWindow.Keys.cs, task b61f79de).
+        Activated += (_, _) => KeepKeysInPanel();
+        // A press outside the keys card closes it (TasksWindow.KeysCard.cs).
+        PreviewMouseDown += (_, e) => CloseKeysCardOnPressOutside(e);
         // Esc undoes the innermost thing; F2 edits the selected line's title in place (Ruling 38); Ctrl+F goes to the
         // search box (Task 7). Through Press, so the tests can hand it the modifiers a synthetic key event cannot carry.
-        PreviewKeyDown += (_, e) => e.Handled = Press(e.Key, Keyboard.Modifiers);
+        // Shift+F10 and Alt+letter come in as Key.System with the real key in SystemKey (TaskDetailWindow does the same), so
+        // the keys of TasksWindow.Keys.cs see them as F10 and the letter.
+        PreviewKeyDown += (_, e) =>
+        {
+            pressSource = e.OriginalSource;
+            try { e.Handled = Press(e.Key == Key.System ? e.SystemKey : e.Key, Keyboard.Modifiers); }
+            finally { pressSource = null; }
+        };
         // Never in Alt+Tab: WS_EX_TOOLWINDOW, for the reason the bar gives in its own OnSourceInitialized
         // (ShowInTaskbar false alone keeps a window off the taskbar but not out of Alt+Tab). The panel is part of the
         // bar, which is not in Alt+Tab either (spec "The panel window").
@@ -3252,12 +3263,13 @@ public partial class TasksWindow : Window
     // Whether the task is drawn as a subtask's line inside its parent's open thread (task 249a1e8a, Line's inThreadOf).
     bool InParentThread(Guid id) => latest is { } view && ThreadLines(DrawnRows(view)).Any(sub => sub.Id == id);
 
-    internal ContextMenu OpenMenuFor(Guid id, bool atPointer = false)
+    // `anchor`: what the menu hangs from when the keyboard opened it (TasksWindow.Keys.cs, AnchorFor); else the "⋯" button.
+    internal ContextMenu OpenMenuFor(Guid id, bool atPointer = false, UIElement? anchor = null)
     {
         var row = RowFor(id);
         var menu = atPointer
             ? OwnMenus.AtPointer(this) // this window as its target, for its screen's scaling
-            : new ContextMenu { PlacementTarget = menuButtons.GetValueOrDefault(id), Placement = PlacementMode.Bottom };
+            : new ContextMenu { PlacementTarget = anchor ?? menuButtons.GetValueOrDefault(id), Placement = PlacementMode.Bottom };
         if (row is null) return menu;
 
         // A closed task's title is not edited: it is history, and Reopen brings it back first.
@@ -3828,7 +3840,9 @@ public partial class TasksWindow : Window
     internal bool Press(Key key, ModifierKeys modifiers) =>
         (key == Key.Escape && Escape())
         || (key == Key.F2 && EditSelected())
-        || (key == Key.F && modifiers == ModifierKeys.Control && FocusSearch());
+        || (key == Key.F && modifiers == ModifierKeys.Control && FocusSearch())
+        // Every other key: arrows, Enter, tabs, views, menus and letters (TasksWindow.Keys.cs, task b61f79de).
+        || Navigate(key, modifiers);
 
     // Ctrl+F (Task 7): the keyboard to the search box, its text selected so typing replaces it, as a browser's find does.
     // Not while a rename or a comment edit is open: those hold every redraw (MustWait), so a search typed then would seem
@@ -3848,7 +3862,9 @@ public partial class TasksWindow : Window
     // is the exception: with nothing else to undo, Esc closes it as its × does (ManagerBack, CloseDockOnEscape).
     bool Escape()
     {
-        if (SearchBox.IsKeyboardFocusWithin) EndSearch();
+        // The keys card goes first: it lies over everything else (TasksWindow.KeysCard.cs).
+        if (KeysCardShown) HideKeysCard();
+        else if (SearchBox.IsKeyboardFocusWithin) EndSearch();
         else if (renaming is not null) EndRename();
         else if (editingComment is not null) EndCommentEdit();
         // A comment box's skill list closes before anything else does (task 29bdd158): the window's Esc runs ahead of the
@@ -3861,7 +3877,9 @@ public partial class TasksWindow : Window
         else if (addSkills.Dismiss()) { }
         else if (AddBoxShown) HideAdd();
         // An Inbox page: back, to its parent's page or the list (TasksWindow.InboxPage.cs, task 740a2231).
-        else if (InboxBack()) { }
+        // Back on the list, the keyboard on the board: the page's box went with the page, and the arrows need the keyboard
+        // somewhere in the panel that is not a box (TasksWindow.Keys.cs, task b61f79de).
+        else if (InboxBack()) KeepKeysInPanel();
         // RULING 63: Esc folds the selected line's open thread, the last thing it undoes.
         // Not while a comment box has the keyboard: there Esc belongs to the box (review, M5).
         else if (selectedId.HasValue && authors.ContainsKey(selectedId.Value) && !(EscapeIgnoresThreadWhile?.Invoke() ?? commentBoxes.Values.Any(box => box.IsKeyboardFocusWithin)))

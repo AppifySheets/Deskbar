@@ -238,6 +238,11 @@
                 </local:FastScrollViewer>
                 <!-- An Inbox task's page (task 740a2231, TasksWindow.InboxPage.cs), over the Inbox's list while one is open. -->
                 <Border x:Name="InboxPage" Visibility="Collapsed" Background="#FF0F1218"/>
+                <!-- The keys card (task b61f79de, TasksWindow.KeysCard.cs): ? or F1 shows the keys of the place on show,
+                     over whatever the board shows, the page included. Filled in code when it opens. -->
+                <Border x:Name="KeysCard" Visibility="Collapsed" Background="#FF1A1D24" BorderBrush="#FF3A3E48"
+                        BorderThickness="1" CornerRadius="10" Padding="14,12" Margin="16" MaxWidth="380"
+                        HorizontalAlignment="Center" VerticalAlignment="Top"/>
             </Grid>
         </DockPanel>
     </Border>

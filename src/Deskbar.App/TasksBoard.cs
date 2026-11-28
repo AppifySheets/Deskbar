@@ -411,6 +411,7 @@ public sealed partial class TasksBoard : IDisposable
             Reevaluate = id => Report(tasks.Reevaluate(id), id),
             ShowInbox = ShowInbox,
             OpenPage = OpenPage,
+            Select = Select,
             PermissionsOf = PermissionsOf, AnswerPermission = AnswerPermission, AnswerSuggestion = AnswerSuggestion,
             AnswerDialog = AnswerDialog, AnswerPlan = AnswerPlan,
             AnswerWithOption = AnswerWithOption,
@@ -884,6 +885,18 @@ public sealed partial class TasksBoard : IDisposable
         selection.Select(id);
         if (!expanded.Remove(id)) expanded.Add(id);
         Refresh();
+    }
+
+    /// <summary>
+    /// Up, Down, Home and End in the panel (TasksWindow.Keys.cs, task b61f79de): the task becomes the selected one and its
+    /// line scrolls into view as little as it takes, and NOTHING ELSE. Unlike <see cref="Pick"/> it leaves every thread as
+    /// it is, so walking down a list does not unfold each line on the way; Enter does what the click does. The selection's
+    /// Changed pulse repaints the highlight (the subscription in the constructor), so no redraw is needed.
+    /// </summary>
+    public void Select(Guid id)
+    {
+        selection.Select(id);
+        window.RevealSelected();
     }
 
     /// <summary>
@@ -2485,6 +2498,12 @@ internal sealed partial record TasksWindowActions(
     /// Claude session to check where the task stands and fix it. None, no button and no item.
     /// </summary>
     public Action<Guid>? Reevaluate { get; init; }
+
+    /// <summary>
+    /// The arrow keys' selection (TasksBoard.Select, task b61f79de): the task selected and scrolled into view, its thread
+    /// left as it is. None (a bare window in a test), the arrows select nothing.
+    /// </summary>
+    public Action<Guid>? Select { get; init; }
 }
 
 /// <summary>

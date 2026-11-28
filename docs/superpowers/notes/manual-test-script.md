@@ -2095,3 +2095,14 @@ PC3. Ask it to write a file: the card offers Yes and No only, as the terminal do
 PC4. **No** on any card refuses the call and the session says the user denied it in Deskbar.
 
 DP1. (task 1f6ae26e) With a plain question waiting, a quiet task handed back and a task handed over with `task ask - --deploy` (merged, waiting for your deploy) asked before both: the Inbox's Needs you tab lists Questions first, then Went quiet, then a "To deploy" caption ("merged, not running yet") holding the deploy task with its amber ring, then Finished.
+
+## The panel from the keyboard alone
+
+The tasks panel works without the mouse ([Deskbar task b61f79de](https://deskbar.app/task#b61f79de-1d04-4d99-ab58-2d1ddba4190c)).
+
+KB1. Open the panel on the Inbox and press Down a few times, without clicking first: the selection walks the lines in order and the list scrolls to keep it in view. Home and End go to the first and the last line.
+KB2. Press Enter: the selected task's page opens with the keyboard in its comment box. Press Esc with the box empty: back on the list, and Down goes on from the same line straight away.
+KB3. Left and Right walk the tabs (Needs you, Claude, Notes, All) and stop at the ends. Ctrl+2 shows the List, Ctrl+3 the Matrix (on a wide panel), Ctrl+4 Stats, Ctrl+1 the Inbox again.
+KB4. Select a line and press the menu key (or Shift+F10): its ... menu opens under its line, and the arrows and Enter pick an item. W opens the workspace menu, P opens the pull request (a menu when there are several), R rechecks a Claude task.
+KB5. On a page, Alt+P, Alt+W and Alt+R do the same while the keyboard is in the comment box, and plain letters are typed into the box. Page Up and Page Down scroll the page.
+KB6. Press ? (or F1): a card lists the keys of the view you are in; on a page it lists the page's keys. ?, F1, Esc or a click elsewhere closes it; so does Ctrl+2. The "? keys" button at the panel's foot opens it too.

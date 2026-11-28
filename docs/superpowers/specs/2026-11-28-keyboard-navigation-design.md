@@ -53,6 +53,11 @@ board).
 | F2, Ctrl+F | as today | rename, search |
 | ? or F1 | anywhere | the keys panel |
 
+**Found while building:** a page opens with the keyboard in its comment box (task 64744611, `TasksWindow.PageFocus.cs`),
+so plain letters on a page would be typed into the message. The letters also answer to Alt+letter everywhere (Alt+P,
+Alt+W, Alt+R, Alt+N, Alt+C), which no text box uses, and the menu key works from the box too. On a page, Up/Down scroll
+it when no box has the keyboard; Page Up/Page Down scroll it even from the box.
+
 ## The keys panel
 
 A small card over the panel, drawn by the panel itself (not a new window), listing the keys above for the view that is
