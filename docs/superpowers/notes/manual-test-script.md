@@ -797,6 +797,12 @@ S16b. A Claude parent's subtask on the bar (task 4c01747c). Give a task assigned
     bar. Pick "Add subtask…" on its line and add one: the new line shows on the bar and glows; click another line and it
     folds away. Tick the box: the plain subtask's line is back on the bar.
 
+S16c. A Done parent's open subtask (task 29d4a541). With the Subtasks box unticked, set the parent from S16 Done while
+    one plain subtask is still open. In the Inbox's Needs you tab that subtask has its own line right under the parent,
+    in Finished; in the List it is under the parent in Waiting on you, and in the Matrix it keeps its line. Tick the
+    subtask closed from its line, then tick the parent: it closes, with no "Close its open subtask first". A plain
+    subtask of a parent that is not Done still folds as in S16.
+
 S17. A subtask's way to its parent (task 54b39c4c). Give a note three subtasks. In the tasks panel open the last
     subtask's thread: it starts with "↑ Subtask of <the note>". Click it: the note is picked, its thread opens and the
     list scrolls to it. Right-click a subtask's line in the panel: **Open parent** follows **Add subtask…** and does the
