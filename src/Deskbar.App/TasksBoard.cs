@@ -361,9 +361,13 @@ public sealed partial class TasksBoard : IDisposable
             OpenManager = () => Report(OpenManager?.Invoke() ?? Result.Failure("The manager is not available.")),
             // The manager's page (task 6c4c067f): its box, its Claude button and the user's messages it draws. Read when
             // they happen, as OpenManager is, since the App sets them after this constructor.
-            SendToManager = (text, from) => Report(SendToManager?.Invoke(text,
-                from is { } id ? tasks.Board.Tasks.TryFirst(t => t.Id == id) : Maybe<TaskItem>.None) ?? Result.Failure("The manager is not available.")),
-            OpenManagerTerminal = () => Report(OpenManagerTerminal?.Invoke() ?? Result.Failure("The manager is not available.")),
+            // From the docked manager (task 71aae045) `from` is null, and the task open in the tasks panel's Inbox is named.
+            SendToManager = (text, from) => ReportManager(SendToManager?.Invoke(text,
+                CurrentTaskForManager(from) is { } id ? tasks.Board.Tasks.TryFirst(t => t.Id == id) : Maybe<TaskItem>.None) ?? Result.Failure("The manager is not available.")),
+            // The Claude button (once "Open in terminal") swaps the docked page for the terminal, which docks in the same slot (task 71aae045). The page
+            // closes only once the terminal is on its way (review finding): a refusal leaves it open with the reason on it.
+            OpenManagerTerminal = () => ReportManager(OpenManagerTerminal?.Invoke() ?? Result.Failure("The manager is not available."))
+                .Tap(HideManager),
             ManagerMessages = () => manager.State.Manager?.Messages ?? [],
             StopClaudeAndClose = id => Close(id, stopClaude: true),
             CloseAnyway = id => Close(id, anyway: true),
@@ -702,7 +706,8 @@ public sealed partial class TasksBoard : IDisposable
     internal void Refresh()
     {
         // Drawn records the arrangement handed over, which a held list keeps next (task 106bc422, TasksBoard.LineHold.cs).
-        if (window.IsOpen) window.Present(Drawn(View()));
+        if (window.IsOpen) window.Present(lastView = Drawn(View()));
+        RefreshManagerDock();
         RefreshTaskWindows();
     }
 
@@ -1391,6 +1396,7 @@ public sealed partial class TasksBoard : IDisposable
         taskWindows.Clear();
         panel.Shutdown();
         window.CloseForGood();
+        ShutdownManagerDock();
     }
 
     // --- the view ----------------------------------------------------------------------------------------------------

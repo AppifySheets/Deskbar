@@ -55,6 +55,7 @@ public partial class App : Application
     // The tasks panel's app bar beside the bar's (TasksPanel; spec 2026-11-23-tasks-panel-design.md), built with the
     // board; the 1 s timer keeps it (Keep, ReclaimTopmost). Null in compatibility mode, like the bar.
     TasksPanel? tasksPanel;
+    TasksPanel? managerPanel;          // the manager's own docked panel, its page (task 71aae045, TasksBoard.DockManager)
     ManagerDock? managerDock;         // the manager's terminal docked inside the tasks panel (task f171bca6)
     bool tasksPanelPinned;            // its hwnd is pinned to every desktop once, after its first show (see the board's construction)
     // Whether the tasks panel is shown, for the bar's "All tasks" look. The bar is built before the panel (the panel needs
@@ -1106,9 +1107,10 @@ public partial class App : Application
         manager?.KnownWindows.Any(w => w.Handle == window && Core.Tasks.ManagerSession.IsWindow(w.ProcessPath, w.Title)) ?? false;
 
     // THE MANAGER BUTTON AND LINE OPEN THE MANAGER'S PAGE (task 6c4c067f; spec
-    // docs/superpowers/specs/2026-11-28-manager-inbox-page-design.md): the tasks panel comes forward on the Inbox with the
-    // manager's page, and today's manager is made sure of without a window (Open with attach false: attached to, resumed,
-    // started or claimed as the click did before). The terminal is the page's Claude button (task d04cf9f0) and the pipe's
+    // docs/superpowers/specs/2026-11-28-manager-inbox-page-design.md), in the manager's own docked panel beside the tasks
+    // panel since task 71aae045 (TasksBoard.ManagerDock.cs), and today's manager is made sure of without a window (Open
+    // with attach false: attached to, resumed, started or claimed as the click did before). The terminal is the page's
+    // Claude button (task d04cf9f0) and the pipe's
     // `task manager`, both still ManagerActions.Open with its window.
     Result OpenManagerPage()
     {
@@ -1261,7 +1263,14 @@ public partial class App : Application
             ? Result.Success()
             : manager!.PinWithoutMemory(window).Tap(() => ClickTrace.Write($"manager window 0x{window.Value:X}: pinned to every desktop")));
         // Pinned (now or before): the dock takes it (ManagerDock.Follow), and puts it back on its strip on each later event.
-        if (done.IsSuccess) managerDock?.Follow(window);
+        if (done.IsSuccess)
+        {
+            // A terminal the dock starts following now (the pipe's `task manager`, say) takes the manager's slot, so the
+            // docked page closes (task 71aae045, review finding): one manager column, not two. Only on the first follow:
+            // every later event of the same terminal comes through here too, and must not close a page opened since.
+            if (managerDock is { } dock && !dock.Follows(window)) tasksBoard?.HideManager();
+            managerDock?.Follow(window);
+        }
         if (done.IsSuccess || triesLeft <= 1) return;
         ClickTrace.Write($"manager window 0x{window.Value:X}: not pinned yet ({done.Error}), trying again");
         var again = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(2) };
@@ -2754,6 +2763,9 @@ public partial class App : Application
                 tasksPanel?.ReclaimTopmost();
                 // The manager's dock after the panel's, for the same reason, and its terminal put back if moved (ManagerDock.Keep).
                 managerDock?.Keep();
+                // ...and the manager's own docked panel (task 71aae045), kept and re-asserted as the tasks panel is.
+                managerPanel?.Keep();
+                managerPanel?.ReclaimTopmost();
                 // Petre: "i want to always refresh what's the active window, i can't afford to
                 // think that one window is active and another being highlighted."
                 //
@@ -2969,6 +2981,33 @@ public partial class App : Application
                     ClickTrace.Write($"manager dock pin failed: {err}");
                 }));
             };
+            // THE MANAGER'S OWN DOCKED PANEL (task 71aae045, TasksBoard.ManagerDock.cs): a second tasks window that draws only
+            // the manager's page, on a strip that follows the bar's and the tasks panel's registrations exactly as the
+            // terminal's dock above does, so it sits just inside the tasks panel (just inside the bar while that is closed).
+            // Kept off the bar's window list and pinned to every desktop after its first show, as the tasks panel is.
+            var managerWindow = new TasksWindow { ManagerOnly = true, Title = "Deskbar manager" };
+            var managerHwnd = new WindowInteropHelper(managerWindow).EnsureHandle();
+            monitor.Ignore(managerHwnd);
+            managerPanel = new TasksPanel(managerWindow, bar.Strip.Merge(tasksPanel.Registered))
+            {
+                Name = "manager panel",
+                ClampWidth = Core.Tasks.ManagerDockLayout.Clamp,
+                OverflowInFront = () => bar.OverflowInFront,
+                BarWindow = () => bar.Hwnd,
+                RestoredWindows = RestoredUnderStrips,
+                Nudge = panelLayout.Nudge,
+            };
+            var managerPinned = false;
+            managerWindow.IsVisibleChanged += (_, _) =>
+            {
+                if (!managerWindow.IsVisible || managerPinned) return;
+                managerPinned = true;
+                _ = Dispatcher.InvokeAsync(() => desktops!.Pin(new WindowHandle(managerHwnd)).TapError(err =>
+                {
+                    managerPinned = false;
+                    ClickTrace.Write($"manager panel pin failed: {err}");
+                }));
+            };
             var tasksActivator = new WindowActivator();
             tasksBoard = new TasksBoard(tasksWindow, tasksPanel, tasks!, manager, GoToTask,
                 // The chips wear the colour the bar's rows wear (its last rebuild's rail colours).
@@ -3053,6 +3092,9 @@ public partial class App : Application
             // without being brought forward. The bar has shown by now, but the panel answers its strip notice on the
             // dispatcher, so this only marks it wanted and the panel docks once that answer runs (TasksPanel.Show).
             if ((manager.State.TasksPanel ?? TasksPanelState.Default).Open) tasksBoard.Restore();
+            // The manager's docked panel (task 71aae045) the same way: handed to the board, and reopened when left open.
+            tasksBoard.DockManager(managerWindow, managerPanel);
+            if (manager.State.ManagerDockOpen) tasksBoard.RestoreManager();
 
             hotkeys = new HotkeyService(direction => switcher.Step(direction), boundSwitcher,
                 () => quickFind.Show(), boundQuickFind);

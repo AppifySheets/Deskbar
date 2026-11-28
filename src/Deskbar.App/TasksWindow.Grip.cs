@@ -73,7 +73,7 @@ public partial class TasksWindow
         var moved = cursor.X - start.CursorX;
         // Docked on the right, the grip is the LEFT edge: dragging it left (a negative move) widens the panel.
         var wanted = start.Window.Right - start.Window.Left + (dockedOn == PanelEdge.Right ? -moved : moved);
-        var least = (int)Math.Ceiling(TasksPanelLayout.MinWidth * start.Scale);
+        var least = (int)Math.Ceiling((ManagerOnly ? Core.Tasks.ManagerDockLayout.MinWidth : TasksPanelLayout.MinWidth) * start.Scale);
         var most = Math.Max(least, start.ScreenWidth / 2);
         previewWidth = Math.Clamp(wanted, least, start.ScreenWidth > 0 ? most : int.MaxValue);
         PlaceWidth(start.Window, previewWidth);
@@ -90,7 +90,10 @@ public partial class TasksWindow
             return;
         }
         // A press without a move (a click on the grip) changes nothing, and so saves nothing.
-        if (previewWidth != before) Actions?.ResizePanel(previewWidth / start.Scale);
+        // The manager's docked window resizes its own strip (task 71aae045), never the tasks panel.
+        if (previewWidth == before) return;
+        if (ManagerOnly) ResizeManagerDock?.Invoke(previewWidth / start.Scale);
+        else Actions?.ResizePanel(previewWidth / start.Scale);
     }
 
     // The window `width` pixels wide, its outer edge (against the bar) where it was at the press.

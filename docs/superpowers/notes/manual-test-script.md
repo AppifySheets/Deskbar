@@ -2019,3 +2019,15 @@ CB2. Click Close task: the task stays, and the block now starts with "Close its 
 CB3. Click the subtask in the block: its own page opens, and Back returns to the parent's page.
 CB4. Give the parent four open subtasks: the block lists three and "and 1 more, in the thread below".
 CB5. Open the parent in its own window (Open in window) and press Close task there: the words show on the window's line above the page, once, and the subtasks under the state line.
+
+## The manager in its own docked panel
+
+Since [Deskbar task 71aae045](https://deskbar.app/task#71aae045-f7d9-47b8-8eee-8c6bf8d72d6d) the manager's page above opens in a panel of its own beside the tasks panel, not inside it. MI1, MI3 and MI4 above read as follows now. Claude sessions on.
+
+MD1. Tasks panel open on a task's page. Click Manager on the bar: a second full-height panel docks just inside the tasks panel with the manager's page (violet tile, "Manager", × at the top right, the box at the foot with a blinking caret). The tasks panel still shows the task's page. Maximized windows shrink to make room.
+MD2. Type straight away, without clicking: the text goes into the manager's box. Enter sends it and the manager names the task open in the tasks panel as "the current task".
+MD3. Press Esc outside the box: the manager's panel stays. Click ×: it closes and the space goes back to the windows.
+MD4. Close the tasks panel while the manager's panel is open: the manager's panel moves out to sit just inside the bar. Open the tasks panel again: the manager's panel ends up inside it again (bar, tasks, manager).
+MD5. Drag the manager panel's inner edge: it takes the new width, and the next open uses it.
+MD6. Leave the manager's panel open and restart Deskbar: it comes back docked, without taking the keyboard.
+MD7. The Claude button left of the box: the panel closes and the manager's terminal docks in its place. A terminal opened another way (`deskbar.cmd task manager`) closes the panel the same way.
