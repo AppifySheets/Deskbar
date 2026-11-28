@@ -32,11 +32,17 @@ namespace Deskbar.Core.Tasks;
 /// brings its window to the front or writes to it again; null while there is nothing unread.</item>
 /// <item><paramref name="AnsweredAt"/>: when the turn ended, for the line's age.</item>
 /// </list>
-/// A new manager (StartNew, Claim) is a new record, so a new day's manager starts without yesterday's question.
+/// And the user's messages from the manager's page (task 6c4c067f, ManagerSession.WithMessage), optional for the same reason:
+/// <list type="bullet">
+/// <item><paramref name="Messages"/>: the newest ManagerSession.MessagesKept of them, oldest first; null for none.</item>
+/// </list>
+/// A new manager (StartNew, Claim) is a new record, so a new day's manager starts without yesterday's question (or messages:
+/// a new session is a new chat).
 /// </summary>
 public sealed record ManagerRecord(string SessionId, DateOnly Day, DateTimeOffset? Since = null, bool Unread = false,
     IReadOnlyList<Guid>? HandedBack = null, string? Question = null, DateTimeOffset? AskedAt = null,
-    bool Replying = false, string? Answer = null, DateTimeOffset? AnsweredAt = null)
+    bool Replying = false, string? Answer = null, DateTimeOffset? AnsweredAt = null,
+    IReadOnlyList<ManagerMessage>? Messages = null)
 {
     // A record compares by its list's CONTENTS, not the list's reference, so a record loaded from state.json equals the
     // one saved, and ManagerWaker can tell a changed record from the same one to skip a needless save.
@@ -44,12 +50,22 @@ public sealed record ManagerRecord(string SessionId, DateOnly Day, DateTimeOffse
         other is not null && SessionId == other.SessionId && Day == other.Day && Since == other.Since
         && Unread == other.Unread && (HandedBack ?? []).SequenceEqual(other.HandedBack ?? [])
         && Question == other.Question && AskedAt == other.AskedAt
-        && Replying == other.Replying && Answer == other.Answer && AnsweredAt == other.AnsweredAt;
+        && Replying == other.Replying && Answer == other.Answer && AnsweredAt == other.AnsweredAt
+        // The page messages (task 6c4c067f) by content too, for the same reason as HandedBack.
+        && (Messages ?? []).SequenceEqual(other.Messages ?? []);
 
     public override int GetHashCode() =>
         HashCode.Combine(HashCode.Combine(SessionId, Day, Since, Unread, (HandedBack ?? []).Count, Question, AskedAt),
-            Replying, Answer, AnsweredAt);
+            Replying, Answer, AnsweredAt, (Messages ?? []).Count);
 }
+
+/// <summary>
+/// One message the user wrote to the manager on its page in the tasks panel (task 6c4c067f, spec
+/// docs/superpowers/specs/2026-11-28-manager-inbox-page-design.md). Kept on the day's ManagerRecord so the page can draw it
+/// as the user's bubble: a message delivered through the manager's waiter is a "task-notification" line in the transcript,
+/// which the chat never shows, so the transcript alone would lose it.
+/// </summary>
+public sealed record ManagerMessage(Guid Id, DateTimeOffset At, string Text);
 
 /// <summary>What a click on the manager button should do.</summary>
 public abstract record ManagerStep
@@ -144,6 +160,34 @@ public static class ManagerSession
                                + "\"Current task\", \"this task\" or \"the open task\" in the message means this one.")
             : Maybe<string>.None;
 
+    // THE MANAGER'S PAGE (task 6c4c067f; spec docs/superpowers/specs/2026-11-28-manager-inbox-page-design.md). The manager
+    // opens inside the tasks panel like a task's Inbox page, and what the user types in its box reaches the session the way
+    // a comment reaches a task's session (its waiter, or a resume with the message). PageId stands for the manager wherever
+    // the page machinery keys by a task id (the transcript poll, the chat source); no task ever has it.
+    public static readonly Guid PageId = new("6d616e61-6765-7200-0000-706167650001");
+
+    /// <summary>How many of the user's page messages the day's record keeps (WithMessage).</summary>
+    public const int MessagesKept = 100;
+
+    // The opening of a page message. It says on its own that what follows is the user's, so the manager reads it right
+    // without a briefing line (the briefing is at its 40-line cap), and the chat drops it when a resume wrote it as a prompt
+    // (ClaudeChatStream.DeliveredByDeskbar), since the page draws the stored copy. It holds no "Deskbar wake." prefix, so the
+    // prompt hook counts it as the user's message (IsUsersMessage), as it would a line typed in the terminal.
+    public const string PageMessageOpening =
+        "Deskbar: the user wrote to you on your page in Deskbar. Their own words, as if typed in your terminal:";
+
+    /// <summary>
+    /// What a message from the manager's page is delivered as: the opening, the user's text, and the open-task line when a
+    /// task's page was open as the manager's page was opened (OpenTaskLine), since the prompt hook, which adds that line to
+    /// a typed prompt, never sees a message the waiter delivers.
+    /// </summary>
+    public static string PageMessage(string text, Maybe<string> openTaskLine) =>
+        $"{PageMessageOpening}\n\n{text.Trim()}" + openTaskLine.Map(line => "\n\n" + line).GetValueOrDefault("");
+
+    /// <summary>The record with one more page message, keeping only the newest MessagesKept.</summary>
+    public static ManagerRecord WithMessage(ManagerRecord record, ManagerMessage message) =>
+        record with { Messages = (record.Messages ?? []).Append(message).TakeLast(MessagesKept).ToList() };
+
     // The user's own message, not one Deskbar typed: a wake carries the wake prefix (looked for anywhere, as
     // ManagerQuestion.AfterPrompt does), and a fresh manager's first turn is FirstMessage itself.
     static bool IsUsersMessage(string prompt) =>
@@ -203,14 +247,16 @@ public static class ManagerSession
     //  * `--` before the message, so the variadic --disallowedTools does not swallow it.
     // The briefing path and shim path are parameters: both come from the user's real expanded paths at runtime. The shim
     // is the form ManagerActions.ShimCommand chose, so a path with a space arrives as its 8.3 short form, or quoted.
-    public static IReadOnlyList<string> StartArguments(string briefingPath, string shimPath) =>
+    // `firstMessage`: the first prompt; FirstMessage (the overview) unless the start came from a message the user wrote on
+    // the manager's page (task 6c4c067f), which then is the first prompt, since the user asked something of their own.
+    public static IReadOnlyList<string> StartArguments(string briefingPath, string shimPath, string? firstMessage = null) =>
     [
         "--bg", "--model", "fable", "-n", Name, "--remote-control", Name, "--strict-mcp-config",
         "--permission-mode", "dontAsk",
         "--append-system-prompt-file", briefingPath,
         "--allowedTools", $"Bash({shimPath.Replace('\\', '/')} task:*)", $"Bash({shimPath.Replace('\\', '/')} report:*)",
         "--disallowedTools", .. DisallowedTools,
-        "--", FirstMessage
+        "--", firstMessage ?? FirstMessage
     ];
 
     /// <summary>The tools the manager is started without (StartArguments has the reasons).</summary>
