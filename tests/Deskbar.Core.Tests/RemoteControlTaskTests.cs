@@ -1185,6 +1185,7 @@ public class RemoteControlTaskTests
              "pr <url> --deploy --session <session>",
              // Task 8470d176, phase 2: a session reports the deploy it checked.
              "deployed <note>|- --session <session>",
+             "deployed <reason>|- --unknown --session <session>",
              "family --session <session>",
              // Task links: a session links its own task, or closes it as a duplicate.
              "duplicate-of <id> --session <session>", "relate <id> --session <session>", "unrelate <id> --session <session>",
@@ -1205,7 +1206,8 @@ public class RemoteControlTaskTests
              // Task 1565789d: a deploy pull request on a task by hand.
              "pr <id> <url> --deploy",
              // Task 8470d176, phase 2: "Mark deployed"'s twin.
-             "deployed <id> <note>|-"],
+             "deployed <id> <note>|-",
+             "deployed <id> <reason>|- --unknown"],
             ControlUsage.All.Where(c => c.Verb == "task").Select(c => c.Arguments));
 
     // --- Task 9: go, start, open-session ---------------------------------------------------------------------------
