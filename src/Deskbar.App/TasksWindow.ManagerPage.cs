@@ -32,12 +32,60 @@ namespace Deskbar.App;
 // from outside (the bar, a link), or another view. While it shows, no task page is open (inboxPage is null), so the
 // manager's prompt hook names no "current task" for a line typed in its terminal; a page message carries the task it was
 // opened over itself (ManagerSession.PageMessage).
+//
+// THE MANAGER'S OWN DOCKED PANEL (task 71aae045, the owner: "open the manager session separately from the main tasks, as a
+// separate docked panel, as it was done before in the terminal version"). The page above moved out of the Inbox into a
+// second TasksWindow made with ManagerOnly set, which TasksBoard.DockManager docks on a strip of its own just inside the
+// tasks panel (inside the bar while the panel is closed): the slot the manager's terminal had (ManagerDock). That window
+// draws nothing but this page (DrawManagerOnly): no toolbar, no add row, no Inbox header or foot, no list. Its top has a
+// close × in place of the back arrow (there is nothing to go back to), Esc leaves it alone, its grip resizes its own strip
+// (ResizeManagerDock) and Alt+F4 closes only it (CloseManagerDock). The tasks panel's own copy of this code is no longer
+// reached (TasksBoard.ShowManager opens the docked window), but stays the fallback for a board with no dock (the tests).
 public partial class TasksWindow
 {
     // Whether the manager's page is what the Inbox shows, and the task page it was opened over (back returns to it, and a
     // message names it as "the current task").
     bool managerPage;
     Guid? managerFrom;
+
+    /// <summary>
+    /// The manager's docked panel (task 71aae045): this window draws only the manager's page. Set once, when the App makes
+    /// the second window; the tasks panel's window leaves it false.
+    /// </summary>
+    internal bool ManagerOnly { get; init; }
+
+    /// <summary>The docked manager's × and its Alt+F4: closes the manager's panel (TasksBoard.HideManager). Set by the board.</summary>
+    internal Action? CloseManagerDock { get; set; }
+
+    /// <summary>The docked manager's grip, at the end of a drag: the new width in DIPs (TasksBoard.ResizeManager). Set by the board.</summary>
+    internal Action<double>? ResizeManagerDock { get; set; }
+
+    internal const string CloseManagerText = "Close the manager";
+
+    // THE WHOLE DRAW OF THE MANAGER'S DOCKED WINDOW, in DrawRows' place once the per-draw registries are emptied. Every part of
+    // the tasks panel's frame is hidden, and the page takes the board: DrawManagerPage shows InboxPage over the rest.
+    void DrawManagerOnly()
+    {
+        Background = InboxLook.Background;
+        Board.Background = Background;
+        Toolbar.Visibility = Visibility.Collapsed;
+        AddRow.Visibility = Visibility.Collapsed;
+        ManagerLineHost.Visibility = Visibility.Collapsed;
+        ColumnHeader.Visibility = Visibility.Collapsed;
+        StatsScroller.Visibility = Visibility.Collapsed;
+        MatrixGrid.Visibility = Visibility.Collapsed;
+        matrixShown = false;
+        statsShown = false;
+        managerPage = true;
+        managerFrom = null;
+        inboxPage = null;
+        Headers = [];
+        Keys = [];
+        DrawManagerPage();
+    }
+
+    // The docked window's redraw signature: only what its page draws (the view's tasks are not on it).
+    string ManagerOnlySignature() => "manager-only" + ManagerPageSignature();
 
     internal const string ManagerPageTag = "manager-page";
     internal const string ManagerPlaceholder = "Message the manager…";
@@ -94,7 +142,8 @@ public partial class TasksWindow
     // Esc on the manager's page (InboxBack): back, unless the keyboard is in the box, where Esc is the box's.
     bool ManagerBack()
     {
-        if (!managerPage || latest?.Inbox is null) return false;
+        // The docked window has nowhere to go back to, and Esc closing the whole panel by accident would be worse.
+        if (ManagerOnly || !managerPage || latest?.Inbox is null) return false;
         if (EscapeIgnoresThreadWhile?.Invoke() ?? commentBoxes.Values.Any(box => box.IsKeyboardFocusWithin)) return false;
         BackFromManager();
         return true;
@@ -146,9 +195,20 @@ public partial class TasksWindow
     UIElement ManagerPageTop()
     {
         var first = new DockPanel { LastChildFill = true };
-        var back = GlyphButton("back", InboxPageBackText, BackFromManager, "Back (Esc)");
-        DockPanel.SetDock(back, Dock.Left);
-        first.Children.Add(back);
+        // In the docked window (ManagerOnly) a close × at the far right instead: there is no list to go back to.
+        if (ManagerOnly)
+        {
+            var close = GlyphButton("x", CloseManagerText, () => CloseManagerDock?.Invoke(), CloseManagerText);
+            close.VerticalAlignment = VerticalAlignment.Top;
+            DockPanel.SetDock(close, Dock.Right);
+            first.Children.Add(close);
+        }
+        else
+        {
+            var back = GlyphButton("back", InboxPageBackText, BackFromManager, "Back (Esc)");
+            DockPanel.SetDock(back, Dock.Left);
+            first.Children.Add(back);
+        }
         // The manager's violet tile, in the place a task's state mark has (ManagerLook: the colours of its line and window).
         var tile = new Border
         {
@@ -279,6 +339,7 @@ public partial class TasksWindow
         };
     }
 
-    // Post's road for the manager's box: the text to the manager, with the task page it was opened over.
+    // Post's road for the manager's box: the text to the manager, with the task page it was opened over. In the docked
+    // window managerFrom is always null, and the board names the task page open in the tasks panel at the moment of sending.
     bool SendToManager(string text) => Actions?.SendToManager?.Invoke(text, managerFrom).IsSuccess ?? false;
 }

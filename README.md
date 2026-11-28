@@ -645,11 +645,14 @@ whole board. It reads `deskbar.cmd task overview`, which prints one line per ope
 task that is waiting on you. It cannot close, delete or finish a task, and only what you say after "The user says:"
 counts as you. The next day a click ends yesterday's and starts a new one.
 
-The manager opens as a page in the tasks panel's Inbox, the way a task opens there: what it said and did as a chat, and
-a box at the foot. Type in the box and press Enter to send it a message (Shift+Enter starts a new line). With no
-manager running yet that day, your message starts one. If you opened the manager from a task's page, your message names
-that task as "the current task", and the back arrow (or Esc) takes you back to it. The Claude button left of the box,
-the same one a task's page has there, opens the manager's own Claude Code window, docked beside the panel.
+The manager opens in a panel of its own, docked just inside the tasks panel (just inside the bar while the tasks panel
+is closed), so your tasks stay where they were. It shows what the manager said and did as a chat, drawn like a task's
+page, with a box at the foot that has the keyboard as soon as the panel opens. Type in the box and press Enter to send it
+a message (Shift+Enter starts a new line). With no manager running yet that day, your message starts one. If a task's
+page is open in the Inbox as you send, your message names that task as "the current task". Drag the panel's inner edge
+to make it wider or narrower; Deskbar remembers the width, and reopens the panel at the next start if you left it open.
+The × at its top right closes it. The Claude button left of the box, the same one a task's page has there, closes the
+panel and opens the manager's own Claude Code window in the same place.
 `deskbar.cmd task show <id>` prints one task in full and `deskbar.cmd task manager` opens that terminal.
 
 On a day you have opened it, Deskbar also wakes the manager when a Claude task is handed back to you because its
@@ -674,7 +677,7 @@ themselves again.
 When the manager needs a decision from you, its question shows as a violet line at the top of the bar's task list and
 of the tasks panel, above every task's question. Click it to open the manager; your reply clears it.
 
-When the manager answers a message of yours while neither its page nor its window is in front, the same violet line
+When the manager answers a message of yours while neither its panel nor its window is in front, the same violet line
 says "Manager answered" with the first line of the answer, in the bar's task list and at the top of the Inbox. Opening
 the manager, bringing its window forward or writing to it again clears it. Its replies to Deskbar's own wakes leave no line.
 
@@ -687,7 +690,7 @@ phone and you can talk to it from there, with the keyboard's microphone if you l
 Deskbar starts on tasks keep Remote Control off, whatever your Claude Code settings say, so the phone's list is not
 buried under them. A session that already had Remote Control keeps it when it is resumed.
 
-The manager's window is docked: it sits in a full-height column just inside the tasks panel (just inside the bar while
+The manager's terminal window is docked the same way: it sits in a full-height column just inside the tasks panel (just inside the bar while
 the panel is closed), and maximized and snapped windows keep clear of it, as they do of the panel. It is pinned to every
 desktop, so it is there whichever workspace you are on. Drag its inner edge to make it wider or narrower; Deskbar
 remembers the width. Dragged by its title bar, it goes back to its place. Closing it gives the space back. It carries

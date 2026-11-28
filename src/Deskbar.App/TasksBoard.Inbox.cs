@@ -41,7 +41,9 @@ public sealed partial class TasksBoard
     /// click on an Inbox line opens a task's page. The App makes sure today's manager exists beside this
     /// (ManagerActions.Open without attach); the page reads its transcript and writes to it through SendToManager.
     /// </summary>
-    public void ShowManager()
+    // Since task 71aae045 the Manager button opens the manager's own docked panel (TasksBoard.ManagerDock.cs, ShowManager);
+    // this page over the Inbox is what a board without that dock still shows (the tests of the page).
+    void ShowManagerInInbox()
     {
         Show();
         statsShown = false;
@@ -54,7 +56,9 @@ public sealed partial class TasksBoard
     /// Whether the user is looking at the manager's page: the panel is open and draws it. The manager's answer then needs
     /// no "Manager answered" line, as when its terminal window is in front (ManagerQuestion.AfterStop's inFront).
     /// </summary>
-    public bool ManagerPageInFront => IsOpen && window.ManagerPageShown;
+    public bool ManagerPageInFront => (IsOpen && window.ManagerPageShown)
+        // ...or the manager's docked panel is open and draws it (task 71aae045).
+        || (ManagerDockOpen && managerWindow is { IsVisible: true } docked && docked.ManagerPageShown);
 
     // List or Matrix chosen: the Inbox is left, and remembered as left. The caller redraws.
     void LeaveInbox() => _ = manager.SaveTasksPanel(PanelState with { Inbox = false });

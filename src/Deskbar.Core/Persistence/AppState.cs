@@ -564,6 +564,11 @@ public sealed record AppState(
     // until the first drag, which is every state.json written before this key: read it as ManagerDockLayout.DefaultWidth.
     public double? ManagerDockWidth { get; init; }
 
+    // Whether the manager's own docked panel (the app's TasksBoard.DockManager, task 71aae045: "open the manager session
+    // separately from the main tasks, as a separate docked panel") was open when last left, so a start reopens it the way
+    // TasksPanel.Open reopens the tasks panel. False in every state.json written before this key: closed.
+    public bool ManagerDockOpen { get; init; }
+
     // Where a task window (the app's TaskDetailWindow, task dca4ebeb: "a separate view that will open a task in,
     // especially for longer tasks") was last left. ONE place shared by every task window (Petre: "remember size and
     // position"): the next task opened lands where the last one was closed or moved to. Null until a task window is first

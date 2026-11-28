@@ -323,7 +323,9 @@ public partial class TasksWindow : Window
         if (!closingForGood)
         {
             e.Cancel = true;
-            if (Actions is { } actions) actions.ClosePanel();
+            // The manager's docked window closes only itself (task 71aae045), never the tasks panel.
+            if (ManagerOnly && CloseManagerDock is { } closeManager) closeManager();
+            else if (!ManagerOnly && Actions is { } actions) actions.ClosePanel();
             else Dismiss();
         }
         base.OnClosing(e);
@@ -372,7 +374,13 @@ public partial class TasksWindow : Window
     /// The keyboard to the toolbar, never to a text box (the window opens on the board). Only once the controller has
     /// brought the window forward and activated it: focusing an inactive window activates it.
     /// </summary>
-    internal void FocusBoard() => Toolbar.Focus();
+    // The manager's docked window has no toolbar: the keyboard goes straight to its message box (task 71aae045), so typing
+    // to the manager needs no click first. With no box (no SendToManager wired) nothing takes it.
+    internal void FocusBoard()
+    {
+        if (!ManagerOnly) Toolbar.Focus();
+        else ManagerBox?.Focus();
+    }
 
     /// <summary>
     /// The window activating itself, only when the controller has no seam to bring it (and counted for the tests).
@@ -393,6 +401,13 @@ public partial class TasksWindow : Window
     {
         if (!IsOpen) return;
         IsOpen = false;
+        // The manager's docked window (task 71aae045): its transcript poll ends with it, and the next open draws afresh, which
+        // starts the poll again (DrawManagerPage), instead of matching the last signature and drawing nothing.
+        if (ManagerOnly)
+        {
+            StopTranscript();
+            drawn = "";
+        }
         if (openMenu is { IsOpen: true } menu) menu.IsOpen = false;
         renaming = null;
         renameBox = null;
@@ -450,7 +465,8 @@ public partial class TasksWindow : Window
 
     void Draw(TasksView view)
     {
-        var signature = Signature(view);
+        // The manager's docked window (ManagerOnly, task 71aae045) draws only its page, so only the page's own signature counts.
+        var signature = ManagerOnly ? ManagerOnlySignature() : Signature(view);
         // Where a new note would go (AddTarget) is not part of the signature (whole-PR review, I-1): it changes with every
         // workspace switch, a line's click included, and redrawing every row for it reset the Matrix's scrolls. Only the
         // add box's chip shows it, painted here in place.
@@ -493,6 +509,24 @@ public partial class TasksWindow : Window
         Flush();
     }
 
+    // The per-draw registries of what is drawn (buttons, boxes, ages, frames), emptied before each draw writes them again.
+    void ClearLineRegistries()
+    {
+        menuButtons.Clear();
+        lineButtons.Clear();
+        dragLines.Clear();
+        dragEntries.Clear();
+        commentBoxes.Clear();
+        commentSkills.Clear();
+        ages.Clear();
+        slimTips.Clear();
+        selectionFrames.Clear();
+        authors.Clear();
+        shownComments.Clear();
+        closing.Clear();
+        idleLines.Clear();
+    }
+
     // Which comment box had the keyboard when the last draw began, and where its caret was.
     Guid keyboardWasIn;
     int caretWas;
@@ -503,6 +537,15 @@ public partial class TasksWindow : Window
         keyboardWasIn = commentBoxes.FirstOrDefault(pair => pair.Value.IsKeyboardFocusWithin).Key;
         caretWas = keyboardWasIn != Guid.Empty ? commentBoxes[keyboardWasIn].CaretIndex : 0;
         RememberDialogFocus();
+        // The manager's docked window (task 71aae045, TasksWindow.ManagerPage.cs): its page and nothing else, before any of
+        // the list's work below. The click guard's key in particular (review finding): computed from rows this window never
+        // shows, it would restart the half second in which the chat's buttons ignore clicks.
+        if (ManagerOnly)
+        {
+            ClearLineRegistries();
+            DrawManagerOnly();
+            return;
+        }
         // When the lines on show change (which tasks, their order, which threads are open, which are closing), a line
         // may now be under the pointer that was not, so for half a second a click is not trusted (the click guard,
         // ClickIgnored). A redraw that only rewrites what lines say (a session's status line) moves nothing and does
@@ -527,19 +570,7 @@ public partial class TasksWindow : Window
         // Where each open thread is scrolled to, read before any line is rebuilt, and which threads open now (task
         // ee9bd3fc). It empties the capped threads' registry too, which a kept line writes back like the others.
         BeforeThreadsRedraw(shownRows);
-        menuButtons.Clear();
-        lineButtons.Clear();
-        dragLines.Clear();
-        dragEntries.Clear();
-        commentBoxes.Clear();
-        commentSkills.Clear();
-        ages.Clear();
-        slimTips.Clear();
-        selectionFrames.Clear();
-        authors.Clear();
-        shownComments.Clear();
-        closing.Clear();
-        idleLines.Clear();
+        ClearLineRegistries();
         // THE STATS VIEW (task 521d2b07, TasksWindow.Stats.cs) takes the place of both the List and the Matrix, and of the
         // search row and the filter chips, which do not apply to it (it counts every task). Drawn, and nothing else.
         statsShown = view.Stats is not null;

@@ -4722,6 +4722,13 @@ public sealed class WorkspaceManager(
             ? Result.Success()
             : Result.Success().Tap(() => Persist(State with { ManagerDockWidth = widthDips }));
 
+    // Whether the manager's docked panel is open (AppState.ManagerDockOpen, task 71aae045), saved as it opens and closes and
+    // at shutdown. A no-op when unchanged.
+    public Result SaveManagerDockOpen(bool open) =>
+        State.ManagerDockOpen == open
+            ? Result.Success()
+            : Result.Success().Tap(() => Persist(State with { ManagerDockOpen = open }));
+
     // Where the task windows open (AppState.TaskWindow, one place shared by all of them): saved when one is moved, resized
     // or closed. A no-op when unchanged, so a window closed where it already was writes nothing.
     public Result SaveTaskWindow(TaskWindowState state) =>
