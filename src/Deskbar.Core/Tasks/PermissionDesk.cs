@@ -45,6 +45,8 @@ namespace Deskbar.Core.Tasks;
 //     only: `claude agents` lists nothing else, see TranscriptMark);
 //   * Settle: the transcript of a session in a terminal or VS Code shows the conversation went on past the question
 //     (TranscriptMark: the tool ran or was refused, measured 2026-11-27);
+//   * Quiet: the hook script stopped touching its heartbeat file, killed on its timeout or gone with its session's
+//     console (task ca73633d);
 //   * ReleaseAll: Deskbar exits, or the setting is turned off;
 //   * Sweep: Deskbar starts, with nothing in memory.
 public sealed class PermissionDesk(string folder, Func<DateTimeOffset> now)
@@ -292,6 +294,53 @@ public sealed class PermissionDesk(string folder, Func<DateTimeOffset> now)
 
     /// <summary>Questions held past <see cref="HeldFor"/> taken off, their slots deleted. True when any went.</summary>
     public bool Expire() => Drop(h => now() >= h.Until);
+
+    // THE SCRIPT'S HEARTBEAT (task ca73633d, the review of the day-long hold). A card is only worth a click while its hook
+    // script still reads the slot, and a day is long enough for the script to stop without a word reaching Deskbar:
+    //   * a session started before the hold went from ten minutes to a day keeps the hook timeout it read at its start
+    //     (Claude Code takes the hooks once per session), so Claude Code kills the script after twelve minutes, while the
+    //     rewritten script and HeldFor would keep the card for a day and a click would answer nothing;
+    //   * a session whose console closed or whose process was killed sends no SessionEnd, and its transcript never moves,
+    //     so neither Forget nor Settle would take its card off.
+    // So the script touches AliveFile in its slot every BeatTicks ticks (ClaudeSkill.PermissionScript), and Quiet takes off
+    // a question whose script has not touched it for Silent. A script that dies with its session's console stops beating;
+    // one that Claude Code kills on its timeout does too.
+    //
+    // SLEEP IS NOT SILENCE. While the machine sleeps the scripts stop ticking and Deskbar stops looking, and on waking the
+    // last beat is as old as the sleep. A look that comes more than half of Silent after the one before it (the keeper
+    // looks every five seconds) therefore starts the count again from that look, which gives every script time to beat.
+
+    /// <summary>The empty file the hook script touches in its slot while it waits (its heartbeat, see Quiet).</summary>
+    public const string AliveFile = "alive";
+
+    /// <summary>How many of its ticks (about a second each) the script waits between beats.</summary>
+    public const int BeatTicks = 15;
+
+    /// <summary>How long a script may go without a beat before its question is taken off: five beats' room.</summary>
+    public static readonly TimeSpan Silent = TimeSpan.FromSeconds(BeatTicks * 5);
+
+    // The keeper's last look, and the moment silence is counted from after a gap between looks (the header above).
+    DateTimeOffset? lastQuietLook;
+    DateTimeOffset quietFrom = DateTimeOffset.MinValue;
+
+    /// <summary>
+    /// Questions whose hook script has stopped beating for <see cref="Silent"/> taken off, their slots deleted: the script
+    /// is gone, so a click would answer nothing (the header above). Silence counts from the question's arrival when no
+    /// beat has come yet. True when any went.
+    /// </summary>
+    public bool Quiet()
+    {
+        var at = now();
+        if (lastQuietLook is { } last && at - last > Silent / 2) quietFrom = at;
+        lastQuietLook = at;
+        return Drop(h => at - new[] { h.Arrived, LastBeat(h.Slot), quietFrom }.Max() >= Silent);
+    }
+
+    // When the slot's heartbeat file was last written; long ago when it is missing (the API's answer for no file is the
+    // year 1601) or cannot be read.
+    DateTimeOffset LastBeat(string slot) =>
+        Result.Try(() => new DateTimeOffset(File.GetLastWriteTimeUtc(Path.Combine(SlotPath(slot), AliveFile)), TimeSpan.Zero))
+            .GetValueOrDefault(DateTimeOffset.MinValue);
 
     /// <summary>A session's questions taken off, their slots deleted: it ended, or settled them elsewhere. True when any went.</summary>
     public bool Forget(string sessionId) => Drop(h => h.Request.SessionId == sessionId);

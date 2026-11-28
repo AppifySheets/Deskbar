@@ -343,9 +343,17 @@ static class ClaudeSkill
         "@endlocal & set \"ok=%ok%\"",
         "@if not defined ok goto done",
         $"@set /a left={seconds ?? Core.Tasks.PermissionDesk.ScriptSeconds}",
+        "@set /a beat=0",
         ":wait",
         "@if not exist \"%slot%\" exit /b 0",
         $"@if exist \"%slot%\\{Core.Tasks.PermissionDesk.AnswerFile}\" goto answer",
+        // THE HEARTBEAT (task ca73633d, PermissionDesk.Quiet): the empty alive file touched on the first tick and every
+        // BeatTicks after, so Deskbar can tell a card whose script still reads the slot from one whose script was killed
+        // (an older session's shorter hook timeout) or went with its console. A slot already deleted is not made again:
+        // the redirect fails, quietly, and the next tick's look ends the script.
+        "@set /a beat-=1",
+        $"@if %beat% leq 0 type nul > \"%slot%\\{Core.Tasks.PermissionDesk.AliveFile}\" 2>nul",
+        $"@if %beat% leq 0 set /a beat={Core.Tasks.PermissionDesk.BeatTicks}",
         "@set /a left-=1",
         "@if %left% leq 0 goto done",
         "@ping -n 2 127.0.0.1 >nul",

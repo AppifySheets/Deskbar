@@ -163,6 +163,71 @@ public sealed class PermissionDeskTests : IDisposable
         Assert.False(desk.Expire());
     }
 
+    // THE SCRIPT'S HEARTBEAT (task ca73633d). The script touches the slot's alive file; the clock here is the test's, so a
+    // beat is written by setting the file's time to it.
+    void Beat(string slot)
+    {
+        var path = Path.Combine(box, slot, PermissionDesk.AliveFile);
+        if (!File.Exists(path)) File.WriteAllText(path, "");
+        File.SetLastWriteTimeUtc(path, clock.UtcDateTime);
+    }
+
+    // The keeper's looks, every five seconds, for the given span.
+    void LookFor(PermissionDesk desk, TimeSpan span, Action? eachLook = null)
+    {
+        var end = clock + span;
+        while (clock < end)
+        {
+            clock += PermissionKeeper.ExpireEvery;
+            eachLook?.Invoke();
+            desk.Quiet();
+        }
+    }
+
+    [Fact]
+    public void A_question_whose_script_never_beats_goes_once_silent()
+    {
+        var desk = Desk();
+        desk.Register(Slot(), Request());
+        LookFor(desk, PermissionDesk.Silent - PermissionKeeper.ExpireEvery);
+        Assert.Single(desk.All);
+
+        LookFor(desk, PermissionKeeper.ExpireEvery);
+        Assert.Empty(desk.All);
+        Assert.False(Directory.Exists(Path.Combine(box, "req-1-2")));
+    }
+
+    [Fact]
+    public void A_question_whose_script_beats_stays_until_the_beats_stop()
+    {
+        var desk = Desk();
+        desk.Register(Slot(), Request());
+        var looks = 0;
+        LookFor(desk, TimeSpan.FromMinutes(30), () => { if (looks++ % 3 == 0) Beat("req-1-2"); });
+        Assert.Single(desk.All);
+
+        LookFor(desk, PermissionDesk.Silent + PermissionKeeper.ExpireEvery);
+        Assert.Empty(desk.All);
+    }
+
+    [Fact]
+    public void A_gap_between_looks_is_sleep_and_starts_the_silence_again()
+    {
+        var desk = Desk();
+        desk.Register(Slot(), Request());
+        Beat("req-1-2");
+        desk.Quiet();
+        // The machine slept for an hour: the last beat is an hour old when Deskbar looks again.
+        clock += TimeSpan.FromHours(1);
+        Assert.False(desk.Quiet());
+        LookFor(desk, TimeSpan.FromSeconds(10), () => Beat("req-1-2"));
+        Assert.Single(desk.All);
+    }
+
+    [Fact]
+    public void The_hook_timeout_leaves_room_for_a_day_of_slow_ticks() =>
+        Assert.True(PermissionDesk.HookTimeoutSeconds >= PermissionDesk.ScriptSeconds * 1.05);
+
     [Fact]
     public void The_script_waits_longer_than_the_card_is_offered() =>
         Assert.True(PermissionDesk.ScriptWait - PermissionDesk.HeldFor >= TimeSpan.FromSeconds(10));
