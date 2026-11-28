@@ -645,8 +645,8 @@ counts as you. The next day a click ends yesterday's and starts a new one.
 The manager opens as a page in the tasks panel's Inbox, the way a task opens there: what it said and did as a chat, and
 a box at the foot. Type in the box and press Enter to send it a message (Shift+Enter starts a new line). With no
 manager running yet that day, your message starts one. If you opened the manager from a task's page, your message names
-that task as "the current task", and the back arrow (or Esc) takes you back to it. "Open in terminal" on the page's
-"⋯" menu opens the manager's own Claude Code window, docked beside the panel, as the button did before.
+that task as "the current task", and the back arrow (or Esc) takes you back to it. The Claude button left of the box,
+the same one a task's page has there, opens the manager's own Claude Code window, docked beside the panel.
 `deskbar.cmd task show <id>` prints one task in full and `deskbar.cmd task manager` opens that terminal.
 
 On a day you have opened it, Deskbar also wakes the manager when a Claude task is handed back to you because its

@@ -1,7 +1,6 @@
 using System.Windows;
 using System.Windows.Automation;
 using System.Windows.Controls;
-using System.Windows.Controls.Primitives;
 using System.Windows.Media;
 using Deskbar.Core.Tasks;
 
@@ -9,22 +8,25 @@ namespace Deskbar.App;
 
 // THE MANAGER'S PAGE IN THE INBOX (task 6c4c067f; spec docs/superpowers/specs/2026-11-28-manager-inbox-page-design.md; the
 // owner: "open a manager session in the same way as you open a task in the inbox", and his picks on the mockup: the page
-// replaces the docked terminal, "Open in terminal" stays on its menu, no manager line pinned in the list).
+// replaces the docked terminal, "Open in terminal" stays on its menu, no manager line pinned in the list). That menu has
+// since given way to the Claude button a task's page has beside its box (task d04cf9f0; the owner: "give the manager
+// similar button to invoke the session easily as the tasks have").
 //
 // The Manager button and the manager line open the manager over the Inbox's list the way a click on a line opens a task's
 // page (TasksBoard.ShowManager calls ShowManagerPage). It is drawn by its own small path, not by DrawInboxPage, because a
 // task's page is built around a task row (description, question, sessions, subtasks, pull requests, Close) and the manager
 // has none of those. What it shares with a task's page, it takes from there unchanged:
 //
-//   the top     the back arrow (Esc does the same, unless the keyboard is in the box), the manager's violet tile, "Manager",
-//               and "⋯" whose one item, "Open in terminal", opens the terminal the button opened before
-//               (TasksWindowActions.OpenManagerTerminal); under them the state in words;
+//   the top     the back arrow (Esc does the same, unless the keyboard is in the box), the manager's violet tile and
+//               "Manager"; under them the state in words;
 //   the body    the manager's chat: its transcript's messages and steps (the same poll, InboxTranscript, following
 //               ManagerSession.PageId, and the same ChatStreamPanel), with the user's page messages as their bubbles
 //               (ManagerRecord.Messages, through TasksWindowActions.ManagerMessages), bottom-aligned and held in place
 //               through redraws exactly as a task's page is (HeldPlace, SettlePageScroll);
 //   the bottom  the comment box of a task's page (CommentBox, keyed by PageId), docked under the scroller; Enter sends
 //               through TasksWindowActions.SendToManager (Post), Shift+Enter breaks the line, a refusal keeps the text.
+//               Left of it, the Claude button a task's page has there (WithClaudeButton, task d04cf9f0): Open Claude, the
+//               manager's own terminal window (TasksWindowActions.OpenManagerTerminal), always in view.
 //
 // HOW IT IS LEFT: back (to the task page it was opened over, if any, else the list), a click on an Inbox line, a task shown
 // from outside (the bar, a link), or another view. While it shows, no task page is open (inboxPage is null), so the
@@ -39,7 +41,7 @@ public partial class TasksWindow
 
     internal const string ManagerPageTag = "manager-page";
     internal const string ManagerPlaceholder = "Message the manager…";
-    internal const string OpenInTerminalText = "Open in terminal";
+    internal const string ManagerClaudeTip = "Go to the manager's Claude session in its own window, starting it first if none runs today";
     internal const string NoManagerYetText = "No manager yet today: send a message to start it.";
 
     /// <summary>Whether the manager's page is drawn right now (TasksBoard.ManagerPageInFront, the tests).</summary>
@@ -157,14 +159,6 @@ public partial class TasksWindow
         };
         DockPanel.SetDock(tile, Dock.Left);
         first.Children.Add(tile);
-        if (Actions?.OpenManagerTerminal is not null)
-        {
-            Button? more = null;
-            more = GlyphButton("more", "More", () => OpenManagerMenu(more!), OpenInTerminalText);
-            more.VerticalAlignment = VerticalAlignment.Top;
-            DockPanel.SetDock(more, Dock.Right);
-            first.Children.Add(more);
-        }
         first.Children.Add(new TextBlock
         {
             Tag = TitleTag,
@@ -196,14 +190,13 @@ public partial class TasksWindow
         _ => (Actions?.ManagerMessages?.Invoke().Count ?? 0) == 0 ? NoManagerYetText : "Starting the manager…",
     };
 
-    // "⋯": its one item opens the manager's terminal, as the button did before the page (task 6c4c067f, the owner's pick 1A).
-    internal ContextMenu OpenManagerMenu(UIElement anchor)
-    {
-        var menu = new ContextMenu { PlacementTarget = anchor, Placement = PlacementMode.Bottom };
-        menu.Items.Add(Item(OpenInTerminalText, () => Actions?.OpenManagerTerminal?.Invoke()));
-        OpenMenu(menu);
-        return menu;
-    }
+    // THE MANAGER'S CLAUDE BUTTON (task d04cf9f0): the button a task's page has left of its box, same picture, same words,
+    // same place, so the manager's session is one click away as a task's is. It replaced the "⋯" menu whose one item,
+    // "Open in terminal", did the same thing two clicks deep (task 6c4c067f); keeping both would be the duplicate the owner
+    // turned down on a task's thread (task 5e02e99f). Always Open Claude, never Start: ManagerActions.Open attaches to
+    // today's manager, resumes it or starts it, so one face covers every state. None when the App wired no terminal.
+    ClaudeChoice? ManagerClaude() =>
+        Actions?.OpenManagerTerminal is { } open ? new ClaudeChoice("terminal", OpenClaudeText, () => open(), ManagerClaudeTip) : null;
 
     // The chat: the user's page messages as their bubbles among the transcript's items, in one stream kept across redraws.
     FrameworkElement ManagerPageBody()
@@ -257,10 +250,11 @@ public partial class TasksWindow
     }
 
     // The box docked under the chat: a task page's comment box (CommentBox) keyed by PageId, styled as KeepBoxForDock styles
-    // a page's (no minimum height, the chat's text size), in the same framed area DockBottom puts a task's box in.
+    // a page's (no minimum height, the chat's text size), in the same framed area DockBottom puts a task's box in, with the
+    // manager's Claude button on its left as a task's has (WithClaudeButton).
     UIElement ManagerBoxArea()
     {
-        var box = CommentBox(ManagerSession.PageId);
+        var box = WithClaudeButton(ManagerClaude(), CommentBox(ManagerSession.PageId));
         if (commentBoxes.TryGetValue(ManagerSession.PageId, out var text))
         {
             text.MinHeight = 0;

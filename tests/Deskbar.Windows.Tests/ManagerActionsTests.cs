@@ -753,7 +753,7 @@ public class ManagerActionsTests
         Assert.True(rig.Cli.Acts.Any(a => a.Arguments.Contains(delivered)) || File.Exists(inbox) && File.ReadAllText(inbox).Contains(delivered));
     }
 
-    // Review of task 6c4c067f: "Open in terminal" while the page's own open is still under way is another intent, so it
+    // Review of task 6c4c067f: the page's Claude button while the page's own open is still under way is another intent, so it
     // runs after it instead of being dropped.
     [Fact]
     public void Open_in_terminal_during_a_page_open_runs_after_it()

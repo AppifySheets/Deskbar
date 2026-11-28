@@ -139,7 +139,7 @@ public partial class TasksBoardTests
         {
             // The manager line's click (task 61e4d143); none by default, so no manager line is drawn.
             OpenManager = openManager,
-            // The manager's page (task 6c4c067f): its box, its "Open in terminal" and its chat; none by default.
+            // The manager's page (task 6c4c067f): its box, its Claude button and its chat; none by default.
             SendToManager = sendToManager,
             OpenManagerTerminal = openManagerTerminal,
             ManagerChat = managerChat,

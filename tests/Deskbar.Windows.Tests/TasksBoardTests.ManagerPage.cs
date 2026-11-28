@@ -149,17 +149,20 @@ public partial class TasksBoardTests
         Assert.Equal(asking, t.Window.InboxPageShown);
     });
 
+    // Task d04cf9f0: the Claude button a task's page has left of its box, on the manager's page, opens its terminal; it
+    // replaced the "⋯" menu, so there is one way in, not two.
     [Fact]
-    public void The_menu_opens_the_terminal() => StaThread.Run(() =>
+    public void The_Claude_button_beside_the_box_opens_the_terminal() => StaThread.Run(() =>
     {
         var fake = new ManagerFake();
         using var t = BuildWithManager(fake);
         t.Controller.ShowManager();
 
-        var menu = t.Window.OpenManagerMenu(PageButton(t, "More"));
-        var item = menu.Items.OfType<MenuItem>().Single();
-        item.RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
-        menu.IsOpen = false;
+        var button = PageButton(t, TasksWindow.OpenClaudeText);
+        var area = Inside(t.Window.InboxPageContent!).OfType<FrameworkElement>().Single(e => Equals(e.Tag, TasksWindow.DockedBoxTag));
+        Assert.Contains(button, Inside(area));
+        Assert.DoesNotContain(Inside(t.Window.InboxPageContent!).OfType<Button>(), b => AutomationProperties.GetName(b) == "More");
+        Click(button);
 
         Assert.Equal(1, fake.Terminals);
     });

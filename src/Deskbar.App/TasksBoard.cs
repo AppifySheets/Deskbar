@@ -212,7 +212,7 @@ public sealed partial class TasksBoard : IDisposable
     /// <summary>A message from the manager's page (ManagerActions.Send), with the task that was open as it was opened.</summary>
     internal Func<string, Maybe<TaskItem>, Result>? SendToManager { get; init; }
 
-    /// <summary>The page's "Open in terminal": the manager's terminal window, as the button opened it before (ManagerActions.Open).</summary>
+    /// <summary>The page's Claude button (Open Claude, task d04cf9f0): the manager's terminal window, as the button opened it before (ManagerActions.Open).</summary>
     internal Func<Result>? OpenManagerTerminal { get; init; }
 
     /// <summary>The manager's transcript for its page: today's stored manager, its folder, running or not. UI thread, cheap.</summary>
@@ -354,7 +354,7 @@ public sealed partial class TasksBoard : IDisposable
             // The manager line's click (task 61e4d143): the Manager button's own click, read when it happens, since the
             // App sets OpenManager after this constructor. A refusal shows on the problem line like any other.
             OpenManager = () => Report(OpenManager?.Invoke() ?? Result.Failure("The manager is not available.")),
-            // The manager's page (task 6c4c067f): its box, its "Open in terminal" and the user's messages it draws. Read when
+            // The manager's page (task 6c4c067f): its box, its Claude button and the user's messages it draws. Read when
             // they happen, as OpenManager is, since the App sets them after this constructor.
             SendToManager = (text, from) => Report(SendToManager?.Invoke(text,
                 from is { } id ? tasks.Board.Tasks.TryFirst(t => t.Id == id) : Maybe<TaskItem>.None) ?? Result.Failure("The manager is not available.")),
@@ -2299,7 +2299,7 @@ internal sealed partial record TasksWindowActions(
     /// <summary>The manager page's box (task 6c4c067f): the text and the task page it was opened from; a refusal keeps the text.</summary>
     public Func<string, Guid?, Result>? SendToManager { get; init; }
 
-    /// <summary>The manager page's "Open in terminal" (task 6c4c067f).</summary>
+    /// <summary>The manager page's Claude button (task 6c4c067f, d04cf9f0).</summary>
     public Action? OpenManagerTerminal { get; init; }
 
     /// <summary>The user's messages the manager's page draws as their bubbles (ManagerRecord.Messages), oldest first.</summary>
