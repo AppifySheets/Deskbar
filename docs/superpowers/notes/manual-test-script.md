@@ -1950,6 +1950,13 @@ DQ4. Open another dialog and write a reply in the page's comment box instead: it
 DQ5. Open another dialog and answer it in the terminal: the card leaves within a few seconds and the chat still gets the "Answered" line.
 DQ6. Answer in the terminal on the card: the card goes and the terminal's dialog still waits for you.
 DQ7. A session in VS Code: the card shows, and answering it closes VS Code's dialog. (Not measured yet.)
+PL1. Start a session on a task in plan mode (`claude --permission-mode plan`, or Shift+Tab to plan mode) and ask for a small change. When it asks for the plan's approval, the task's page shows a "CLAUDE'S PLAN, FOR YOUR APPROVAL" card with the whole plan as formatted text, a note box, and Approve, Approve and accept edits, Keep planning (off) and Answer in the terminal. About six seconds later the task is under Needs you with "Approve Claude's plan: " and the plan's first line, not under "Asks permission".
+PL2. Approve: the terminal's dialog closes on its own, the session starts on the plan and asks before its first edit (an Allow / Deny card), the plan card leaves, and the chat gets "Approved Claude's plan."
+PL3. Another plan, Approve and accept edits: the session edits without asking, and the chat gets "Approved Claude's plan, with edits accepted from now on."
+PL4. Another plan: type a note (Keep planning turns on) and press Keep planning. The session reworks the plan as the note says and a new plan card appears; the chat gets "Asked Claude to keep planning:" with the note.
+PL5. Another plan, answered in the terminal: the card leaves within a few seconds and the task's question settles.
+PL6. Answer in the terminal on the card: the card goes and the terminal's dialog still waits.
+PL7. Type half a note, switch to another task and back: the note is still in the box.
 
 ## Click to copy a command
 

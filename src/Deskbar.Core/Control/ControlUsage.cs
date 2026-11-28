@@ -60,7 +60,7 @@ public static class ControlUsage
                 "what claude-permission-hook.cmd runs when Claude Code is about to ask for a permission, with the\n"
                 + "      hook's JSON on stdin: puts the question on the background session's task page and prints the\n"
                 + "      one-time code its answer will carry. Prints nothing when the question stays in the terminal\n"
-                + "      (claude-permissions off, a session that is not a background one with a task, a dialog tool).\n"
+                + "      (claude-permissions off, a session with no task, a dialog its card cannot draw).\n"
                 + "      Only a click in Deskbar answers; no command does"),
         ]),
         new("Tasks", [

@@ -141,9 +141,9 @@ public sealed class PermissionDesk(string folder, Func<DateTimeOffset> now)
     /// question that is not on show: never asked, already answered, expired or ended.
     /// </summary>
     public Result Answer(string slot, PermissionDecision decision) =>
-        // A dialog's slot takes its answers (AnswerDialog) or Pass; Allow and Deny are not answers to a dialog, and its
-        // script would print nothing for them anyway (PermissionAnswer.LineFor).
-        held.Any(h => h.Pending.Slot == slot && h.Pending.Request.IsAskUserQuestion) && decision != PermissionDecision.Pass
+        // A dialog's slot takes its answers (AnswerDialog, AnswerPlan) or Pass; Allow and Deny are not answers to a dialog,
+        // and its script would print nothing for them anyway (PermissionAnswer.LineFor).
+        held.Any(h => h.Pending.Slot == slot && h.Pending.Request.IsDialog) && decision != PermissionDecision.Pass
             ? Result.Failure("This question takes its answers, not Allow or Deny.")
             : Handed(slot, (path, code) => Write(path, AnswerFile, $"{code} {PermissionAnswer.WordOf(decision)}\n"));
 
@@ -160,12 +160,29 @@ public sealed class PermissionDesk(string folder, Func<DateTimeOffset> now)
     /// for the line over the control pipe, whose server it checks is Deskbar's own executable (PipeTrust), showing its
     /// code; what it prints can only be what Deskbar holds.
     /// </summary>
-    public Result AnswerDialog(string slot, IReadOnlyDictionary<string, string> answers)
+    public Result AnswerDialog(string slot, IReadOnlyDictionary<string, string> answers) =>
+        HandedLine(slot, request => DialogAsk.Of(request)
+            .ToResult("This question is not a dialog Deskbar can answer. Answer it in the terminal.")
+            .Bind(dialog => dialog.AnswerLine(answers)));
+
+    /// <summary>
+    /// The user's click on a plan card (task 8dbbaa0b, PlanAsk): approve, approve and accept edits, or keep planning with
+    /// a note. The hook's line travels as a dialog's answers do (<see cref="AnswerDialog"/>): kept in memory for the
+    /// script to fetch, "&lt;code&gt; dialog" in the slot. Refused, with nothing written and the plan left on show, for
+    /// keep planning without a note; refused like <see cref="Answer"/> for a plan no longer on show.
+    /// </summary>
+    public Result AnswerPlan(string slot, PlanDecision decision, string note = "") =>
+        HandedLine(slot, request => PlanAsk.Of(request)
+            .ToResult("This question is not a plan Deskbar can answer. Answer it in the terminal.")
+            .Bind(plan => plan.AnswerLine(decision, note)));
+
+    // A dialog's answer: the line `lineOf` makes for the slot's request is kept for the script's fetch, then the dialog
+    // word goes into the slot and the question off the desk. A refused line leaves everything as it was.
+    Result HandedLine(string slot, Func<PermissionRequest, Result<string>> lineOf)
     {
         var found = held.FirstOrDefault(h => h.Pending.Slot == slot).Pending;
         if (found is null) return Result.Failure(Ended);
-        return DialogAsk.Of(found.Request).ToResult("This question is not a dialog Deskbar can answer. Answer it in the terminal.")
-            .Bind(dialog => dialog.AnswerLine(answers))
+        return lineOf(found.Request)
             .Bind(line => Handed(slot, (path, code) =>
             {
                 handedLines[slot] = (code, line, now() + FetchWindow);
@@ -176,7 +193,8 @@ public sealed class PermissionDesk(string folder, Func<DateTimeOffset> now)
     /// <summary>How long a dialog's answer line waits to be fetched: the script reads the answer file within a tick or two.</summary>
     public static readonly TimeSpan FetchWindow = TimeSpan.FromMinutes(1);
 
-    // The dialogs' answer lines waiting for their scripts, by slot, with the code a fetch must show (AnswerDialog, Fetch).
+    // The dialogs' answer lines waiting for their scripts, by slot, with the code a fetch must show (AnswerDialog,
+    // AnswerPlan, Fetch).
     readonly Dictionary<string, (string Code, string Line, DateTimeOffset Until)> handedLines = [];
 
     /// <summary>

@@ -53,6 +53,38 @@ public sealed class SessionPromptTests : IDisposable
             SessionPrompt.Text("permission_prompt", "Claude Code needs your approval for the plan", Plan("\n# Fix the bar\n\nSteps...")).Value);
     }
 
+    // While the plan's card is on the task's page the question says so (task 8dbbaa0b) instead of sending the user to the
+    // session.
+    [Fact]
+    public void A_plan_on_its_card_is_worded_as_approving_it_here()
+    {
+        const string said = "Claude Code needs your approval for the plan";
+
+        Assert.Equal("Approve Claude's plan: Fix the bar",
+            SessionPrompt.Text("permission_prompt", said, Plan("\n# Fix the bar\n\nSteps..."), planOnCard: true).Value);
+        Assert.Equal("Approve Claude's plan: Fix the bar", SessionPrompt.Named("permission_prompt", said, Plan("# Fix the bar"), true).Value);
+        Assert.Equal(SessionPrompt.PlanOnCardLead, SessionPrompt.Named("permission_prompt", said, Plan(""), true).Value);
+    }
+
+    [Fact]
+    public void A_plan_off_its_card_still_says_to_approve_it_in_the_session()
+    {
+        const string said = "Claude Code needs your approval for the plan";
+
+        Assert.Equal("Approve the plan in the session: Fix the bar", SessionPrompt.Text("permission_prompt", said, Plan("# Fix the bar"), planOnCard: false).Value);
+        Assert.Equal(SessionPrompt.PlanLead, SessionPrompt.Named("permission_prompt", said, Plan(""), false).Value);
+    }
+
+    // The flag changes only a plan's words: any other dialog says what it said before.
+    [Fact]
+    public void The_plan_flag_changes_no_other_dialogs_words()
+    {
+        Assert.Equal("Allow Bash in the session: git push",
+            SessionPrompt.Text("permission_prompt", "Claude needs your permission", Bash("git push"), planOnCard: true).Value);
+        Assert.Equal($"{SessionPrompt.Lead} Session paused",
+            SessionPrompt.Text("permission_prompt", "Session paused", Plan("# P"), planOnCard: true).Value);
+    }
+
     // Review focus 1: "Session paused" also arrives as permission_prompt (the registry's default type), and must not be
     // named after a Bash prompt that was answered a moment before.
     [Theory]

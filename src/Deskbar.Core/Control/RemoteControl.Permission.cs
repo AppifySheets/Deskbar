@@ -28,9 +28,10 @@ namespace Deskbar.Core.Control;
 //     SDK's canUseTool runs the hooks "alongside your host, and whichever decides first applies" (manual step PA3). As
 //     `claude agents` lists only background sessions, such a card is watched through the session's transcript instead
 //     (TranscriptMark, PermissionDesk.Settle);
-//   * ExitPlanMode (ruling Q8: its answer needs the user's choice), and an AskUserQuestion the card cannot draw. A
-//     well-formed AskUserQuestion goes on a card of its own since task c047d0a0 (Petre: "model this in the task so i
-//     don't have to open claude code"), which sends the user's picks back (DialogAsk), and the reply says so;
+//   * an AskUserQuestion or an ExitPlanMode its card cannot draw (ruling Q8 kept both off the Allow / Deny card: their
+//     answer needs the user's choice). A well-formed AskUserQuestion goes on a card of its own since task c047d0a0
+//     (Petre: "model this in the task so i don't have to open claude code"), which sends the user's picks back
+//     (DialogAsk); a plan goes on the plan card since task 8dbbaa0b (PlanAsk); the reply says "dialog" for both;
 //   * the manager session (it has no task), a session with no open task (unknown, or its task closed);
 //   * JSON that is not a PermissionRequest, a missing or refused slot (PermissionDesk.Register).
 //
@@ -75,9 +76,9 @@ public sealed partial class RemoteControl
         desk.Forget(asked.SessionId);
         return manager.State is { ClaudePermissionsInEffect: true, TasksInbox: true }
             && hook is { Headless: false }
-            // ExitPlanMode stays in the terminal; AskUserQuestion goes on a card of its own when the card can draw it
-            // (DialogAsk, task c047d0a0).
-            && (!asked.IsDialog || DialogAsk.Of(asked).HasValue)
+            // AskUserQuestion and ExitPlanMode each go on a card of their own when the card can draw them (DialogAsk,
+            // task c047d0a0; PlanAsk, task 8dbbaa0b); one it cannot draw stays in the terminal.
+            && (!asked.IsDialog || DialogAsk.Of(asked).HasValue || PlanAsk.Of(asked).HasValue)
             && request.Slot is { Length: > 0 } slot
             && !IsManagerFolder(Folder(request.From) ?? Folder(hook.Folder))
             && service.Board.TaskOf(asked.SessionId).HasValue
@@ -85,9 +86,9 @@ public sealed partial class RemoteControl
                 // transcript stands now, which grows only once the question is answered (TranscriptMark).
                 ? desk.Register(slot, asked, listed: hook.Background,
                         mark: hook.Background ? null : TranscriptMark.Take(TranscriptMark.For(hook.Transcript, asked.AgentId)).GetValueOrDefault())
-                    // A dialog's slot is told so ("<code> dialog"): its script then prints the slot's dialog file for
-                    // the dialog word and nothing else (PermissionAnswer.LineFor).
-                    .Match(code => Said(asked.IsAskUserQuestion ? $"{code} {PermissionAnswer.DialogKind}\r\n" : code + "\r\n"), _ => Quiet)
+                    // A dialog's slot is told so ("<code> dialog"): its script then fetches and prints the line Deskbar
+                    // holds for the dialog word and nothing else (PermissionAnswer.LineFor).
+                    .Match(code => Said(asked.IsDialog ? $"{code} {PermissionAnswer.DialogKind}\r\n" : code + "\r\n"), _ => Quiet)
                 : Quiet;
     }
 

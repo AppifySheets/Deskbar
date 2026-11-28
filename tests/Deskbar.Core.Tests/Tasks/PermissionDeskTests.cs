@@ -410,6 +410,119 @@ public sealed class PermissionDeskTests : IDisposable
         Assert.Empty(Directory.GetFileSystemEntries(Path.Combine(box, "req-1-2")));
     }
 
+    // --- the plan (ExitPlanMode, task 8dbbaa0b): answered like a dialog, from its own card ---------------------------------
+
+    const string PlanInput = """{"plan":"# Fix the bar\n\n1. Do it","planFilePath":"C:\\Users\\x\\.claude\\plans\\fix-the-bar.md"}""";
+
+    static PermissionRequest Plan(string session = "s1", string input = PlanInput) =>
+        new(session, "ExitPlanMode", @"C:\repos\x", "plan", [new PermissionField("plan", "# Fix the bar")], Input: input);
+
+    [Theory]
+    [InlineData(PlanDecision.Approve, "")]
+    [InlineData(PlanDecision.ApproveEdits, "")]
+    [InlineData(PlanDecision.KeepPlanning, "Split step 2")]
+    public void A_plan_answer_writes_the_code_with_dialog_and_the_line_is_fetched_once(PlanDecision decision, string note)
+    {
+        var desk = Desk();
+        var code = desk.Register(Slot(), Plan()).Value;
+        var line = PlanAsk.Parse(PlanInput).Value.AnswerLine(decision, note).Value;
+
+        Assert.True(desk.AnswerPlan("req-1-2", decision, note).IsSuccess);
+
+        Assert.Equal($"{code} dialog\n", AnswerText("req-1-2"));
+        // The line is on no disk: the slot holds the answer file and nothing else.
+        Assert.Equal([PermissionDesk.AnswerFile], Directory.GetFiles(Path.Combine(box, "req-1-2")).Select(Path.GetFileName));
+        Assert.Empty(desk.All);
+        Assert.True(desk.Fetch("req-1-2", "fedcba9876543210fedcba9876543210").IsFailure);
+        Assert.Equal(line, desk.Fetch("req-1-2", code).Value);
+        Assert.True(desk.Fetch("req-1-2", code).IsFailure);
+        Assert.Equal(line, PermissionAnswer.LineFor(AnswerText("req-1-2"), code, line).Value);
+    }
+
+    // The note is checked before anything is written, so the plan stays on show for the user to type one.
+    [Theory]
+    [InlineData("")]
+    [InlineData("  \n ")]
+    public void Keep_planning_without_a_note_is_refused_and_the_plan_stays_on_show(string note)
+    {
+        var desk = Desk();
+        desk.Register(Slot(), Plan());
+
+        Assert.True(desk.AnswerPlan("req-1-2", PlanDecision.KeepPlanning, note).IsFailure);
+
+        Assert.Empty(Directory.GetFileSystemEntries(Path.Combine(box, "req-1-2")));
+        Assert.Single(desk.All);
+        Assert.True(desk.AnswerPlan("req-1-2", PlanDecision.KeepPlanning, "now a note").IsSuccess);
+    }
+
+    [Fact]
+    public void A_plan_answer_for_a_slot_that_is_not_a_plan_or_is_unknown_is_refused()
+    {
+        var desk = Desk();
+        desk.Register(Slot("req-1-1"), Request());
+        desk.Register(Slot("req-2-2"), Dialog("s2"));
+
+        Assert.True(desk.AnswerPlan("req-1-1", PlanDecision.Approve).IsFailure);
+        Assert.True(desk.AnswerPlan("req-2-2", PlanDecision.Approve).IsFailure);
+        Assert.True(desk.AnswerPlan("req-9-9", PlanDecision.Approve).IsFailure);
+
+        Assert.Empty(Directory.GetFileSystemEntries(Path.Combine(box, "req-1-1")));
+        Assert.Empty(Directory.GetFileSystemEntries(Path.Combine(box, "req-2-2")));
+        Assert.Equal(2, desk.All.Count);
+    }
+
+    // A plan whose input has no plan in it cannot be answered from a card, whatever slot it holds.
+    [Fact]
+    public void A_plan_answer_for_a_plan_request_without_a_plan_is_refused()
+    {
+        var desk = Desk();
+        desk.Register(Slot(), Plan(input: "{}"));
+
+        Assert.True(desk.AnswerPlan("req-1-2", PlanDecision.Approve).IsFailure);
+
+        Assert.Single(desk.All);
+    }
+
+    [Theory]
+    [InlineData(PermissionDecision.Allow)]
+    [InlineData(PermissionDecision.Deny)]
+    [InlineData(PermissionDecision.AllowEdits)]
+    public void Allow_Deny_and_Edits_are_refused_for_a_plan_and_write_nothing(PermissionDecision decision)
+    {
+        var desk = Desk();
+        desk.Register(Slot(), Plan());
+
+        Assert.True(desk.Answer("req-1-2", decision).IsFailure);
+
+        Assert.Empty(Directory.GetFileSystemEntries(Path.Combine(box, "req-1-2")));
+        Assert.Single(desk.All);
+    }
+
+    [Fact]
+    public void Pass_hands_a_plan_back_to_the_terminal()
+    {
+        var desk = Desk();
+        var code = desk.Register(Slot(), Plan()).Value;
+
+        Assert.True(desk.Answer("req-1-2", PermissionDecision.Pass).IsSuccess);
+
+        Assert.Equal($"{code} pass\n", AnswerText("req-1-2"));
+        Assert.Empty(desk.All);
+    }
+
+    // A plan has no questions to answer: AnswerDialog is the AskUserQuestion card's road only.
+    [Fact]
+    public void A_dialog_answer_for_a_plan_is_refused()
+    {
+        var desk = Desk();
+        desk.Register(Slot(), Plan());
+
+        Assert.True(desk.AnswerDialog("req-1-2", Blue).IsFailure);
+
+        Assert.Empty(Directory.GetFileSystemEntries(Path.Combine(box, "req-1-2")));
+        Assert.Single(desk.All);
+    }
+
     // --- the fetch (PermissionDesk.Fetch): the line is handed over once, for the right code, within a minute -----------
 
     // A dialog answered from the desk: the code the registration returned, and the line waiting for it.

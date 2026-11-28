@@ -38,17 +38,22 @@ public sealed record PermissionRequest(string SessionId, string Tool, string Fol
     // user's choice (the hooks reference, "PermissionRequest decision control"), which a plain Allow would not give. The
     // PM's ruling (Q8) kept both off the card. AskUserQuestion has its own card since task c047d0a0, which sends the
     // picks as that updatedInput (DialogAsk; measured 2026-11-28 in a background session: Claude read "Pick a
-    // colour"="Blue" from the hook's answer and the dialog never needed the terminal). ExitPlanMode still prints nothing.
+    // colour"="Blue" from the hook's answer and the dialog never needed the terminal). ExitPlanMode has its card since
+    // task 8dbbaa0b, which echoes the plan back as that updatedInput, or denies with the user's note (PlanAsk).
     static readonly string[] DialogTools = [DialogQuestion.Tool, "ExitPlanMode"];
 
     /// <summary>
     /// Whether this is one of Claude Code's own dialogs, which a plain Allow cannot answer. AskUserQuestion is answered
-    /// with the user's picks since task c047d0a0 (DialogAsk), so RemoteControl.Permission takes that one apart.
+    /// with the user's picks since task c047d0a0 (DialogAsk) and a plan from its own card since task 8dbbaa0b (PlanAsk);
+    /// RemoteControl.Permission takes a dialog only when one of the two can draw it.
     /// </summary>
     public bool IsDialog => DialogTools.Contains(Tool, StringComparer.Ordinal);
 
     /// <summary>Whether this is Claude Code's multiple-choice dialog, answered from a card of its own (DialogAsk).</summary>
     public bool IsAskUserQuestion => Tool == DialogQuestion.Tool;
+
+    /// <summary>Whether this is Claude Code's plan approval dialog, answered from a card of its own (PlanAsk).</summary>
+    public bool IsPlan => Tool == PlanAsk.Tool;
 
     static readonly JsonSerializerOptions Indented = new()
     {

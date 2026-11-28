@@ -59,8 +59,10 @@ public sealed partial class RemoteControl
 
         var type = hook.NotificationType.GetValueOrDefault("");
         // The Allow / Deny card already shows this session's tool permission on its task's page, with the command; a
-        // second question for the same prompt would only say it again.
-        if (type == "permission_prompt" && permissions?.Asks(hook.SessionId) == true) return blinked;
+        // second question for the same prompt would only say it again. A plan on its card (task 8dbbaa0b) is not one of
+        // those: approving a plan is a decision, so its task waits on the user with the plan's question, as it did
+        // before the card, and the card is where it is answered.
+        if (type == "permission_prompt" && permissions?.Of(hook.SessionId).Any(p => !p.Request.IsPlan) == true) return blinked;
 
         var detail = prompts.Detail(hook.SessionId);
         // Claude's multiple-choice dialog is a permission dialog in Claude Code's registry too ("Claude needs your
@@ -71,7 +73,9 @@ public sealed partial class RemoteControl
         var message = hook.Message.GetValueOrDefault("");
         // The detail's subagent picks the transcript to watch only when the detail named the question.
         var agent = SessionPrompt.Named(type, message, detail).HasValue ? detail.Bind(d => d.AgentId) : Maybe<string>.None;
-        SessionPrompt.Text(type, message, detail)
+        // A plan whose card is on the task's page is answered there, and its question says so (SessionPrompt.PlanOnCardLead).
+        var planOnCard = permissions?.Of(hook.SessionId).Any(q => q.Request.IsPlan) == true;
+        SessionPrompt.Text(type, message, detail, planOnCard)
             .Bind(text => service.Board.TaskOf(hook.SessionId).Where(TakesDialogQuestion).Map(t => (Task: t, Text: text)))
             .Tap(found => PlaceQuestion(service, found.Task, found.Text, hook, agent));
         return blinked;

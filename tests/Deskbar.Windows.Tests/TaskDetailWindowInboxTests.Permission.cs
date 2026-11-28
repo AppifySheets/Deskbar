@@ -3,6 +3,7 @@ using System.Text.Json.Nodes;
 using System.Windows.Automation;
 using System.Windows.Controls;
 using System.Windows.Input;
+using CSharpFunctionalExtensions;
 using Deskbar.App;
 using Deskbar.Core.Tasks;
 
@@ -216,6 +217,125 @@ public partial class TaskDetailWindowInboxTests
             Assert.True(after.IsKeyboardFocusWithin);
             Assert.Equal(5, after.CaretIndex);
         }
+    }));
+
+    // --- the plan's card (ExitPlanMode, task 8dbbaa0b) ----------------------------------------------------------------
+
+    const string PlanInput = """{"plan":"# Fix the bar\n\n1. Do it first\n2. Then test","planFilePath":"C:\\Users\\x\\.claude\\plans\\fix-the-bar.md"}""";
+
+    // A task window with a plan on show for the task's session, on a scratch permission box. The page's AnswerPlan is
+    // replaced by a spy that records its calls and answers with `reply` (the real one when null).
+    static void WithPlan(Action<Rig, PermissionDesk, string, Guid, TaskDetailWindow, TasksWindow, List<(string Slot, PlanDecision Decision, string Note)>> body,
+        Func<Result>? reply = null)
+    {
+        using var t = Build();
+        var box = Path.Combine(Path.GetTempPath(), "deskbar-plan-window-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            var desk = new PermissionDesk(box, () => Start.AddHours(1));
+            t.Board.Permissions = desk;
+            var id = t.Tasks.Create("Ship the fix", t.Sparrow, Session("s1")).Value.Id;
+            var (window, page) = Open(t, id);
+            var calls = new List<(string Slot, PlanDecision Decision, string Note)>();
+            if (reply is not null)
+                page.Actions = page.Actions! with
+                {
+                    AnswerPlan = (slot, decision, note) =>
+                    {
+                        calls.Add((slot, decision, note));
+                        return reply();
+                    },
+                };
+            Directory.CreateDirectory(Path.Combine(box, "req-1-1"));
+            Assert.True(desk.Register("req-1-1", new PermissionRequest("s1", "ExitPlanMode", @"C:\repos\TaskSpaces", "plan",
+                [new PermissionField("plan", "# Fix the bar")], Input: PlanInput)).IsSuccess);
+            body(t, desk, box, id, window, page, calls);
+        }
+        finally
+        {
+            if (Directory.Exists(box)) Directory.Delete(box, true);
+        }
+    }
+
+    [Fact]
+    public void A_pending_plan_draws_the_plan_card_with_its_body_and_four_buttons() => StaThread.Run(() => WithPlan((t, desk, box, id, window, page, calls) =>
+    {
+        var card = Cards(window, TasksWindow.PlanCardTag).Single();
+        Assert.Empty(Cards(window, TasksWindow.PermissionCardTag));
+        Assert.Empty(Cards(window, TasksWindow.DialogCardTag));
+        var body = Inside(card).OfType<RichTextBox>().Single(b => b.Tag as string == TasksWindow.PlanBodyTag);
+        var text = new System.Windows.Documents.TextRange(body.Document.ContentStart, body.Document.ContentEnd).Text;
+        Assert.Contains("Fix the bar", text);
+        Assert.Contains("Do it first", text);
+        Assert.Contains("Then test", text);
+        Assert.Single(Inside(card).OfType<TextBox>(), b => b.Tag as string == TasksWindow.PlanNoteTag);
+        Assert.Equal([TasksWindow.ApprovePlanText, TasksWindow.ApprovePlanEditsText, TasksWindow.KeepPlanningText, TasksWindow.AnswerInTerminalText],
+            Inside(card).OfType<Button>().Select(b => AutomationProperties.GetName(b)));
+    }));
+
+    [Fact]
+    public void Keep_planning_is_off_until_the_note_box_has_words() => StaThread.Run(() => WithPlan((t, desk, box, id, window, page, calls) =>
+    {
+        var card = Cards(window, TasksWindow.PlanCardTag).Single();
+        var note = Inside(card).OfType<TextBox>().Single(b => b.Tag as string == TasksWindow.PlanNoteTag);
+        Assert.False(ButtonNamed(card, TasksWindow.KeepPlanningText).IsEnabled);
+        Assert.True(ButtonNamed(card, TasksWindow.ApprovePlanText).IsEnabled);
+
+        note.Text = "   ";
+        Assert.False(ButtonNamed(card, TasksWindow.KeepPlanningText).IsEnabled);
+
+        note.Text = "split step 2";
+        Assert.True(ButtonNamed(card, TasksWindow.KeepPlanningText).IsEnabled);
+
+        note.Text = "";
+        Assert.False(ButtonNamed(card, TasksWindow.KeepPlanningText).IsEnabled);
+    }));
+
+    [Theory]
+    [InlineData(PlanDecision.Approve, TasksWindow.ApprovePlanText)]
+    [InlineData(PlanDecision.ApproveEdits, TasksWindow.ApprovePlanEditsText)]
+    public void An_approve_button_sends_its_decision_with_no_note(PlanDecision decision, string button) => StaThread.Run(() => WithPlan((t, desk, box, id, window, page, calls) =>
+    {
+        Click(Cards(window, TasksWindow.PlanCardTag).Single(), button);
+
+        Assert.Equal([("req-1-1", decision, "")], calls);
+    }, reply: Result.Success));
+
+    [Fact]
+    public void Keep_planning_after_typing_a_note_sends_the_note() => StaThread.Run(() => WithPlan((t, desk, box, id, window, page, calls) =>
+    {
+        var card = Cards(window, TasksWindow.PlanCardTag).Single();
+        Inside(card).OfType<TextBox>().Single(b => b.Tag as string == TasksWindow.PlanNoteTag).Text = "split step 2";
+
+        Click(card, TasksWindow.KeepPlanningText);
+
+        Assert.Equal([("req-1-1", PlanDecision.KeepPlanning, "split step 2")], calls);
+    }, reply: Result.Success));
+
+    // A refusal's text is shown on the page, the card stays and the typed note is kept.
+    [Fact]
+    public void A_failure_result_shows_its_text_and_keeps_the_card_and_the_note() => StaThread.Run(() => WithPlan((t, desk, box, id, window, page, calls) =>
+    {
+        var card = Cards(window, TasksWindow.PlanCardTag).Single();
+        Inside(card).OfType<TextBox>().Single(b => b.Tag as string == TasksWindow.PlanNoteTag).Text = "split step 2";
+
+        Click(card, TasksWindow.KeepPlanningText);
+
+        Assert.Contains(Inside(window).OfType<TextBlock>(), b => b.Text == "This question has ended. Answer it in the terminal.");
+        var after = Cards(window, TasksWindow.PlanCardTag).Single();
+        Assert.Equal("split step 2", Inside(after).OfType<TextBox>().Single(b => b.Tag as string == TasksWindow.PlanNoteTag).Text);
+    }, reply: () => Result.Failure("This question has ended. Answer it in the terminal.")));
+
+    // The real wiring, no spy: Approve reaches the desk, which writes "<code> dialog" and holds the allow line.
+    [Fact]
+    public void Approve_on_the_real_actions_answers_the_desk_and_notes_the_thread() => StaThread.Run(() => WithPlan((t, desk, box, id, window, page, calls) =>
+    {
+        Click(Cards(window, TasksWindow.PlanCardTag).Single(), TasksWindow.ApprovePlanText);
+
+        var code = File.ReadAllText(Path.Combine(box, "req-1-1", PermissionDesk.AnswerFile)).Split(' ')[0];
+        Assert.Equal("allow", (string)JsonNode.Parse(desk.Fetch("req-1-1", code).Value)!["hookSpecificOutput"]!["decision"]!["behavior"]!);
+        Assert.Empty(Cards(window, TasksWindow.PlanCardTag));
+        Assert.Contains(t.Tasks.Board.Tasks.Single(x => x.Id == id).Comments, c => c.Markdown == PlanAsk.ThreadLine(PlanDecision.Approve));
     }));
 
     // With no dialog waiting the same box posts a comment as ever.

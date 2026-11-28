@@ -30,7 +30,8 @@ public enum PermissionDecision
 // background session the dialog stays). No path prints allow by default.
 //
 // A DIALOG'S SLOT is the one exception to "never text built from data" (task c047d0a0): the answer to AskUserQuestion
-// is the picked labels and typed text, so its line cannot be a literal of the script. After the same code check, and
+// is the picked labels and typed text, and the answer to a plan (ExitPlanMode, task 8dbbaa0b, PlanAsk) echoes the plan
+// back or carries the user's note, so its line cannot be a literal of the script. After the same code check, and
 // only for a slot whose registration said it is a dialog's, the script asks Deskbar for the line over the control pipe
 // (`claude-permission --fetch`, its code on stdin; PermissionDesk.Fetch) and lets the reply, one line of pure-ASCII JSON
 // (DialogAsk.AnswerLine), straight through to its own output, never parsing it. The line is never a file: a file beside
@@ -57,8 +58,8 @@ public static class PermissionAnswer
         """{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"allow","updatedPermissions":[{"type":"setMode","mode":"acceptEdits","destination":"session"}]}}}""";
 
     /// <summary>
-    /// The word that answers a multiple-choice dialog (AskUserQuestion, task c047d0a0): the line printed is then the one
-    /// Deskbar hands the script when it fetches it (PermissionDesk.Fetch, DialogAsk.AnswerLine). Taken only by a slot
+    /// The word that answers a dialog (AskUserQuestion, task c047d0a0; a plan, task 8dbbaa0b): the line printed is then
+    /// the one Deskbar hands the script when it fetches it (PermissionDesk.Fetch, DialogAsk.AnswerLine, PlanAsk.AnswerLine). Taken only by a slot
     /// registered as a dialog's (<see cref="DialogKind"/>), and a dialog's slot takes no other word: a plain allow is not
     /// an answer to a dialog, and no line is fetched for a tool permission.
     /// </summary>

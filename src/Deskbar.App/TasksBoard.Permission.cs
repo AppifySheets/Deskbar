@@ -25,9 +25,10 @@ public sealed partial class TasksBoard
     }
 
     // Whether a session of the task has a TOOL permission question on show: the Inbox's mark and section (InboxTabs.Split).
-    // A multiple-choice dialog is not one (task c047d0a0): its task already waits on the dialog's own question
-    // (DialogQuestion), so it stays in Waiting on you rather than under "Asks permission, a yes or a no".
-    bool AsksPermission(TaskItem task) => permissions is { } desk && desk.OfTask(tasks.Board, task.Id).Any(p => !p.Request.IsAskUserQuestion);
+    // A multiple-choice dialog is not one (task c047d0a0), nor is a plan to approve (task 8dbbaa0b): its task already
+    // waits on the dialog's own question (DialogQuestion, SessionPrompt), so it stays in Waiting on you rather than under
+    // "Asks permission, a yes or a no".
+    bool AsksPermission(TaskItem task) => permissions is { } desk && desk.OfTask(tasks.Board, task.Id).Any(p => !p.Request.IsDialog);
 
     IReadOnlyList<PermissionDesk.Pending> PermissionsOf(Guid id) => permissions?.OfTask(tasks.Board, id) ?? [];
 
@@ -36,6 +37,16 @@ public sealed partial class TasksBoard
 
     Result AnswerDialog(string slot, IReadOnlyDictionary<string, string> answers) =>
         permissions?.AnswerDialog(slot, answers) ?? Result.Failure("This question has ended. Answer it in the terminal.");
+
+    // A plan card's click (task 8dbbaa0b). What was decided goes into the task's thread as Deskbar's line, so the chat
+    // keeps it after the card has gone: nothing else would say a plan was approved from here, or what the note was.
+    Result AnswerPlan(string slot, PlanDecision decision, string note)
+    {
+        if (permissions is not { } desk) return Result.Failure("This question has ended. Answer it in the terminal.");
+        var task = desk.All.FirstOrDefault(p => p.Slot == slot) is { } pending ? tasks.Board.TaskOf(pending.Request.SessionId) : default;
+        return desk.AnswerPlan(slot, decision, note)
+            .Tap(() => task.Tap(t => tasks.Note(t.Id, PlanAsk.ThreadLine(decision, note))));
+    }
 }
 
 internal sealed partial record TasksWindowActions
@@ -48,4 +59,7 @@ internal sealed partial record TasksWindowActions
 
     /// <summary>A dialog card's Send (TasksBoard.AnswerDialog, task c047d0a0): the picks by question text. No pipe command does it.</summary>
     public Func<string, IReadOnlyDictionary<string, string>, Result>? AnswerDialog { get; init; }
+
+    /// <summary>A plan card's click (TasksBoard.AnswerPlan, task 8dbbaa0b): the decision and the note. No pipe command does it.</summary>
+    public Func<string, PlanDecision, string, Result>? AnswerPlan { get; init; }
 }

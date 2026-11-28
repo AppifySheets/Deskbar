@@ -52,6 +52,13 @@ public partial class TasksWindow
     readonly HashSet<string> permissionUnfolded = [];
     readonly Dictionary<Guid, string> permissionNote = [];
 
+    // THE CARDS KEEP THEIR SCROLL THROUGH A REDRAW (task 8dbbaa0b, the branch's review). Every draw of the page builds the
+    // cards and their scroller anew, and a plan is long: its task's question arrives about six seconds after the card, the
+    // page redraws, and without this the plan jumped back to its first line under the reader. The last scroller, the
+    // cards it held and where it stood are kept, and a new scroller for the same cards starts there.
+    ScrollViewer? cardsScroller;
+    string cardsScrolled = "";
+
     IReadOnlyList<PermissionDesk.Pending> PermissionsOfTask(Guid id) => Actions?.PermissionsOf?.Invoke(id) ?? [];
 
     // Part of the page's redraw signature: the questions on show, what is unfolded and the note.
@@ -68,25 +75,32 @@ public partial class TasksWindow
         var stack = new StackPanel { Margin = new Thickness(10, 6, 10, 8) };
         if (note is not null)
             stack.Children.Add(Text(note, 12, InboxLook.Ink2, margin: new Thickness(2, 0, 2, 6)).Wrapped());
-        // A multiple-choice dialog gets the dialog card (task c047d0a0, TasksWindow.DialogCard); anything else the Allow / Deny card.
+        // A multiple-choice dialog gets the dialog card (task c047d0a0, TasksWindow.DialogCard), a plan the plan card
+        // (task 8dbbaa0b, TasksWindow.PlanCard); anything else the Allow / Deny card.
         foreach (var question in questions)
-            stack.Children.Add(DialogAsk.Of(question.Request) is { HasValue: true } dialog
-                ? DialogCard(row.Id, question, dialog.Value)
+            stack.Children.Add(DialogAsk.Of(question.Request) is { HasValue: true } dialog ? DialogCard(row.Id, question, dialog.Value)
+                : PlanAsk.Of(question.Request) is { HasValue: true } plan ? PlanCard(row.Id, question, plan.Value)
                 : PermissionCard(row.Id, question));
+        // A long command unfolded must not push the whole page off: the cards scroll inside 70% of the page at most, room for a
+        // folded card with its buttons on a short panel.
+        var scroller = new ScrollViewer
+        {
+            VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+            HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
+            MaxHeight = Math.Max(240, (InboxPage.ActualHeight > 0 ? InboxPage.ActualHeight : 600) * 0.7),
+            Focusable = false,
+            Content = stack,
+        };
+        // The same cards as the last draw start where that draw's scroller stood (see cardsScroller).
+        var shown = $"{row.Id}|{string.Join(',', questions.Select(q => q.Slot))}";
+        var offset = cardsScroller is { } last && cardsScrolled == shown ? last.VerticalOffset : 0;
+        (cardsScroller, cardsScrolled) = (scroller, shown);
+        if (offset > 0) scroller.Loaded += (_, _) => scroller.ScrollToVerticalOffset(offset);
         return new Border
         {
             BorderBrush = InboxLook.Hairline,
             BorderThickness = new Thickness(0, 1, 0, 0),
-            // A long command unfolded must not push the whole page off: the cards scroll inside 70% of the page at most, room for a
-            // folded card with its buttons on a short panel.
-            Child = new ScrollViewer
-            {
-                VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
-                HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
-                MaxHeight = Math.Max(240, (InboxPage.ActualHeight > 0 ? InboxPage.ActualHeight : 600) * 0.7),
-                Focusable = false,
-                Content = stack,
-            },
+            Child = scroller,
         };
     }
 
