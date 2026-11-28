@@ -43,7 +43,8 @@ namespace Deskbar.App;
 //                 Claude session's window (ClaudeTaskActions.Go, Task 9; TaskViews.SessionToGoTo names the session). A
 //                 note on no workspace has nowhere to go, so its click opens its thread instead.
 //   Close         at once through TaskService.Close (only Petre closes, and this is his click), with the bar's undo
-//                 window: the line stays in its place for six seconds, struck through, with Undo (Ruling 10).
+//                 window: the line stays in its place for six seconds, struck through, with Undo (Ruling 10), and
+//                 longer while Petre is still at the panel: until it goes idle or hides (task af38579b, UndoWindowOver).
 //   Undo          exactly undo (Ruling 31): the status it had, its question if it waited on Petre, its place and the
 //                 selection (TaskBoard.UndoClose).
 //   Reopen        a closed task under the Closed filter: TaskService.Reopen.
@@ -233,6 +234,10 @@ public sealed partial class TasksBoard : IDisposable
         public bool Selected { get; init; }
 
         public bool Expanded { get; init; }
+
+        // The six seconds are over but Petre was still at the panel, so the line stays, struck through with Undo, until
+        // he leaves it alone or hides it (task af38579b, see UndoWindowOver).
+        public bool Over { get; init; }
     }
 
     //   panel         the panel's app bar and place (TasksPanel), built on the same window by the App, or by the tests
@@ -557,8 +562,14 @@ public sealed partial class TasksBoard : IDisposable
     {
         // Never once the app is going: the state Shutdown saved is the one the next start reads.
         if (shutDown) return;
+        // Lines he closed that stayed while he was at the panel (task af38579b, UndoWindowOver) are done with: the panel
+        // he went through them in is going, so the next open does not show them struck through.
+        LetOverClosesGo();
         panel.Hide();
         window.Dismiss();
+        // A task window or an Inbox page open on one of those tasks drew it struck through with Undo: redrawn, so it does
+        // not offer an Undo that would now answer "Nothing to undo" (review).
+        RefreshTaskWindows();
         Remember(open: false);
     }
 
@@ -1100,7 +1111,7 @@ public sealed partial class TasksBoard : IDisposable
         // A closed task's thread is done with, so the close folds it, and in the same step, before the pulse's redraw, so
         // it is never drawn open under a struck line. Undo opens it again when it was open (Ruling 31: exactly undo).
         var wasExpanded = expanded.Remove(id);
-        pendingCloses[id] = new PendingClose(task.Status, undoTimer(UndoWindow, () => Forget(id)))
+        pendingCloses[id] = new PendingClose(task.Status, undoTimer(UndoWindow, () => UndoWindowOver(id)))
         {
             Question = task.Question,
             Selected = selection.IsSelected(id),
@@ -1581,6 +1592,38 @@ public sealed partial class TasksBoard : IDisposable
                 pendingCloses.Remove(p.Key);
                 if (p.Value.Expanded) expanded.Add(p.Key);
             });
+
+    // THE LINE HE TICKED STAYS WHILE HE IS AT THE PANEL (task af38579b, Petre: "when i mark the task as done, don't hide it
+    // if i'm on that screen, going through tasks, so they don't jump up and down, which could result in me pressing the
+    // wrong thing"). Going down the list closing one task after another, the line he closed six seconds ago left and every
+    // line under it moved up a place, so the line under his pointer, the one he was about to tick, became the next task.
+    // So the six seconds end the line only when the panel is idle (LineHold.cs: untouched for IdleAfter, or never touched,
+    // as with a close from the pipe). While he is still at the panel the line stays where it was, struck through with Undo
+    // (Undo still works: nothing he can see has changed), and it leaves when the panel goes idle (OnIdleTick) or is hidden
+    // (Hide). Every line closed in that stretch leaves in the same redraw, so the list moves once, while he is not at it.
+    void UndoWindowOver(Guid id)
+    {
+        if (!pendingCloses.TryGetValue(id, out var pending)) return;
+        if (idle)
+        {
+            Forget(id);
+            return;
+        }
+        // Touched lately means the idle timer is running (Touch arms it), so its last tick lets this line go.
+        pending.Timer.Dispose();
+        pendingCloses[id] = pending with { Over = true };
+    }
+
+    // The panel went idle or was hidden: every line whose six seconds ran out while he was at the panel leaves. Only takes
+    // them off the pending list; the caller redraws: the whole board (OnIdleTick), or the task windows only (Hide, whose
+    // panel is going off screen).
+    void LetOverClosesGo() =>
+        pendingCloses.Where(p => p.Value.Over).Select(p => p.Key).ToList().ForEach(id =>
+        {
+            pendingCloses.Remove(id);
+            // Out of a held list too, as Forget does (task 106bc422).
+            letGo.Add(id);
+        });
 
     // The undo window is over: the line leaves.
     void Forget(Guid id)

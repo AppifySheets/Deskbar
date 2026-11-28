@@ -26,7 +26,8 @@ namespace Deskbar.App;
 //     Claude switch) stays where it was, drawn as it is now (a closed task drawn closed). A deleted task has nothing to
 //     draw and leaves;
 //   - a line the board lists that was not drawn waits (a task a session just added, one that came back from Snoozed);
-//   - a task HE closed leaves as it always did, once its undo window is over (letGo), and a move HE makes on any line (a
+//   - a task HE closed leaves once its undo window is over (letGo), which while he is at the panel means once it goes
+//     idle (task af38579b, TasksBoard.UndoWindowOver), and a move HE makes on any line (a
 //     drag, a flag toggle, a status, a snooze, a workspace, an assignee or a goal, a reopen) redraws the list as the board
 //     has it (Moving): a drop that stayed put for a minute would look like a drop that failed.
 // It lets go, and the list is redrawn as the board has it, when:
@@ -143,6 +144,8 @@ public sealed partial class TasksBoard
             return;
         }
         idle = true;
+        // The lines he closed while at the panel leave in this same redraw (task af38579b, TasksBoard.UndoWindowOver).
+        LetOverClosesGo();
         Refresh();
     }
 

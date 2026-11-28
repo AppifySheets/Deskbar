@@ -521,7 +521,10 @@ added and Claude starts on it in the background. No terminal opens and nothing m
 were typing, and a small "Claude started" card shows for a few seconds in the corner of the screen, without taking focus (click it to open the session). The camera beside the flag toggles does the same with a picture of the window you were working in: the task gets the picture and the window's name, and Claude starts on it. Type `/` at the start of the box to pick one of the repo's own Claude Code
 skills for that workspace, the ones its repos keep in `.claude/skills` (the list comes from Claude Code itself), and the session starts by running it. A line on the bar has no tick box, so a long title
 gets its whole second row; click a line to open its task in the tasks panel, and close it there or
-with Close in the line's right-click menu, with six seconds to undo.
+with Close in the line's right-click menu, with six seconds to undo. In the tasks panel a line you close
+keeps its place, struck through and with Undo, for as long as you keep working in the panel, so the lines
+under it do not move up while you go down the list; it goes once you leave the panel alone for a minute or
+so, or hide it.
 An important task's title is bold and an urgent one's italic, which sorts the list into Covey's four
 quadrants; set them from a line's right-click menu or the toggles in the tasks panel, and drag a line up
 or down to reorder it. When there are more tasks than fit, the list scrolls with the mouse wheel.
