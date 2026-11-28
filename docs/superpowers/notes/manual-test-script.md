@@ -2074,3 +2074,12 @@ PF2. On a task's page, open a subtask's page from the thread, then press Back: e
 PF3. On an open page, click the toolbar, then wait for a session's comment to redraw the page: the keyboard stays on the toolbar, it is not pulled back into the box.
 PF4. Type half a message on a page, click another window, wait ten seconds (the panel redraws), then click the panel's empty chat area: typing goes on in the box with the half message.
 PF5. With a task window open in the Inbox look, open it again from its line's ⋯ menu ("Open in window") after clicking elsewhere: it comes forward with the keyboard in its comment box.
+
+## The permission card offers the terminal's choices
+
+[Deskbar task bd55bd54](https://deskbar.app/task#bd55bd54-6f05-468c-aafe-8e793b15e68c). "Answer Claude's permission questions in Deskbar" ticked, the Inbox view on, a throwaway note with a Claude session in a scratch folder in the default permission mode (Shift+Tab until the footer says manual mode).
+
+PC1. Ask it to run `echo "$APPDATA" > pc1.txt`. The card's buttons match the terminal's list: Yes, Yes, and switch to auto mode, No, then Answer in the terminal. Click **Yes, and switch to auto mode**: the file is made, the terminal's footer says auto mode is on, and the next command runs without asking.
+PC2. Back in the default mode, ask it to run `git init`. The card adds "Yes, and don't ask again for: git init *" before the auto mode choice, as the terminal does. Click it: the command runs, and the scratch folder's `.claude/settings.local.json` now allows `git init *`.
+PC3. Ask it to write a file: the card offers Yes and No only, as the terminal does.
+PC4. **No** on any card refuses the call and the session says the user denied it in Deskbar.
