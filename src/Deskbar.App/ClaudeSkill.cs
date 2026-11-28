@@ -536,7 +536,11 @@ static class ClaudeSkill
           Deskbar: pull requests, issues, published pages and mockups (artifacts), documents and reports.
           `deskbar.cmd task link <task id>` prints it as markdown, [Deskbar task 1a2b3c4d](https://deskbar.app/task#...);
           in a page, use an <a> to the same address. Clicked, it opens the task in Deskbar, so the user can get from
-          the pull request or the mockup back to the task.
+          the pull request or the mockup back to the task. Inside Deskbar it is the other way round: never mention
+          your own task by its id or link it in your replies, `task ask` questions or comments. They all show in that task's own chat
+          and at its top, where the user already is, so "the merge request is at the top of Deskbar task 1a2b3c4d"
+          sends them to the page they are reading. Say what to do and link what to open (the pull request, the
+          page); other tasks still get their links.
         - Your repository's own rules win. The pull request rules in Deskbar's start briefing (keep it rebased on its base, let CI
           run the tests) are a default: where the repository's CLAUDE.md says otherwise (no CI on pull requests,
           rebasing only right before the merge), follow the CLAUDE.md.

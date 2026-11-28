@@ -435,8 +435,14 @@ public static class SessionBriefing
     // `task link` in the commands below. Not only pull requests and issues: Petre, pointing at a mockup a session had
     // published as a claude.ai artifact, "also include those links in other places claude generates, like mockups". So
     // the rule covers whatever a session makes for its task that he opens outside Deskbar.
+    // NEVER INSIDE THE TASK ITSELF (task ba216ac9, Petre: "stop mentioning the task inside the task's chat", with a
+    // screenshot of a session's reply in the task's chat ending "The merge request is at the top of Deskbar task
+    // dcfc8287"). A session's replies are mirrored into its task's chat, and its asks and comments show there and at the
+    // task's top, so a link to the task in them points the user at the page they are already reading. The link rule
+    // above and the user's own "every reference is a link" made sessions add it, so the exception is said out loud
+    // here, on the `task link` command line for a session that joined later, and in the skill's "Link your task".
     static string LinkLine(TaskItem task) =>
-        $"Put your task's link near the top of everything you make for it that the user opens outside Deskbar (pull requests, issues, mockups and other published pages, documents), so a click takes them back to the task in Deskbar: {TaskLink.Markdown(task.Id)} (in a page, an <a> to it).";
+        $"Put your task's link near the top of everything you make for it that the user opens outside Deskbar (pull requests, issues, mockups and other published pages, documents), so a click takes them back to the task in Deskbar: {TaskLink.Markdown(task.Id)} (in a page, an <a> to it). Never mention your task by its id or link it in your replies, asks or comments: they show in its own chat, where the user already is.";
 
     // A subtask's prompt line reminds a long-running session that the family exists and how to read it again (subtasks
     // spec: siblings move on after the session started). Still one line.
@@ -631,6 +637,8 @@ public static class SessionBriefing
         // below were tightened to make the room, keeping every rule they state. Cut again when task links (1e68ca8b) landed
         // beside it (about 20 characters were left).
         // After task 59d0aac1 below, the worst case (fifty offered tasks) is 9,992 characters: 8 to spare.
+        // Task ba216ac9 added "never in the task's own chat" to the `task link` line and paid for it with cuts on the
+        // "Before you start", relate, duplicate-of and "Keep the design" lines: 9,989 characters measured, 11 to spare.
         //
         // ONE ORDERED RULE, NOT TWO (task 59d0aac1, from task b63e86cf: an iam.ge session marked its task done at the
         // release, before anything showed the change running, and Petre had to ask whether it was watching the deploy).
@@ -683,7 +691,8 @@ public static class SessionBriefing
         $"  {Shim} task done --session {sessionId}   (when the work is finished and nothing waits on the user, so not while a pull request of yours waits to be merged; for a merged change, after the order above; only the user closes a task)",
         $"  {Shim} task later - --session {sessionId}   (the title of a follow-up note on your workspace, linked to your task as related)",
         // Task 5016d533: the link for a pull request or issue, for a session that joined after its start briefing.
-        $"  {Shim} task link <id>   (your task's link as markdown, for the top of each pull request, issue, mockup or document)",
+        // Task ba216ac9: and never in what shows in the task's own chat (LinkLine's comment).
+        $"  {Shim} task link <id>   (your task's link as markdown, for the top of each pull request, issue, mockup or document; never in the task's own chat)",
         // Subtasks spec: a session splitting its work makes a subtask, which the next session picks up with this one's
         // context (its join reply names this session and its transcript). `task family` is not listed here: the join
         // reply, the start briefing and a subtask's prompt line carry it where it matters.
@@ -694,7 +703,7 @@ public static class SessionBriefing
         // read again on every turn. So what a session keeps OUT of its own conversation is what saves his limits:
         // test runs, searches and rebases go to a subagent on a cheaper model, and only the outcome comes back. No
         // model is named, because which ones a person has depends on their plan.
-        "Keep your conversation short (all of it is read again each turn): give test runs, builds, broad searches, rebases and other mechanical work to a subagent on a cheaper model than yours, and take back only the outcome. Keep the design, the decisions and the code that needs judgement for yourself.",
+        "Keep your conversation short (all of it is read again each turn): give test runs, builds, broad searches, rebases and other mechanical work to a subagent on a cheaper model than yours, and take back only the outcome. Keep the design, decisions and the code that needs judgement for yourself.",
         // Petre: "can we also add a review step at the end by a smarter model?". A review reads the diff, not the
         // session, so it costs a fraction of the work it checks. It finds faults in the change; it does not rescue
         // a wrong approach, which is why a plan gets the same look before the code is written.
@@ -703,9 +712,9 @@ public static class SessionBriefing
         // examine what's related to it"). Task 64cb52ab asked for a button that a merged PR had shipped that morning; the
         // session only found out because Petre said "see if something like this has already been done". So every session
         // looks first, links what it finds, and closes its own task as a duplicate rather than redoing finished work.
-        $"Before you start on a task, look through {Shim} task list and {Shim} task list --closed for tasks about the same or related work, and read what their sessions did. Link what you find:",
-        $"  {Shim} task relate <id> --session {sessionId}   (a session on either task reads the link; task unrelate <id> removes it)",
-        $"  {Shim} task duplicate-of <id> --session {sessionId}   (your task is the same work as task <id>, done or under way: it closes as its duplicate and you do not redo it)",
+        $"Before you start, look through {Shim} task list and {Shim} task list --closed for tasks about the same or related work, and read what their sessions did. Link what you find:",
+        $"  {Shim} task relate <id> --session {sessionId}   (sessions on both tasks see it; task unrelate <id> removes it)",
+        $"  {Shim} task duplicate-of <id> --session {sessionId}   (your task is the same work as <id>, done or under way: it closes as its duplicate and you do not redo it)",
         "Keep the task lean: say what needs the user, and nothing else. The title is a few words naming the work. The status line is one short phrase, under about 60 characters, saying where it stands. Comments are rare: only for what needs the user's attention or a result they must know, with no progress logs, measurements, spike notes or findings dumps.",
         "Never close or delete a task, and leave the user's own notes alone unless they ask.",
     ];
