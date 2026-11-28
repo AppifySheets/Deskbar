@@ -109,7 +109,7 @@ The panel is narrow on purpose, which makes a long task hard to read and harder 
 - The link goes through a page on deskbar.app, because GitHub and most other places only keep web links. That page hands the link to Deskbar, so your browser asks once whether to open Deskbar; tick its "always allow" box and later links open straight away. The task's id stays in the part after `#`, which a browser never sends to the site.
 - Deskbar registers the `deskbar:` link type for you when it starts, so a `deskbar://task/<id>` link opens the task too. If Deskbar is not running, the click starts it and then opens the task.
 - A task link inside Deskbar, in a comment, a description or a question, opens the task's window directly, without the browser.
-- Claude sessions on a task are told to put the task's link at the top of everything they make for it that you open outside Deskbar: pull requests, issues, published pages and mockups, documents and reports. Each of them leads back to its task.
+- Claude sessions on a task are told to put the task's link at the top of everything they make for it that you open outside Deskbar: pull requests, issues, published pages and mockups, documents and reports. Each of them leads back to its task. Inside the task itself they leave it out: their replies, questions and comments show in that task's own chat, so they never point you at the task you are already reading.
 - `deskbar.cmd task link <id>` prints the same markdown link.
 
 ## The Inbox

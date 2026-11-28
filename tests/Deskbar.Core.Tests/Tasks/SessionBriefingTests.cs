@@ -51,6 +51,20 @@ public sealed class SessionBriefingTests
         Assert.DoesNotContain(Dashes, text.Contains);
     }
 
+    // Task ba216ac9 (Petre: "stop mentioning the task inside the task's chat"): a session's replies, asks and comments show
+    // in its task's own chat, so the briefing tells it never to name or link the task there, both in the start briefing of
+    // a session on a task and on the `task link` line every session reads.
+    [Fact]
+    public void A_session_is_told_not_to_link_its_task_inside_the_task()
+    {
+        var own = SessionBriefing.Start(Start("resume"), Task("No self links"), []);
+        var joiner = SessionBriefing.Start(Start(), Maybe<TaskItem>.None, []);
+
+        Assert.Contains("Never mention your task by its id or link it in your replies, asks or comments", own);
+        Assert.Contains("mockup or document; never in the task's own chat)", joiner);
+        Assert.DoesNotContain(Dashes, own.Contains);
+    }
+
     [Fact]
     public void A_new_session_is_told_its_id_the_offered_tasks_and_how_to_join_or_create()
     {
