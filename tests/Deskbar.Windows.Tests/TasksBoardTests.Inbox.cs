@@ -1273,6 +1273,38 @@ public partial class TasksBoardTests
         Assert.Null(t.Window.InboxPageShown);
     });
 
+    // Task 9106eaba (Petre: "subtask of should be at the top of the page, loud and clear, not inside the chat"): a
+    // subtask's page names its parent once, in the docked header above the title (ParentBand), never in the scrolling
+    // chat, and the band opens the parent's page. A page of a task without a parent has no band.
+    [Fact]
+    public void A_subtasks_page_names_its_parent_at_the_top_not_in_the_chat() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var parent = t.Tasks.AddNote("Parent errand", t.Gepha).Value.Id;
+        var sub = t.Tasks.AddNote("Child errand", t.Gepha).Value.Id;
+        t.Tasks.SetParent(sub, parent);
+        t.Controller.Show();
+        ChooseInbox(t);
+        t.Window.ChooseInboxTab(InboxTab.Notes);
+        Click(LineOf(t.Window, parent));
+        Assert.DoesNotContain(Inside(t.Window.InboxPageContent!).OfType<Button>(), b => Equals(b.Tag, TasksWindow.ParentBandTag));
+        Click(Inside(t.Window.InboxPageContent!).OfType<Button>().Single(b => AutomationProperties.GetName(b) == "Subtask Child errand"));
+        Assert.Equal(sub, t.Window.InboxPageShown);
+
+        var parentButtons = Inside(t.Window.InboxPageContent!).OfType<Button>()
+            .Where(b => AutomationProperties.GetName(b) == "Parent Parent errand").ToList();
+        var band = Assert.Single(parentButtons);
+        Assert.Equal(TasksWindow.ParentBandTag, band.Tag);
+        Assert.DoesNotContain(band, Inside(t.Window.InboxPageScroller!));
+        Assert.Contains("Parent errand", Inside(band).OfType<TextBlock>().Select(b => b.Text));
+        // Across the header, not a chip centred on a short title (review): its face is as wide as the button.
+        t.Window.UpdateLayout();
+        Assert.Equal(band.ActualWidth, ((FrameworkElement)band.Content).ActualWidth, 1.0);
+
+        Click(band);
+        Assert.Equal(parent, t.Window.InboxPageShown);
+    });
+
     // A real click on a workspace in the chip's move menu moves the task.
     [Fact]
     public void A_click_in_the_chips_move_menu_moves_the_task() => StaThread.Run(() =>

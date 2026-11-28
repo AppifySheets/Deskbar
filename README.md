@@ -589,7 +589,7 @@ conversation is kept in, so it reads what the earlier work found instead of you 
 drawn right under its parent, starting with "↳", and a parent's line counts its open subtasks; opening a parent in
 the tasks panel lists the ones without a line of their own (folded away, or hidden by a filter) as full lines, with
 every button a task's line has; click one to open it right there, inside the parent's thread. Going the other way, an open subtask's thread starts with "↑ Subtask of" and its
-parent's title, which you can click to show the parent, and "Open parent" on a subtask's menu (in the panel or on the
+parent's title, which you can click to show the parent (on the subtask's page in the Inbox the parent sits in a band above the title instead, where it never scrolls away), and "Open parent" on a subtask's menu (in the panel or on the
 bar) does the same; a subtask's own window has a Parent button that opens the parent's window. Untick "Subtasks" at the top of the tasks panel to fold them into their parent's
 line, in the panel and on the bar, which keeps the count; a subtask waiting on you stays in view. Drag a task onto the middle of another to put it
 under that task; drop a subtask anywhere else, between two lines, to make it a plain task again. That holds for a subtask on a line of its own too (its parent snoozed or Claude's, or the subtask waiting on you); dropped back on its own line it stays as it is. In the tasks panel that works from the parent's open thread too: with Subtasks unticked a subtask is only listed there, and its entry drags out the same way. A parent closes last: while

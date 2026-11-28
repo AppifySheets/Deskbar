@@ -579,6 +579,8 @@ public partial class TasksWindow
         if (pageInWindow) foreach (var extra in WindowStateRow(row)) second.Children.Add(extra);
 
         var top = new StackPanel();
+        // A subtask's parent comes first, above the title (task 9106eaba, ParentBand).
+        if (ParentBand(row) is { } parentBand) top.Children.Add(parentBand);
         top.Children.Add(first);
         top.Children.Add(second);
         // WHY IT CANNOT BE CHECKED (task 485ba96b, Petre: "state that the session has no access to logs or whatever else it
@@ -600,6 +602,63 @@ public partial class TasksWindow
             BorderThickness = new Thickness(0, 0, 0, 1),
             Child = top,
         };
+    }
+
+    internal const string ParentBandTag = "page-parent-band";
+
+    // A SUBTASK'S PARENT AT THE TOP OF ITS PAGE (task 9106eaba; Petre, on a subtask's page whose "↑ Subtask of" sat in
+    // small grey at the head of the chat: "subtask of should be at the top of the page, loud and clear, not inside the
+    // chat"; option A of https://claude.ai/artifact/BAizuY7gpBeMacdwxSm7kH). The chat's head is in the page's scrolling
+    // body, which opens scrolled to its end, so on any chat taller than the page the parent was out of sight. So on a page
+    // the parent is the first thing in the docked header, above the title, and the thread leaves its own entry out
+    // (Thread, OnItsPage): a raised band with a blue edge down its left, "↑ SUBTASK OF" in blue capitals and the parent's
+    // title in ink, a "›" at its end. The whole band is one button that does what the thread's entry did,
+    // Actions.OpenParent: in the panel the parent's page (back to it when it is the page right under this one on the
+    // stack, InboxFollowsSelection), in a task window the parent's own window. Named "Parent <title>" as that entry was.
+    // Null for a task without a parent, or where nothing can open one.
+    Button? ParentBand(TaskRowView row)
+    {
+        if (row.ParentId is not { } parentId || row.ParentTitle is not { } parentTitle || Actions?.OpenParent is not { } openParent) return null;
+        var caption = Text($"↑ {SubtaskOfText.ToUpperInvariant()}", 10.5, InboxLook.Blue, FontWeights.Bold, new Thickness(0, 0, 8, 0));
+        caption.VerticalAlignment = VerticalAlignment.Center;
+        var go = Text("›", 15, InboxLook.Blue, FontWeights.Normal, new Thickness(8, 0, 0, 0));
+        go.VerticalAlignment = VerticalAlignment.Center;
+        // The title takes what the caption and the "›" leave, cut with "…" (the full title is in the tooltip); a dock, as
+        // OpenSubtaskLink's, because a horizontal stack would let a long title run past the header's edge.
+        var name = Text(parentTitle.ReplaceLineEndings(" "), 13.5, InboxLook.Ink, FontWeights.SemiBold);
+        name.TextTrimming = TextTrimming.CharacterEllipsis;
+        name.VerticalAlignment = VerticalAlignment.Center;
+        DockPanel.SetDock(caption, Dock.Left);
+        DockPanel.SetDock(go, Dock.Right);
+        var parts = new DockPanel { LastChildFill = true };
+        parts.Children.Add(caption);
+        parts.Children.Add(go);
+        parts.Children.Add(name);
+        // The blue edge is a border round the band's face, so the hover fill (InboxButton's) stays inside it.
+        var face = new Border
+        {
+            BorderBrush = InboxLook.Blue,
+            BorderThickness = new Thickness(3, 0, 0, 0),
+            Padding = new Thickness(9, 5, 2, 5),
+            Child = parts,
+        };
+        var band = InboxButton(face, $"Parent {parentTitle}", () => openParent(parentId), new Thickness(0), InboxLook.Raised, 7, ignoredWhen: ClickIgnored);
+        // ACROSS THE WHOLE HEADER, whatever the title's length (review): Flat's FlatButton template centres its content and
+        // ignores HorizontalContentAlignment, so a short parent title drew a small chip in the middle. LinkButton is the
+        // same template with the content stretched (the Stats view's task links use it). Its hover fills the button's own
+        // background, which the raised face covers, so the face takes the hover fill itself here.
+        band.Template = (ControlTemplate)FindResource("LinkButton");
+        var bandFace = (Border)band.Content;
+        band.MouseEnter += (_, _) => bandFace.Background = InboxLook.RaisedHot;
+        band.MouseLeave += (_, _) => bandFace.Background = InboxLook.Raised;
+        // Square at its left, where the blue edge runs, rounded at its right: a rounded corner would cut the edge short.
+        bandFace.CornerRadius = new CornerRadius(0, 7, 7, 0);
+        band.Tag = ParentBandTag;
+        band.HorizontalAlignment = HorizontalAlignment.Stretch;
+        band.HorizontalContentAlignment = HorizontalAlignment.Stretch;
+        band.Margin = new Thickness(2, 0, 0, 8);
+        band.ToolTip = $"Open the parent task: {parentTitle}";
+        return band;
     }
 
     internal const string CloseBlockersTag = "page-close-blockers";
