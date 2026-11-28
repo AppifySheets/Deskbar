@@ -44,7 +44,8 @@ namespace Deskbar.App;
 // block (all its lines, as written), and words in straight or curly double quotes ("Pull and redeploy", a button a
 // session names). The point is the WHOLE command: a long one wraps over two lines of a narrow bubble, and selecting
 // it by dragging across the wrap was the chore. The copied text flashes for a moment so the press is seen to have
-// done something, because WPF closes the hover text on a press.
+// done something, because WPF closes the hover text on a press, and a small note under the pointer says "Copied"
+// (task f39f5db3, see "The note at the pointer" by Copyable).
 //   A press, not a release, for the reason a link opens on one: in a read-only box the editor captures the mouse on
 //   the press to start a selection, so the release never reaches the run. Taking the press means a drag that starts
 //   on code does not select part of it; a drag from the plain text beside it still does, and the whole command is
@@ -93,6 +94,16 @@ internal static class MarkdownBlocks
     static readonly Brush CopiedFill = Frozen(Color.FromRgb(0x2E, 0x6B, 0x45));
     static readonly TimeSpan CopiedFlash = TimeSpan.FromMilliseconds(600);
 
+    /// <summary>The note at the pointer after a copy (see "The note at the pointer").</summary>
+    internal const string CopiedNote = "Copied";
+
+    /// <summary>The note when the clipboard was busy and nothing was copied.</summary>
+    internal const string NotCopiedNote = "Not copied: the clipboard is busy";
+
+    // How long the note stands: long enough to read one word without looking for it, short enough to be gone before
+    // the next thing is read.
+    static readonly TimeSpan NoteTime = TimeSpan.FromMilliseconds(1200);
+
     // A table's grid lines and its header row's fill: white at low strength, so they show on every dark surface the
     // document lands on (a chat bubble, the tasks panel, a task window) without a colour of their own.
     static readonly Brush TableRule = Frozen(Color.FromArgb(0x48, 0xFF, 0xFF, 0xFF));
@@ -132,10 +143,15 @@ internal static class MarkdownBlocks
     /// does; left null, the default browser opens it, or a file link's plan is followed (see the header).
     /// </summary>
     /// <remarks><paramref name="copy"/> is where a click on code or a quote puts its text (see the header); left null,
-    /// the clipboard.</remarks>
-    public static FlowDocument Render(string markdown, Action<Uri>? open = null, Action<string>? copy = null)
+    /// the clipboard. <paramref name="note"/> is where the note that follows a copy goes ("Copied", or why not); left
+    /// null, a small tooltip at the mouse pointer (see "The note at the pointer" in the header).</remarks>
+    public static FlowDocument Render(string markdown, Action<Uri>? open = null, Action<string>? copy = null,
+        Action<string>? note = null)
     {
-        var reading = new Reading(open ?? Open, copy ?? CopyToClipboard);
+        // A copy handed in by a caller (the tests) always succeeds; the clipboard can be busy (CopyToClipboard).
+        var put = copy is null ? (Func<string, bool>)CopyToClipboard : text => { copy(text); return true; };
+        var tell = note is null ? (Action<TextElement, string>)ShowNote : (_, text) => note(text);
+        var reading = new Reading(open ?? Open, new Copier(put, tell));
         var document = new FlowDocument { PagePadding = new Thickness(0), FontFamily = TextFont, TextAlignment = TextAlignment.Left };
         Blocks((markdown ?? "").Replace("\r\n", "\n").Split('\n'), reading).ToList().ForEach(document.Blocks.Add);
         return document;
@@ -154,10 +170,14 @@ internal static class MarkdownBlocks
 
     // What a reading hands down to every construct: where a link's click goes, and where a copy goes. Copy is null
     // where nothing copies: in a TextBlock (InlinesOf) and inside a link's text (see the header).
-    sealed record Reading(Action<Uri> Open, Action<string>? Copy)
+    sealed record Reading(Action<Uri> Open, Copier? Copy)
     {
         public Reading WithoutCopy => this with { Copy = null };
     }
+
+    // How a copyable part copies: Put places the text and says whether it got there (false: the clipboard was busy), and
+    // Note tells the user which, beside the part that was pressed (ShowNote, or the tests' list).
+    sealed record Copier(Func<string, bool> Put, Action<TextElement, string> Note);
 
     // --- blocks --------------------------------------------------------------------------------------------------
 
@@ -316,7 +336,7 @@ internal static class MarkdownBlocks
 
     // A fenced block, from its opening fence to the closing one (or to the end, when the comment forgot to close it).
     // Its lines are kept exactly, leading spaces included, and read for nothing.
-    static (Block, int) Fenced(IReadOnlyList<string> lines, Action<string>? copy)
+    static (Block, int) Fenced(IReadOnlyList<string> lines, Copier? copy)
     {
         var body = lines.Skip(1).TakeWhile(line => !line.TrimStart().StartsWith("```", StringComparison.Ordinal)).ToArray();
         var closed = body.Length + 1 < lines.Count;
@@ -399,7 +419,7 @@ internal static class MarkdownBlocks
 
     // A quoted phrase: its marks as plain text either side of its words, the words copyable on their own. Where nothing
     // copies (a TextBlock, a link's text) it is the text it was written as.
-    static Inline QuoteOf(Match match, Action<string>? copy)
+    static Inline QuoteOf(Match match, Copier? copy)
     {
         if (copy is null) return new Run(match.Value);
         var words = new Run(match.Groups["quoteText"].Value) { Tag = QuoteTag };
@@ -411,7 +431,7 @@ internal static class MarkdownBlocks
     // (so neither the editor's selection nor the bubble under it sees it), and a short flash of the copied part. The
     // flash puts back whatever background the part had at the press, so a restyle after Render (InboxMarks gives code
     // its own chip) survives it.
-    static void Copyable(TextElement element, string text, Action<string> copy)
+    static void Copyable(TextElement element, string text, Copier copy)
     {
         element.Cursor = System.Windows.Input.Cursors.Hand;
         element.ToolTip = CopyHint;
@@ -420,10 +440,66 @@ internal static class MarkdownBlocks
             e.Handled = true;
             // A double-click's second press is the same copy again: taken, so it selects nothing, but not repeated.
             if (e.ClickCount > 1) return;
-            copy(text);
-            Flash(element);
+            // The flash and "Copied" only when the text got there; a busy clipboard says so instead of pretending.
+            var copied = copy.Put(text);
+            if (copied) Flash(element);
+            copy.Note(element, copied ? CopiedNote : NotCopiedNote);
         };
     }
+
+    // THE NOTE AT THE POINTER (task f39f5db3, Petre: "when copying on a click, say that it's been copied in a small note
+    // near the mouse pointer"). The green flash alone was easy to miss on a long command, and the hover text "Click to
+    // copy" closes on the press, so nothing said the copy had happened. The note is a ToolTip opened by hand, placed
+    // the way hover text is (PlacementMode.Mouse: just under the pointer), so it has the app's tooltip look with nothing
+    // to style, and OwnToolTips' class handlers lift it above the bar like any other hover text (task d4695a97: an
+    // owner-less popup slides under the bar's once-a-second climb otherwise).
+    //   One note per UI thread, reused: a second copy moves it to the new press and starts its time again, so two notes
+    //   never stand at once. It is closed and reopened rather than left open, because a popup that is already open does
+    //   not follow the pointer to the new press.
+    //   It goes after NoteTime by itself. WPF's ToolTipService leaves a tooltip it did not open alone, so a move of the
+    //   pointer does not close it early; that is fine for a note this short.
+    [ThreadStatic] static System.Windows.Controls.ToolTip? pointerNote;
+    [ThreadStatic] static System.Windows.Threading.DispatcherTimer? noteTimer;
+
+    /// <summary>This thread's note, for the tests; null until the first copy here.</summary>
+    internal static System.Windows.Controls.ToolTip? NoteOnThisThread => pointerNote;
+
+    static void ShowNote(TextElement element, string text)
+    {
+        var tip = pointerNote ??= new System.Windows.Controls.ToolTip { Placement = System.Windows.Controls.Primitives.PlacementMode.Mouse };
+        var timer = noteTimer ??= NoteTimer(tip);
+        tip.IsOpen = false;
+        tip.Content = text;
+        // The box the document sits in, so the popup opens on that window's screen and DPI. Null (a document not shown
+        // anywhere) still opens at the pointer.
+        tip.PlacementTarget = HostOf(element);
+        tip.IsOpen = true;
+        timer.Stop();
+        timer.Start();
+    }
+
+    static System.Windows.Threading.DispatcherTimer NoteTimer(System.Windows.Controls.ToolTip tip)
+    {
+        var timer = new System.Windows.Threading.DispatcherTimer { Interval = NoteTime };
+        timer.Tick += (_, _) =>
+        {
+            timer.Stop();
+            tip.IsOpen = false;
+            // Let go of the box it last stood by, so a task window closed after a copy is not kept alive by the note.
+            tip.PlacementTarget = null;
+        };
+        return timer;
+    }
+
+    // The control a document element is shown in: up the logical tree (run, paragraph, FlowDocument, RichTextBox) to the
+    // first UIElement.
+    static UIElement? HostOf(DependencyObject element) =>
+        LogicalTreeHelper.GetParent(element) switch
+        {
+            UIElement host => host,
+            null => null,
+            var parent => HostOf(parent),
+        };
 
     // A press during a flash (a double-click's second press) only restarts the running flash: saving the background
     // then would save the green, and the flash would put the green back for good.
@@ -452,10 +528,12 @@ internal static class MarkdownBlocks
     }
 
     // The clipboard is shared with every program and one can hold it open for a moment; a copy that finds it busy is
-    // traced and dropped rather than thrown on the UI thread (as TaskLinkClipboard does).
-    static void CopyToClipboard(string text) =>
+    // traced and dropped rather than thrown on the UI thread (as TaskLinkClipboard does). Whether it got there decides
+    // the note at the pointer.
+    static bool CopyToClipboard(string text) =>
         Result.Try(() => System.Windows.Clipboard.SetText(text))
-            .TapError(error => ClickTrace.Write($"copy from a comment: {error}"));
+            .TapError(error => ClickTrace.Write($"copy from a comment: {error}"))
+            .IsSuccess;
 
     // A hyperlink whose click goes to the opener. Click rather than RequestNavigate: there is no navigation host in a
     // RichTextBox, and Click is raised on a press in a read-only box with IsDocumentEnabled set.
