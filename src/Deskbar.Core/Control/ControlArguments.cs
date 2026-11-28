@@ -260,7 +260,8 @@ public static class ControlArguments
     // it here, or a `-` after it is passed on as a literal title and its text is traced in full (TextForTrace).
     // `task subtask`'s --no-start (task fa056b2f) is the fourth: `task subtask --no-start -` must still read stdin.
     // `task ask`'s --deploy (task a87891ca) is the fifth: `task ask --deploy -` must read stdin as `task ask - --deploy` does.
-    static readonly string[] ValuelessFlags = ["--important", "--urgent", "--no-start", "--deploy", FromClaude];
+    // `task deployed`'s --unknown (task 485ba96b) is the sixth: `task deployed --unknown -` must read stdin too.
+    static readonly string[] ValuelessFlags = ["--important", "--urgent", "--no-start", "--deploy", "--unknown", FromClaude];
 
     static bool TakesValue(string word) => IsOption(word) && !ValuelessFlags.Contains(word, StringComparer.Ordinal);
 

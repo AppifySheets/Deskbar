@@ -489,6 +489,9 @@ public sealed partial class RemoteControl
 //                                           told to the session once and settles no question (task 1565789d)
     //   task deployed <note> --session <sid>    the session's own task's change was seen running where its app is deployed,
     //                                           the note the evidence (task 8470d176, phase 2; TaskBoard.MarkDeployed)
+    //   task deployed <reason> --unknown --session <sid>
+    //                                           the session cannot tell whether its change was deployed, the reason what it
+    //                                           has no access to (task 485ba96b; TaskBoard.MarkDeployUnknown)
     //   task duplicate-of <id> --session <sid>  the session's own task closes as a duplicate of <id> (task links spec)
     //   task relate <id> --session <sid>        links the session's own task to <id> as related
     //   task unrelate <id> --session <sid>      removes that link
@@ -579,6 +582,13 @@ public sealed partial class RemoteControl
             // app's logs, health page or deploy output for the version carrying its merge, and the note is what it saw
             // ("2026.11.25.39-3749d21 in the portal logs"), usually on stdin. Every recorded pull request of its own task
             // not reported yet is recorded; a blank note, or a task with no recorded pull request, is refused.
+            // CANNOT TELL WHETHER IT DEPLOYED (task 485ba96b, TaskItem.DeployUnknown). The session has no access to where
+            // its change runs (no logs, health page or deploy output it can reach), and the reason says what it lacks, so
+            // the task shows "Can't check the deploy" with it instead of a question. `--unknown` alone, the `-` forgotten,
+            // is refused rather than stored as a deploy note "--unknown".
+            ["deployed", "--unknown"] => ControlReply.Fail("task deployed --unknown needs the reason, or - to read it from stdin"),
+            ["deployed", var reason, "--unknown"] => Changed(Own().Bind(t => service.MarkDeployUnknown(t.Id, reason).Map(() => t))),
+            ["deployed", "--unknown", var reason] => Changed(Own().Bind(t => service.MarkDeployUnknown(t.Id, reason).Map(() => t))),
             ["deployed", var note] => Changed(Own().Bind(t => service.MarkDeployed(t.Id, note).Map(() => t))),
             _ => ControlReply.Fail($"Wrong arguments for a session's task form.\n{TaskUsage()}"),
         };

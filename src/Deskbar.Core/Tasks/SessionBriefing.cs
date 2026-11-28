@@ -225,7 +225,7 @@ public static class SessionBriefing
         + $"- a question that is already settled (its pull request merged or closed, the decision made): run {Shim} task answered --session <your session id>\n"
         + $"- a question that still holds but no longer says what the user must do now: ask again with {Shim} task ask - --session <your session id>, the text on stdin\n"
         // Task 59d0aac1: a merged change that has to run is not finished until it does (the briefing's order).
-        + $"- a merged change that has to run but is not reported deployed: check where it runs, then {Shim} task deployed - --session <your session id> with the evidence, or, if a person makes the deploy, hand it over with {Shim} task ask - --deploy --session <your session id>\n"
+        + $"- a merged change that has to run but is not reported deployed: check where it runs, then {Shim} task deployed - --session <your session id> with the evidence, or, if a person makes the deploy, hand it over with {Shim} task ask - --deploy --session <your session id>, or, if you cannot see where it runs, {Shim} task deployed - --unknown --session <your session id> with what you lack\n"
         + $"- work that is finished and deployed (or has nothing to deploy) with nothing waiting on the user: run {Shim} task done --session <your session id>, with what to try in the status line\n"
         + $"- a task marked done whose work is not finished after all: run {Shim} task join {task.Id.ToString()[..8]} --session <your session id> and carry on\n"
         + $"- a status line that no longer says where the task stands: rewrite it with {Shim} task status-line - --session <your session id>\n"
@@ -621,7 +621,13 @@ public static class SessionBriefing
         // ask line's list, and this line names `task ask - --deploy` (TaskItem.QuestionIsDeploy), which draws the merged
         // ring instead. `task answered` left the end of the line, because `task deployed` settles a hand-over itself
         // (TaskBoard.MarkDeployed); the two cuts pay for the flag, and the briefing is shorter than before.
-        $"After the merge, finish in this order: released (if the repository has a release step), deployed, done. Deployed: the running app's own evidence shows the new version; report it with {Shim} task deployed - --session {sessionId}, the evidence on stdin, or \"nothing to deploy\" for a change nothing runs (docs, a library). In Deskbar's own repository done follows the release. When Deskbar watches, it nudges you when your merge commit's runs finish. Never mark done before deployed. When a person deploys or only they see the evidence: task ask - --deploy (\"Redeploy X\"); Deskbar wakes you to check; once it shows: task deployed, task done. Do not ask the user to test it: put what to try in the status line; they close the task once it works.",
+        //
+        // A DEPLOY THE SESSION CANNOT SEE IS NOT A QUESTION EITHER (task 485ba96b, Petre: "if the task has no way of knowing
+        // if it's been deployed, show a chip for not knowing, not a question mark, and state that the session has no access
+        // to logs or whatever else it needs"). "Or only they see the evidence" sent such a session to a hand-over, though
+        // nobody had a deploy to make; now `task deployed - --unknown` (TaskItem.DeployUnknown) records what it lacks and
+        // the session finishes. A hand-over is for a deploy a person makes, and its check may still end in --unknown.
+        $"After the merge, finish in this order: released (if the repository has a release step), deployed, done. Deployed: the running app's evidence shows the new version; report it with {Shim} task deployed - --session {sessionId}, or \"nothing to deploy\" for a change nothing runs (docs, a library). In Deskbar's own repository done follows the release. When Deskbar watches, it nudges you when your merge commit's runs finish. Never mark done before deployed. When a person deploys: task ask - --deploy (\"Redeploy X\"); Deskbar wakes you to check. If you cannot see the deploy: task deployed - --unknown, saying what you lack. Then task done. Do not ask the user to test it: put what to try in the status line; they close the task once it works.",
         // AN OPEN PULL REQUEST STAYS ON TOP OF ITS BASE (task 6e4dc116, Petre: "still conflicting; you should keep rebasing
         // open prs", then "make that a deskbar level change"). Other sessions merge all day, so a pull request waiting on
         // the user falls behind its base or starts to conflict while it waits, and the merge he comes to do is blocked or

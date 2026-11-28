@@ -48,7 +48,11 @@ internal static class TaskStatusMarks
     /// is a click on its line. Tagged <see cref="DoneTickTag"/>, or <see cref="ShippingTickTag"/> for the ring, for the
     /// tests.
     /// </summary>
-    internal static FrameworkElement DoneTick(double size, bool shipping = false)
+    // A DEPLOY ITS SESSION CANNOT CHECK (task 485ba96b, <paramref name="unchecked"/>, DeliveryStage.Unchecked): the same
+    // ring broken into dashes, the Inbox's dashed mark (InboxMarks' "doneUnknown"), so the bar says "done, not confirmed"
+    // and never claims either a deploy or a wait. The dash pattern is in units of the stroke's 1.6 thickness: about eight
+    // dashes round the 14-unit circle, as the Inbox's icon has.
+    internal static FrameworkElement DoneTick(double size, bool shipping = false, bool @unchecked = false)
     {
         // The tick is drawn on a 14-unit grid (the mockup's SVG) and scaled to the size asked for.
         var tick = new Path
@@ -64,13 +68,13 @@ internal static class TaskStatusMarks
         // Both rounds fill the whole 14-unit square from 0,0. The ring's stroke is drawn inward from that edge (WPF keeps
         // a shape's stroke within its bounds), so its outer edge is the disc's edge and the tick sits in the same place.
         var round = shipping
-            ? new Ellipse { Width = 14, Height = 14, Stroke = DoneGreen, StrokeThickness = 1.6 }
+            ? new Ellipse { Width = 14, Height = 14, Stroke = DoneGreen, StrokeThickness = 1.6, StrokeDashArray = @unchecked ? UncheckedDashes : null }
             : new Ellipse { Width = 14, Height = 14, Fill = DoneGreen };
         canvas.Children.Add(round);
         canvas.Children.Add(tick);
         return new Viewbox
         {
-            Tag = shipping ? ShippingTickTag : DoneTickTag,
+            Tag = shipping ? @unchecked ? UncheckedTickTag : ShippingTickTag : DoneTickTag,
             Width = size,
             Height = size,
             Child = canvas,
@@ -90,6 +94,40 @@ internal static class TaskStatusMarks
 
     internal const string DoneTickTag = "task-done-tick";
     internal const string ShippingTickTag = "task-shipping-tick";
+    internal const string UncheckedTickTag = "task-unchecked-tick";
+
+    // The unchecked ring's dashes (task 485ba96b), frozen as every shared WPF object must be (CLAUDE.md, Traps).
+    static readonly DoubleCollection UncheckedDashes = FrozenDashes(1.9, 1.15);
+
+    static DoubleCollection FrozenDashes(params double[] pattern)
+    {
+        var dashes = new DoubleCollection(pattern);
+        dashes.Freeze();
+        return dashes;
+    }
+
+    /// <summary>
+    /// A pill with a DASHED outline and <paramref name="text"/> in it (task 485ba96b): the "can't check the deploy" step and
+    /// chip. A Border cannot dash its edge, so a rounded Rectangle draws it behind the text. Not hit-testable.
+    /// </summary>
+    internal static FrameworkElement DashedPill(string text, double fontSize, Brush ink, Brush edge, FontWeight weight, double radius = 9) =>
+        new Grid
+        {
+            HorizontalAlignment = HorizontalAlignment.Left,
+            VerticalAlignment = VerticalAlignment.Center,
+            IsHitTestVisible = false,
+            Children =
+            {
+                new Rectangle { Stroke = edge, StrokeThickness = 1, StrokeDashArray = PillDashes, RadiusX = radius, RadiusY = radius },
+                new TextBlock
+                {
+                    Text = text, FontSize = fontSize, Foreground = ink, FontWeight = weight, Margin = new Thickness(7, 1, 7, 1),
+                    TextTrimming = TextTrimming.CharacterEllipsis,
+                },
+            },
+        };
+
+    static readonly DoubleCollection PillDashes = FrozenDashes(3, 2);
     internal const string ChipTag = "task-status-chip";
 
     // Each status's chip: fill (null = outlined only), edge and ink. Closed has no chip (a closed line shows under the
@@ -119,6 +157,8 @@ internal static class TaskStatusMarks
     {
         DeliveryStage.Open => "PR open",
         DeliveryStage.Checking => "Done",
+        // Its session cannot check the deploy (task 485ba96b).
+        DeliveryStage.Unchecked => "Can't check",
         _ => "Merged",
     };
 
@@ -137,8 +177,12 @@ internal static class TaskStatusMarks
     /// <paramref name="awaitsDeploy"/>) gets the Waiting chip outlined the same way, with "Deploy": merged, not running,
     /// and the next move his (mockup https://claude.ai/artifact/BVJ6WrgNAoeBso1GJ2S5CV).
     /// </remarks>
+    // A Done task whose session cannot check the deploy (task 485ba96b, DeliveryStage.Unchecked) gets "Can't check" in a
+    // DASHED grey pill instead: the Done chip's colours would say done, and the outlined one says merged and on its way.
     internal static FrameworkElement? Chip(TaskStatus status, DeliveryStage delivery = DeliveryStage.None, bool awaitsDeploy = false) =>
-        ChipColours.TryGetValue(status, out var colours)
+        status == TaskStatus.Done && delivery == DeliveryStage.Unchecked
+            ? Tagged(DashedPill(ShippingWord(delivery), 10, ChipColours[TaskStatus.Backlog].Ink, ChipColours[TaskStatus.Backlog].Edge, FontWeights.Normal, 8))
+        : ChipColours.TryGetValue(status, out var colours)
             ? new Border
             {
                 Tag = ChipTag,
@@ -155,4 +199,10 @@ internal static class TaskStatusMarks
                 Child = new TextBlock { Text = ChipText(status, delivery, awaitsDeploy), FontSize = 10, Foreground = colours.Ink, TextTrimming = TextTrimming.CharacterEllipsis },
             }
             : null;
+
+    static FrameworkElement Tagged(FrameworkElement chip)
+    {
+        chip.Tag = ChipTag;
+        return chip;
+    }
 }

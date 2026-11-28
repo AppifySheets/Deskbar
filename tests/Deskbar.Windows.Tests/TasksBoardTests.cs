@@ -1963,6 +1963,30 @@ public partial class TasksBoardTests
     // Task 8470d176, phase 2: a Done task whose pull request in ANOTHER repository is merged keeps the ring until a deploy
     // is reported, and its line menu offers "Mark deployed", which records one by hand and fills the ring. A Deskbar
     // pull request waiting for the running build gets no such item: no report can fill that ring.
+    // Task 485ba96b: a Done task merged elsewhere whose session said it cannot check the deploy gets the dashed ring and a
+    // dashed "Can't check" chip, never the "Merged" ones, and "Mark deployed" is still on its menu: that is how it gets known.
+    [Fact]
+    public void A_deploy_its_session_cannot_check_has_the_dashed_ring_and_chip() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var done = t.Tasks.Create("portal accounts", t.Gepha, Session("s3")).Value.Id;
+        var pr = new PullRequestLink("AppifySheets", "iam.ge", 537);
+        t.Tasks.AddPullRequest(done, pr);
+        t.Tasks.MarkDone(done);
+        Assert.True(t.Tasks.MarkDeployUnknown(done, "no access to the Portainer logs").IsSuccess);
+        t.Controller.Show();
+        t.Tasks.Arrived(new RunningBuild("AppifySheets", "Deskbar", "2.6.23", new string('a', 40)),
+            new Dictionary<string, PullRequestArrival> { [pr.Key] = new(PullRequestState.Merged, false) });
+        t.Window.UpdateLayout();
+
+        var parts = Inside(LineOf(t.Window, done)).OfType<FrameworkElement>().ToArray();
+        Assert.Contains(parts, e => Equals(e.Tag, TaskStatusMarks.UncheckedTickTag));
+        Assert.DoesNotContain(parts, e => Equals(e.Tag, TaskStatusMarks.ShippingTickTag));
+        var chip = Assert.Single(parts, e => Equals(e.Tag, TaskStatusMarks.ChipTag));
+        Assert.Contains(Inside(chip).OfType<TextBlock>(), b => b.Text == "Can't check");
+        Assert.True(t.Tasks.CanMarkDeployed(t.Tasks.Board.Tasks.Single(x => x.Id == done)));
+    });
+
     [Fact]
     public void Mark_deployed_fills_the_ring_of_a_change_merged_elsewhere() => StaThread.Run(() =>
     {

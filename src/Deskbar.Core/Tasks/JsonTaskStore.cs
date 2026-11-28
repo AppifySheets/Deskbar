@@ -196,7 +196,15 @@ public sealed class JsonTaskStore(string baseDirectory, Action<string>? trace = 
         // with a plain question is written as before, and read tolerantly like the other flags. Still version 2: an older
         // build drops it on its next save, which draws one hand-over as a plain question and never costs a task.
         [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull), JsonConverter(typeof(TolerantFlagConverter))]
-        bool? QuestionIsDeploy = null);
+        bool? QuestionIsDeploy = null,
+        // TaskItem.DeployUnknown (task 485ba96b): the session could not check the deploy, why (`deployUnknown`, its reason
+        // as the session wrote it) and when (`deployUnknownAt`). Both left out while none and read tolerantly; a reason
+        // without a time reads with the task's UpdatedAt, a time without a reason as none. Still version 2: an older build
+        // drops them on its next save, which draws the task as "merged, not running yet" again and never costs a task.
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull), JsonConverter(typeof(TolerantStringConverter))]
+        string? DeployUnknown = null,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull), JsonConverter(typeof(TolerantTimeConverter))]
+        DateTimeOffset? DeployUnknownAt = null);
 
     // TaskItem.Repeat as stored: the schedule's canonical text (RepeatSchedule.Text), the model and the folder. Every part
     // is nullable because the reader fills what it finds and FromDto decides whether that is a repeat.
@@ -317,7 +325,9 @@ public sealed class JsonTaskStore(string baseDirectory, Action<string>? trace = 
             t.QuestionOptions.Count > 0 ? t.QuestionOptions : null,
             t.DeployPullRequests.Count > 0 ? t.DeployPullRequests.Select(p => p.Url).ToArray() : null,
             t.DeployPullRequestsEnded.Count > 0 ? t.DeployPullRequestsEnded : null,
-            t.QuestionIsDeploy ? true : null);
+            t.QuestionIsDeploy ? true : null,
+            t.DeployUnknown.HasValue ? t.DeployUnknown.Value.Reason : null,
+            t.DeployUnknown.HasValue ? t.DeployUnknown.Value.At.ToUniversalTime() : null);
 
     static TaskItem FromDto(TaskDto d) =>
         new(d.Id, d.Title ?? "",
@@ -372,6 +382,10 @@ public sealed class JsonTaskStore(string baseDirectory, Action<string>? trace = 
                 : [],
             // The hand-over mark lives with its question, open or set aside (TaskBoard.HandOverKept); alone it means nothing.
             QuestionIsDeploy = d.QuestionIsDeploy == true && (!string.IsNullOrWhiteSpace(d.Question) || !string.IsNullOrWhiteSpace(d.QuestionSetAside)),
+            // The reason is the record (task 485ba96b); its time falls back to the task's last change when a hand edit lost it.
+            DeployUnknown = string.IsNullOrWhiteSpace(d.DeployUnknown)
+                ? Maybe<DeployUnknownReport>.None
+                : new DeployUnknownReport((d.DeployUnknownAt ?? d.UpdatedAt).ToUniversalTime(), d.DeployUnknown.Trim()),
         };
 
     // A stored repeat as a TaskRepeat, or none (task 0b78269e). It needs a schedule that parses (so a minute-level hand edit

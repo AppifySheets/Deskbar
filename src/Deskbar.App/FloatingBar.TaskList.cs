@@ -1790,7 +1790,7 @@ public partial class FloatingBar
         // gets the same ring or disc (TaskStatusMarks.ShowsTick).
         if (TaskStatusMarks.ShowsTick(line.Status, line.Delivery) && !line.Closing)
         {
-            var tick = TaskStatusMarks.DoneTick(Math.Round(Text(9.5)), line.Delivery.Shipping);
+            var tick = TaskStatusMarks.DoneTick(Math.Round(Text(9.5)), line.Delivery.Shipping, line.Delivery.Unchecked);
             tick.Margin = new Thickness(0, 0, 4, 0);
             text.Inlines.Add(new InlineUIContainer(tick) { BaselineAlignment = BaselineAlignment.Center });
         }

@@ -477,9 +477,12 @@ static class ClaudeSkill
           evidence on stdin ("2026.11.25.39-3749d21 in the portal logs"). A change nothing runs (docs, a skill, a
           library with no host) reports "nothing to deploy: library" instead. In Deskbar's own repository Deskbar
           checks the running build itself, so done follows the release there. When a person makes the deploy (presses
-          redeploy, say), or only they can see the evidence, hand it over with `task ask - --deploy` ("Redeploy the
-          portal"): that is no question, so the task shows as merged and waiting for the deploy, not as something to
-          answer, and your `task deployed` report settles it. Keep plain `task ask` for what the user decides or
+          redeploy, say), hand it over with `task ask - --deploy` ("Redeploy the portal"): that is no question, so the
+          task shows as merged and waiting for the deploy, not as something to answer, and your `task deployed` report
+          settles it. When you cannot see where the change runs (no access to its logs, health page or deploy output),
+          do not ask whether it deployed: run `deskbar.cmd task deployed - --unknown --session <id>` with what you lack
+          on stdin ("no access to the Portainer logs on contabo1"). The task then shows "Can't check the deploy" with
+          your reason, and you finish with `task done`. Keep plain `task ask` for what the user decides or
           answers, and for a merge. When the
           deploy waits on a pull request you did not open (a release's pull request in a stacks repository), register
           it before you ask: `deskbar.cmd task pr <url> --deploy --session <id>`. Deskbar then tells you once it is

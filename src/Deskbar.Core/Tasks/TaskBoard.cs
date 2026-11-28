@@ -235,9 +235,35 @@ public sealed record TaskBoard(IReadOnlyList<TaskItem> Tasks)
                     ? Replaced(HandOverSettled(task with
                     {
                         Deployed = [.. task.Deployed, .. fresh.Select(p => new DeployedPullRequest(p.Key, now, text.Trim()))],
+                        // A deploy seen settles "cannot tell" (task 485ba96b): the report is the answer the session lacked.
+                        DeployUnknown = Maybe<DeployUnknownReport>.None,
                         UpdatedAt = now,
                     }, now))
                     : Result.Success(this)));
+
+    /// <summary>
+    /// The task's session cannot tell whether its change was deployed (task 485ba96b, TaskItem.DeployUnknown):
+    /// <paramref name="reason"/>, trimmed, says what it has no access to. Refused with a blank reason (the reason is the
+    /// point: Petre asked that the task say what the session lacks), on a task with no recorded pull request (nothing to
+    /// deploy, as MarkDeployed refuses), and on one whose every pull request is reported deployed already (it is known, so
+    /// "cannot tell" would be false). A deploy hand-over is settled by it, as a deploy report settles one: the user made the
+    /// deploy and the session cannot see its outcome, which is all the session can say. A second report replaces the first
+    /// one's reason and time. Any status takes it, as MarkDeployed does. Raised does not move: it asks nothing of Petre.
+    /// </summary>
+    public Result<TaskBoard> MarkDeployUnknown(Guid id, string reason, DateTimeOffset now) =>
+        CleanText(reason, "Say what you cannot reach to check the deploy (its logs, health page or deploy output), so the task can tell the user")
+            .Bind(text => Lookup(id).Bind(task => task.PullRequests.Concat(task.DeployPullRequests).ToArray() is not { Length: > 0 } recorded
+                ? Result.Failure<TaskBoard>(NoPullRequestToDeploy)
+                : recorded.All(p => task.Deployed.Any(d => d.Key == p.Key))
+                    ? Result.Failure<TaskBoard>(AlreadyReportedDeployed)
+                    : Replaced(HandOverSettled(task with
+                    {
+                        DeployUnknown = new DeployUnknownReport(now, text.Trim()),
+                        UpdatedAt = now,
+                    }, now))));
+
+    /// <summary>Why MarkDeployUnknown refuses a task whose every pull request is reported deployed already.</summary>
+    public const string AlreadyReportedDeployed = "Every pull request on this task is reported deployed already, so its deploy is known";
 
     // A DEPLOY REPORT SETTLES A DEPLOY HAND-OVER (task a87891ca, TaskItem.QuestionIsDeploy). The hand-over asked the user
     // for exactly this deploy, so once it is reported (by the session, or by the user's own "Mark deployed") nothing waits

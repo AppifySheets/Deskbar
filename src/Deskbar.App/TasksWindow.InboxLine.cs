@@ -162,7 +162,7 @@ public partial class TasksWindow
         var icon = InboxMarks.Icon(InboxMarks.IconOf(line.Mark), 18, InboxMarks.InkOf(line.Mark), InboxLook.Raised, turning: line.Mark == InboxMark.Working);
         if (row.Closing)
             tile.Child = Centred(TickOf(row.Id, row.Status, row.Closing, ""));
-        else if (line.Mark is InboxMark.Note or InboxMark.Finished or InboxMark.FinishedNotRunning)
+        else if (line.Mark is InboxMark.Note or InboxMark.Finished or InboxMark.FinishedNotRunning or InboxMark.DeployUnchecked)
         {
             // The note's box closes it (TickOf's Close: Actions.Close, the click guard, the board's refusal for a parent with
             // open subtasks), drawn as the mockup's empty box. A finished task's tick closes it the same way: it is drawn
@@ -236,6 +236,11 @@ public partial class TasksWindow
         // reads "Merged, built · waiting for your deploy · Redeploy the portal stack…" rather than as a question.
         if (line.Mark == InboxMark.WaitsForDeploy)
             words = DeployWait.Words(row.DeployBuilt is { } built ? Maybe.From(built) : Maybe<bool>.None) + (words.Length > 0 ? " · " + words : "");
+        // ITS SESSION CANNOT CHECK THE DEPLOY (task 485ba96b, DeliveryStage.Unchecked): the line says so and why ("Can't
+        // check the deploy: no access to the Portainer logs on contabo1"), in place of the status line, which the page
+        // still shows. Petre asked that the task state what the session lacks, and this is where a line states things.
+        if (line.Mark == InboxMark.DeployUnchecked && row.Delivery.Unchecked)
+            words = row.Delivery.Note;
         if (words.Length == 0) return null;
         var text = new TextBlock
         {

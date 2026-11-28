@@ -169,6 +169,11 @@ public static class ControlUsage
                 "the session's own task's change runs where its app is deployed: the note is the evidence (the version\n"
                 + "      seen in the app's logs, health page or deploy output). Until then a done task with a pull request\n"
                 + "      outside Deskbar's own repository shows a hollow ring; Deskbar checks its own repository by itself"),
+            // Task 485ba96b: the session cannot see where its change runs, and says why (TaskBoard.MarkDeployUnknown).
+            new("task", "deployed <reason>|- --unknown --session <session>",
+                "the session cannot tell whether its own task's change was deployed: the reason says what it has no\n"
+                + "      access to (the server's logs, its health page). The task shows \"Can't check the deploy\" with the\n"
+                + "      reason instead of a question, and you may finish with task done; a later deploy report replaces it"),
             new("task", "family --session <session>",
                 "the parent, the siblings, the linked tasks and their sessions (with transcript files) of the session's own\n"
                 + "      task, as the task join reply gives them; read it again when they may have moved on"),
@@ -234,6 +239,8 @@ public static class ControlUsage
             new("task", "deployed <id> <note>|-",
                 "record that a task's change runs where its app is deployed, as \"Mark deployed\" on a line's menu does;\n"
                 + "      the note says how you know. Needs a pull request recorded on the task (task pr)"),
+            new("task", "deployed <id> <reason>|- --unknown",
+                "record that a task's session cannot tell whether its change was deployed, and why"),
         ]),
         new("Goals", [
             new("goal", "list [--week [<date>] | --month [<date>] | --all]",
