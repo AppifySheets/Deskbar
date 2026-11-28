@@ -43,10 +43,22 @@ namespace Deskbar.Core.Control;
 public sealed partial class RemoteControl
 {
     ControlReply ClaudePermission(IReadOnlyList<string> rest) =>
-        ControlArguments.ParseClaudeHook(rest)
-            .Bind(request => ClaudeHookEvent.Parse(request.Json!, request.Entrypoint, request.Attended, request.Job)
-                .Bind(hook => PermissionRequest.Parse(request.Json!).Map(asked => (Request: request, Hook: hook, Asked: asked))))
-            .Map(found => Registered(found.Request, found.Hook, found.Asked))
+        ControlArguments.ParseClaudeHook(rest).Match(request => request.Fetch ? Fetched(request) : Asked(request), _ => Quiet);
+
+    // A DIALOG'S SCRIPT FETCHING ITS ANSWER (task c047d0a0): `claude-permission --fetch --slot <name>`, the code it was
+    // handed on stdin. The reply is the answer line the user's Send left for that slot (PermissionDesk.AnswerDialog), once,
+    // and the script lets it straight through as the hook's output; anything else is nothing, and the terminal asks. The
+    // client checks this verb's server is Deskbar's own executable (PipeTrust), which is why the line comes this way and
+    // not as a file in the slot.
+    ControlReply Fetched(ClaudeHookRequest request) =>
+        permissions is { } desk && request.Slot is { Length: > 0 } slot
+            ? desk.Fetch(slot, request.Json!.Trim()).Match(line => Said(line + "\r\n"), _ => Quiet)
+            : Quiet;
+
+    ControlReply Asked(ClaudeHookRequest request) =>
+        ClaudeHookEvent.Parse(request.Json!, request.Entrypoint, request.Attended, request.Job)
+            .Bind(hook => PermissionRequest.Parse(request.Json!).Map(asked => (Hook: hook, Asked: asked)))
+            .Map(found => Registered(request, found.Hook, found.Asked))
             .GetValueOrDefault(Quiet);
 
     ControlReply Registered(ClaudeHookRequest request, ClaudeHookEvent hook, PermissionRequest asked)
