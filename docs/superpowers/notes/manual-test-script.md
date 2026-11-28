@@ -367,6 +367,10 @@ written for the floating window and now describe the panel; 64a to 64n cover wha
     task (its title and its status line): the task stays; a word that matches nothing hides it. Esc clears the
     box. Type again: a × shows at the box's right end (none while it is empty); click it: the box is empty, every
     task is back, the × is gone and the keyboard is still in the box. Close and reopen the panel: the search is empty.
+64s. Search always showing (task b14e4203). In the Inbox, the search box sits under the header with nothing clicked,
+    and the header has no magnifier. Click into the box and type: the lines filter. Esc: the box empties and stays.
+    Open a task's page: the empty box is gone; press Ctrl+F there and it comes back with the keyboard. Back: the list
+    shows the box again.
 64q. Search by pull request (task e7aa49b1). Have a Claude session on a task open a pull request with `gh pr create`.
     Open the task in its window: "Pull requests" lists it, and clicking it opens it in the browser. Close the task,
     then type the pull request's number in the panel's search box, then `#` and the number, then its link: each
