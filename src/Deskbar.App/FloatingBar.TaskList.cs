@@ -1849,7 +1849,7 @@ public partial class FloatingBar
     internal ContextMenu? OpenTaskMoveMenu(Guid id, UIElement? anchor = null)
     {
         if (taskService?.Board.Tasks.FirstOrDefault(t => t.Id == id) is not { } task) return null;
-        var menu = WorkspaceChipMenu.Build(WorkspaceChipMenu.Entries(manager.State, withNone: true), task.WorkspaceId,
+        var menu = WorkspaceChipMenu.Build(WorkspaceChipMenu.Entries(manager.State, withNone: true, tasks: taskService?.Board.Tasks), task.WorkspaceId,
             workspace => taskService?.MoveTo(id, workspace).TapError(err => ClickTrace.Write($"task list: not moved: {err}")),
             anchor, ChipMenuWidth);
         HoldFadeWhileOpen(menu);
@@ -2330,7 +2330,7 @@ public partial class FloatingBar
         if (TaskAddTargetFollowsFront) taskAddTarget = manager.CurrentWorkspaceId;
         PaintTaskChips();
         var picked = false;
-        var menu = WorkspaceChipMenu.Build(WorkspaceChipMenu.Entries(manager.State, withNone: true), taskAddTarget, target =>
+        var menu = WorkspaceChipMenu.Build(WorkspaceChipMenu.Entries(manager.State, withNone: true, tasks: taskService?.Board.Tasks), taskAddTarget, target =>
             {
                 picked = true;
                 TaskAddPickMenu = null;
@@ -2585,7 +2585,7 @@ public partial class FloatingBar
     internal ContextMenu? OpenAddTargetMenu()
     {
         if (taskAddChip is null) return null;
-        var menu = WorkspaceChipMenu.Build(WorkspaceChipMenu.Entries(manager.State, withNone: true), taskAddTarget, ChooseTaskTarget,
+        var menu = WorkspaceChipMenu.Build(WorkspaceChipMenu.Entries(manager.State, withNone: true, tasks: taskService?.Board.Tasks), taskAddTarget, ChooseTaskTarget,
             taskAddChip.Button, ChipMenuWidth);
         HoldFadeWhileOpen(menu);
         TaskAddMenu = menu;

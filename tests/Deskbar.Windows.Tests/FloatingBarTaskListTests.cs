@@ -1146,7 +1146,8 @@ public partial class FloatingBarTaskListTests
     {
         Click(AddChip(t));
         var menu = t.Bar.TaskAddMenu!;
-        Click(WorkspaceChipMenu.Chips(menu).Single(c => AutomationProperties.GetName(c) == name));
+        // First: a recent workspace has a twin in the Recent row (task 46eddcb0), and either picks the same.
+        Click(WorkspaceChipMenu.Chips(menu).First(c => AutomationProperties.GetName(c) == name));
         menu.IsOpen = false;
     }
 
@@ -1709,8 +1710,9 @@ public partial class FloatingBarTaskListTests
 
         var menu = t.Bar.OpenTaskMoveMenu(id)!;
         var items = WorkspaceChipMenu.Chips(menu);
-        Assert.Equal(["none", "GEPHA", "Sparrow"], items.Select(MenuNameOf));
-        Assert.Equal(["GEPHA"], items.Where(i => AutomationProperties.GetItemStatus(i) == WorkspaceChipMenu.CurrentStatus).Select(MenuNameOf));
+        // The Recent row (task 46eddcb0) leads with the note's own workspace, which stays in its place below as well.
+        Assert.Equal(["GEPHA", "none", "GEPHA", "Sparrow"], items.Select(MenuNameOf));
+        Assert.Equal(["GEPHA", "GEPHA"], items.Where(i => AutomationProperties.GetItemStatus(i) == WorkspaceChipMenu.CurrentStatus).Select(MenuNameOf));
 
         Click(items.Single(i => MenuNameOf(i) == "Sparrow"));
         menu.IsOpen = false;

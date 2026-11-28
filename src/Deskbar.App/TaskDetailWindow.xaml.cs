@@ -344,7 +344,8 @@ public partial class TaskDetailWindow : Window
             string.Join('\u001e', r.Comments.Select(c => $"{c.Id}|{c.Author}|{c.When}|{c.Settled}|{c.Editable}|{c.Markdown}")),
             string.Join('\u001e', r.SessionList.Select(s => $"{s.Id}|{s.State}|{s.Joined:O}")),
             string.Join('\u001e', r.Subtasks.Select(s => $"{s.Id}|{s.Title}|{s.Status}|{s.StatusLine}")),
-            string.Join('\u001e', view.Places.Select(p => p.ToString())),
+            // Without the Recent row (task 46eddcb0), which the page never draws; OpenMoveMenu reads it from `latest`.
+            string.Join('\u001e', view.Places.Where(p => !p.Recent).Select(p => p.ToString())),
             (int)(view.Now - r.Created).TotalMinutes);
     }
 

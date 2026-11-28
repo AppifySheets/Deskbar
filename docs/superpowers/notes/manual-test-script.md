@@ -229,6 +229,12 @@ The task list at the bottom of the bar (spec `docs/superpowers/specs/2026-11-22-
     above, past its caption, and on up to the top block with more presses. Down from the top block's last line:
     it lands in the first group. Right on a group's last chip: the next group's first. Up on the top line wraps to
     the bottom, Down on the bottom line to the top. Enter picks wherever the edge is.
+46c. Recent workspaces first (task 46eddcb0). Add a note to a workspace you rarely use, say docs. Open any workspace
+    menu (the add box's Enter, a line's chip, the panel's Move to): a "Recent" caption heads the menu, with docs
+    first and then the workspaces of your next newest notes (five at most), and a hairline under the row. docs
+    is still in its own group below too. With the add box on a recent workspace, the white keyboard edge opens on
+    its chip in the Recent row; on a workspace that is not recent, on its usual chip. Right from the row's last
+    chip goes on to "none". Type "do": the edge lands on the Recent row's docs, not the one below.
 47. Click a line of a note on another workspace: the tasks panel opens (or comes forward, and takes the foreground) on that task, selected,
     scrolled into view and expanded to its comments, and you stay where you are. Double-click the line: you go to
     its workspace (only when both presses land on the same line: click one line and double-click the line beside

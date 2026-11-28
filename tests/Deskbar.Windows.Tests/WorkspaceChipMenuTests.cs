@@ -8,6 +8,7 @@ using Deskbar.App;
 using Deskbar.Core.Domain;
 using Deskbar.Core.Geometry;
 using Deskbar.Core.Persistence;
+using Deskbar.Core.Tasks;
 
 namespace Deskbar.Windows.Tests;
 
@@ -159,6 +160,68 @@ public class WorkspaceChipMenuTests
             Assert.Equal("Sparrow", NameOf(WorkspaceChipMenu.StartChip(menu).Value));
             var noCurrent = WorkspaceChipMenu.Build(WorkspaceChipMenu.Entries(state, withNone: true), Guid.NewGuid(), _ => { }, anchor);
             Assert.Same(WorkspaceChipMenu.Chips(noCurrent)[0], WorkspaceChipMenu.StartChip(noCurrent).Value);
+            return 0;
+        });
+    });
+
+    // A task made `minutes` after a fixed moment in `workspace`, for the Recent row (task 46eddcb0).
+    static TaskItem TaskIn(Guid workspace, int minutes)
+    {
+        var at = new DateTimeOffset(2026, 11, 28, 8, 0, 0, TimeSpan.Zero).AddMinutes(minutes);
+        return new(Guid.NewGuid(), "t", workspace, Deskbar.Core.Tasks.TaskStatus.InProgress, "", Maybe<string>.None, at, at, at, [], []);
+    }
+
+    // Task 46eddcb0, Petre: "show recent workspaces at the top and let me select from them first". Given the tasks, the
+    // entries open with a "Recent" caption and the workspaces of the newest tasks, newest first; the full list follows
+    // unchanged, so those workspaces show twice.
+    [Fact]
+    public void Recent_workspaces_lead_the_entries_and_stay_in_their_places() => StaThread.Run(() =>
+    {
+        var harness = Harness.Build(grouped: true);
+        var state = harness.Manager.State;
+        Guid Id(string name) => state.Workspaces.Single(w => w.Name == name).Id;
+        var tasks = new[] { TaskIn(Id("GEPHA"), 1), TaskIn(Id("Archive"), 2) };
+
+        var entries = WorkspaceChipMenu.Entries(state, withNone: true, tasks: tasks);
+
+        Assert.Equal(["Recent", "Archive", "GEPHA", "none", "GEPHA", "Team", "Sparrow", "Archive"], entries.Select(e => e.Name));
+        Assert.Equal([true, true, true, false, false, false, false, false], entries.Select(e => e.Recent));
+        // No tasks, or none in a workspace still on the menu: no Recent caption over an empty row.
+        Assert.DoesNotContain(WorkspaceChipMenu.Entries(state, withNone: true, tasks: []), e => e.Recent);
+        Assert.DoesNotContain(WorkspaceChipMenu.Entries(state, withNone: true, w => w.Name == "Sparrow", tasks), e => e.Recent);
+    });
+
+    // The Recent row is drawn above the "none" block and the groups, so the keyboard starts in it: on the current choice
+    // when it is recent, else on the row's first chip, and type to jump finds the recent chip before its twin.
+    [Fact]
+    public void The_recent_row_is_drawn_first_and_the_keyboard_starts_in_it() => StaThread.Run(() =>
+    {
+        var harness = Harness.Build(grouped: true);
+        var state = harness.Manager.State;
+        Guid Id(string name) => state.Workspaces.Single(w => w.Name == name).Id;
+        var tasks = new[] { TaskIn(Id("GEPHA"), 1), TaskIn(Id("Archive"), 2) };
+        var picked = new List<Maybe<Guid>>();
+
+        WithAnchor(anchor =>
+        {
+            var entries = WorkspaceChipMenu.Entries(state, withNone: true, tasks: tasks);
+            var menu = WorkspaceChipMenu.Build(entries, Id("GEPHA"), picked.Add, anchor);
+            var chips = WorkspaceChipMenu.Chips(menu);
+            Assert.Equal(["Archive", "GEPHA", "none", "GEPHA", "Sparrow", "Archive"], chips.Select(NameOf));
+            var caption = ((StackPanel)menu.Items[0]).Children.OfType<TextBlock>().Single();
+            Assert.Equal(WorkspaceChipMenu.RecentCaption, caption.Text);
+            // The current choice is outlined in both places; the keyboard starts on its recent twin.
+            Assert.Same(chips[1], WorkspaceChipMenu.StartChip(menu).Value);
+            Assert.True(IsCurrent(chips[1]) && IsCurrent(chips[3]));
+            Assert.Same(chips[0], WorkspaceChipMenu.TypeAheadMatch(menu, "arc").Value);
+            // A current choice that is not recent keeps the keyboard where it always was; none at all starts on the row.
+            var sparrow = WorkspaceChipMenu.Build(entries, Id("Sparrow"), _ => { }, anchor);
+            Assert.Equal("Sparrow", NameOf(WorkspaceChipMenu.StartChip(sparrow).Value));
+            var free = WorkspaceChipMenu.Build(entries, Guid.NewGuid(), _ => { }, anchor);
+            Assert.Same(WorkspaceChipMenu.Chips(free)[0], WorkspaceChipMenu.StartChip(free).Value);
+            // A recent chip picks its workspace like any other.
+            Click(chips[0]);
+            Assert.Equal([Maybe.From(Id("Archive"))], picked);
             return 0;
         });
     });

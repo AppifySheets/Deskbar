@@ -676,7 +676,9 @@ public partial class TasksWindow : Window
             // text asked again counts its age from the new ask; the age itself is rewritten once a minute (RefreshAges).
             // An answer in place of a question (task 2c5de076) redraws it too, even with the same text.
             $"{view.ManagerAsks?.Question}{view.ManagerAsks?.AskedAt}{view.ManagerAsks?.Answered}",
-            string.Join('|', view.Places.Select(p => $"{p.IsGroup}{p.Workspace}{p.Name}{(p.Colour as SolidColorBrush)?.Color}")),
+            // Without the Recent row (task 46eddcb0): it reorders on every note filed elsewhere, nothing drawn shows it,
+            // and every menu reads it from `latest` as it opens (the workspace filter's too), so it never forces a redraw.
+            string.Join('|', view.Places.Where(p => !p.Recent).Select(p => $"{p.IsGroup}{p.Workspace}{p.Name}{(p.Colour as SolidColorBrush)?.Color}")),
             view.EmptyText,
             $"{renaming}{editingComment}{linking}{subtaskUnder}{string.Join(",", settledOpen.Order())}|{string.Join(",", earlierOpen.Order())}|{string.Join(",", longOpen.Order())}",
             // The heights texts were dragged to (task 2088e1ed), so a redraw after a drag builds them at that height.
@@ -813,7 +815,8 @@ public partial class TasksWindow : Window
         CurrentWorkspaceOn = following;
         Button? workspace = null;
         workspace = Flat(new TextBlock { Text = $"{view.WorkspaceFilterLabel} ▾", Foreground = Ink, FontSize = 11 }, "Workspace filter",
-            () => OpenMenu(WorkspaceFilterMenu(view, workspace!)), new Thickness(8, 2, 8, 2));
+            // `latest`, not the drawn view: the Recent row is not in the redraw key, so the drawn view's can be stale.
+            () => OpenMenu(WorkspaceFilterMenu(latest ?? view, workspace!)), new Thickness(8, 2, 8, 2));
         workspace.Margin = new Thickness(0, 0, 0, ChipRowGap);
         Filters.Children.Add(workspace);
         // The assignee filter (Ruling 57): me, Claude or all. Its menu opens from Flat's own press, like the others.

@@ -514,7 +514,9 @@ Type a note into the box at its top and press Enter (Shift+Enter starts a new li
 the note's description). Enter first opens the workspace menu under the box, with the keyboard on
 the workspace you are on (or on the one picked by the chip under the box), so you see where the note
 will land before it does: Enter again adds it there, the arrows or the first letters of another
-workspace's name move to that one, and Esc goes back to the text without adding anything. Enter also hands the note to
+workspace's name move to that one, and Esc goes back to the text without adding anything. Every workspace
+menu of the task list opens with a Recent row on top: the workspaces your newest tasks went to, newest first, so
+the few you use are a press or two away. They stay in their usual places below as well. Enter also hands the note to
 Claude: it is added and Claude starts on it in the background, in the workspace's one folder or one you pick. Where Claude
 has no folder to start in (a workspace with no repo, Claude sessions turned off, or Claude Code not installed), Enter only adds the note. To only
 add it anywhere, press Ctrl+Enter instead (it asks for the workspace the same way): the new note is selected and glows
