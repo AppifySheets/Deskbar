@@ -1899,6 +1899,7 @@ CC1. In the tasks panel's thread, point at the inline code: the pointer is a han
 CC2. Click the fenced block: both lines paste, as written. Click "Pull and redeploy": the words paste without the quote marks.
 CC3. The same in the Inbox chat and in the task's own window. A link in the comment still opens on a click, and dragging from the plain text beside the code still selects text.
 CC4. A task line's question or status line with code in it: a click picks the task, as before, and copies nothing.
+CC5. (Task f39f5db3.) Click the inline code: a small "Copied" note shows just under the pointer and goes after about a second. Click a second command straight away: the one note moves to the new click, and there are never two. Do it on the floating bar's tasks and in the panel where it meets the bar: the note stays above the bar.
 
 ## Claude Code's dialogs ask through the task
 

@@ -533,7 +533,7 @@ read: the comments scroll inside the thread, starting at the latest, with its ro
 comment box below. Opening a thread scrolls the list just enough to show the line and the thread together.
 A command in a comment or a chat message copies with one click: point at anything in `backticks`, a code
 block or words in double quotes, and "Click to copy" shows; a click puts the whole command on the clipboard, however
-it wraps.
+it wraps, and a small "Copied" note shows under the pointer for a moment.
 The panel is a full-height strip docked just inside the bar, on every virtual desktop, and it pushes
 maximized windows aside as the bar does. A window that is not maximized but reaches under the panel when
 it opens or grows is moved out from under it, keeping its size where there is room and narrowed where
