@@ -24,7 +24,9 @@ namespace Deskbar.App;
 //   2. ManagerSession.Next decides, from the stored ManagerRecord (AppState.Manager), today and that list:
 //        * Attach: today's manager (or yesterday's, while it is busy: a new day never stops a turn in flight) is listed;
 //        * Resume: today's manager is not listed and its transcript is there: a BARE `claude --bg --resume <full id>`,
-//          which keeps every option it was started with (measured), then attach;
+//          which keeps every option it was started with (measured), then attach. Its old comment waiter is retired
+//          first and the resume carries ManagerSession.ResumedMessage, so it takes a turn whose Stop starts a fresh
+//          waiter (task fdfa49d9, ResumeRetiringWaiter);
 //        * StartNew: nothing stored, yesterday's, or its transcript gone: `claude stop` on the old one first when it is
 //          still listed (idle), then the start (ManagerSession.StartArguments), its id stored with today, then attach;
 //        * Claim: the stored manager is not listed (or nothing is stored) but a background session runs in the manager
@@ -347,7 +349,7 @@ public sealed class ManagerActions : IDisposable
         ManagerStep.Claim claim => Observable.Return(Result.Success(claim.Agent))
             .Do(_ => manager.SetManagerSession(new ManagerRecord(claim.Agent.SessionId, day, scheduler.Now))),
         ManagerStep.Resume resume => Briefed(_ => OnScheduler(() =>
-            sessions.RunAndFind(ManagerSession.ResumeArguments(resume.SessionId), folder, resume.SessionId))),
+            ResumeRetiringWaiter(resume.SessionId, ManagerSession.ClickResumeArguments(resume.SessionId)))),
         ManagerStep.StartNew start => StopFirst(start.StopFirst).SelectMany(_ => Started(day)),
         _ => Observable.Return(Result.Failure<ClaudeAgent>($"Unknown manager step {step}")),
     };
@@ -451,10 +453,27 @@ public sealed class ManagerActions : IDisposable
                 ? Observable.Defer(() =>
                     {
                         WriteBriefing().TapError(e => trace?.Invoke($"manager: {e}"));
-                        return OnScheduler(() => sessions.RunAndFind([.. ManagerSession.ResumeArguments(sessionId), "--", message], folder, sessionId));
+                        return OnScheduler(() => ResumeRetiringWaiter(sessionId, [.. ManagerSession.ResumeArguments(sessionId), "--", message]));
                     })
                     .Select(found => found.IsSuccess ? Result.Success() : Waits(sessionId, message, found.Error))
                 : Observable.Return(Waits(sessionId, message, "it is still listed as running")));
+
+    // EVERY RESUME OF THE MANAGER RETIRES ITS COMMENT WAITER FIRST (task fdfa49d9), as a task session's resume has done
+    // since task daeaa26c (ClaudeSessions.WakeNow, retireWaiter). The waiter a Stop hook started outlives the Claude
+    // process that started it, and its generation stays in the gen file, so after a resume Deskbar still counted it as
+    // alive (CommentInbox.Lapsed false) and sent the next page message into the inbox, where the orphan claimed it and
+    // printed it to nobody. Measured on 2026-11-28: the Manager button resumed the manager at 11:27 (briefing rewritten,
+    // SessionStart with the same id, no turn), the 11:01 waiter claimed "are all sessions awake?" at 11:30 and left it
+    // behind as <id>.md.<its generation>, and the manager never saw it; the message after it waited for the next Stop.
+    // Retired, the session counts as having no waiter until its first turn's Stop registers one, so a message sent in
+    // that gap takes the road for a lapsed waiter (CommentWake.PlanFor) instead of an orphan's inbox. Every resume here
+    // carries a prompt (a wake's or a page message's text, or ManagerSession.ResumedMessage on a click), so that first
+    // turn comes at once and the gap lasts only as long as it. Without an inbox (a rig without wakes) there is no waiter.
+    Task<Result<ClaudeAgent>> ResumeRetiringWaiter(string sessionId, IReadOnlyList<string> arguments)
+    {
+        inbox?.Retire(sessionId);
+        return sessions.RunAndFind(arguments, folder, sessionId);
+    }
 
     /// <summary>How many fresh reads of the list a wake makes, ResumePause apart, before it resumes the manager.</summary>
     public const int ResumeChecks = 5;

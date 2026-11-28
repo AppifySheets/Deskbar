@@ -273,6 +273,18 @@ public static class ManagerSession
     // forked copy under a new id. The full session id is needed for the same reason; a short one forks too.
     public static IReadOnlyList<string> ResumeArguments(string sessionId) => ["--bg", "--resume", sessionId];
 
+    // THE PROMPT A CLICK'S RESUME CARRIES (task fdfa49d9). A resume with no prompt starts the process and takes no turn
+    // (measured 2026-11-28: SessionStart, then nothing), so no Stop hook runs and the manager has no comment waiter until
+    // the user types in its terminal. Every page message and wake in that gap would then need `claude stop` and a resume,
+    // which closes a terminal the user attached to it (ClaudeSessions' keeper notes, task 2eeb5589). With this prompt the
+    // resume takes one short turn, its Stop starts a waiter, and later messages go through the inbox as usual. A message
+    // already waiting in the inbox from before the resume is handed over by that same waiter.
+    public const string ResumedMessage =
+        "Deskbar resumed you because your process had ended. Nothing needs doing now; answer in one short line.";
+
+    /// <summary>The Manager button's resume: the bare resume with ResumedMessage after `--`, so it takes one turn.</summary>
+    public static IReadOnlyList<string> ClickResumeArguments(string sessionId) => [.. ResumeArguments(sessionId), "--", ResumedMessage];
+
     /// <summary>
     /// The system prompt appended to the manager, short imperative lines. The shim is named by the exact full path with
     /// forward slashes, because it is what the allow rule matches; a path with a space comes as its 8.3 short form, or
