@@ -29,7 +29,8 @@ namespace Deskbar.App;
 // defers rebuilds, #77; a click away and Esc close it), with its item container overridden (ChipMenu): the blocks are
 // their own containers, so no MenuItem chrome pads them. The chips are focusable buttons, so the keyboard still works:
 // Tab and Shift+Tab (and the arrow keys, through directional navigation) walk them in a cycle, Enter or Space picks,
-// Esc closes. The menu opens with the keyboard on the current choice, which keeps its blue outline.
+// Esc closes. The menu opens with the keyboard on the current choice, which keeps its blue outline. Typing a name's
+// first letters moves the keyboard to that chip (TypeAheadMatch, task 6184e8bf), and a held Enter's repeats pick nothing.
 //
 // The colours are LaneColour's, the resolution the switcher and quick find share with the bar: a group's colour for its
 // members, a workspace's own by its defined position otherwise. A workspace that opted out of colour gets the neutral
@@ -146,7 +147,45 @@ internal static class WorkspaceChipMenu
 
         // The keyboard starts on the current choice, or on the first chip.
         menu.Opened += (_, _) => StartChip(menu).Tap(chip => chip.Focus());
+
+        // A held Enter repeats, and a repeat reaching a chip would pick it: the add box's Enter opens this menu (task
+        // 6184e8bf), so the same press held a moment too long would add the note to whichever chip the menu opened on
+        // without Petre choosing. Only a fresh press picks.
+        menu.PreviewKeyDown += (_, e) =>
+        {
+            if (e.IsRepeat && e.Key is Key.Enter or Key.Return) e.Handled = true;
+        };
+
+        // TYPE TO JUMP (task 6184e8bf: a workspace "which i can select with the keyboard"). With twenty-odd workspaces
+        // the arrows take many presses, so letters typed while the menu is open move the keyboard to the first chip
+        // whose name starts with them, "sp" to Sparrow; after a pause of TypeAheadPause the next letter starts afresh.
+        // Spaces are left to the chips, where Space picks. Enter then picks the chip the keyboard is on, as before.
+        var typed = "";
+        var typedAt = DateTime.MinValue;
+        menu.PreviewTextInput += (_, e) =>
+        {
+            if (string.IsNullOrWhiteSpace(e.Text) || e.Text.Any(char.IsControl)) return;
+            var now = DateTime.UtcNow;
+            typed = (now - typedAt > TypeAheadPause ? "" : typed) + e.Text;
+            typedAt = now;
+            TypeAheadMatch(menu, typed).Tap(chip => chip.Focus());
+            e.Handled = true;
+        };
         return menu;
+    }
+
+    /// <summary>How long a pause in typing ends the name being typed in the menu (type to jump).</summary>
+    internal static readonly TimeSpan TypeAheadPause = TimeSpan.FromSeconds(1);
+
+    /// <summary>
+    /// The chip that <paramref name="typed"/> names: the first, in the menu's order, whose name starts with it, else the
+    /// first whose name holds it, ignoring case; none when no chip matches, and then the keyboard stays where it was.
+    /// </summary>
+    internal static Maybe<Button> TypeAheadMatch(ContextMenu menu, string typed)
+    {
+        var named = Chips(menu).Select(chip => (chip, name: AutomationProperties.GetName(chip))).ToArray();
+        return Maybe.From(named.FirstOrDefault(x => x.name.StartsWith(typed, StringComparison.OrdinalIgnoreCase)).chip
+                          ?? named.FirstOrDefault(x => x.name.Contains(typed, StringComparison.OrdinalIgnoreCase)).chip);
     }
 
     /// <summary>

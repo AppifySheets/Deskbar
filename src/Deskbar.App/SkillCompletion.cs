@@ -17,8 +17,8 @@ namespace Deskbar.App;
 //
 // Keys, read ahead of the box's own (the box's owner attaches this before its own PreviewKeyDown):
 //   * Down and Up move the pick; Tab or Enter puts "/<skill> " in the box, caret after the space, for the arguments.
-//   * Ctrl+Enter puts the pick in the box and lets the key go on, so the bar adds the task and starts Claude on it at
-//     once ("/ref" then Ctrl+Enter starts /refresh-pr).
+//   * Ctrl+Enter puts the pick in the box and lets the key go on, so the box's owner asks for the workspace (task
+//     6184e8bf) and then adds the task and starts Claude on it ("/ref", Ctrl+Enter, Enter starts /refresh-pr).
 //   * Esc closes the list and nothing else (the box keeps its text); it stays closed until the text changes.
 // A click on a row picks it. The rows take no keyboard focus, so the caret stays in the box.
 //

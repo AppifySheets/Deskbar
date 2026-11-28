@@ -811,7 +811,7 @@ public partial class FloatingBar
             TextWrapping = TextWrapping.Wrap,
             AcceptsReturn = true,
             MaxLines = TaskAddMaxLines,
-            ToolTip = "Enter adds the task, Ctrl+Enter adds it and starts Claude on it, Shift+Enter starts a new line, Esc clears the box. The first line is the title, the rest the description. Ctrl+V or a drop adds a picture. Type / to pick one of the workspace's Claude Code skills",
+            ToolTip = "Enter asks which workspace, then adds the task; Ctrl+Enter does the same and starts Claude on it; Shift+Enter starts a new line, Esc clears the box. The first line is the title, the rest the description. Ctrl+V or a drop adds a picture. Type / to pick one of the workspace's Claude Code skills",
         };
         AutomationProperties.SetName(taskAddBox, "New task");
         // The "/" list of skills (task 3a872301). Attached BEFORE OnTaskAddKey, so while the list is open its Enter, Tab
@@ -2284,8 +2284,15 @@ public partial class FloatingBar
         if (e.Key == Key.Enter)
         {
             e.Handled = true;
+            // A held Enter repeats; only the first press counts, so holding it a moment too long cannot also pick from
+            // the workspace menu that press opens (AskTaskTarget).
+            if (e.IsRepeat) return;
             // Ctrl+Enter is the Start Claude button's key (task 3c40dec9): the note is added and handed to Claude.
-            CommitTaskNote(startClaude: Keyboard.Modifiers.HasFlag(ModifierKeys.Control));
+            var startClaude = Keyboard.Modifiers.HasFlag(ModifierKeys.Control);
+            // With something to add, Enter first asks where it goes (task 6184e8bf); with nothing, the add is refused
+            // exactly as before and no menu opens for an empty box.
+            if (HasTaskNote) AskTaskTarget(startClaude);
+            else CommitTaskNote(startClaude);
         }
         else if (e.Key == Key.Escape)
         {
@@ -2295,6 +2302,54 @@ public partial class FloatingBar
             else EndTyping(clear: true);
         }
     }
+
+    // THE WORKSPACE ASKED AT ENTER (task 6184e8bf; Petre: "when adding a task, when i press enter, open a workspace
+    // selection which i can select with the keyboard so that i don't accidentally create a task in the wrong
+    // workspace"). The chip beside the box always said where a note would go, but nobody reads a chip while typing, and
+    // a note sent from the wrong desktop landed on the wrong workspace without a word. So Enter (and Ctrl+Enter) no
+    // longer adds at once: it opens the add chip's own workspace menu (WorkspaceChipMenu) under the chip, with the
+    // keyboard on the workspace the note would go to now, the one in front unless a chip was picked or the note is a
+    // subtask. A second Enter takes it, so the old habit is Enter, Enter; the arrows, Tab or the first letters of a name
+    // (the menu's type-ahead) move to another, and Enter or a click picks that one. Either way the pick is made as a
+    // chip press makes it (ChooseTaskTarget) and then the note is added (CommitTaskNote), Claude started on it when the
+    // first press was Ctrl+Enter. Esc, or a click away, closes the menu and adds nothing: the text stays in the box,
+    // with the keyboard, for another Enter or an edit.
+    void AskTaskTarget(bool startClaude)
+    {
+        if (taskAddBox is null || taskAddChip is null) return;
+        // The menu opens on the workspace the note would go to at this moment (CommitTaskNote's own rule), even if no
+        // repaint has caught a desktop switch made since the box opened.
+        if (TaskAddTargetFollowsFront) taskAddTarget = manager.CurrentWorkspaceId;
+        PaintTaskChips();
+        var picked = false;
+        var menu = WorkspaceChipMenu.Build(WorkspaceChipMenu.Entries(manager.State, withNone: true), taskAddTarget, target =>
+            {
+                picked = true;
+                TaskAddPickMenu = null;
+                ChooseTaskTarget(target);
+                CommitTaskNote(startClaude);
+            },
+            taskAddChip.Button, ChipMenuWidth);
+        // Closed comes late: the popup hides at once but raises Closed from its destroy timer (up to 150 ms with the
+        // menu fade on, measured in WPF's Popup.HideWindow), so for a pick it runs after the note was added. Only a menu
+        // closed without one (Esc, a click away) puts the keyboard back in the box, and only while no newer menu is
+        // open: Esc then a quick Enter opens a second menu before the first one's Closed, and taking the keyboard from
+        // it would send its type-ahead letters into the note.
+        menu.Closed += (_, _) => Dispatcher.BeginInvoke(() =>
+        {
+            if (TaskAddPickMenu == menu) TaskAddPickMenu = null;
+            if (!picked && taskTyping && TaskAddPickMenu is null) taskAddBox?.Focus();
+        }, DispatcherPriority.Input);
+        HoldFadeWhileOpen(menu);
+        TaskAddPickMenu = menu;
+        menu.IsOpen = true;
+    }
+
+    // Whether the box holds a note to add: words, or a pasted picture (a picture alone makes a "Picture" task).
+    bool HasTaskNote => taskAddBox?.Text.Trim().Length > 0 || taskAddImages.Count > 0;
+
+    /// <summary>The workspace menu Enter opened and nothing has been picked from yet, for the tests.</summary>
+    internal ContextMenu? TaskAddPickMenu { get; private set; }
 
     // Enter: a Backlog note where the chips say. A title of nothing is refused by the board and the box keeps the
     // keyboard. The first line is the title and any lines after it the description (TaskNote.Split, task 98420dbc).
@@ -2560,10 +2615,10 @@ public partial class FloatingBar
     //
     // "Add subtask…" on a line's menu opens this same box with the parent as a chip ("↳ <parent title> ×") after the
     // workspace chip. The workspace chip moves to the parent's workspace (still changeable), so a subtask added from
-    // another desktop lands with its parent. Enter adds it under the parent; Esc or the chip's press drops the parent and
+    // another desktop lands with its parent. Enter asks where (the parent's workspace first) and adds it under the parent; Esc or the chip's press drops the parent and
     // leaves the text as a plain note; after an add or a clearing Esc the box is a plain note box again (EndTyping).
 
-    internal const string SubtaskPlaceholder = "A subtask: Enter adds it, Esc drops the parent";
+    internal const string SubtaskPlaceholder = "A subtask: Enter asks where, then adds it; Esc drops the parent";
 
     // The task the next add goes under, or none for a plain note.
     Maybe<Guid> taskAddParent = Maybe<Guid>.None;

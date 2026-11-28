@@ -103,6 +103,20 @@ public class WorkspaceChipMenuTests
         Assert.Equal([Maybe<Guid>.From(state.Workspaces.Single(w => w.Name == "Archive").Id)], picked);
     });
 
+    // Type to jump (task 6184e8bf): letters typed in the menu name the chip the keyboard goes to, a name's start first,
+    // then any part of it, ignoring case; letters that name nothing leave it where it was.
+    [Fact]
+    public void Typed_letters_name_the_chip_by_its_start_then_by_any_part() => StaThread.Run(() =>
+    {
+        var harness = Harness.Build(grouped: true);
+        var menu = WorkspaceChipMenu.Build(WorkspaceChipMenu.Entries(harness.Manager.State, withNone: true), Maybe<Guid>.None, _ => { }, null);
+
+        Assert.Equal("Sparrow", NameOf(WorkspaceChipMenu.TypeAheadMatch(menu, "sp").Value));
+        Assert.Equal("GEPHA", NameOf(WorkspaceChipMenu.TypeAheadMatch(menu, "g").Value));
+        Assert.Equal("Sparrow", NameOf(WorkspaceChipMenu.TypeAheadMatch(menu, "arr").Value));
+        Assert.True(WorkspaceChipMenu.TypeAheadMatch(menu, "zz").HasNoValue);
+    });
+
     // Review minor 4 of 187cf4a: one very long workspace name is trimmed inside its chip, the full name in the chip's
     // tooltip, so it cannot run past the menu's edge.
     [Fact]
