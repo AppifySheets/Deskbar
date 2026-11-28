@@ -634,23 +634,10 @@ public sealed partial class TasksBoard : IDisposable
     // and activating it would take the keyboard from it: the trace read "shown behind the full-screen window" and then,
     // 40 ms later, "raised and activated". So it stays where the panel put it, unfocused, and comes on top by itself on
     // the first tick after the full-screen window has gone (TasksPanel.ReclaimTopmost).
-    void Arrived()
-    {
-        if (!window.IsVisible) return;
-        if (panel.BehindFullScreen)
-        {
-            ClickTrace.Write("tasks panel: behind a full-screen window, not brought forward");
-            return;
-        }
-        var activated = bringForward is { } seam ? seam(EnsureHandle()) : ActivatedHere();
-        if (activated) window.FocusBoard();
-    }
-
-    bool ActivatedHere()
-    {
-        window.ActivateHere();
-        return true;
-    }
+    //
+    // A refusal right after the window was shown is tried again for a moment (ComeForward, TasksBoard.Arrival.cs): the
+    // shell places a newly shown window on a desktop a little later, and until then the seam cannot tell it is in front.
+    void Arrived() => ComeForward(window, panel);
 
     /// <summary>
     /// The App's bring-forward, in its order: <paramref name="raise"/> the window to the top of the z-order, then
@@ -1371,6 +1358,8 @@ public sealed partial class TasksBoard : IDisposable
         subscriptions.Dispose();
         pendingCloses.Values.ToList().ForEach(p => p.Timer.Dispose());
         pendingCloses.Clear();
+        // An arrival's retry still waiting (TasksBoard.Arrival.cs) ends with the board too.
+        EndArrivals();
     }
 
     /// <summary>

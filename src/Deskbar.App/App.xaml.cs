@@ -57,7 +57,6 @@ public partial class App : Application
     TasksPanel? tasksPanel;
     TasksPanel? managerPanel;          // the manager's own docked panel, its page (task 71aae045, TasksBoard.DockManager)
     ManagerDock? managerDock;         // the manager's terminal docked inside the tasks panel (task f171bca6)
-    bool tasksPanelPinned;            // its hwnd is pinned to every desktop once, after its first show (see the board's construction)
     // Whether the tasks panel is shown, for the bar's "All tasks" look. The bar is built before the panel (the panel needs
     // the bar's strip notices), so the bar gets this relay at its construction and the panel's Shown is fed into it once
     // the panel exists.
@@ -2966,18 +2965,9 @@ public partial class App : Application
             // ShowDetachedStats): a window that has never been shown is on no desktop and cannot be pinned. The panel
             // shows itself (on the bar's notice), so the first time it becomes visible is the moment. Queued rather than
             // done inside IsVisibleChanged, which fires in the middle of the panel's own dock: the pin is a COM call that
-            // pumps messages. A failure is traced, and the next show tries again; meanwhile the panel stays on the
-            // desktop it was shown on.
-            tasksWindow.IsVisibleChanged += (_, _) =>
-            {
-                if (!tasksWindow.IsVisible || tasksPanelPinned) return;
-                tasksPanelPinned = true;
-                _ = Dispatcher.InvokeAsync(() => desktops!.Pin(new WindowHandle(tasksHwnd)).TapError(err =>
-                {
-                    tasksPanelPinned = false;
-                    ClickTrace.Write($"tasks panel pin failed: {err}");
-                }));
-            };
+            // pumps messages. A failure is traced and tried again shortly (PinWhenShown, task b62c4472), and the next show
+            // tries again after that; meanwhile the panel stays on the desktop it was shown on.
+            PinWhenShown(tasksWindow, tasksHwnd, "tasks panel");
             // THE MANAGER'S DOCK (task f171bca6, ManagerDock): a strip just inside the tasks panel, or just inside the bar
             // while the panel is closed, holding the manager's terminal; reserved only while that window is open. Its app
             // bar sits on a transparent, click-through placeholder of Deskbar's own, kept off the bar's window list and
@@ -2986,17 +2976,7 @@ public partial class App : Application
             var dockHwnd = new WindowInteropHelper(dockWindow).EnsureHandle();
             monitor.Ignore(dockHwnd);
             managerDock = new ManagerDock(dockWindow, bar.Strip, tasksPanel, manager, RestoredUnderStrips, panelLayout.Nudge);
-            var dockPinned = false;
-            dockWindow.IsVisibleChanged += (_, _) =>
-            {
-                if (!dockWindow.IsVisible || dockPinned) return;
-                dockPinned = true;
-                _ = Dispatcher.InvokeAsync(() => desktops!.Pin(new WindowHandle(dockHwnd)).TapError(err =>
-                {
-                    dockPinned = false;
-                    ClickTrace.Write($"manager dock pin failed: {err}");
-                }));
-            };
+            PinWhenShown(dockWindow, dockHwnd, "manager dock");
             // THE MANAGER'S OWN DOCKED PANEL (task 71aae045, TasksBoard.ManagerDock.cs): a second tasks window that draws only
             // the manager's page, on a strip that follows the bar's and the tasks panel's registrations exactly as the
             // terminal's dock above does, so it sits just inside the tasks panel (just inside the bar while that is closed).
@@ -3013,17 +2993,7 @@ public partial class App : Application
                 RestoredWindows = RestoredUnderStrips,
                 Nudge = panelLayout.Nudge,
             };
-            var managerPinned = false;
-            managerWindow.IsVisibleChanged += (_, _) =>
-            {
-                if (!managerWindow.IsVisible || managerPinned) return;
-                managerPinned = true;
-                _ = Dispatcher.InvokeAsync(() => desktops!.Pin(new WindowHandle(managerHwnd)).TapError(err =>
-                {
-                    managerPinned = false;
-                    ClickTrace.Write($"manager panel pin failed: {err}");
-                }));
-            };
+            PinWhenShown(managerWindow, managerHwnd, "manager panel");
             var tasksActivator = new WindowActivator();
             tasksBoard = new TasksBoard(tasksWindow, tasksPanel, tasks!, manager, GoToTask,
                 // The chips wear the colour the bar's rows wear (its last rebuild's rail colours).
@@ -3472,6 +3442,65 @@ public partial class App : Application
             .TapError(err => MessageBox.Show(
                 $"Deskbar could not pin the floating bar to every workspace:\n{err}\n\nIt will only stay visible on the desktop it was shown on.",
                 "Deskbar", MessageBoxButton.OK, MessageBoxImage.Warning));
+    }
+
+    // PINNED AFTER ITS FIRST SHOW, AND TRIED AGAIN UNTIL IT TAKES (task b62c4472): the tasks panel, the manager's docked
+    // panel and the manager dock's placeholder. Pinned once, since a pin lives on the hwnd and survives Hide()/Show() (see
+    // PinFloatingBar below). Not inside IsVisibleChanged, which fires in the middle of the panel's own dock, and the pin is
+    // a COM call that pumps messages, so it is queued.
+    //
+    // A pin straight after the show failed on every start (the trace: "tasks panel pin failed" and "manager panel pin
+    // failed: ... Element not found. (0x8002802B)" a few ms after each first show), because the shell places a newly shown
+    // window on a desktop only a moment later, and before that the window is on no desktop to pin from. It used to be
+    // tried again only on the next show, so the panel stayed on one desktop meanwhile, and the arrival's "is it on the
+    // desktop in front?" said no (TasksBoard.Arrival.cs). Now a failure is tried again ShownPinRetry later, ShownPinTries
+    // times in all, and only then left to the next show. A window hidden meanwhile stops the tries (it is on no desktop
+    // again), and its next show starts them afresh.
+    const int ShownPinTries = 10;
+    static readonly TimeSpan ShownPinRetry = TimeSpan.FromMilliseconds(250);
+
+    void PinWhenShown(Window window, nint hwnd, string name)
+    {
+        var pinned = false;
+        var trying = false;
+
+        void Try(int triesLeft)
+        {
+            if (!window.IsVisible)
+            {
+                trying = false;
+                return;
+            }
+            var result = desktops!.Pin(new WindowHandle(hwnd));
+            if (result.IsSuccess)
+            {
+                pinned = true;
+                trying = false;
+                // One line when it took a retry, so the trace shows how long the shell took to place the window.
+                if (triesLeft < ShownPinTries) ClickTrace.Write($"{name}: pinned on try {ShownPinTries - triesLeft + 1}");
+                return;
+            }
+            if (triesLeft <= 1)
+            {
+                trying = false;
+                ClickTrace.Write($"{name} pin failed: {result.Error}; tried {ShownPinTries} times, the next show tries again");
+                return;
+            }
+            var again = new System.Windows.Threading.DispatcherTimer { Interval = ShownPinRetry };
+            again.Tick += (_, _) =>
+            {
+                again.Stop();
+                Try(triesLeft - 1);
+            };
+            again.Start();
+        }
+
+        window.IsVisibleChanged += (_, _) =>
+        {
+            if (!window.IsVisible || pinned || trying) return;
+            trying = true;
+            _ = Dispatcher.InvokeAsync(() => Try(ShownPinTries));
+        };
     }
 
     // --- the screen strips -------------------------------------------------------------------------------

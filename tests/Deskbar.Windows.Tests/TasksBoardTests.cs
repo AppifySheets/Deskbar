@@ -1499,12 +1499,44 @@ public partial class TasksBoardTests
     [Fact]
     public void A_panel_off_the_desktop_in_front_is_not_focused() => StaThread.Run(() =>
     {
-        using var t = Build(activates: () => false);
+        var asked = 0;
+        using var t = Build(activates: () =>
+        {
+            asked++;
+            return false;
+        });
 
         t.Controller.Show();
 
         Assert.False(t.Window.IsActive);
         Assert.NotSame(t.Window.Toolbar, FocusManager.GetFocusedElement(t.Window));
+
+        // Task b62c4472: the refusal is asked again for a moment (the shell may not have placed a just-shown window yet),
+        // but a panel that stays off the desktop in front is never focused, and the tries end.
+        Enumerable.Range(0, TasksBoard.ArriveTries + 2).ToList().ForEach(_ => t.Timers.FireAll());
+        Assert.Equal(TasksBoard.ArriveTries, asked);
+        Assert.NotSame(t.Window.Toolbar, FocusManager.GetFocusedElement(t.Window));
+    });
+
+    // Task b62c4472, measured in the trace: right after the show the shell has not placed the window on a desktop yet, so
+    // the seam's first answer is no. A retry a moment later finds it in front and the keyboard goes in as it would have.
+    [Fact]
+    public void A_panel_the_shell_places_late_is_focused_on_a_retry() => StaThread.Run(() =>
+    {
+        var asked = 0;
+        using var t = Build(activates: () => ++asked >= 3);
+
+        t.Controller.Show();
+        Assert.NotSame(t.Window.Toolbar, FocusManager.GetFocusedElement(t.Window));
+
+        t.Timers.FireAll();
+        t.Timers.FireAll();
+
+        Assert.Equal(3, asked);
+        Assert.Same(t.Window.Toolbar, FocusManager.GetFocusedElement(t.Window));
+        // Brought forward once: no retry is left waiting.
+        t.Timers.FireAll();
+        Assert.Equal(3, asked);
     });
 
     // MANUAL STEP 64n, measured 2026-11-25: `tasks-window show` while a video played full screen docked the panel behind
