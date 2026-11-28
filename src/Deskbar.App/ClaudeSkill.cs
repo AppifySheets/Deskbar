@@ -274,8 +274,9 @@ static class ClaudeSkill
     //      stays in the terminal) ends it at once, printing nothing.
     //   3. Every second: a slot that is gone (Deskbar dropped the question: the session moved on, the setting went off,
     //      Deskbar exited or restarted) ends it, printing nothing. An answer file is read ONCE and the slot removed; then
-    //      it prints a fixed line only for exactly one line "<its code> allow|deny|edits", the rule of
-    //      PermissionAnswer.LineFor, and nothing for anything else. Its own deadline, `seconds` ticks of a second or
+    //      it prints a fixed line only for exactly one line "<its code> allow|deny|auto", fetches its line from Deskbar
+    //      for "<its code> fetch" (a picked suggestion, task bd55bd54), the rule of PermissionAnswer.ToolLineFor, and
+    //      prints nothing for anything else. Its own deadline, `seconds` ticks of a second or
     //      more, ends it printing nothing.
     //
     // NOTHING READ IS EVER PARSED BY cmd: the reply's code and the answer's line are each set from a FOR variable
@@ -356,26 +357,29 @@ static class ClaudeSkill
         "@if not \"%lines%\"==\"1\" goto done",
         // The verdict is reached under delayed expansion and only the verdict leaves it, so the slot's path (which may
         // hold a "!") is only ever used with delayed expansion off. A dialog's slot takes the dialog word and nothing
-        // else; any other slot takes allow, deny or edits and never the dialog word (PermissionAnswer.LineFor).
+        // else; any other slot takes allow, deny, auto or fetch and never the dialog word (PermissionAnswer.LineFor and
+        // ToolLineFor). Both the dialog word and fetch end in the same fetch below.
         "@setlocal EnableDelayedExpansion",
         "@set \"verdict=\"",
         "@if not defined kind if \"!line!\"==\"!code! allow\" set \"verdict=allow\"",
         "@if not defined kind if \"!line!\"==\"!code! deny\" set \"verdict=deny\"",
-        "@if not defined kind if \"!line!\"==\"!code! edits\" set \"verdict=edits\"",
-        $"@if defined kind if \"!line!\"==\"!code! {Core.Tasks.PermissionAnswer.DialogWord}\" set \"verdict=dialog\"",
+        "@if not defined kind if \"!line!\"==\"!code! auto\" set \"verdict=auto\"",
+        $"@if not defined kind if \"!line!\"==\"!code! {Core.Tasks.PermissionAnswer.FetchWord}\" set \"verdict=fetch\"",
+        $"@if defined kind if \"!line!\"==\"!code! {Core.Tasks.PermissionAnswer.DialogWord}\" set \"verdict=fetch\"",
         "@endlocal & set \"verdict=%verdict%\"",
-        "@if \"%verdict%\"==\"dialog\" goto dialog",
+        "@if \"%verdict%\"==\"fetch\" goto fetch",
         "@rd /s /q \"%slot%\" >nul 2>&1",
         "@if \"%verdict%\"==\"allow\" goto allow",
         "@if \"%verdict%\"==\"deny\" goto deny",
-        "@if \"%verdict%\"==\"edits\" goto edits",
+        "@if \"%verdict%\"==\"auto\" goto auto",
         "@exit /b 0",
-        // The dialog's answer: the slot goes, then the script asks Deskbar for the line the user's Send left
-        // (`claude-permission --fetch`, PermissionDesk.Fetch), its code on stdin, and the reply, one line of pure-ASCII
-        // JSON (DialogAsk.AnswerLine), goes straight through to the hook's output: cmd never parses it. The code is 32
-        // hex digits, checked above, so echoing it is safe; it is spent by now (the answer was given and is fetched once).
-        // A refusal is on stderr, dropped, and prints nothing: the terminal then asks.
-        ":dialog",
+        // A fetched answer (a dialog's, or a picked suggestion's, task bd55bd54): the slot goes, then the script asks
+        // Deskbar for the line the user's click left (`claude-permission --fetch`, PermissionDesk.Fetch), its code on
+        // stdin, and the reply, one line of pure-ASCII JSON (DialogAsk.AnswerLine, PermissionAnswer.SuggestionLine), goes
+        // straight through to the hook's output: cmd never parses it. The code is 32 hex digits, checked above, so echoing
+        // it is safe; it is spent by now (the answer was given and is fetched once). A refusal is on stderr, dropped, and
+        // prints nothing: the terminal then asks.
+        ":fetch",
         "@rd /s /q \"%slot%\" >nul 2>&1",
         $"@echo %code%| call \"%~dp0{ControlCommandLine.ShimName}\" {Core.Control.ControlArguments.ClaudePermissionVerb} --fetch --slot \"%name%\" 2>nul",
         "@exit /b 0",
@@ -385,8 +389,8 @@ static class ClaudeSkill
         ":deny",
         $"@echo {Core.Tasks.PermissionAnswer.DenyLine}",
         "@exit /b 0",
-        ":edits",
-        $"@echo {Core.Tasks.PermissionAnswer.AllowEditsLine}",
+        ":auto",
+        $"@echo {Core.Tasks.PermissionAnswer.AllowAutoLine}",
         "@exit /b 0",
         ":done",
         "@rd /s /q \"%slot%\" >nul 2>&1",

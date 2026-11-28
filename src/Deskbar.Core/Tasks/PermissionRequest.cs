@@ -26,12 +26,18 @@ namespace Deskbar.Core.Tasks;
 //               dialog answered from the task's page must echo its questions back unchanged (DialogAsk, task c047d0a0),
 //               and re-serialising the parsed fields could alter them; so the raw text is kept, in memory only, like the
 //               rest of the request (PermissionDesk).
+//   Suggestions permission_suggestions: the "Yes, and ..." choices Claude Code builds its own dialog from, each kept
+//               whole, so the card can offer the same choice and hand that very entry back as updatedPermissions
+//               (PermissionChoices, task bd55bd54). An entry that is not an object, or has no "type", is left out.
 //
 // Only a hook whose hook_event_name is PermissionRequest and that names a session and a tool is taken; anything else is
 // refused, and the verb that reads it then answers nothing, which leaves Claude Code's own terminal dialog.
 public sealed record PermissionRequest(string SessionId, string Tool, string Folder, Maybe<string> Mode,
     IReadOnlyList<PermissionField> Fields, Maybe<string> AgentId = default, string Input = "")
 {
+    /// <summary>permission_suggestions, in Claude Code's order; empty when it sent none (see the header).</summary>
+    public IReadOnlyList<PermissionSuggestion> Suggestions { get; init; } = [];
+
     public const string Event = "PermissionRequest";
 
     // AskUserQuestion and ExitPlanMode are dialogs, not permissions: their "allow" needs an updatedInput carrying the
@@ -83,7 +89,12 @@ public sealed record PermissionRequest(string SessionId, string Tool, string Fol
 
             return new PermissionRequest(session.Value, tool.Value, Text(root, "cwd").GetValueOrDefault(""),
                 Text(root, "permission_mode"), fields, Text(root, "agent_id").Where(SafeAgentId.IsMatch),
-                root.TryGetProperty("tool_input", out var raw) ? raw.GetRawText() : "");
+                root.TryGetProperty("tool_input", out var raw) ? raw.GetRawText() : "")
+            {
+                Suggestions = root.TryGetProperty("permission_suggestions", out var suggested) && suggested.ValueKind == JsonValueKind.Array
+                    ? suggested.EnumerateArray().Select(PermissionSuggestion.Of).Where(s => s.HasValue).Select(s => s.Value).ToList()
+                    : [],
+            };
         }
         catch (JsonException e)
         {
@@ -100,6 +111,35 @@ public sealed record PermissionRequest(string SessionId, string Tool, string Fol
         root.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String && value.GetString() is { Length: > 0 } text
             ? text
             : Maybe<string>.None;
+}
+
+/// <summary>
+/// One entry of permission_suggestions (task bd55bd54): its type (addRules, addDirectories, setMode, ...), where it would
+/// be kept (session, localSettings, ...), its rule behaviour (allow, for addRules), the rules or folders it names as text,
+/// and the entry itself as JSON, kept so the answer hands Claude Code back exactly what it offered
+/// (PermissionAnswer.SuggestionLine).
+/// </summary>
+public sealed record PermissionSuggestion(string Type, string Destination, string Behavior, IReadOnlyList<string> Names, string Json)
+{
+    public static Maybe<PermissionSuggestion> Of(JsonElement entry) =>
+        entry.ValueKind == JsonValueKind.Object && Word(entry, "type") is { Length: > 0 } type
+            ? new PermissionSuggestion(type, Word(entry, "destination"), Word(entry, "behavior"), NamesOf(entry), entry.GetRawText())
+            : Maybe<PermissionSuggestion>.None;
+
+    // What the entry names, for its words on the card: an addRules entry's rules (the rule's content, "git init *", or the
+    // bare tool name when the rule has none), an addDirectories entry's folders.
+    static IReadOnlyList<string> NamesOf(JsonElement entry) =>
+        entry.TryGetProperty("rules", out var rules) && rules.ValueKind == JsonValueKind.Array
+            ? rules.EnumerateArray().Where(r => r.ValueKind == JsonValueKind.Object)
+                .Select(r => Word(r, "ruleContent") is { Length: > 0 } content ? content : Word(r, "toolName"))
+                .Where(n => n.Length > 0).ToList()
+            : entry.TryGetProperty("directories", out var folders) && folders.ValueKind == JsonValueKind.Array
+                ? folders.EnumerateArray().Where(f => f.ValueKind == JsonValueKind.String).Select(f => f.GetString() ?? "")
+                    .Where(n => n.Length > 0).ToList()
+                : [];
+
+    static string Word(JsonElement entry, string name) =>
+        entry.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String ? value.GetString() ?? "" : "";
 }
 
 /// <summary>One field of a permission request's tool_input: its name and its value as text.</summary>

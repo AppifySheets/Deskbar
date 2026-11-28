@@ -102,7 +102,7 @@ public partial class TasksWindow
         buttons.Children.Add(PlanButton(task, question, PlanDecision.Approve, ApprovePlanText, primary: true));
         buttons.Children.Add(PlanButton(task, question, PlanDecision.ApproveEdits, ApprovePlanEditsText));
         buttons.Children.Add(keep);
-        buttons.Children.Add(PermissionButton(task, question, PermissionDecision.Pass, AnswerInTerminalText));
+        buttons.Children.Add(PermissionButton(task, question, TerminalChoice));
         card.Children.Add(buttons);
         card.Children.Add(Text("\"Accept edits\" lets this session edit files without asking from now on, also after a restart.",
             11.5, InboxLook.Ink3, margin: new Thickness(0, 6, 0, 0)).Wrapped());
