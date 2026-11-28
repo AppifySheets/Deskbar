@@ -8,7 +8,7 @@ using System.Windows.Threading;
 
 namespace Deskbar.App;
 
-// "CLAUDE STARTED", the add boxes' Ctrl+Enter confirmation (Deskbar task 7b17a573; Petre: "only start a task and don't
+// "CLAUDE STARTED", the add boxes' Enter confirmation (Ctrl+Enter until Deskbar task 64c9eb8f; task 7b17a573; Petre: "only start a task and don't
 // open a terminal. confirm it has started as a mild notification, don't even take me away from my current thread").
 //
 // WHY A WINDOW OF OUR OWN, not a Windows notification: this app cannot deliver one (#123). The direct build has no
@@ -23,7 +23,7 @@ namespace Deskbar.App;
 //   * it sits in the bottom-right corner of the primary screen's work area, where Windows' own notifications appear, so
 //     it reads as one at a glance and covers nothing in the middle of the screen;
 //   * no sound, and it fades by itself after a few seconds. While the pointer rests on it, it stays.
-//   * a newer notice replaces an older one (App.NotifyClaudeStarted closes the last), so a burst of Ctrl+Enters leaves
+//   * a newer notice replaces an older one (App.NotifyClaudeStarted closes the last), so a burst of Enters leaves
 //     one card, not a stack.
 // A click on it is asking for the session after all: Clicked fires and the card closes; the App goes to the session as a
 // double-click on the task's line does.

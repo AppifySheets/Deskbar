@@ -380,6 +380,20 @@ public sealed class ClaudeTaskActions : IDisposable
         ClaudeStart.NewTaskFolders(workspace, parent, tasks.Board,
             ClaudeStart.EditorRepos(seams.EditorFolderNames(workspace), tasks.Board), seams.WorkspaceFolder(workspace));
 
+    /// <summary>
+    /// Whether a plain Enter in an add box starts Claude on the note it adds (task 64c9eb8f; Petre: "switch enter vs
+    /// ctrl+enter"; before it Enter only added and Ctrl+Enter started Claude). Yes while sessions keep their tasks, Claude
+    /// Code is installed, and a task on <paramref name="workspace"/> under <paramref name="parent"/> has a folder to start
+    /// in (<see cref="NewTaskFolders"/>, the very list <see cref="OfferInBackground"/> then starts in, or offers as the
+    /// pick list when it holds several: a workspace with several repos needs the pick either way). No, Enter only adds, as
+    /// Ctrl+Enter does: with sessions off the start would be refused with a message box after every add, without Claude
+    /// Code every add would offer to install it (both settings default to on, so this is the case for anyone who never
+    /// installed it), and on a workspace with no folder (a personal one, say) every add would open the folder pick list.
+    /// The play button still asks in all three cases, since a press on it is a request for Claude.
+    /// </summary>
+    public bool EnterStartsClaude(Maybe<Guid> workspace, Maybe<Guid> parent) =>
+        manager.State.ClaudeTasksInEffect && seams.ClaudeInstalled() && NewTaskFolders(workspace, parent).Count > 0;
+
     // --- a workspace's folder, chosen (Deskbar task 50b61120) -----------------------------------------------------------
     //
     // Petre: "Add an option to set the folder for the claude workflows, which should also run claude and add permissions
@@ -492,7 +506,7 @@ public sealed class ClaudeTaskActions : IDisposable
     public ContextMenu? Offer(Guid id) => Offer(id, background: false);
 
     /// <summary>
-    /// <see cref="Offer"/> for the add boxes' Ctrl+Enter and play button (task 7b17a573; Petre: "only start a task and
+    /// <see cref="Offer"/> for the add boxes' Enter (Ctrl+Enter until task 64c9eb8f) and play button (task 7b17a573; Petre: "only start a task and
     /// don't open a terminal. confirm it has started as a mild notification, don't even take me away from my current
     /// thread"). Everything up to the start is Offer's (the refusals, the folder pick list when there are several), but
     /// the session then runs in the background: no window is attached to it, and
@@ -570,7 +584,7 @@ public sealed class ClaudeTaskActions : IDisposable
     /// plus a question that holds the next runs back, and the line here would say the same thing twice.
     ///
     /// <paramref name="background"/> is the start Petre asked for but does not want to watch (task 7b17a573, the add
-    /// boxes' Ctrl+Enter through <see cref="OfferInBackground"/>): like <paramref name="quiet"/> it opens no window, but a
+    /// boxes' Enter and play button through <see cref="OfferInBackground"/>): like <paramref name="quiet"/> it opens no window, but a
     /// failure is told as a clicked start's is, and a success is confirmed through
     /// <see cref="ClaudeTaskSeams.StartedInBackground"/>, since he asked and is owed an answer that does not take him
     /// anywhere.

@@ -102,7 +102,7 @@ public partial class TasksBoardTests
         Func<Guid, Task<IReadOnlyList<SkillChoice>>>? taskSkills = null, Action<Guid>? startClaudeInBackground = null,
         Func<Result<WindowShot.Shot>>? shootWindow = null,
         Func<string, Maybe<TaskItem>, Result>? sendToManager = null, Func<Result>? openManagerTerminal = null,
-        Func<ChatSource>? managerChat = null)
+        Func<ChatSource>? managerChat = null, Func<Maybe<Guid>, bool>? enterStartsClaude = null)
     {
         var harness = Harness.Build();
         var minutes = 0;
@@ -135,7 +135,8 @@ public partial class TasksBoardTests
         }, undoTimer: timers.Start, now: () => Start.AddHours(1), selection: selection,
             sessionsOf: sessionsOf, startClaude: startClaude, openSession: openSession, sessionsChanged: sessionsChanged,
             workingOf: workingOf, pickFolder: pickFolder, runNow: runNow, transcriptOf: transcriptOf,
-            taskSkills: taskSkills, startClaudeInBackground: startClaudeInBackground, shootWindow: shootWindow)
+            taskSkills: taskSkills, startClaudeInBackground: startClaudeInBackground, shootWindow: shootWindow,
+            enterStartsClaude: enterStartsClaude)
         {
             // The manager line's click (task 61e4d143); none by default, so no manager line is drawn.
             OpenManager = openManager,
@@ -5205,14 +5206,15 @@ public partial class TasksBoardTests
     });
 
     // Task 3c40dec9 (Petre: "when adding a task, have a button to start immediately with claude"): the add box has a Start
-    // Claude button after its flag toggles, and Ctrl+Enter in the box does what it does: the note is added as Enter adds
-    // it, the box closes, and the new task goes to `startClaude` (the App's ClaudeTaskActions.Offer) once the key press
-    // is over. An empty box adds and starts nothing. Without the seam there is no button and Ctrl+Enter only adds.
+    // Claude button after its flag toggles, and Enter in the box does what it does (task 64c9eb8f, "switch enter vs
+    // ctrl+enter"; Ctrl+Enter did until then): the note is added, the box closes, and the new task goes to `startClaude`
+    // (the App's ClaudeTaskActions.Offer) once the key press is over. Ctrl+Enter only adds. An empty box adds and starts
+    // nothing. Without the seam there is no button and Enter only adds.
     [Fact]
-    public void The_add_box_starts_Claude_on_the_note_with_its_button_or_Ctrl_Enter() => StaThread.Run(() =>
+    public void The_add_box_starts_Claude_on_the_note_with_its_button_or_Enter() => StaThread.Run(() =>
     {
         var started = new List<Guid>();
-        using var t = Build(startClaude: started.Add);
+        using var t = Build(startClaude: started.Add, enterStartsClaude: _ => true);
         t.Controller.Show();
         Click(ButtonNamed(t.Window, "Add"));
 
@@ -5223,7 +5225,7 @@ public partial class TasksBoardTests
         Assert.Empty(started);
         Assert.True(t.Window.AddBoxShown);
 
-        Assert.True(t.Window.TypeNote("Fix the build", Key.Enter, ModifierKeys.Control));
+        Assert.True(t.Window.TypeNote("Fix the build", Key.Enter));
         var task = Assert.Single(t.Tasks.Board.Tasks);
         Assert.Equal("Fix the build", task.Title);
         Assert.False(t.Window.AddBoxShown);
@@ -5231,38 +5233,71 @@ public partial class TasksBoardTests
         t.Window.Dispatcher.Invoke(() => { }, System.Windows.Threading.DispatcherPriority.ApplicationIdle);
         Assert.Equal([task.Id], started);
 
-        // Plain Enter still only adds.
+        // Ctrl+Enter only adds.
         Click(ButtonNamed(t.Window, "Add"));
-        Assert.True(t.Window.TypeNote("Pay rent", Key.Enter));
+        Assert.True(t.Window.TypeNote("Pay rent", Key.Enter, ModifierKeys.Control));
         t.Window.Dispatcher.Invoke(() => { }, System.Windows.Threading.DispatcherPriority.ApplicationIdle);
+        Assert.Equal(2, t.Tasks.Board.Tasks.Count);
         Assert.Equal([task.Id], started);
 
-        // Without the seam (a copy without Claude sessions): no button, and Ctrl+Enter adds as Enter does.
+        // Without the seam (a copy without Claude sessions): no button, and Enter only adds, as Ctrl+Enter does.
         using var plain = Build();
         plain.Controller.Show();
         Click(ButtonNamed(plain.Window, "Add"));
         Assert.False(HasButtonNamed(plain.Window, TasksWindow.AddAndStartClaudeText));
-        Assert.True(plain.Window.TypeNote("Errand", Key.Enter, ModifierKeys.Control));
+        Assert.True(plain.Window.TypeNote("Errand", Key.Enter));
         Assert.Single(plain.Tasks.Board.Tasks);
     });
 
+    // Task 64c9eb8f: Enter starts Claude only where the App's rule says so (sessions on, Claude Code installed, a folder
+    // to start in), judged on the workspace the note goes to. Where it says no, Enter only adds, so a note on a
+    // workspace with no folder does not open a folder pick list on every add; the play button still starts it.
+    [Fact]
+    public void Enter_only_adds_where_Claude_cannot_start_on_the_workspace() => StaThread.Run(() =>
+    {
+        var started = new List<Guid>();
+        var asked = new List<Maybe<Guid>>();
+        using var t = Build(startClaude: started.Add, enterStartsClaude: workspace =>
+        {
+            asked.Add(workspace);
+            return false;
+        });
+        t.Controller.Show();
+        Click(ButtonNamed(t.Window, "Add"));
+        Assert.True(t.Window.TypeNote("Buy milk", Key.Enter));
+        t.Window.Dispatcher.Invoke(() => { }, System.Windows.Threading.DispatcherPriority.ApplicationIdle);
+        var task = Assert.Single(t.Tasks.Board.Tasks);
+        Assert.Empty(started);
+        // Asked about the workspace the note went to.
+        Assert.Equal([task.WorkspaceId], asked);
+
+        // The play button still starts Claude there: a press on it is a request for Claude.
+        Click(ButtonNamed(t.Window, "Add"));
+        t.Window.AddBox.Text = "Fix the build";
+        Click(ButtonNamed(t.Window, TasksWindow.AddAndStartClaudeText));
+        t.Window.Dispatcher.Invoke(() => { }, System.Windows.Threading.DispatcherPriority.ApplicationIdle);
+        Assert.Equal([t.Tasks.Board.Tasks.Single(x => x.Title == "Fix the build").Id], started);
+    });
+
     // Task 7b17a573 (Petre: "only start a task and don't open a terminal. confirm it has started as a mild notification,
-    // don't even take me away from my current thread"): with the App's background start wired, Ctrl+Enter hands the note
+    // don't even take me away from my current thread"): with the App's background start wired, Enter (Ctrl+Enter until
+    // task 64c9eb8f) hands the note
     // to it and not to the line menu's start, and the note is not selected, so the panel stays on the task Petre had
     // picked rather than scrolling to the new line.
     [Fact]
-    public void Ctrl_Enter_starts_in_the_background_and_leaves_the_selection_alone() => StaThread.Run(() =>
+    public void Enter_starts_in_the_background_and_leaves_the_selection_alone() => StaThread.Run(() =>
     {
         var clicked = new List<Guid>();
         var background = new List<Guid>();
         var selection = new TaskSelection();
-        using var t = Build(selection: selection, startClaude: clicked.Add, startClaudeInBackground: background.Add);
+        using var t = Build(selection: selection, startClaude: clicked.Add, startClaudeInBackground: background.Add,
+            enterStartsClaude: _ => true);
         var picked = t.Tasks.AddNote("The thread I am reading", t.Gepha).Value.Id;
         t.Controller.Show();
         selection.Select(picked);
 
         Click(ButtonNamed(t.Window, "Add"));
-        Assert.True(t.Window.TypeNote("Fix the build", Key.Enter, ModifierKeys.Control));
+        Assert.True(t.Window.TypeNote("Fix the build", Key.Enter));
         t.Window.Dispatcher.Invoke(() => { }, System.Windows.Threading.DispatcherPriority.ApplicationIdle);
 
         var task = t.Tasks.Board.Tasks.Single(x => x.Title == "Fix the build");

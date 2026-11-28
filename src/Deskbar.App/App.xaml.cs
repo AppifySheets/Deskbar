@@ -536,7 +536,7 @@ public partial class App : Application
         }
     }
 
-    // "CLAUDE STARTED", the add boxes' Ctrl+Enter confirmation (task 7b17a573; Petre: "only start a task and don't open
+    // "CLAUDE STARTED", the add boxes' Enter confirmation (Ctrl+Enter until task 64c9eb8f; task 7b17a573; Petre: "only start a task and don't open
     // a terminal. confirm it has started as a mild notification, don't even take me away from my current thread").
     // A card of the app's own in the screen's corner that never takes the foreground (ClaudeStartedNotice says why not a
     // tray balloon: Windows drops this app's, #123). A newer card replaces the one on show. Clicking it is asking for
@@ -2274,7 +2274,7 @@ public partial class App : Application
                 OfferInstall = message => MessageBox.Show(message, "Deskbar", MessageBoxButton.YesNo, MessageBoxImage.Question) == MessageBoxResult.Yes,
                 ClaudeInstalled = () => Deskbar.Windows.Claude.ClaudeLocator.Find().HasValue,
                 Tell = message => MessageBox.Show(message, "Deskbar", MessageBoxButton.OK, MessageBoxImage.Information),
-                // The add boxes' Ctrl+Enter (task 7b17a573): a "Claude started" card that takes no focus.
+                // The add boxes' Enter and play button (task 7b17a573): a "Claude started" card that takes no focus.
                 StartedInBackground = (task, _) => NotifyClaudeStarted(task),
                 // A double-click that brings back a task the keeper gave up on clears the give-up's resume count.
                 Forget = claudeSessions.Forget,
@@ -2556,9 +2556,11 @@ public partial class App : Application
                 SessionWindow = SessionWindowOf,
                 // A line menu's "Start Claude on this" (Task 9): ClaudeTaskActions.Offer, which may open a pick list.
                 StartClaude = id => claudeActions?.Offer(id),
-                // The add box's Ctrl+Enter and play button (task 7b17a573): the same start in the background, with no
-                // window and a "Claude started" card that takes no focus.
+                // The add box's Enter and play button (task 7b17a573; Enter since task 64c9eb8f, Ctrl+Enter before): the
+                // same start in the background, with no window and a "Claude started" card that takes no focus.
                 StartClaudeInBackground = id => claudeActions?.OfferInBackground(id),
+                // Whether a plain Enter in the add box starts Claude (task 64c9eb8f): sessions on and a folder to start in.
+                EnterStartsClaude = (workspace, parent) => claudeActions?.EnterStartsClaude(workspace, parent) == true,
                 // The row menu's "Folder…" and the New workspace dialog's folder (task 50b61120): store, trust, and a
                 // terminal running claude there.
                 ChooseClaudeFolder = id => claudeActions?.ChooseWorkspaceFolder(id),
@@ -2981,9 +2983,12 @@ public partial class App : Application
                 // line menu and in the thread, and a redraw whenever `claude agents --json` gives a new list.
                 sessionsOf: task => claudeActions?.SessionsOf(task) ?? [],
                 startClaude: id => claudeActions?.Offer(id),
-                // The add box's Ctrl+Enter and play button (task 7b17a573): the same start in the background, with no
-                // window and a "Claude started" card that takes no focus.
+                // The add box's Enter and play button (task 7b17a573; Enter since task 64c9eb8f, Ctrl+Enter before): the
+                // same start in the background, with no window and a "Claude started" card that takes no focus.
                 startClaudeInBackground: id => claudeActions?.OfferInBackground(id),
+                // Whether a plain Enter in the add box starts Claude (task 64c9eb8f), as the bar's; the panel's add box adds
+                // no subtasks, so no parent.
+                enterStartsClaude: workspace => claudeActions?.EnterStartsClaude(workspace, Maybe<Guid>.None) == true,
                 // The add box's camera (task 494d34ee): the window Petre was in before Deskbar, which only the bar's
                 // foreground hook knows (a click in the panel makes the panel the window in front). Read at the press.
                 shootWindow: () => WindowShot.Of(floatingBar?.WindowBeforeDeskbar ?? 0),

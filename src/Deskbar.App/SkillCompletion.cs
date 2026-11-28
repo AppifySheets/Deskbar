@@ -17,8 +17,9 @@ namespace Deskbar.App;
 //
 // Keys, read ahead of the box's own (the box's owner attaches this before its own PreviewKeyDown):
 //   * Down and Up move the pick; Tab or Enter puts "/<skill> " in the box, caret after the space, for the arguments.
-//   * Ctrl+Enter puts the pick in the box and lets the key go on, so the box's owner asks for the workspace (task
-//     6184e8bf) and then adds the task and starts Claude on it ("/ref", Ctrl+Enter, Enter starts /refresh-pr).
+//   * Ctrl+Enter puts the pick in the box and lets the key go on to the box's owner: an add box asks for the workspace
+//     (task 6184e8bf) and then only adds the task, since Ctrl+Enter there adds without starting Claude (task 64c9eb8f;
+//     Enter is the add-and-start key now: "/ref", Enter, Enter, Enter starts /refresh-pr); a comment box posts.
 //   * Esc closes the list and nothing else (the box keeps its text); it stays closed until the text changes.
 // A click on a row picks it. The rows take no keyboard focus, so the caret stays in the box.
 //
@@ -257,7 +258,7 @@ sealed class SkillCompletion
                 Pick();
                 e.Handled = true;
                 break;
-            // Ctrl+Enter: the pick goes in, and the key goes on to the box's owner, which adds and starts Claude.
+            // Ctrl+Enter: the pick goes in, and the key goes on to the box's owner (an add box adds, a comment box posts).
             case Key.Enter when shown.Count > 0 && ctrl:
                 Pick();
                 break;

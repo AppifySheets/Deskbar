@@ -813,7 +813,7 @@ public partial class FloatingBar
             TextWrapping = TextWrapping.Wrap,
             AcceptsReturn = true,
             MaxLines = TaskAddMaxLines,
-            ToolTip = "Enter asks which workspace, then adds the task; Ctrl+Enter does the same and starts Claude on it; Shift+Enter starts a new line, Esc clears the box. The first line is the title, the rest the description. Ctrl+V or a drop adds a picture. Type / to pick one of the workspace's Claude Code skills",
+            ToolTip = "Enter asks which workspace, then adds the task and starts Claude on it (where the workspace has a folder); Ctrl+Enter does the same without starting Claude; Shift+Enter starts a new line, Esc clears the box. The first line is the title, the rest the description. Ctrl+V or a drop adds a picture. Type / to pick one of the workspace's Claude Code skills",
         };
         AutomationProperties.SetName(taskAddBox, "New task");
         // The "/" list of skills (task 3a872301). Attached BEFORE OnTaskAddKey, so while the list is open its Enter, Tab
@@ -2289,12 +2289,17 @@ public partial class FloatingBar
             // A held Enter repeats; only the first press counts, so holding it a moment too long cannot also pick from
             // the workspace menu that press opens (AskTaskTarget).
             if (e.IsRepeat) return;
-            // Ctrl+Enter is the Start Claude button's key (task 3c40dec9): the note is added and handed to Claude.
-            var startClaude = Keyboard.Modifiers.HasFlag(ModifierKeys.Control);
+            // ENTER STARTS CLAUDE, CTRL+ENTER ONLY ADDS (task 64c9eb8f; Petre: "switch enter vs ctrl+enter"). Until then
+            // Enter only added the note and Ctrl+Enter was the Start Claude button's key (task 3c40dec9); most notes typed
+            // here are meant for Claude, so the plain key now does that and Ctrl is the exception. Enter starts Claude
+            // only where Claude has a folder to start in (EnterStartsClaude, judged on the workspace picked from the menu
+            // below; several folders still open the pick list); elsewhere, a workspace with no folder, Claude sessions
+            // off or Claude Code not installed, it only adds, as Ctrl+Enter does.
+            var onlyAdd = Keyboard.Modifiers.HasFlag(ModifierKeys.Control);
             // With something to add, Enter first asks where it goes (task 6184e8bf); with nothing, the add is refused
-            // exactly as before and no menu opens for an empty box.
-            if (HasTaskNote) AskTaskTarget(startClaude);
-            else CommitTaskNote(startClaude);
+            // exactly as before, no menu opens for an empty box and nothing starts.
+            if (HasTaskNote) AskTaskTarget(onlyAdd);
+            else CommitTaskNote();
         }
         else if (e.Key == Key.Escape)
         {
@@ -2314,9 +2319,10 @@ public partial class FloatingBar
     // subtask. A second Enter takes it, so the old habit is Enter, Enter; the arrows, Tab or the first letters of a name
     // (the menu's type-ahead) move to another, and Enter or a click picks that one. Either way the pick is made as a
     // chip press makes it (ChooseTaskTarget) and then the note is added (CommitTaskNote), Claude started on it when the
-    // first press was Ctrl+Enter. Esc, or a click away, closes the menu and adds nothing: the text stays in the box,
-    // with the keyboard, for another Enter or an edit.
-    void AskTaskTarget(bool startClaude)
+    // first press was a plain Enter and the picked workspace lets Enter start it (task 64c9eb8f, EnterStartsClaudeHere);
+    // `onlyAdd` is a first press of Ctrl+Enter. Esc, or a click away, closes the menu and adds nothing: the text stays in
+    // the box, with the keyboard, for another Enter or an edit.
+    void AskTaskTarget(bool onlyAdd)
     {
         if (taskAddBox is null || taskAddChip is null) return;
         // The menu opens on the workspace the note would go to at this moment (CommitTaskNote's own rule), even if no
@@ -2329,7 +2335,8 @@ public partial class FloatingBar
                 picked = true;
                 TaskAddPickMenu = null;
                 ChooseTaskTarget(target);
-                CommitTaskNote(startClaude);
+                // Judged after the pick, on the workspace the note now goes to, not the one the menu opened on.
+                CommitTaskNote(startClaude: !onlyAdd && EnterStartsClaudeHere());
             },
             taskAddChip.Button, ChipMenuWidth);
         // Closed comes late: the popup hides at once but raises Closed from its destroy timer (up to 150 ms with the
@@ -2347,6 +2354,15 @@ public partial class FloatingBar
         menu.IsOpen = true;
     }
 
+    // Whether a plain Enter starts Claude on the note it is about to add (task 64c9eb8f): the App's rule
+    // (EnterStartsClaude) on the workspace the note goes to now, by CommitTaskNote's own rule for the one in front, and
+    // its parent for a subtask. Never without the App's rule (the tests, a bar with no Claude), so Enter there only adds.
+    bool EnterStartsClaudeHere()
+    {
+        if (TaskAddTargetFollowsFront) taskAddTarget = manager.CurrentWorkspaceId;
+        return AddedTaskStarter is not null && EnterStartsClaude?.Invoke(taskAddTarget, taskAddParent) == true;
+    }
+
     // Whether the box holds a note to add: words, or a pasted picture (a picture alone makes a "Picture" task).
     bool HasTaskNote => taskAddBox?.Text.Trim().Length > 0 || taskAddImages.Count > 0;
 
@@ -2357,7 +2373,7 @@ public partial class FloatingBar
     // keyboard. The first line is the title and any lines after it the description (TaskNote.Split, task 98420dbc).
     // Pasted pictures go in the description too, after that text, and with nothing typed the task is called "Picture"
     // (FloatingBar.TaskPictures.cs). The note added is then highlighted (ShowAddedTask). With `startClaude` (the Start
-    // Claude button or Ctrl+Enter, task 3c40dec9) the note is then handed to Claude (StartAddedTask). A `shot` (the
+    // Claude button, task 3c40dec9, or Enter since task 64c9eb8f) the note is then handed to Claude (StartAddedTask). A `shot` (the
     // camera button, task 494d34ee) is one more picture after the pasted ones, with the line naming its window under the
     // typed words; it counts as a picture for the title, so a shot with nothing typed is a "Picture" task.
     void CommitTaskNote(bool startClaude = false, WindowShot.Shot? shot = null)
@@ -2386,7 +2402,7 @@ public partial class FloatingBar
 
     // ADD AND START CLAUDE (task 3c40dec9; Petre: "when adding a task, have a button to start immediately with claude").
     // Before this, a note meant for Claude took three steps: Enter, find its line, right-click and "Start Claude on this".
-    // The button after the flag toggles (and Ctrl+Enter in the box) does all three: it adds the note exactly as Enter
+    // The button after the flag toggles (and Enter in the box, since task 64c9eb8f) does all three: it adds the note exactly as Enter
     // does, then runs the line menu's "Start Claude on this" on it (StartClaude, the App's ClaudeTaskActions.Offer). So
     // everything that item does holds here too: it starts in the workspace's one folder, or opens the folder pick list
     // at the pointer, and a refusal (Claude sessions off, Claude Code missing) is told the same way. With nothing typed
@@ -2418,7 +2434,7 @@ public partial class FloatingBar
                 if (!taskTyping) BeginTyping();
                 CommitTaskNote(startClaude: true);
             },
-            "Add and start Claude (Ctrl+Enter): adds the task and starts a Claude session on it");
+            "Add and start Claude (Enter): adds the task and starts a Claude session on it");
         button.Visibility = Visibility.Collapsed;
         return button;
     }
