@@ -12,8 +12,13 @@ namespace Deskbar.Windows.Shell;
 //     for Portainer, which answers 404 there and names its logo in the page): one GET of the bookmarked page itself,
 //     without its #fragment, read as text/html only and at most 512 KB of it; then the icon that page declares in a
 //     <link rel="...icon..."> (DeclaredIcon, in Core), fetched only when it is on the SAME scheme, host and port and is
-//     not an svg. So three requests at most for one origin, and never one to another site;
-//   * redirects are NOT followed (a 3xx counts as "no icon": a redirect leaves the origin or lands on a login page);
+//     not an svg;
+//   * ONE redirect is followed, and only of that page, and only to the same scheme, host and port
+//     (DeclaredIcon.RedirectOf, added 2026-11-28 for Headplane, whose deep links send a cookie-less request to its
+//     login page, the page that names its logo). So four requests at most for one origin, and never one to another
+//     site;
+//   * every other redirect is NOT followed (a 3xx counts as "no icon"): not of /favicon.ico, not of the declared icon,
+//     not a second one of the page, and never one that leaves the origin;
 //   * no cookies, no credentials, user agent "Deskbar", and never the link's user:password;
 //   * an icon is at most 256 KB and must say image/*;
 //   * each request has its own 5 second limit;
@@ -40,7 +45,8 @@ public sealed class FaviconFetcher(HttpMessageHandler? handler = null, TimeSpan?
             UseCookies = false,
             Credentials = null,
             PreAuthenticate = false,
-            // A redirect leaves the origin or lands on a login page, so it counts as no icon rather than being followed.
+            // The handler follows nothing by itself. The one redirect the fallback takes (a page sending to its login
+            // page, on the same origin) is decided and asked for by FetchDeclared, never by the handler.
             AllowAutoRedirect = false,
             // A response read only up to its cap must not go on being read off the wire after it is disposed: by
             // default the handler drains up to 1 MB of what is left to reuse the connection, which would break the
@@ -64,15 +70,20 @@ public sealed class FaviconFetcher(HttpMessageHandler? handler = null, TimeSpan?
             // Authority carries host and port only, never user information.
             : Image(new Uri($"{link.Scheme}://{link.Authority}/favicon.ico"), cancel);
 
-    // THE FALLBACK, asked by the caller only after Fetch gave nothing it could decode: the bookmarked page, then the
-    // icon it declares on its own origin. Two requests at most; the second only when the page names an acceptable icon.
+    // THE FALLBACK, asked by the caller only after Fetch gave nothing it could decode: the bookmarked page (or the one
+    // same-origin page it redirects to), then the icon it declares on its own origin. Three requests at most; the
+    // icon's only when the page names an acceptable one.
     public async Task<Result<byte[]>> FetchDeclared(Uri link, CancellationToken cancel)
     {
         if (link.Scheme is not ("http" or "https")) return Result.Failure<byte[]>("Only http and https links have a favicon.");
-        var page = DeclaredIcon.PageOf(link);
-        var html = await Get(page, type => type.Equals("text/html", StringComparison.OrdinalIgnoreCase), "a web page",
-            MaxPageBytes, overflowFails: false, cancel);
-        if (html.IsFailure) return Result.Failure<byte[]>(html.Error);
+        var asked = DeclaredIcon.PageOf(link);
+        var first = await Html(asked, cancel);
+        // A redirect to the same origin (the login page of an app behind a sign-in) is read instead, once. Its own
+        // redirect, if any, is not followed: that second answer is taken as it comes.
+        var moved = first.IsFailure ? DeclaredIcon.RedirectOf(asked, first.Error.Status, first.Error.Location) : Maybe<Uri>.None;
+        var (page, html) = moved.HasValue ? (moved.Value, await Html(moved.Value, cancel)) : (asked, first);
+        if (html.IsFailure) return Result.Failure<byte[]>(html.Error.Reason);
+        // Icons are resolved against the page that was actually read, so the login page's relative href lands right.
         var icon = DeclaredIcon.Of(Encoding.UTF8.GetString(html.Value), page);
         return icon.HasNoValue
             ? Result.Failure<byte[]>("The page declares no icon on its own site that Deskbar can show.")
@@ -82,13 +93,27 @@ public sealed class FaviconFetcher(HttpMessageHandler? handler = null, TimeSpan?
                 : await Image(icon.Value, cancel);
     }
 
-    Task<Result<byte[]>> Image(Uri url, CancellationToken cancel) =>
-        Get(url, type => type.StartsWith("image/", StringComparison.OrdinalIgnoreCase), "an image", MaxBytes, overflowFails: true, cancel);
+    // An icon: a redirect is a failure like any other, so only its reason is kept.
+    async Task<Result<byte[]>> Image(Uri url, CancellationToken cancel) =>
+        await Get(url, type => type.StartsWith("image/", StringComparison.OrdinalIgnoreCase), "an image", MaxBytes, overflowFails: true, cancel)
+            is var image && image.IsSuccess
+            ? image.Value
+            : Result.Failure<byte[]>(image.Error.Reason);
+
+    // A page, read as text/html only and no further than its cap. A refusal keeps its status and Location, so
+    // FetchDeclared can decide whether it is the one redirect it follows.
+    Task<Result<byte[], Refusal>> Html(Uri url, CancellationToken cancel) =>
+        Get(url, type => type.Equals("text/html", StringComparison.OrdinalIgnoreCase), "a web page", MaxPageBytes, overflowFails: false, cancel);
+
+    // Why a GET gave nothing usable: the reason, for the log, and for an answer that was not a success its status and
+    // Location header (0 and null when no answer came, a timeout or a network error). Get never follows the Location
+    // itself; only FetchDeclared does, once, for the page.
+    sealed record Refusal(string Reason, int Status = 0, Uri? Location = null);
 
     // One GET with every rule above: the Deskbar user agent and nothing else, no redirect, a media type `typeOk`
     // accepts, at most `max` bytes, within `limit`. `overflowFails`: an icon past its cap is refused whole (a cut icon
     // is a broken one), while a page is simply read no further than its cap, since its <head> comes first.
-    async Task<Result<byte[]>> Get(Uri url, Func<string, bool> typeOk, string wanted, int max, bool overflowFails, CancellationToken cancel)
+    async Task<Result<byte[], Refusal>> Get(Uri url, Func<string, bool> typeOk, string wanted, int max, bool overflowFails, CancellationToken cancel)
     {
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancel);
         deadline.CancelAfter(limit);
@@ -98,29 +123,34 @@ public sealed class FaviconFetcher(HttpMessageHandler? handler = null, TimeSpan?
             request.Headers.TryAddWithoutValidation("User-Agent", "Deskbar");
             using var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, deadline.Token);
 
-            if (!response.IsSuccessStatusCode) return Result.Failure<byte[]>($"The server answered {(int)response.StatusCode}.");
+            // A redirect keeps its Location, for FetchDeclared to judge; nothing here follows it.
+            if (!response.IsSuccessStatusCode)
+                return No($"The server answered {(int)response.StatusCode}.", (int)response.StatusCode, response.Headers.Location);
             if (response.Content.Headers.ContentType?.MediaType is not { } type || !typeOk(type))
-                return Result.Failure<byte[]>($"The answer is not {wanted}.");
+                return No($"The answer is not {wanted}.");
             if (overflowFails && response.Content.Headers.ContentLength > max)
-                return Result.Failure<byte[]>($"The answer is larger than {max / 1024} KB.");
+                return No($"The answer is larger than {max / 1024} KB.");
 
             // Read one byte past the cap so a body of unknown length that is too big is noticed, not truncated.
             await using var body = await response.Content.ReadAsStreamAsync(deadline.Token);
             var bytes = new byte[max + 1];
             var count = await body.ReadAtLeastAsync(bytes, bytes.Length, throwOnEndOfStream: false, deadline.Token);
-            return count > max && overflowFails ? Result.Failure<byte[]>($"The answer is larger than {max / 1024} KB.")
-                : count == 0 ? Result.Failure<byte[]>("The answer is empty.")
-                : bytes[..Math.Min(count, max)];
+            return count > max && overflowFails ? No($"The answer is larger than {max / 1024} KB.")
+                : count == 0 ? No("The answer is empty.")
+                : Result.Success<byte[], Refusal>(bytes[..Math.Min(count, max)]);
         }
         catch (OperationCanceledException)
         {
-            return Result.Failure<byte[]>(cancel.IsCancellationRequested ? "Cancelled." : "The server took longer than the time allowed.");
+            return No(cancel.IsCancellationRequested ? "Cancelled." : "The server took longer than the time allowed.");
         }
         catch (Exception e)
         {
-            return Result.Failure<byte[]>(e.Message);
+            return No(e.Message);
         }
     }
+
+    static Result<byte[], Refusal> No(string reason, int status = 0, Uri? location = null) =>
+        Result.Failure<byte[], Refusal>(new Refusal(reason, status, location));
 }
 
 // The icons that were fetched and decoded, one file per origin under %APPDATA%\Deskbar\bookmark-icons (the caller

@@ -152,7 +152,7 @@ public sealed class BookmarkFaviconTests : IDisposable
     }
 
     // THE FALLBACK (FetchDeclared): the bookmarked page, then the icon it declares on its own origin. A server that
-    // answers by path and records every request, so the tests can count them (three in all, with /favicon.ico).
+    // answers by path and records every request, so the tests can count them (four at most, with /favicon.ico).
     sealed class SiteServer(Func<string, HttpResponseMessage> answer) : HttpMessageHandler
     {
         public List<HttpRequestMessage> Seen { get; } = [];
@@ -237,13 +237,77 @@ public sealed class BookmarkFaviconTests : IDisposable
         Assert.Single(server.Seen);
     }
 
+    static HttpResponseMessage Moved(string location) =>
+        new(HttpStatusCode.Found) { Headers = { Location = new Uri(location, UriKind.RelativeOrAbsolute) } };
+
+    // Petre's Headplane, as measured on 2026-11-28: /favicon.ico is a 404, the bookmarked /admin/acls answers a
+    // cookie-less request with a 302 to /admin/login, and the login page names /admin/favicon.ico.
     [Fact]
-    public async Task The_fallback_follows_no_redirect_of_the_page()
+    public async Task The_fallback_follows_the_page_to_its_login_page_on_the_same_site_and_takes_its_icon()
     {
-        var server = new SiteServer(_ => new HttpResponseMessage(HttpStatusCode.Found) { Headers = { Location = new Uri("/login", UriKind.Relative) } });
+        var server = new SiteServer(path => path switch
+        {
+            "/admin/acls" => Moved("http://100.65.0.4:33000/admin/login"),
+            "/admin/login" => Page("""<link href="/admin/favicon.ico" rel="icon"/>"""),
+            "/admin/favicon.ico" => Picture(),
+            _ => new HttpResponseMessage(HttpStatusCode.NotFound),
+        });
+
+        var result = await new FaviconFetcher(server).FetchDeclared(new Uri("http://100.65.0.4:33000/admin/acls"), default);
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(Png, result.Value);
+        Assert.Equal(["http://100.65.0.4:33000/admin/acls", "http://100.65.0.4:33000/admin/login", "http://100.65.0.4:33000/admin/favicon.ico"],
+            server.Seen.Select(r => r.RequestUri!.ToString()));
+        // The followed request keeps every promise the first one makes.
+        Assert.All(server.Seen, r =>
+        {
+            Assert.Equal("Deskbar", r.Headers.UserAgent.ToString());
+            Assert.Null(r.Headers.Authorization);
+            Assert.False(r.Headers.Contains("Cookie"));
+        });
+    }
+
+    [Fact]
+    public async Task A_relative_icon_on_the_login_page_resolves_against_the_login_page()
+    {
+        var server = new SiteServer(path => path switch
+        {
+            "/app/deep/page" => Moved("/app/login"),
+            "/app/login" => Page("""<link rel="icon" href="logo.png">"""),
+            "/app/logo.png" => Picture(),
+            _ => new HttpResponseMessage(HttpStatusCode.NotFound),
+        });
+
+        Assert.True((await new FaviconFetcher(server).FetchDeclared(new Uri("https://nas.local/app/deep/page"), default)).IsSuccess);
+        Assert.Equal("https://nas.local/app/logo.png", server.Seen.Last().RequestUri!.ToString());
+    }
+
+    [Fact]
+    public async Task The_fallback_follows_no_redirect_to_another_site()
+    {
+        var server = new SiteServer(_ => Moved("https://login.example.com/"));
 
         Assert.True((await new FaviconFetcher(server).FetchDeclared(new Uri("https://portainer.local/"), default)).IsFailure);
         Assert.Single(server.Seen);
+    }
+
+    [Fact]
+    public async Task The_fallback_follows_only_one_redirect_of_the_page()
+    {
+        var server = new SiteServer(path => path == "/" ? Moved("/login") : Moved("/sso"));
+
+        Assert.True((await new FaviconFetcher(server).FetchDeclared(new Uri("https://portainer.local/"), default)).IsFailure);
+        Assert.Equal(["https://portainer.local/", "https://portainer.local/login"], server.Seen.Select(r => r.RequestUri!.ToString()));
+    }
+
+    [Fact]
+    public async Task The_declared_icon_is_not_chased_through_a_redirect()
+    {
+        var server = new SiteServer(path => path == "/" ? Page("""<link rel="icon" href="/logo.png">""") : Moved("/elsewhere.png"));
+
+        Assert.True((await new FaviconFetcher(server).FetchDeclared(new Uri("https://portainer.local/"), default)).IsFailure);
+        Assert.Equal(2, server.Seen.Count);
     }
 
     // P8: this is the store's guarantee, so it lives here and not in the fetcher's tests. The caller saves only a
