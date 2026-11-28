@@ -57,7 +57,7 @@ public partial class TasksWindow
     internal const string ReevaluateText = "Reevaluate";
 
     internal const string ReevaluateTip =
-        "Reevaluate: ask Claude to check where this task really stands and fix it: settle a question already answered, mark finished work done, rewrite an old status line";
+        "Reevaluate: ask Claude to check where this task really stands and follow it up: rebase or fix its pull request, settle a question already answered, mark finished work done, rewrite an old status line";
 
     // Whether Reevaluate is offered: an open task a Claude session has worked on (nobody to ask without one; a closed task
     // is history, Reopen comes first). The line and the row add their own condition: beside Open Claude, where there is a
@@ -87,7 +87,7 @@ public partial class TasksWindow
 
     // The tooltip: the state first, as the plain tile's tooltip had it, then what a click does.
     static string RecheckTip(string state) =>
-        $"{state}. Click to ask Claude to check where this task really stands: settle a question already answered, mark finished work done, rewrite an old status line";
+        $"{state}. Click to ask Claude to check where this task really stands and follow it up: rebase or fix its pull request, settle a question already answered, mark finished work done, rewrite an old status line";
 
     // The state's face (an icon, the words, the deploy track) inside a quiet button that presses Reevaluate; null where
     // Reevaluate is not offered, so the caller keeps the face as it was.
