@@ -697,7 +697,9 @@ public partial class TasksBoardTests
         var row = Inside(t.Window.InboxPageContent!).OfType<WrapPanel>().Single(p => Equals(p.Tag, TasksWindow.ThreadActionsTag));
         var names = row.Children.OfType<Button>().Select(AutomationProperties.GetName).ToArray();
         Assert.Contains(TasksWindow.OpenInWindowText, names);
-        Assert.Contains(TasksWindow.OpenClaudeText, names);
+        // Open Claude is beside the docked comment box on a page, not in this row (task 625405cc).
+        Assert.DoesNotContain(TasksWindow.OpenClaudeText, names);
+        Assert.True(HasButtonNamed(DockedBoxFrame(t), TasksWindow.OpenClaudeText));
         Assert.All(row.Children.OfType<Button>(), b => Assert.Equal(Visibility.Visible, b.Visibility));
     });
 
@@ -717,7 +719,8 @@ public partial class TasksBoardTests
         var row = Inside(t.Window.InboxPageContent!).OfType<WrapPanel>().Single(p => Equals(p.Tag, TasksWindow.ThreadActionsTag));
         var buttons = row.Children.OfType<Button>().ToArray();
         Assert.Contains(TasksWindow.OpenInWindowText, buttons.Select(AutomationProperties.GetName));
-        Assert.Contains(TasksWindow.OpenClaudeText, buttons.Select(AutomationProperties.GetName));
+        // Open Claude went down beside the docked comment box (task 625405cc), the same icon button.
+        buttons = [.. buttons, ButtonNamed(DockedBoxFrame(t), TasksWindow.OpenClaudeText)];
         Assert.All(buttons, b =>
         {
             Assert.Empty(Inside(b).OfType<TextBlock>());
