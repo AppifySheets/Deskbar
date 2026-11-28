@@ -868,11 +868,14 @@ public partial class FloatingBar
         // ADD AND START CLAUDE (task 3c40dec9; Petre: "when adding a task, have a button to start immediately with
         // claude"), after the two flags: AddAndStartClaudeButton says what it does.
         taskAddStartClaude = AddAndStartClaudeButton();
+        // A TASK FROM THE WINDOW ON SCREEN (task 494d34ee): the camera right after the two toggles, before the play glyph,
+        // since Petre asked for it "near the urgent/important buttons" (FloatingBar.TaskFromWindow.cs).
+        taskAddFromWindow = AddFromWindowButton();
         taskAddChips = new WrapPanel
         {
             Tag = "task-add-chips",
             Margin = new Thickness(0, 3, 0, 0),
-            Children = { taskAddChip.Button, ParentChipButton(), taskAddImportant.Button, taskAddUrgent.Button, taskAddStartClaude },
+            Children = { taskAddChip.Button, ParentChipButton(), taskAddImportant.Button, taskAddUrgent.Button, taskAddFromWindow, taskAddStartClaude },
         };
         PaintAddFlags();
         // RULING 50 (Petre: "move all tasks to the top to save vertical space, next to workspace selection"). "All tasks" /
@@ -2297,16 +2300,18 @@ public partial class FloatingBar
     // keyboard. The first line is the title and any lines after it the description (TaskNote.Split, task 98420dbc).
     // Pasted pictures go in the description too, after that text, and with nothing typed the task is called "Picture"
     // (FloatingBar.TaskPictures.cs). The note added is then highlighted (ShowAddedTask). With `startClaude` (the Start
-    // Claude button or Ctrl+Enter, task 3c40dec9) the note is then handed to Claude (StartAddedTask).
-    void CommitTaskNote(bool startClaude = false)
+    // Claude button or Ctrl+Enter, task 3c40dec9) the note is then handed to Claude (StartAddedTask). A `shot` (the
+    // camera button, task 494d34ee) is one more picture after the pasted ones, with the line naming its window under the
+    // typed words; it counts as a picture for the title, so a shot with nothing typed is a "Picture" task.
+    void CommitTaskNote(bool startClaude = false, WindowShot.Shot? shot = null)
     {
         if (taskService is null || taskAddBox is null) return;
-        var (title, body) = TaskNote.Split(taskAddBox.Text, taskAddImages.Count);
+        var (title, body) = TaskNote.Split(taskAddBox.Text, taskAddImages.Count + (shot is null ? 0 : 1));
         var quadrant = QuadrantOf.Flags(taskAddFlags.Important, taskAddFlags.Urgent);
         // The workspace is settled at Enter, not when the box opened (task 701c71a8): unless Petre picked one by hand,
         // the note goes to the workspace in front now, even if no repaint has caught a desktop switch made since.
         if (TaskAddTargetFollowsFront) taskAddTarget = manager.CurrentWorkspaceId;
-        (TaskAddDescription(body) is { } describe
+        (TaskAddDescription(body, shot) is { } describe
                 ? taskService.AddNote(title, taskAddTarget, quadrant, taskAddParent, describe)
                 : taskService.AddNote(title, taskAddTarget, quadrant, taskAddParent))
             .Tap(task =>
@@ -2535,6 +2540,9 @@ public partial class FloatingBar
         // The Start Claude button shows once the App has wired StartClaude (AddAndStartClaudeButton).
         if (taskAddStartClaude is not null)
             taskAddStartClaude.Visibility = StartClaude is null ? Visibility.Collapsed : Visibility.Visible;
+        // The camera too: it adds and starts Claude in one press, so it needs what the play button needs (task 494d34ee).
+        if (taskAddFromWindow is not null)
+            taskAddFromWindow.Visibility = StartClaude is null ? Visibility.Collapsed : Visibility.Visible;
         PaintParentChip();
         PaintPlaceholder();
         PaintInboxAdd(); // the Inbox look's add row (FloatingBar.InboxAdd.cs)

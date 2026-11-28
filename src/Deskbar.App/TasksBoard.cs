@@ -261,7 +261,8 @@ public sealed partial class TasksBoard : IDisposable
         Func<Maybe<Guid>, Maybe<Guid>, Task<IReadOnlyList<SkillChoice>>>? workspaceSkills = null,
         Func<TaskItem, Action<string>, ContextMenu?>? pickFolder = null, Func<Guid, Result>? runNow = null,
         Func<Guid, Task<IReadOnlyList<SkillChoice>>>? taskSkills = null,
-        Func<TaskSession, Maybe<string>>? transcriptOf = null, Action<Guid>? startClaudeInBackground = null)
+        Func<TaskSession, Maybe<string>>? transcriptOf = null, Action<Guid>? startClaudeInBackground = null,
+        Func<Result<WindowShot.Shot>>? shootWindow = null)
     {
         this.pickFolder = pickFolder;
         this.runNow = runNow;
@@ -334,6 +335,9 @@ public sealed partial class TasksBoard : IDisposable
             AddNoteAndStartClaude = (startClaudeInBackground ?? startClaude) is { } start
                 ? (title, workspace, quadrant, describe) => AddNoteAndStartClaude(start, title, workspace, quadrant, describe)
                 : null,
+            // The add box's camera (task 494d34ee, WindowShot): the picture of the window Petre was in before Deskbar. Only
+            // with a way to start Claude, since the camera adds and starts in one press. None, the camera is not shown.
+            ShootWindow = (startClaudeInBackground ?? startClaude) is null ? null : shootWindow,
             // The manager line's click (task 61e4d143): the Manager button's own click, read when it happens, since the
             // App sets OpenManager after this constructor. A refusal shows on the problem line like any other.
             OpenManager = () => Report(OpenManager?.Invoke() ?? Result.Failure("The manager is not available.")),
@@ -2258,6 +2262,13 @@ internal sealed partial record TasksWindowActions(
     /// it; whether the add worked. None, the button is not shown and Ctrl+Enter adds as Enter does.
     /// </summary>
     public Func<string, Maybe<Guid>, Quadrant, Func<Guid, Result<string>>?, bool>? AddNoteAndStartClaude { get; init; }
+
+    /// <summary>
+    /// The add box's camera (task 494d34ee): the picture of the window Petre was in before he clicked Deskbar, and the
+    /// line naming it, or why there is none. The note then goes through <see cref="AddNoteAndStartClaude"/>. None, the
+    /// camera is not shown.
+    /// </summary>
+    public Func<Result<WindowShot.Shot>>? ShootWindow { get; init; }
 
     /// <summary>The manager line's click (task 61e4d143): opens the manager session.</summary>
     public Action? OpenManager { get; init; }
