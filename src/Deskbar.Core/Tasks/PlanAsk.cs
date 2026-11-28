@@ -33,7 +33,7 @@ public enum PlanDecision
 //     approved your plan" and its next permission request said permission_mode "default".
 //   * the same with updatedPermissions [{setMode acceptEdits, destination session}] approves it and the next request
 //     said permission_mode "acceptEdits": its Write ran without a question. The same entry the permission card's "stop
-//     asking for edits" sends (PermissionAnswer.AllowEditsLine), in memory only, nothing written to settings files.
+//     asking for edits" sent until task bd55bd54, in memory only, nothing written to settings files.
 //   * behavior "deny" with a message keeps the session in plan mode: the message is the tool's result, word for word,
 //     Claude revised the plan as it said and asked again (a new ExitPlanMode, a new card).
 //   * an allow WITHOUT updatedInput is not an answer: the terminal's dialog stayed. That is why the Allow / Deny card

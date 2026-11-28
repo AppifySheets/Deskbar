@@ -32,7 +32,8 @@ public partial class TasksBoardTests
     static int permissionSlots;
 
     // A Claude task whose session "s1" asks for `command` (by `tool`), the Inbox on and its page open.
-    static PermissionRig PermissionPage(string command = "git push fork feature/x", string tool = "Bash", Func<DateTime>? clickClock = null)
+    static PermissionRig PermissionPage(string command = "git push fork feature/x", string tool = "Bash", Func<DateTime>? clickClock = null,
+        IReadOnlyList<PermissionSuggestion>? suggestions = null)
     {
         var t = Build(clickClock: clickClock);
         var box = Path.Combine(Path.GetTempPath(), "deskbar-perm-card-" + Guid.NewGuid().ToString("N"));
@@ -42,18 +43,19 @@ public partial class TasksBoardTests
         t.Controller.Show();
         ChooseInbox(t);
         var rig = new PermissionRig { Board = t, Desk = desk, Box = box, Task = id };
-        Ask(rig, command, tool);
+        Ask(rig, command, tool, suggestions);
         Click(LineOf(t.Window, id));
         return rig;
     }
 
-    static string Ask(PermissionRig rig, string command, string tool = "Bash")
+    static string Ask(PermissionRig rig, string command, string tool = "Bash", IReadOnlyList<PermissionSuggestion>? suggestions = null)
     {
         var slot = $"req-{Interlocked.Increment(ref permissionSlots)}-1";
         Directory.CreateDirectory(Path.Combine(rig.Box, slot));
         var field = tool == "Bash" ? "command" : "file_path";
         Assert.True(rig.Desk.Register(slot, new PermissionRequest("s1", tool, @"C:\repos\TaskSpaces", "default",
-            [new PermissionField(field, command), new PermissionField("description", "Push the branch")])).IsSuccess);
+            [new PermissionField(field, command), new PermissionField("description", "Push the branch")])
+            { Suggestions = suggestions ?? [] }).IsSuccess);
         return slot;
     }
 
@@ -81,22 +83,43 @@ public partial class TasksBoardTests
         Assert.True(HasButtonNamed(card, TasksWindow.AllowText));
         Assert.True(HasButtonNamed(card, TasksWindow.DenyText));
         Assert.True(HasButtonNamed(card, TasksWindow.AnswerInTerminalText));
-        // Not an edit, so no "stop asking for edits".
-        Assert.False(HasButtonNamed(card, TasksWindow.AllowEditsText));
+        // A shell command in default mode: the terminal's "switch to auto mode" too (task bd55bd54).
+        Assert.True(HasButtonNamed(card, TasksWindow.AutoText));
         Assert.Equal(InboxMark.AsksPermission, r.Board.Window.InboxShown!.Lines.Single(l => l.Id == r.Task).Mark);
         Assert.Equal(InboxSection.Permissions, r.Board.Window.InboxShown!.Lines.Single(l => l.Id == r.Task).Section);
     });
 
+    // An edit gets the terminal's Yes / No (measured 2026-11-28, task bd55bd54), then the card's way back to the terminal.
     [Fact]
-    public void An_edit_offers_allow_and_stop_asking_for_edits() => StaThread.Run(() =>
+    public void An_edit_offers_yes_and_no_as_the_terminal_does() => StaThread.Run(() =>
     {
         using var r = PermissionPage(@"C:\repos\TaskSpaces\src\App.cs", tool: "Edit");
 
-        Assert.True(HasButtonNamed(Cards(r).Single(), TasksWindow.AllowEditsText));
+        var names = Inside(Cards(r).Single()).OfType<Button>().Select(b => System.Windows.Automation.AutomationProperties.GetName(b))
+            .Where(n => n is TasksWindow.AllowText or TasksWindow.AutoText or TasksWindow.DenyText or TasksWindow.AnswerInTerminalText);
+        Assert.Equal([TasksWindow.AllowText, TasksWindow.DenyText, TasksWindow.AnswerInTerminalText], names);
+    });
+
+    // A suggestion's "Yes, and ..." writes the fetch word, and its line hands Claude Code's entry back.
+    [Fact]
+    public void A_suggestion_button_writes_fetch_and_the_line_waits_for_the_script() => StaThread.Run(() =>
+    {
+        var rule = PermissionSuggestion.Of(System.Text.Json.JsonDocument.Parse(
+            """{"type":"addRules","rules":[{"toolName":"Bash","ruleContent":"git init *"}],"behavior":"allow","destination":"localSettings"}""").RootElement).Value;
+        using var r = PermissionPage("git init", suggestions: [rule]);
+        var slot = r.Desk.All.Single().Slot;
+
+        Click(ButtonNamed(Cards(r).Single(), "Yes, and don't ask again for: git init *"));
+
+        Assert.EndsWith($" {PermissionAnswer.FetchWord}\n", AnswerIn(r, slot));
+        Assert.Empty(r.Desk.All);
+        var code = AnswerIn(r, slot)!.Split(' ')[0];
+        Assert.Equal(PermissionAnswer.SuggestionLine(rule), r.Desk.Fetch(slot, code).Value);
     });
 
     [Theory]
     [InlineData(TasksWindow.AllowText, "allow")]
+    [InlineData(TasksWindow.AutoText, "auto")]
     [InlineData(TasksWindow.DenyText, "deny")]
     [InlineData(TasksWindow.AnswerInTerminalText, "pass")]
     public void A_click_writes_its_answer_and_the_card_goes(string button, string word) => StaThread.Run(() =>

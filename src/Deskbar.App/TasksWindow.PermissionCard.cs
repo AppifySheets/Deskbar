@@ -20,9 +20,11 @@ namespace Deskbar.App;
 // sideways (`white-space: nowrap`), which hid the tail of a long command off the right edge; that is the one thing of the
 // mockup this does not copy.
 //
-// THE BUTTONS: Allow, "Allow and stop asking for edits" (only for an edit tool, with what it does said under it), Deny,
-// and "Answer in the terminal" (the hook prints nothing at once, and the terminal's own dialog, drawn the whole time,
-// decides). Only the user's own action in this window writes an answer (no pipe command does it). THE KEYBOARD, as the
+// THE BUTTONS are the terminal's own choices, in its words and order (task bd55bd54, PermissionChoices): Yes, a
+// "Yes, and ..." per suggestion Claude Code made ("don't ask again for: git init *"), "Yes, and switch to auto mode" for a
+// shell command, No; then "Answer in the terminal" (the hook prints nothing at once, and the terminal's own dialog, drawn
+// the whole time, decides). They were Allow, Deny and, for an edit tool, "Allow and stop asking for edits" until Petre
+// saw the card and the terminal disagree ("questions seems to be different"). Only the user's own action in this window writes an answer (no pipe command does it). THE KEYBOARD, as the
 // PM ruled after the review's L1: a button focused with Tab and pressed with Enter is allowed; no single key allows. Space
 // does nothing on the buttons, and no key pressed elsewhere reaches them. (The plan first said "Enter never allows";
 // that was wrong as built, and the ruling keeps the build.) A click in the first ArmTime after a card first appears is
@@ -35,14 +37,14 @@ public partial class TasksWindow
 
     internal const string PermissionCardTag = "permission-card";
     internal const string PermissionPartTag = "permission-part";
-    internal const string AllowText = "Allow";
-    internal const string AllowEditsText = "Allow and stop asking for edits";
-    internal const string DenyText = "Deny";
+    internal const string AllowText = PermissionChoices.YesText;
+    internal const string AutoText = PermissionChoices.AutoText;
+    internal const string DenyText = PermissionChoices.NoText;
     internal const string AnswerInTerminalText = "Answer in the terminal";
     internal const string ShowAllPartPrefix = "Show all";
 
-    // The tools whose question is a file edit: only for those does "stop asking for edits" mean what it says.
-    static readonly string[] EditTools = ["Edit", "MultiEdit", "Write", "NotebookEdit"];
+    // Every card's last button: hand the question back to the terminal (the hook prints nothing).
+    static readonly PermissionChoice TerminalChoice = new(AnswerInTerminalText, PermissionDecision.Pass);
 
     static readonly FontFamily Mono = new("Cascadia Mono, Consolas, Courier New");
 
@@ -123,15 +125,12 @@ public partial class TasksWindow
             card.Children.Add(Text($"In {text.Folder}", 11.5, InboxLook.Ink3, margin: new Thickness(0, 4, 0, 0)).Wrapped());
 
         var buttons = new WrapPanel { Margin = new Thickness(0, 9, 0, 0) };
-        var edit = EditTools.Contains(question.Request.Tool, StringComparer.Ordinal);
-        buttons.Children.Add(PermissionButton(task, question, PermissionDecision.Allow, AllowText, primary: true));
-        if (edit) buttons.Children.Add(PermissionButton(task, question, PermissionDecision.AllowEdits, AllowEditsText));
-        buttons.Children.Add(PermissionButton(task, question, PermissionDecision.Deny, DenyText));
-        buttons.Children.Add(PermissionButton(task, question, PermissionDecision.Pass, AnswerInTerminalText));
+        // The terminal's choices (PermissionChoices), then the card's own way back to the terminal.
+        PermissionChoices.Of(question.Request)
+            .Append(TerminalChoice)
+            .ToList()
+            .ForEach(choice => buttons.Children.Add(PermissionButton(task, question, choice)));
         card.Children.Add(buttons);
-        if (edit)
-            card.Children.Add(Text("\"Stop asking for edits\" lets this session edit files without asking from now on, also after a restart.",
-                11.5, InboxLook.Ink3, margin: new Thickness(0, 6, 0, 0)).Wrapped());
 
         var frame = new Border
         {
@@ -188,10 +187,12 @@ public partial class TasksWindow
         return box;
     }
 
-    Button PermissionButton(Guid task, PermissionDesk.Pending question, PermissionDecision decision, string words, bool primary = false)
+    Button PermissionButton(Guid task, PermissionDesk.Pending question, PermissionChoice choice)
     {
-        var face = Text(words, 12.5, primary ? InboxLook.Background : InboxLook.Ink, FontWeights.SemiBold);
-        var button = InboxButton(face, words, () => Answer(task, question.Slot, decision), new Thickness(12, 5, 12, 6),
+        var primary = choice.Primary;
+        // A suggestion's words can be long (a rule, a folder path), so they wrap rather than run off the card.
+        var face = Text(choice.Words, 12.5, primary ? InboxLook.Background : InboxLook.Ink, FontWeights.SemiBold).Wrapped();
+        var button = InboxButton(face, choice.Words, () => Answer(task, question.Slot, choice), new Thickness(12, 5, 12, 6),
             primary ? InboxLook.Ink : InboxLook.Raised, 12, primary ? null : InboxLook.StrongLine,
             ignoredWhen: () => ClickIgnored() || ClickClock() - permissionShownAt.GetValueOrDefault(question.Slot) < ArmTime);
         button.Margin = new Thickness(0, 0, 6, 4);
@@ -204,10 +205,14 @@ public partial class TasksWindow
     }
 
     // The click: the desk writes the answer, or says the question has ended (then the terminal is the place to answer).
-    void Answer(Guid task, string slot, PermissionDecision decision)
+    // A suggestion's "Yes, and ..." goes through AnswerSuggestion, which hands Claude Code's own entry back; every other
+    // choice is a fixed decision.
+    void Answer(Guid task, string slot, PermissionChoice choice)
     {
-        if (Actions?.AnswerPermission is not { } answer) return;
-        var result = answer(slot, decision);
+        var answered = choice.Suggestion is { } index
+            ? Actions?.AnswerSuggestion?.Invoke(slot, index)
+            : Actions?.AnswerPermission?.Invoke(slot, choice.Decision);
+        if (answered is not { } result) return;
         permissionShownAt.Remove(slot);
         permissionUnfolded.RemoveWhere(k => k.StartsWith(slot + "/", StringComparison.Ordinal));
         if (result.IsFailure) permissionNote[task] = result.Error;

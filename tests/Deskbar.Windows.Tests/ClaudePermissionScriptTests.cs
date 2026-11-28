@@ -10,7 +10,7 @@ namespace Deskbar.Windows.Tests;
 // page), run for real by cmd in a scratch folder beside a stub deskbar.cmd that answers as `claude-permission` does: the
 // code, one line. The test plays Deskbar's click by writing the slot's answer file the way PermissionDesk.Answer does.
 //
-// Hard properties held here: the script prints a line only for exactly "<its code> allow|deny|edits", the rule of
+// Hard properties held here: the script prints a line only for exactly "<its code> allow|deny|auto", the rule of
 // PermissionAnswer.LineFor (each case is checked against that function); every other path prints nothing, never allow,
 // including a planted answer built to break cmd's parsing; a slot that goes ends it at once.
 public sealed class ClaudePermissionScriptTests : IDisposable
@@ -102,7 +102,7 @@ public sealed class ClaudePermissionScriptTests : IDisposable
     [Theory]
     [InlineData("allow", PermissionAnswer.AllowLine)]
     [InlineData("deny", PermissionAnswer.DenyLine)]
-    [InlineData("edits", PermissionAnswer.AllowEditsLine)]
+    [InlineData("auto", PermissionAnswer.AllowAutoLine)]
     public void The_right_code_and_a_word_print_that_line_and_the_slot_goes(string word, string line)
     {
         var (exitCode, stdout, slot) = Answered($"{Code} {word}\n");
@@ -253,6 +253,34 @@ public sealed class ClaudePermissionScriptTests : IDisposable
         Assert.False(Directory.Exists(slot));
         // The same rule as the C# mirror.
         Assert.Equal(DialogLine, PermissionAnswer.LineFor($"{Code} dialog\n", Code, DialogLine).Value);
+    }
+
+    // A picked suggestion on a tool permission's card (task bd55bd54): the tool slot takes "fetch" and prints the fetched
+    // line; it never takes the dialog word, and a dialog's slot never takes fetch.
+    static readonly string SuggestionLine = PermissionAnswer.SuggestionLine(PermissionRequest.Parse(
+        """{"session_id":"s","hook_event_name":"PermissionRequest","tool_name":"Bash","permission_suggestions":[{"type":"addRules","rules":[{"toolName":"Bash","ruleContent":"git init *"}],"behavior":"allow","destination":"localSettings"}]}""")
+        .Value.Suggestions[0]);
+
+    [Fact]
+    public void A_picked_suggestion_prints_the_fetched_line_and_the_slot_goes()
+    {
+        var (exitCode, stdout, slot) = DialogAnswered($"{Code} fetch\n", stubReply: Code, fetched: SuggestionLine + "\r\n");
+
+        Assert.Equal(0, exitCode);
+        Assert.Equal(SuggestionLine, stdout.TrimEnd('\r', '\n'));
+        Assert.False(Directory.Exists(slot));
+        Assert.Equal(SuggestionLine, PermissionAnswer.ToolLineFor($"{Code} fetch\n", Code, SuggestionLine).Value);
+    }
+
+    [Theory]
+    [InlineData(Code, "dialog")]
+    [InlineData(Code + " dialog", "fetch")]
+    public void Fetch_and_dialog_words_are_each_taken_by_their_own_slot_only(string stubReply, string word)
+    {
+        var (exitCode, stdout, _) = DialogAnswered($"{Code} {word}\n", stubReply: stubReply, fetched: SuggestionLine + "\r\n");
+
+        Assert.Equal(0, exitCode);
+        Assert.Equal("", stdout.TrimEnd('\r', '\n'));
     }
 
     // The fetch's stdin is the script's own code: a server that accepts another code answers nothing.

@@ -176,9 +176,26 @@ public sealed class PermissionDesk(string folder, Func<DateTimeOffset> now)
             .ToResult("This question is not a plan Deskbar can answer. Answer it in the terminal.")
             .Bind(plan => plan.AnswerLine(decision, note)));
 
-    // A dialog's answer: the line `lineOf` makes for the slot's request is kept for the script's fetch, then the dialog
-    // word goes into the slot and the question off the desk. A refused line leaves everything as it was.
-    Result HandedLine(string slot, Func<PermissionRequest, Result<string>> lineOf)
+    /// <summary>
+    /// The user's click on a "Yes, and ..." built from one of Claude Code's permission_suggestions (task bd55bd54,
+    /// PermissionChoices): the line that allows the call and hands that entry back (PermissionAnswer.SuggestionLine) kept
+    /// in memory for the script to fetch, as a dialog's is, and "&lt;code&gt; fetch" written to the slot. Refused, with
+    /// nothing written and the question left on show, for a dialog's slot and for an index the request does not have;
+    /// refused like <see cref="Answer"/> for a question no longer on show.
+    /// </summary>
+    public Result AnswerSuggestion(string slot, int index) =>
+        HandedLine(slot, request =>
+                request.IsDialog
+                    ? Result.Failure<string>("This question takes its answers, not Allow or Deny.")
+                    : index >= 0 && index < request.Suggestions.Count
+                        ? PermissionAnswer.SuggestionLine(request.Suggestions[index])
+                        : Result.Failure<string>("This choice is not one Claude Code offered. Answer it in the terminal."),
+            PermissionAnswer.FetchWord);
+
+    // An answer with a line built from data (a dialog's, or a picked suggestion's): the line `lineOf` makes for the slot's
+    // request is kept for the script's fetch, then `word` goes into the slot and the question off the desk. A refused line
+    // leaves everything as it was.
+    Result HandedLine(string slot, Func<PermissionRequest, Result<string>> lineOf, string word = PermissionAnswer.DialogWord)
     {
         var found = held.FirstOrDefault(h => h.Pending.Slot == slot).Pending;
         if (found is null) return Result.Failure(Ended);
@@ -186,12 +203,13 @@ public sealed class PermissionDesk(string folder, Func<DateTimeOffset> now)
             .Bind(line => Handed(slot, (path, code) =>
             {
                 handedLines[slot] = (code, line, now() + FetchWindow);
-                Write(path, AnswerFile, $"{code} {PermissionAnswer.DialogWord}\n");
+                Write(path, AnswerFile, $"{code} {word}\n");
             }))
             // Noted for RemoteControl.CardsGone (task 28fd8550): the card leaves the desk the moment Send is pressed, a few
             // seconds before the dialog's PostToolUse settles the question, and in that gap the question must not be
-            // reworded to "Answer in the session's terminal" as if the card had been handed back.
-            .Tap(() => answeredOnCard[found.Request.SessionId] = now());
+            // reworded to "Answer in the session's terminal" as if the card had been handed back. A dialog's only: a
+            // tool permission answered with Allow notes nothing either.
+            .TapIf(word == PermissionAnswer.DialogWord, () => answeredOnCard[found.Request.SessionId] = now());
     }
 
     // When each session's dialog was last answered on its card (AnswerDialog), for AnsweredOnCardSince.

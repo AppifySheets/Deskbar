@@ -85,7 +85,7 @@ public sealed class PermissionDeskTests : IDisposable
     [Theory]
     [InlineData(PermissionDecision.Allow, PermissionAnswer.AllowLine)]
     [InlineData(PermissionDecision.Deny, PermissionAnswer.DenyLine)]
-    [InlineData(PermissionDecision.AllowEdits, PermissionAnswer.AllowEditsLine)]
+    [InlineData(PermissionDecision.AllowAuto, PermissionAnswer.AllowAutoLine)]
     public void A_click_writes_the_code_and_the_word_and_the_hook_prints_that_line(PermissionDecision decision, string line)
     {
         var desk = Desk();
@@ -259,7 +259,7 @@ public sealed class PermissionDeskTests : IDisposable
     [InlineData("0123456789abcdef0123456789abcdef allow\n", PermissionAnswer.AllowLine)]
     [InlineData("0123456789abcdef0123456789abcdef allow\r\n", PermissionAnswer.AllowLine)]
     [InlineData("0123456789abcdef0123456789abcdef deny", PermissionAnswer.DenyLine)]
-    [InlineData("0123456789abcdef0123456789abcdef edits", PermissionAnswer.AllowEditsLine)]
+    [InlineData("0123456789abcdef0123456789abcdef auto", PermissionAnswer.AllowAutoLine)]
     public void Only_the_right_code_and_a_known_word_give_a_line(string text, string line) =>
         Assert.Equal(line, PermissionAnswer.LineFor(text, Code).Value);
 
@@ -269,6 +269,8 @@ public sealed class PermissionDeskTests : IDisposable
     [InlineData("allow")]
     [InlineData("0123456789abcdef0123456789abcdef")]
     [InlineData("0123456789abcdef0123456789abcdef pass")]
+    [InlineData("0123456789abcdef0123456789abcdef edits")]   // the old edits word, gone with task bd55bd54
+    [InlineData("0123456789abcdef0123456789abcdef fetch")]   // fetch has no line without a fetch
     [InlineData("0123456789abcdef0123456789abcdef Allow")]
     [InlineData("0123456789abcdef0123456789abcdef allow please")]
     [InlineData("0123456789abcdef0123456789abcdef  allow")]
@@ -289,8 +291,8 @@ public sealed class PermissionDeskTests : IDisposable
     public void The_printed_lines_are_the_measured_ones()
     {
         Assert.Contains(PermissionAnswer.DenyMessage, PermissionAnswer.DenyLine);
-        Assert.Contains("\"destination\":\"session\"", PermissionAnswer.AllowEditsLine);
-        foreach (var line in new[] { PermissionAnswer.AllowLine, PermissionAnswer.DenyLine, PermissionAnswer.AllowEditsLine })
+        Assert.Contains("\"destination\":\"session\"", PermissionAnswer.AllowAutoLine);
+        foreach (var line in new[] { PermissionAnswer.AllowLine, PermissionAnswer.DenyLine, PermissionAnswer.AllowAutoLine })
         {
             using var parsed = System.Text.Json.JsonDocument.Parse(line);
             Assert.Equal("PermissionRequest", parsed.RootElement.GetProperty("hookSpecificOutput").GetProperty("hookEventName").GetString());
@@ -358,8 +360,8 @@ public sealed class PermissionDeskTests : IDisposable
     [Theory]
     [InlineData(PermissionDecision.Allow)]
     [InlineData(PermissionDecision.Deny)]
-    [InlineData(PermissionDecision.AllowEdits)]
-    public void Allow_Deny_and_Edits_are_refused_for_a_dialog_and_write_nothing(PermissionDecision decision)
+    [InlineData(PermissionDecision.AllowAuto)]
+    public void Allow_Deny_and_Auto_are_refused_for_a_dialog_and_write_nothing(PermissionDecision decision)
     {
         var desk = Desk();
         desk.Register(Slot(), Dialog());
@@ -486,8 +488,8 @@ public sealed class PermissionDeskTests : IDisposable
     [Theory]
     [InlineData(PermissionDecision.Allow)]
     [InlineData(PermissionDecision.Deny)]
-    [InlineData(PermissionDecision.AllowEdits)]
-    public void Allow_Deny_and_Edits_are_refused_for_a_plan_and_write_nothing(PermissionDecision decision)
+    [InlineData(PermissionDecision.AllowAuto)]
+    public void Allow_Deny_and_Auto_are_refused_for_a_plan_and_write_nothing(PermissionDecision decision)
     {
         var desk = Desk();
         desk.Register(Slot(), Plan());

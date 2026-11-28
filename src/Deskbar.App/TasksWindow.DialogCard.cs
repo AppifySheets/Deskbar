@@ -87,7 +87,7 @@ public partial class TasksWindow
         var buttons = new WrapPanel { Margin = new Thickness(0, 9, 0, 0) };
         send.Margin = new Thickness(0, 0, 6, 4);
         buttons.Children.Add(send);
-        buttons.Children.Add(PermissionButton(task, question, PermissionDecision.Pass, AnswerInTerminalText));
+        buttons.Children.Add(PermissionButton(task, question, TerminalChoice));
         card.Children.Add(buttons);
         card.Children.Add(Text("Or write a reply in the comment box: it answers every question you have not picked.",
             11.5, InboxLook.Ink3, margin: new Thickness(0, 4, 0, 0)).Wrapped());
