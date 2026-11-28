@@ -297,6 +297,117 @@ public sealed class PermissionDeskTests : IDisposable
         }
     }
 
+    // --- the multiple-choice dialog (AskUserQuestion, task c047d0a0) --------------------------------------------------
+
+    const string ColourInput =
+        """{"questions":[{"question":"Pick a colour","header":"Colour","options":[{"label":"Red","description":"warm"},{"label":"Blue","description":"cool"}],"multiSelect":false}]}""";
+
+    static PermissionRequest Dialog(string session = "s1", string input = ColourInput) =>
+        new(session, "AskUserQuestion", @"C:\repos\x", "default", [new PermissionField("questions", "...")], Input: input);
+
+    static IReadOnlyDictionary<string, string> Blue => new Dictionary<string, string> { ["Pick a colour"] = "Blue" };
+
+    string DialogText(string slot) => File.ReadAllText(Path.Combine(box, slot, PermissionDesk.DialogFile));
+
+    // The hand-over: dialog.json holds the line the hook prints, answer.txt names the code and "dialog", and the hook
+    // prints the file only when the answer says so.
+    [Fact]
+    public void A_dialog_answer_writes_the_line_and_the_code_with_dialog()
+    {
+        var desk = Desk();
+        var code = desk.Register(Slot(), Dialog()).Value;
+        var line = DialogAsk.Parse(ColourInput).Value.AnswerLine(Blue).Value;
+
+        Assert.True(desk.AnswerDialog("req-1-2", Blue).IsSuccess);
+
+        Assert.Equal(line + "\n", DialogText("req-1-2"));
+        Assert.Equal($"{code} dialog\n", AnswerText("req-1-2"));
+        Assert.Equal(line, PermissionAnswer.LineFor(AnswerText("req-1-2"), code, DialogText("req-1-2")).Value);
+        Assert.Empty(desk.All);
+        Assert.False(File.Exists(Path.Combine(box, "req-1-2", "answer.tmp")));
+    }
+
+    [Fact]
+    public void LineFor_with_the_dialog_file_refuses_a_wrong_code_a_verdict_word_or_an_empty_file()
+    {
+        const string code = "0123456789abcdef0123456789abcdef";
+        const string line = """{"hookSpecificOutput":{}}""";
+
+        Assert.Equal(line, PermissionAnswer.LineFor($"{code} dialog\n", code, line + "\n").Value);
+        Assert.True(PermissionAnswer.LineFor($"{code} allow\n", code, line).HasNoValue);
+        Assert.True(PermissionAnswer.LineFor($"{code} deny\n", code, line).HasNoValue);
+        Assert.True(PermissionAnswer.LineFor($"{code} edits\n", code, line).HasNoValue);
+        Assert.True(PermissionAnswer.LineFor("fedcba9876543210fedcba9876543210 dialog\n", code, line).HasNoValue);
+        Assert.True(PermissionAnswer.LineFor($"{code} dialog\n", code, "\r\n").HasNoValue);
+        Assert.True(PermissionAnswer.LineFor($"{code} dialog\n", "not-a-code", line).HasNoValue);
+    }
+
+    // A slot that is not a dialog's never takes "dialog": the rule without a dialog file is the old one.
+    [Fact]
+    public void LineFor_without_a_dialog_file_refuses_dialog()
+    {
+        const string code = "0123456789abcdef0123456789abcdef";
+
+        Assert.True(PermissionAnswer.LineFor($"{code} dialog\n", code).HasNoValue);
+        Assert.Equal(PermissionAnswer.AllowLine, PermissionAnswer.LineFor($"{code} allow\n", code).Value);
+    }
+
+    // A dialog's slot takes its answers, never a click that allows or denies it; Pass still hands it to the terminal.
+    [Theory]
+    [InlineData(PermissionDecision.Allow)]
+    [InlineData(PermissionDecision.Deny)]
+    [InlineData(PermissionDecision.AllowEdits)]
+    public void Allow_Deny_and_Edits_are_refused_for_a_dialog_and_write_nothing(PermissionDecision decision)
+    {
+        var desk = Desk();
+        desk.Register(Slot(), Dialog());
+
+        Assert.True(desk.Answer("req-1-2", decision).IsFailure);
+
+        Assert.Empty(Directory.GetFileSystemEntries(Path.Combine(box, "req-1-2")));
+        Assert.Single(desk.All);
+    }
+
+    [Fact]
+    public void Pass_hands_a_dialog_back_to_the_terminal()
+    {
+        var desk = Desk();
+        var code = desk.Register(Slot(), Dialog()).Value;
+
+        Assert.True(desk.Answer("req-1-2", PermissionDecision.Pass).IsSuccess);
+
+        Assert.Equal($"{code} pass\n", AnswerText("req-1-2"));
+        Assert.False(File.Exists(Path.Combine(box, "req-1-2", PermissionDesk.DialogFile)));
+        Assert.Empty(desk.All);
+    }
+
+    // An answer that does not cover every question is refused, nothing is written, and the question stays on show for
+    // the user to finish.
+    [Fact]
+    public void A_dialog_answer_with_a_missing_answer_is_refused_and_the_question_stays()
+    {
+        var desk = Desk();
+        desk.Register(Slot(), Dialog());
+
+        Assert.True(desk.AnswerDialog("req-1-2", new Dictionary<string, string>()).IsFailure);
+        Assert.True(desk.AnswerDialog("req-1-2", new Dictionary<string, string> { ["Pick a colour"] = " " }).IsFailure);
+
+        Assert.Empty(Directory.GetFileSystemEntries(Path.Combine(box, "req-1-2")));
+        Assert.Single(desk.All);
+        Assert.True(desk.AnswerDialog("req-1-2", Blue).IsSuccess);
+    }
+
+    [Fact]
+    public void A_dialog_answer_for_a_permission_question_or_an_unknown_slot_is_refused()
+    {
+        var desk = Desk();
+        desk.Register(Slot(), Request());
+
+        Assert.True(desk.AnswerDialog("req-1-2", Blue).IsFailure);
+        Assert.True(desk.AnswerDialog("req-9-9", Blue).IsFailure);
+        Assert.Empty(Directory.GetFileSystemEntries(Path.Combine(box, "req-1-2")));
+    }
+
     // A terminal or VS Code session is not in `claude agents`, so the list never judges its question (task 6306d261);
     // its transcript does, through Settle. A background question carries no mark, so Settle leaves it to the list.
     [Fact]
