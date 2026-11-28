@@ -211,29 +211,42 @@ public sealed class ClaudePermissionScriptTests : IDisposable
 
     // --- a dialog's slot (AskUserQuestion, task c047d0a0) ------------------------------------------------------------
 
-    // The line Deskbar writes for a dialog: pure ASCII JSON on one line, with quotes, braces and a Georgian answer
-    // escaped, the kind of text cmd's `type` must hand over unchanged.
+    // The line Deskbar hands over for a dialog: pure ASCII JSON on one line, with quotes, braces and a Georgian answer
+    // escaped, the kind of text the script must let through unchanged.
     static readonly string DialogLine = DialogAsk.Parse(
             """{"questions":[{"question":"Pick a colour","header":"Colour","options":[{"label":"Red","description":"warm"}]}]}""")
         .Value.AnswerLine(new Dictionary<string, string> { ["Pick a colour"] = "ფერი \"x\" & y | z ^ % !" }).Value;
 
-    // One full run against a stub that says "<code> dialog": the script registers, Deskbar writes dialog.json and then
-    // the answer file the way PermissionDesk.AnswerDialog does, and what the script printed comes back.
-    (int ExitCode, string Stdout, string Slot) DialogAnswered(string answerText, string? stubReply = null, string? dialogJson = null)
+    // A stub deskbar.cmd that answers both calls of the script: the registration (the code, and "dialog" when the reply
+    // says so) and `claude-permission --fetch` (which reads its stdin and prints fetch.txt only when stdin is exactly
+    // `expected`, as PermissionDesk.Fetch answers only the right code).
+    static string FetchingStub(string expected) =>
+        "@echo %* | findstr /c:\"--fetch\" >nul && goto fetch\r\n" +
+        "@type \"%~dp0code.txt\"\r\n" +
+        "@exit /b 0\r\n" +
+        ":fetch\r\n" +
+        "@set /p got=\r\n" +
+        $"@if \"%got%\"==\"{expected}\" type \"%~dp0fetch.txt\"\r\n";
+
+    // One full run against that stub: the script registers, Deskbar writes the answer file the way
+    // PermissionDesk.AnswerDialog does (no dialog file), and what the script printed comes back. `fetched` is what the
+    // stub's fetch prints ("" for nothing), `expectedCode` the code that fetch accepts.
+    (int ExitCode, string Stdout, string Slot) DialogAnswered(string answerText, string? stubReply = null, string fetched = "",
+        string expectedCode = Code)
     {
-        var script = Prepared(stubReply ?? $"{Code} dialog");
+        var script = Prepared(stubReply ?? $"{Code} dialog", stub: FetchingStub(expectedCode));
+        Prepare(script, "fetch.txt", fetched);
         using var process = Started(script);
         var slot = Slot(script, process);
-        if (dialogJson is not null) File.WriteAllText(Path.Combine(slot, PermissionDesk.DialogFile), dialogJson, new UTF8Encoding(false));
         Answer(slot, answerText);
         var (exitCode, stdout) = Finished(process);
         return (exitCode, stdout, slot);
     }
 
     [Fact]
-    public void A_dialog_slot_with_its_answer_prints_exactly_the_dialog_file_and_the_slot_goes()
+    public void A_dialog_answer_prints_exactly_the_line_the_fetch_returns_and_the_slot_goes()
     {
-        var (exitCode, stdout, slot) = DialogAnswered($"{Code} dialog\n", dialogJson: DialogLine + "\n");
+        var (exitCode, stdout, slot) = DialogAnswered($"{Code} dialog\n", fetched: DialogLine + "\r\n");
 
         Assert.Equal(0, exitCode);
         Assert.Equal(DialogLine, stdout.TrimEnd('\r', '\n'));
@@ -242,8 +255,30 @@ public sealed class ClaudePermissionScriptTests : IDisposable
         Assert.Equal(DialogLine, PermissionAnswer.LineFor($"{Code} dialog\n", Code, DialogLine).Value);
     }
 
+    // The fetch's stdin is the script's own code: a server that accepts another code answers nothing.
+    [Fact]
+    public void The_fetch_sends_the_scripts_own_code()
+    {
+        var (exitCode, stdout, _) = DialogAnswered($"{Code} dialog\n", fetched: DialogLine + "\r\n",
+            expectedCode: "fedcba9876543210fedcba9876543210");
+
+        Assert.Equal(0, exitCode);
+        Assert.Equal("", stdout.Trim());
+    }
+
+    // The fetch has nothing (spent, expired, Deskbar gone): nothing is printed and the terminal keeps the dialog.
+    [Fact]
+    public void A_fetch_that_prints_nothing_prints_nothing()
+    {
+        var (exitCode, stdout, slot) = DialogAnswered($"{Code} dialog\n");
+
+        Assert.Equal(0, exitCode);
+        Assert.Equal("", stdout.Trim());
+        Assert.False(Directory.Exists(slot));
+    }
+
     // A dialog's slot takes nothing but "<code> dialog": a verdict word (which would let it through without the user's
-    // picks) prints nothing, and so does a wrong code, even with the dialog file there.
+    // picks) prints nothing, and so does a wrong code, even though the fetch would answer.
     [Theory]
     [InlineData("allow")]
     [InlineData("deny")]
@@ -251,7 +286,7 @@ public sealed class ClaudePermissionScriptTests : IDisposable
     [InlineData("pass")]
     public void A_verdict_word_on_a_dialog_slot_prints_nothing(string word)
     {
-        var (exitCode, stdout, _) = DialogAnswered($"{Code} {word}\n", dialogJson: DialogLine + "\n");
+        var (exitCode, stdout, _) = DialogAnswered($"{Code} {word}\n", fetched: DialogLine + "\r\n");
 
         Assert.Equal(0, exitCode);
         Assert.Equal("", stdout.Trim());
@@ -260,27 +295,17 @@ public sealed class ClaudePermissionScriptTests : IDisposable
     [Fact]
     public void A_wrong_code_on_a_dialog_slot_prints_nothing()
     {
-        var (exitCode, stdout, _) = DialogAnswered("fedcba9876543210fedcba9876543210 dialog\n", dialogJson: DialogLine + "\n");
+        var (exitCode, stdout, _) = DialogAnswered("fedcba9876543210fedcba9876543210 dialog\n", fetched: DialogLine + "\r\n");
 
         Assert.Equal(0, exitCode);
         Assert.Equal("", stdout.Trim());
     }
 
-    // The answer is there but the file is not: nothing to print, so nothing is printed (the terminal keeps the dialog).
-    [Fact]
-    public void A_dialog_answer_without_its_file_prints_nothing()
-    {
-        var (exitCode, stdout, _) = DialogAnswered($"{Code} dialog\n");
-
-        Assert.Equal(0, exitCode);
-        Assert.Equal("", stdout.Trim());
-    }
-
-    // A plain question (the stub says only the code) never takes "dialog", even with a dialog file planted beside it.
+    // A plain question (the stub says only the code) never takes "dialog", even though the fetch would answer.
     [Fact]
     public void The_word_dialog_on_a_plain_slot_prints_nothing()
     {
-        var (exitCode, stdout, _) = DialogAnswered($"{Code} dialog\n", stubReply: Code, dialogJson: DialogLine + "\n");
+        var (exitCode, stdout, _) = DialogAnswered($"{Code} dialog\n", stubReply: Code, fetched: DialogLine + "\r\n");
 
         Assert.Equal(0, exitCode);
         Assert.Equal("", stdout.Trim());
@@ -294,12 +319,11 @@ public sealed class ClaudePermissionScriptTests : IDisposable
     [InlineData("DIALOG")]
     public void An_unknown_kind_in_the_reply_gives_no_code(string kind)
     {
-        // The planting stub puts the answer and the dialog file in the slot during the call, so the test cannot lose the
-        // race against a script that ends at once (see PlantingStub).
+        // The planting stub puts the answer in the slot during the call, so the test cannot lose the race against a
+        // script that ends at once (see PlantingStub). Its own stub does not fetch, and none must be asked for.
         var script = Prepared($"{Code} {kind}", stub: PlantingStub(
-            "copy /y \"%~dp0answer.src\" \"%%d\\answer.txt\" >nul & copy /y \"%~dp0dialog.src\" \"%%d\\dialog.json\" >nul"));
-        Prepare(script, "answer.src", $"{Code} allow\n");
-        Prepare(script, "dialog.src", DialogLine + "\n");
+            "copy /y \"%~dp0answer.src\" \"%%d\\answer.txt\" >nul"));
+        Prepare(script, "answer.src", $"{Code} dialog\n");
         using var process = Started(script);
 
         var (exitCode, stdout) = Finished(process);
@@ -445,4 +469,4 @@ public sealed class ClaudePermissionScriptTests : IDisposable
 
         Assert.Equal(PermissionAnswer.AllowLine, Finished(process).Stdout.TrimEnd('\r', '\n'));
     }
-}
+}

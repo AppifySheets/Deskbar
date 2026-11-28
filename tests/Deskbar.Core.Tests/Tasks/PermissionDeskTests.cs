@@ -307,10 +307,8 @@ public sealed class PermissionDeskTests : IDisposable
 
     static IReadOnlyDictionary<string, string> Blue => new Dictionary<string, string> { ["Pick a colour"] = "Blue" };
 
-    string DialogText(string slot) => File.ReadAllText(Path.Combine(box, slot, PermissionDesk.DialogFile));
-
-    // The hand-over: dialog.json holds the line the hook prints, answer.txt names the code and "dialog", and the hook
-    // prints the file only when the answer says so.
+    // The hand-over: only answer.txt reaches the disk, naming the code and "dialog"; the line the hook prints stays in
+    // Deskbar's memory until the script fetches it with its code (PermissionDesk.Fetch).
     [Fact]
     public void A_dialog_answer_writes_the_line_and_the_code_with_dialog()
     {
@@ -320,9 +318,13 @@ public sealed class PermissionDeskTests : IDisposable
 
         Assert.True(desk.AnswerDialog("req-1-2", Blue).IsSuccess);
 
-        Assert.Equal(line + "\n", DialogText("req-1-2"));
         Assert.Equal($"{code} dialog\n", AnswerText("req-1-2"));
-        Assert.Equal(line, PermissionAnswer.LineFor(AnswerText("req-1-2"), code, DialogText("req-1-2")).Value);
+        // The line is on no disk: the slot holds the answer file and nothing else.
+        Assert.Equal([PermissionDesk.AnswerFile], Directory.GetFiles(Path.Combine(box, "req-1-2")).Select(Path.GetFileName));
+        Assert.DoesNotContain("allow", File.ReadAllText(Path.Combine(box, "req-1-2", PermissionDesk.AnswerFile)));
+        var fetched = desk.Fetch("req-1-2", code).Value;
+        Assert.Equal(line, fetched);
+        Assert.Equal(line, PermissionAnswer.LineFor(AnswerText("req-1-2"), code, fetched).Value);
         Assert.Empty(desk.All);
         Assert.False(File.Exists(Path.Combine(box, "req-1-2", "answer.tmp")));
     }
@@ -377,7 +379,7 @@ public sealed class PermissionDeskTests : IDisposable
         Assert.True(desk.Answer("req-1-2", PermissionDecision.Pass).IsSuccess);
 
         Assert.Equal($"{code} pass\n", AnswerText("req-1-2"));
-        Assert.False(File.Exists(Path.Combine(box, "req-1-2", PermissionDesk.DialogFile)));
+        Assert.True(desk.Fetch("req-1-2", code).IsFailure);
         Assert.Empty(desk.All);
     }
 
@@ -406,6 +408,79 @@ public sealed class PermissionDeskTests : IDisposable
         Assert.True(desk.AnswerDialog("req-1-2", Blue).IsFailure);
         Assert.True(desk.AnswerDialog("req-9-9", Blue).IsFailure);
         Assert.Empty(Directory.GetFileSystemEntries(Path.Combine(box, "req-1-2")));
+    }
+
+    // --- the fetch (PermissionDesk.Fetch): the line is handed over once, for the right code, within a minute -----------
+
+    // A dialog answered from the desk: the code the registration returned, and the line waiting for it.
+    (PermissionDesk Desk, string Code, string Line) Answered()
+    {
+        var desk = Desk();
+        var code = desk.Register(Slot(), Dialog()).Value;
+        Assert.True(desk.AnswerDialog("req-1-2", Blue).IsSuccess);
+        return (desk, code, DialogAsk.Parse(ColourInput).Value.AnswerLine(Blue).Value);
+    }
+
+    [Fact]
+    public void Fetch_returns_the_line_once_for_the_right_code_then_fails()
+    {
+        var (desk, code, line) = Answered();
+
+        Assert.Equal(line, desk.Fetch("req-1-2", code).Value);
+        Assert.True(desk.Fetch("req-1-2", code).IsFailure);
+    }
+
+    [Theory]
+    [InlineData("fedcba9876543210fedcba9876543210")]
+    [InlineData("0123456789ABCDEF0123456789ABCDEF")]
+    [InlineData("not-hex")]
+    [InlineData("")]
+    public void Fetch_fails_for_a_wrong_or_malformed_code_and_keeps_the_line_for_the_right_one(string wrong)
+    {
+        var (desk, code, line) = Answered();
+
+        Assert.True(desk.Fetch("req-1-2", wrong).IsFailure);
+
+        Assert.Equal(line, desk.Fetch("req-1-2", code).Value);
+    }
+
+    [Fact]
+    public void Fetch_fails_for_an_unknown_slot_and_for_a_question_not_answered()
+    {
+        var (desk, code, _) = Answered();
+        var other = desk.Register(Slot("req-3-4"), Dialog("s2")).Value;
+
+        Assert.True(desk.Fetch("req-9-9", code).IsFailure);
+        Assert.True(desk.Fetch("req-3-4", other).IsFailure);
+        Assert.True(desk.Fetch("..\\x", code).IsFailure);
+    }
+
+    [Fact]
+    public void Fetch_fails_past_the_fetch_window()
+    {
+        var (desk, code, _) = Answered();
+        clock += PermissionDesk.FetchWindow;
+
+        Assert.True(desk.Fetch("req-1-2", code).IsFailure);
+    }
+
+    [Fact]
+    public void Fetch_still_answers_just_inside_the_fetch_window()
+    {
+        var (desk, code, line) = Answered();
+        clock += PermissionDesk.FetchWindow - TimeSpan.FromSeconds(1);
+
+        Assert.Equal(line, desk.Fetch("req-1-2", code).Value);
+    }
+
+    [Fact]
+    public void Fetch_fails_after_ReleaseAll()
+    {
+        var (desk, code, _) = Answered();
+
+        desk.ReleaseAll();
+
+        Assert.True(desk.Fetch("req-1-2", code).IsFailure);
     }
 
     // A terminal or VS Code session is not in `claude agents`, so the list never judges its question (task 6306d261);

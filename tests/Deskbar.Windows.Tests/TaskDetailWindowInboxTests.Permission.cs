@@ -48,9 +48,9 @@ public partial class TaskDetailWindowInboxTests
         """{"questions":[{"question":"Pick a colour","header":"Colour","multiSelect":false,"options":[{"label":"Red","description":"warm"},{"label":"Blue","description":"cool"}]},{"question":"Which sizes?","header":"Size","multiSelect":true,"options":[{"label":"S","description":"small"},{"label":"M","description":"medium"},{"label":"L","description":"large"}]}]}""";
 
     // A task window with a dialog on show for the task's session, on a scratch permission box.
-    static void WithDialog(Action<Rig, PermissionDesk, string, Guid, TaskDetailWindow, TasksWindow> body)
+    static void WithDialog(Action<Rig, PermissionDesk, string, Guid, TaskDetailWindow, TasksWindow> body, Func<DateTime>? pageClock = null)
     {
-        using var t = Build();
+        using var t = Build(pageClock: pageClock);
         var box = Path.Combine(Path.GetTempPath(), "deskbar-dialog-window-" + Guid.NewGuid().ToString("N"));
         try
         {
@@ -74,8 +74,10 @@ public partial class TaskDetailWindowInboxTests
     static IEnumerable<System.Windows.Controls.Border> Cards(object window, string tag) =>
         Inside(window).OfType<System.Windows.Controls.Border>().Where(b => b.Tag as string == tag);
 
-    static JsonNode DialogAnswersWritten(string box) =>
-        JsonNode.Parse(File.ReadAllText(Path.Combine(box, "req-1-1", PermissionDesk.DialogFile)))!
+    // The answers the desk handed over: the code is in answer.txt ("<code> dialog"), and the line is fetched with it as
+    // the script does (PermissionDesk.Fetch); no file holds the line.
+    static JsonNode DialogAnswersWritten(PermissionDesk desk, string box) =>
+        JsonNode.Parse(desk.Fetch("req-1-1", File.ReadAllText(Path.Combine(box, "req-1-1", PermissionDesk.AnswerFile)).Split(' ')[0]).Value)!
             ["hookSpecificOutput"]!["decision"]!["updatedInput"]!["answers"]!;
 
     [Fact]
@@ -115,7 +117,7 @@ public partial class TaskDetailWindowInboxTests
 
         Click(card, TasksWindow.SendAnswersText);
 
-        var answers = DialogAnswersWritten(box);
+        var answers = DialogAnswersWritten(desk, box);
         Assert.Equal("Red", (string)answers["Pick a colour"]!);
         Assert.Equal("S, M", (string)answers["Which sizes?"]!);
         Assert.EndsWith(" dialog\n", File.ReadAllText(Path.Combine(box, "req-1-1", PermissionDesk.AnswerFile)));
@@ -134,7 +136,7 @@ public partial class TaskDetailWindowInboxTests
 
         Click(card, TasksWindow.SendAnswersText);
 
-        var answers = DialogAnswersWritten(box);
+        var answers = DialogAnswersWritten(desk, box);
         Assert.Equal("ფერი", (string)answers["Pick a colour"]!);
         Assert.Equal("L", (string)answers["Which sizes?"]!);
     }));
@@ -149,7 +151,7 @@ public partial class TaskDetailWindowInboxTests
 
         Assert.True(page.TypeComment(id, "M and L", Key.Enter));
 
-        var answers = DialogAnswersWritten(box);
+        var answers = DialogAnswersWritten(desk, box);
         Assert.Equal("Blue", (string)answers["Pick a colour"]!);
         Assert.Equal("M and L", (string)answers["Which sizes?"]!);
         Assert.DoesNotContain(t.Tasks.Board.Tasks.Single(x => x.Id == id).Comments, c => c.Markdown == "M and L");
@@ -163,9 +165,57 @@ public partial class TaskDetailWindowInboxTests
     {
         Assert.True(page.TypeComment(id, "Whatever you think", Key.Enter));
 
-        var answers = DialogAnswersWritten(box);
+        var answers = DialogAnswersWritten(desk, box);
         Assert.Equal("Whatever you think", (string)answers["Pick a colour"]!);
         Assert.Equal("Whatever you think", (string)answers["Which sizes?"]!);
+    }));
+
+    // A card only just drawn answers nothing from the comment box (the arming delay a click gets too: a reply typed
+    // while the card appears is a comment, not an answer), and answers once it has been on show past ArmTime. The page
+    // clock is frozen here so "just drawn" and "a moment later" are exact.
+    [Fact]
+    public void The_comment_box_does_not_answer_a_dialog_before_the_arming_time() => StaThread.Run(() =>
+    {
+        var now = Start.UtcDateTime;
+        WithDialog((t, desk, box, id, window, page) =>
+        {
+            Assert.True(page.TypeComment(id, "too early", Key.Enter));
+
+            // Posted as a comment; the dialog is still waiting and nothing was handed over.
+            Assert.Contains(t.Tasks.Board.Tasks.Single(x => x.Id == id).Comments, c => c.Markdown == "too early");
+            Assert.Single(desk.All);
+            Assert.False(File.Exists(Path.Combine(box, "req-1-1", PermissionDesk.AnswerFile)));
+
+            now += TasksWindow.ArmTime + TimeSpan.FromMilliseconds(100);
+            Assert.True(page.TypeComment(id, "now it counts", Key.Enter));
+
+            Assert.Equal("now it counts", (string)DialogAnswersWritten(desk, box)["Pick a colour"]!);
+            Assert.DoesNotContain(t.Tasks.Board.Tasks.Single(x => x.Id == id).Comments, c => c.Markdown == "now it counts");
+        }, pageClock: () => now);
+    });
+
+    // A redraw of the page (here, a new comment on the task) rebuilds the card, and the Other box keeps what was typed
+    // in it, and the keyboard when it had it (RememberDialogFocus / RefocusDialogOther).
+    [Fact]
+    public void A_redraw_keeps_the_other_boxs_text_and_focus() => StaThread.Run(() => WithDialog((t, desk, box, id, window, page) =>
+    {
+        var other = Inside(window).OfType<TextBox>().First(b => b.Tag as string == TasksWindow.DialogOtherTag);
+        other.Text = "typed so far";
+        other.Focus();
+        var hadFocus = other.IsKeyboardFocusWithin;
+        other.CaretIndex = 5;
+
+        Assert.True(t.Tasks.Comment(id, CSharpFunctionalExtensions.Maybe<string>.None, "a redraw").IsSuccess);
+
+        var after = Inside(window).OfType<TextBox>().First(b => b.Tag as string == TasksWindow.DialogOtherTag);
+        Assert.NotSame(other, after);
+        Assert.Equal("typed so far", after.Text);
+        // The hidden desktop may not give the window the keyboard at all; when the box had it, the new one must too.
+        if (hadFocus)
+        {
+            Assert.True(after.IsKeyboardFocusWithin);
+            Assert.Equal(5, after.CaretIndex);
+        }
     }));
 
     // With no dialog waiting the same box posts a comment as ever.
