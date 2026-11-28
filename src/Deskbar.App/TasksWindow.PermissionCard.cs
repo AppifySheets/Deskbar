@@ -62,6 +62,7 @@ public partial class TasksWindow
     FrameworkElement? PermissionCards(TaskRowView row)
     {
         var questions = PermissionsOfTask(row.Id);
+        ForgetEndedDialogs(row.Id, questions);
         var note = permissionNote.GetValueOrDefault(row.Id);
         if (questions.Count == 0 && note is null) return null;
         var stack = new StackPanel { Margin = new Thickness(10, 6, 10, 8) };

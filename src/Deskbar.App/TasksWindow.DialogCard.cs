@@ -40,9 +40,36 @@ public partial class TasksWindow
     readonly Dictionary<string, Dictionary<string, List<string>>> dialogPicks = [];
     readonly Dictionary<string, Dictionary<string, string>> dialogOther = [];
 
+    // The task each card's slot belongs to, so a task's page can drop what it kept for cards no longer on show.
+    readonly Dictionary<string, Guid> dialogTask = [];
+
+    // THE OTHER BOX KEEPS THE KEYBOARD THROUGH A REDRAW (the branch's review, finding 2): every draw builds the card anew,
+    // so the box that had the keyboard ("slot\nquestion") and its caret are noted as the draw begins (DrawRows) and the new
+    // box gets them back once it ends, as the comment box does.
+    readonly Dictionary<string, TextBox> dialogOtherBoxes = [];
+    (string Key, int Caret)? dialogFocusWas;
+
+    void RememberDialogFocus() =>
+        dialogFocusWas = dialogOtherBoxes.FirstOrDefault(b => b.Value.IsKeyboardFocusWithin) is { Value: not null } had
+            ? (had.Key, had.Value.CaretIndex)
+            : null;
+
+    void RefocusDialogOther()
+    {
+        if (dialogFocusWas is not { } was || !dialogOtherBoxes.TryGetValue(was.Key, out var box) || !box.IsVisible) return;
+        box.Focus();
+        box.CaretIndex = Math.Min(was.Caret, box.Text.Length);
+    }
+
+    // What a task's page kept for dialog cards that are no longer on show (answered in the terminal, handed back,
+    // expired) goes when the page draws its cards again (the branch's review, finding 5).
+    void ForgetEndedDialogs(Guid task, IReadOnlyList<PermissionDesk.Pending> onShow) =>
+        dialogTask.Where(d => d.Value == task && onShow.All(p => p.Slot != d.Key)).Select(d => d.Key).ToList().ForEach(ForgetDialog);
+
     FrameworkElement DialogCard(Guid task, PermissionDesk.Pending question, DialogAsk dialog)
     {
         if (!permissionShownAt.ContainsKey(question.Slot)) permissionShownAt[question.Slot] = ClickClock();
+        dialogTask[question.Slot] = task;
         var picks = dialogPicks.TryGetValue(question.Slot, out var p) ? p : dialogPicks[question.Slot] = [];
         var other = dialogOther.TryGetValue(question.Slot, out var o) ? o : dialogOther[question.Slot] = [];
         var card = new StackPanel();
@@ -120,6 +147,7 @@ public partial class TasksWindow
             AcceptsReturn = false,
         };
         AutomationProperties.SetName(otherBox, $"Other answer to {Label(item)}");
+        dialogOtherBoxes[$"{slot}\n{item.Question}"] = otherBox;
         var hint = Text("Other: type your own answer", 12.5, InboxLook.Ink3, margin: new Thickness(10, 0, 0, 0));
         hint.IsHitTestVisible = false;
         var otherArea = new Grid { Margin = new Thickness(0, 0, 0, 0) };
@@ -276,12 +304,16 @@ public partial class TasksWindow
     // keeps its pick, every other one takes the words (Claude reads them per question, so a one-line reply reaches it
     // whichever question it meant). False when no dialog waits or the desk refused (the dialog ended): the caller then
     // posts the words as a comment.
+    //
+    // Only from the box of the task's PAGE, where the card is drawn above it, and only for a card that has been on show
+    // for ArmTime (the branch's review, finding 3): a comment box in the List's thread shows no card, so its words are a
+    // comment; and words typed before the card appeared were not written as an answer to it.
     bool AnsweredDialogWith(Guid task, string words)
     {
-        if (Actions?.AnswerDialog is not { } answer) return false;
+        if (Actions?.AnswerDialog is not { } answer || inboxPage != task) return false;
         var waiting = PermissionsOfTask(task)
             .Select(p => (Pending: p, Dialog: DialogAsk.Of(p.Request)))
-            .FirstOrDefault(d => d.Dialog.HasValue);
+            .FirstOrDefault(d => d.Dialog.HasValue && permissionShownAt.ContainsKey(d.Pending.Slot) && !Arming(d.Pending.Slot));
         if (waiting.Pending is null) return false;
         var (pending, dialog) = (waiting.Pending, waiting.Dialog.Value);
         var picked = Answers(dialog, dialogPicks.GetValueOrDefault(pending.Slot, []), dialogOther.GetValueOrDefault(pending.Slot, []));
@@ -297,6 +329,8 @@ public partial class TasksWindow
     {
         dialogPicks.Remove(slot);
         dialogOther.Remove(slot);
+        dialogTask.Remove(slot);
+        dialogOtherBoxes.Keys.Where(k => k.StartsWith(slot + "\n", StringComparison.Ordinal)).ToList().ForEach(k => dialogOtherBoxes.Remove(k));
         permissionShownAt.Remove(slot);
     }
 }

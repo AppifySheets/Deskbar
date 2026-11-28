@@ -30,11 +30,12 @@ public enum PermissionDecision
 // background session the dialog stays). No path prints allow by default.
 //
 // A DIALOG'S SLOT is the one exception to "never text built from data" (task c047d0a0): the answer to AskUserQuestion
-// is the picked labels and typed text, so its line cannot be a literal of the script. Deskbar writes it as one line of
-// pure-ASCII JSON in the slot's dialog file (DialogAsk.AnswerLine), and the script prints that file with `type`, which
-// never parses it, only after the same code check, and only for a slot whose registration said it is a dialog's. A
-// process that knows the code could put JSON of its own there; such a process could equally answer Allow to a tool
-// permission, and the code's boundary is the one PermissionDesk's header states.
+// is the picked labels and typed text, so its line cannot be a literal of the script. After the same code check, and
+// only for a slot whose registration said it is a dialog's, the script asks Deskbar for the line over the control pipe
+// (`claude-permission --fetch`, its code on stdin; PermissionDesk.Fetch) and lets the reply, one line of pure-ASCII JSON
+// (DialogAsk.AnswerLine), straight through to its own output, never parsing it. The line is never a file: a file beside
+// the answer could be swapped by a process that watches the slot without knowing the code (the branch's review,
+// finding 1), whereas the pipe's server is checked to be Deskbar's own executable (PipeTrust).
 //
 // The three lines are the ones measured to work in the spike (runs 1, 2 and 10). The deny message is fixed (the PM's
 // ruling Q9: no free text, which would have to travel through a file and cmd into JSON). "Allow and stop asking for
@@ -56,10 +57,10 @@ public static class PermissionAnswer
         """{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"allow","updatedPermissions":[{"type":"setMode","mode":"acceptEdits","destination":"session"}]}}}""";
 
     /// <summary>
-    /// The word that answers a multiple-choice dialog (AskUserQuestion, task c047d0a0): the line printed is then the slot's
-    /// <see cref="PermissionDesk.DialogFile"/>, which Deskbar wrote just before (DialogAsk.AnswerLine). Taken only by a slot
+    /// The word that answers a multiple-choice dialog (AskUserQuestion, task c047d0a0): the line printed is then the one
+    /// Deskbar hands the script when it fetches it (PermissionDesk.Fetch, DialogAsk.AnswerLine). Taken only by a slot
     /// registered as a dialog's (<see cref="DialogKind"/>), and a dialog's slot takes no other word: a plain allow is not
-    /// an answer to a dialog, and the dialog file is never printed for a tool permission.
+    /// an answer to a dialog, and no line is fetched for a tool permission.
     /// </summary>
     public const string DialogWord = "dialog";
 
@@ -68,16 +69,16 @@ public static class PermissionAnswer
 
     /// <summary>
     /// The line the hook prints for an answer file's text, when the hook was handed <paramref name="code"/>: for a tool
-    /// permission's slot (<paramref name="dialogFile"/> has no value) as <see cref="LineFor(string,string)"/> says; for a
-    /// dialog's slot, what its dialog file holds ("" when there is none), for exactly "&lt;code&gt; dialog" only.
+    /// permission's slot (<paramref name="fetched"/> has no value) as <see cref="LineFor(string,string)"/> says; for a
+    /// dialog's slot, the line its fetch returned ("" when it returned nothing), for exactly "&lt;code&gt; dialog" only.
     /// </summary>
-    public static Maybe<string> LineFor(string answerText, string code, Maybe<string> dialogFile) =>
-        dialogFile.HasNoValue
+    public static Maybe<string> LineFor(string answerText, string code, Maybe<string> fetched) =>
+        fetched.HasNoValue
             ? LineFor(answerText, code)
             : Code.IsMatch(code)
               && answerText.TrimEnd('\r', '\n').Split(' ') is [var given, DialogWord]
               && given == code
-              && dialogFile.Value.TrimEnd('\r', '\n') is { Length: > 0 } line
+              && fetched.Value.TrimEnd('\r', '\n') is { Length: > 0 } line
                 ? line
                 : Maybe<string>.None;
 

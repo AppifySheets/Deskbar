@@ -488,6 +488,7 @@ public partial class TasksWindow : Window
         commentEditor?.Focus();
         RefocusLink();
         RefocusSubtaskBox();
+        RefocusDialogOther();
         // A view that arrived during the draw is drawn now.
         Flush();
     }
@@ -501,6 +502,7 @@ public partial class TasksWindow : Window
         commentEditor = null; // set again by CommentOf when its comment is drawn
         keyboardWasIn = commentBoxes.FirstOrDefault(pair => pair.Value.IsKeyboardFocusWithin).Key;
         caretWas = keyboardWasIn != Guid.Empty ? commentBoxes[keyboardWasIn].CaretIndex : 0;
+        RememberDialogFocus();
         // When the lines on show change (which tasks, their order, which threads are open, which are closing), a line
         // may now be under the pointer that was not, so for half a second a click is not trusted (the click guard,
         // ClickIgnored). A redraw that only rewrites what lines say (a session's status line) moves nothing and does

@@ -49,7 +49,10 @@ public sealed record OpenRequest(string Url, string? From);
 
 // `claude-hook`, parsed: CLAUDE_CODE_ENTRYPOINT, CLAUDE_CODE_SESSION_ATTENDED and CLAUDE_JOB_DIR as the hook script passed them (empty
 // or a literal %NAME% when unset; ClaudeHookEvent decides what they mean), the session's folder, and the hook's JSON.
-public sealed record ClaudeHookRequest(string? Entrypoint, string? Attended, string? From, string? Json, string? Job = null, string? Slot = null);
+// Fetch: claude-permission only, `--fetch`: the dialog hook script asking for its answer line, its code as the --json
+// text (RemoteControl.Permission, PermissionDesk.Fetch; task c047d0a0).
+public sealed record ClaudeHookRequest(string? Entrypoint, string? Attended, string? From, string? Json, string? Job = null, string? Slot = null,
+    bool Fetch = false);
 
 // The command line after `ctl`, with the parsing kept apart from the doing so both halves can be tested
 // without a pipe or a running app.
@@ -323,6 +326,8 @@ public static class ControlArguments
         ["--json", var value, .. var tail] => HookOptions(so with { Json = value }, tail),
         // claude-permission only: the hook script's own slot folder (PermissionDesk), which the answer goes into.
         ["--slot", var value, .. var tail] => HookOptions(so with { Slot = value }, tail),
+        // claude-permission only, and valueless: the dialog script fetching its answer line (task c047d0a0).
+        ["--fetch", .. var tail] => HookOptions(so with { Fetch = true }, tail),
         // AN OPTION THIS COPY DOES NOT KNOW IS SKIPPED, with its value (final review, item 14). The hook scripts are
         // rewritten by whichever Deskbar starts last, so a newer script that passes one more variable can reach an
         // older Deskbar still running, and refusing it would silence every hook of every session until a restart.
@@ -333,7 +338,7 @@ public static class ControlArguments
         [var unknown, ..] => Result.Failure<ClaudeHookRequest>($"'{unknown}' is not an option of claude-hook, or it is missing its value."),
     };
 
-    static readonly IReadOnlyList<string> HookOptionNames = ["--entry", "--attended", "--job", "--from", "--json", "--slot"];
+    static readonly IReadOnlyList<string> HookOptionNames = ["--entry", "--attended", "--job", "--from", "--json", "--slot", "--fetch"];
 
     // `create <name> [--group <g> | --position <n> | --before <ws> | --after <ws>] [--folder <path>]`
     //

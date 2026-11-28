@@ -81,12 +81,6 @@ public sealed class PermissionDesk(string folder, Func<DateTimeOffset> now)
     /// <summary>The answer file's name inside a slot.</summary>
     public const string AnswerFile = "answer.txt";
 
-    /// <summary>
-    /// The file a dialog's answer line goes in, inside its slot (AskUserQuestion, task c047d0a0): written BEFORE the answer
-    /// file, so the script that sees "&lt;code&gt; dialog" always finds it complete (PermissionAnswer.DialogWord).
-    /// </summary>
-    public const string DialogFile = "dialog.json";
-
     /// <summary>A slot's name as the script makes it: req-%RANDOM%-%RANDOM%, each number 0 to 32767.</summary>
     public static readonly Regex SlotName = new(@"^req-\d{1,5}-\d{1,5}$", RegexOptions.Compiled);
 
@@ -154,10 +148,17 @@ public sealed class PermissionDesk(string folder, Func<DateTimeOffset> now)
             : Handed(slot, (path, code) => Write(path, AnswerFile, $"{code} {PermissionAnswer.WordOf(decision)}\n"));
 
     /// <summary>
-    /// The user's answers to a multiple-choice dialog (question text to answer, DialogAsk): the hook's line written to the
-    /// slot's <see cref="DialogFile"/>, then "&lt;code&gt; dialog" to its answer file, each atomically, and the question
-    /// taken off the desk. Refused, with nothing written and the question left on show, for answers that do not cover
-    /// every question; refused like <see cref="Answer"/> for a question no longer on show.
+    /// The user's answers to a multiple-choice dialog (question text to answer, DialogAsk): the hook's line kept IN
+    /// MEMORY for the script to fetch (<see cref="Fetch"/>), then "&lt;code&gt; dialog" written to the slot's answer file,
+    /// and the question taken off the desk. Refused, with nothing written and the question left on show, for answers that
+    /// do not cover every question; refused like <see cref="Answer"/> for a question no longer on show.
+    ///
+    /// WHY THE LINE IS NOT A FILE (the branch's review, finding 1): the code authenticates the answer file's word, not a
+    /// second file beside it. A dialog.json in the slot could be swapped by any process of the user that watches the
+    /// folder, in the tick between Deskbar writing it and the script reading it, without knowing the code, and the hook
+    /// would then print that process's JSON: a decision with permission rules of its own, say. So the script asks Deskbar
+    /// for the line over the control pipe, whose server it checks is Deskbar's own executable (PipeTrust), showing its
+    /// code; what it prints can only be what Deskbar holds.
     /// </summary>
     public Result AnswerDialog(string slot, IReadOnlyDictionary<string, string> answers)
     {
@@ -167,9 +168,29 @@ public sealed class PermissionDesk(string folder, Func<DateTimeOffset> now)
             .Bind(dialog => dialog.AnswerLine(answers))
             .Bind(line => Handed(slot, (path, code) =>
             {
-                Write(path, DialogFile, line + "\n");
+                handedLines[slot] = (code, line, now() + FetchWindow);
                 Write(path, AnswerFile, $"{code} {PermissionAnswer.DialogWord}\n");
             }));
+    }
+
+    /// <summary>How long a dialog's answer line waits to be fetched: the script reads the answer file within a tick or two.</summary>
+    public static readonly TimeSpan FetchWindow = TimeSpan.FromMinutes(1);
+
+    // The dialogs' answer lines waiting for their scripts, by slot, with the code a fetch must show (AnswerDialog, Fetch).
+    readonly Dictionary<string, (string Code, string Line, DateTimeOffset Until)> handedLines = [];
+
+    /// <summary>
+    /// A dialog's answer line, handed ONCE to the script of <paramref name="slot"/> that shows its code
+    /// (`claude-permission --fetch`, RemoteControl.Permission). Refused for a wrong code, a slot with no line waiting, and
+    /// a line past <see cref="FetchWindow"/>; a line handed or expired is gone.
+    /// </summary>
+    public Result<string> Fetch(string slot, string code)
+    {
+        handedLines.Where(h => now() >= h.Value.Until).Select(h => h.Key).ToList().ForEach(k => handedLines.Remove(k));
+        if (!handedLines.TryGetValue(slot, out var handed) || !PermissionAnswer.Code.IsMatch(code) || handed.Code != code)
+            return Result.Failure<string>("No answer waits for this slot.");
+        handedLines.Remove(slot);
+        return handed.Line;
     }
 
     const string Ended = "This question has ended. Answer it in the terminal.";
@@ -225,7 +246,12 @@ public sealed class PermissionDesk(string folder, Func<DateTimeOffset> now)
     public bool Settle() => Drop(h => h.Mark is { } mark && mark.MovedOn());
 
     /// <summary>Every question taken off and its slot deleted: Deskbar exits, or the setting went off.</summary>
-    public bool ReleaseAll() => Drop(_ => true);
+    public bool ReleaseAll()
+    {
+        // Answer lines not yet fetched go too: their scripts find no slot, or no line, and print nothing.
+        handedLines.Clear();
+        return Drop(_ => true);
+    }
 
     /// <summary>
     /// On start: every slot folder left in the box deleted (a Deskbar that just started holds no question, so no slot can

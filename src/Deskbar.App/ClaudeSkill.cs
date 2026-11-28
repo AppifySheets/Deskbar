@@ -294,8 +294,9 @@ static class ClaudeSkill
     // that serves the pipe's name while Deskbar is closed gets nothing, and this script prints nothing.
     //
     // A DIALOG'S SLOT (AskUserQuestion, task c047d0a0): the registration's reply is "<code> dialog", and such a slot takes
-    // only "<code> dialog", for which the script prints the slot's dialog file with `type` (PermissionAnswer explains the
-    // one exception to printing literals). Any other second word in the reply counts as no code.
+    // only "<code> dialog", for which the script fetches the answer line from Deskbar over the pipe and lets it through
+    // (PermissionAnswer explains the one exception to printing literals, and why the line is never a file). Any other
+    // second word in the reply counts as no code.
     //
     // Every path but the answers ends in `exit /b 0` with nothing on stdout: Claude Code then keeps its own dialog
     // (and never sees exit 2, which is not a decision on this event anyway).
@@ -369,11 +370,14 @@ static class ClaudeSkill
         "@if \"%verdict%\"==\"deny\" goto deny",
         "@if \"%verdict%\"==\"edits\" goto edits",
         "@exit /b 0",
-        // The dialog's answer: the line Deskbar wrote (DialogAsk.AnswerLine, pure ASCII JSON), printed by `type`, which
-        // never parses it, then the slot goes.
+        // The dialog's answer: the slot goes, then the script asks Deskbar for the line the user's Send left
+        // (`claude-permission --fetch`, PermissionDesk.Fetch), its code on stdin, and the reply, one line of pure-ASCII
+        // JSON (DialogAsk.AnswerLine), goes straight through to the hook's output: cmd never parses it. The code is 32
+        // hex digits, checked above, so echoing it is safe; it is spent by now (the answer was given and is fetched once).
+        // A refusal is on stderr, dropped, and prints nothing: the terminal then asks.
         ":dialog",
-        $"@type \"%slot%\\{Core.Tasks.PermissionDesk.DialogFile}\" 2>nul",
         "@rd /s /q \"%slot%\" >nul 2>&1",
+        $"@echo %code%| call \"%~dp0{ControlCommandLine.ShimName}\" {Core.Control.ControlArguments.ClaudePermissionVerb} --fetch --slot \"%name%\" 2>nul",
         "@exit /b 0",
         ":allow",
         $"@echo {Core.Tasks.PermissionAnswer.AllowLine}",
