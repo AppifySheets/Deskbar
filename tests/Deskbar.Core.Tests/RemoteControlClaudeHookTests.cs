@@ -1532,6 +1532,57 @@ public class RemoteControlClaudeHookTests
         Assert.False(tasks.WasAttended("mgr"));
     }
 
+    // --- a session in a temp folder is a throwaway, offered no task (task 98a6378a, ThrowawayFolder) ---
+
+    const string ProbeDir = @"C:\Temp\probe-hook";
+
+    // A hook run from `from`, against a control whose Throwaway says yes for ProbeDir and below, as the app's says for
+    // the real temp folder.
+    string ProbeHook(WorkspaceManager manager, string hookEvent, string session = "probe", string source = "startup", string from = ProbeDir) =>
+        new RemoteControl(manager, tasks: tasks, longPath: LongPath,
+                taskSessions: new TaskSessionCommands(_ => Result.Success(), _ => [], (_, _, _) => Result.Success(), (_, _) => Result.Success())
+                {
+                    Throwaway = folder => ThrowawayFolder.Is(folder, @"C:\Temp", @"C:\Users\me", LongPath),
+                })
+            .Execute(["claude-hook", "--entry", "claude-vscode", "--attended", "1", "--from", from,
+                "--json", HookOf(hookEvent, session, source, "")]).Output;
+
+    // The probe of 2026-11-28 read "This session has no task yet ... create one", made "echo hi marker.txt", and was then
+    // resumed and nudged on it. Now it reads nothing, and is never marked attended, so the keeper never adopts it.
+    [Fact]
+    public void Throwaway_session_gets_no_offer_no_reminder_and_is_not_attended()
+    {
+        var manager = Started();
+        tasks.AddNote("Fix the strip", IdOf(manager, "Deskbar"));
+
+        Assert.Equal("", ProbeHook(manager, "SessionStart"));
+        Assert.Equal("", ProbeHook(manager, "UserPromptSubmit"));
+        Assert.False(tasks.WasAttended("probe"));
+        Assert.True(tasks.Board.TaskOf("probe").HasNoValue);
+    }
+
+    // A probe that made a task on purpose is an ordinary session from then on: it hears its task on every prompt.
+    [Fact]
+    public void Throwaway_session_that_holds_a_task_keeps_its_task_events()
+    {
+        var manager = Started();
+        tasks.Create("Card probe", Maybe<Guid>.None, tasks.NewSession("probe", ProbeDir));
+
+        Assert.Contains("Card probe", ProbeHook(manager, "UserPromptSubmit"));
+        Assert.True(tasks.WasAttended("probe"));
+    }
+
+    // The same control, a session outside the temp folder: offered tasks as always.
+    [Fact]
+    public void Session_outside_the_temp_folder_is_still_offered_tasks()
+    {
+        var manager = Started();
+        tasks.AddNote("Fix the strip", IdOf(manager, "Deskbar"));
+
+        Assert.Contains("task new", ProbeHook(manager, "SessionStart", session: "real", from: Repo));
+        Assert.True(tasks.WasAttended("real"));
+    }
+
     // The waiting Stop hook registers a waiter for the manager too (event wakes, docs/superpowers/specs/2026-11-25-manager-
     // event-wakes-design.md): Deskbar's wake of a running, idle manager goes into its inbox, as a comment goes to a task's.
     [Fact]

@@ -47,6 +47,9 @@ namespace Deskbar.Core.Control;
 //   PreToolUse           only for AskUserQuestion, Claude Code's multiple-choice dialog: its questions become the task's
 //                        question, as `task ask` would make them (task 493b7ba9, DialogQuestion). Nothing to read.
 //
+// A THROWAWAY session (a temp or job tmp folder, no task ever; task 98a6378a, IsThrowaway) gets nothing from SessionStart
+// and UserPromptSubmit and is never adopted, like the manager.
+//
 // The three task events do nothing at all, and print nothing, for a HEADLESS session (`claude -p`, SDK runs, scheduled
 // agents; ClaudeHookEvent's rule), when sessions do not keep tasks (AppState.ClaudeTasksInEffect: a hook entry left
 // behind by a crash must not act on a setting that is off), and in a copy with no task service.
@@ -125,6 +128,7 @@ public sealed partial class RemoteControl
     {
         "SessionStart" when IsManagerFolder(folder) => Said(SessionBriefing.Manager(hook.SessionId)),
         "UserPromptSubmit" when IsManagerFolder(folder) => ManagerPrompted(hook),
+        "SessionStart" or "UserPromptSubmit" when IsThrowaway(service, hook, folder) => Quiet,
         "SessionStart" => Said(SessionStarted(Attended(service, hook), hook, folder)),
         "UserPromptSubmit" => Said(Prompted(Attended(service, hook), hook)),
         "SessionEnd" => Ended(service, hook),
@@ -240,6 +244,19 @@ public sealed partial class RemoteControl
 
     // The folder is already normalised (Folder), the same way the task forms read it (RemoteControl.Tasks).
     bool IsManagerFolder(string? folder) => ManagerSession.IsManager(folder, taskSessions?.ManagerFolder ?? "", LongPath);
+
+    // A THROWAWAY SESSION IS LEFT OUT OF TASKS (task 98a6378a, ThrowawayFolder has the story): a session working in a temp
+    // folder or a Claude job's tmp folder, that no task has ever held, is answered before Attended runs, as the manager is
+    // above. So SessionStart offers it no task (it gets nothing at all, and makes none), a prompt gets no reminder line,
+    // and the keeper never adopts it (HeardAttended is never called). With no task, nothing resumes or nudges it either.
+    // "Ever held" counts closed tasks too: a throwaway that made a task of its own (`task new`, a deliberate test of the
+    // board) or was put on one keeps every task event from then on, its resume on a closed task included.
+    // Only these two events: Notification and Stop blink as for any session (they act on no task), and the task-bound
+    // events, the permission card's included (it needs the session's task, Permission.cs), find no task to act on. So a
+    // probe that means to test the card or the board from a temp folder runs `task new` itself first.
+    bool IsThrowaway(TaskService service, ClaudeHookEvent hook, string? folder) =>
+        (taskSessions?.Throwaway(folder) ?? false)
+        && !service.Board.Tasks.Any(t => t.Sessions.Any(s => s.Id == hook.SessionId));
 
     static TaskService Attended(TaskService service, ClaudeHookEvent hook)
     {
