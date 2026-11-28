@@ -1922,6 +1922,18 @@ PA2. Same again with `mkdir pa2`, but answer **Yes** in the terminal: the folder
 PA3. Same in a VS Code Claude tab with `mkdir pa3`: the card shows beside VS Code's own prompt; **Deny** refuses the command and the session says so.
 PA4. A background session (`claude --bg`) still behaves as before: card, Allow, and answering in the attached terminal takes the card off.
 
+## Claude's multiple-choice questions on the task's page (task c047d0a0)
+
+With "Answer Claude's permission questions in Deskbar" ticked and the Inbox view on:
+
+DQ1. Ask a session with a task to put a two-question choice to you through its dialog. Within a few seconds the task's page shows a "CLAUDE ASKS YOU" card with both questions, their headers, options, descriptions and the Recommended tag. The line stays under Needs you, not "Asks permission".
+DQ2. Send answers is off until both questions have a pick. Pick both and Send: the terminal's dialog closes on its own, the session goes on with your picks, the card leaves, and the chat gets "Answered Claude's question:" with both picks.
+DQ3. Type in Other for one question and Send: the session reads your words as that answer.
+DQ4. Open another dialog and write a reply in the page's comment box instead: it answers the dialog, nothing is posted as a comment, and the chat line shows your words.
+DQ5. Open another dialog and answer it in the terminal: the card leaves within a few seconds and the chat still gets the "Answered" line.
+DQ6. Answer in the terminal on the card: the card goes and the terminal's dialog still waits for you.
+DQ7. A session in VS Code: the card shows, and answering it closes VS Code's dialog. (Not measured yet.)
+
 ## Click to copy a command
 
 A command in a comment or chat message copies whole on a click ([Deskbar task b6af9445](https://deskbar.app/task#b6af9445-56f0-42ea-9df1-f9ee58a89179)). A throwaway note with a comment holding `` `docker logs some-very-long-container-name-that-wraps` ``, a fenced block of two lines and "Pull and redeploy" in double quotes.
