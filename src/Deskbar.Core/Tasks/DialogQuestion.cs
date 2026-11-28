@@ -60,6 +60,19 @@ public static class DialogQuestion
             ? Lead + question[PageLead.Length..]
             : Maybe<string>.None;
 
+    /// <summary>
+    /// A session's own `task ask` text without a dialog lead it copied (task 28fd8550: sessions began their asks with
+    /// "Answer in the session's terminal:", read off dialog questions on other tasks). A `task ask` is answered on the
+    /// task's page, so neither lead belongs on it, and keeping PageLead to dialog questions is what lets
+    /// RemoteControl.CardsGone tell a dialog's question from a session's ask after a restart. Text that is only a lead is
+    /// kept as it is.
+    /// </summary>
+    public static string WithoutLead(string text) =>
+        new[] { Lead, PageLead }.FirstOrDefault(l => text.TrimStart().StartsWith(l, StringComparison.Ordinal)) is { } lead
+        && text.TrimStart()[lead.Length..].TrimStart() is { Length: > 0 } rest
+            ? rest
+            : text;
+
     // One question follows the lead on its line; several are a list under it.
     static string Led(string lead, string[] lines) =>
         lines.Length == 1

@@ -64,12 +64,40 @@ public sealed partial class RemoteControl
     // question, and the PermissionRequest that registers the card. A dialog answered on the card is settled by its
     // PostToolUse a moment after the card goes; a tick in between rewords it first, which the settle also accepts
     // (IsDialogQuestion).
-    void CardsGone(TaskService service) =>
+    //
+    // Two exceptions found in the branch's review. A dialog just answered ON the card (PermissionDesk.AnsweredOnCardSince)
+    // is left alone for CardGrace: the card leaves the desk on Send, seconds before PostToolUse settles the question. And a
+    // page-led question with NO placement is an orphan of a Deskbar restart (placements and cards live in memory only, and
+    // PermissionDesk.Sweep deletes every slot at start, so the terminal keeps the dialog): it is reworded too, once no
+    // session of its task has a card. Only a dialog question can start with PageLead, since a session's `task ask` loses a
+    // copied lead (DialogQuestion.WithoutLead).
+    void CardsGone(TaskService service)
+    {
+        PlacedCardsGone(service);
+        OrphanedCardsGone(service);
+    }
+
+    // Whether the session's dialog still has its card, or was answered on it a moment ago.
+    bool HasCard(TaskService service, string session) =>
+        permissions is { } desk
+        && (desk.Of(session).Any(q => q.Request.IsAskUserQuestion) || desk.AnsweredOnCardSince(session, service.Now - CardGrace));
+
+    void OrphanedCardsGone(TaskService service) =>
+        service.Board.Tasks
+            .Where(t => t is { IsOpen: true, Status: TaskStatus.WaitingOnYou, Question.HasValue: true })
+            .Where(t => prompts.All.All(p => p.Task != t.Id))
+            .Where(t => !t.Sessions.Any(s => HasCard(service, s.Id)))
+            .Select(t => (Task: t, Terminal: DialogQuestion.ToTerminal(t.Question.Value)))
+            .Where(r => r.Terminal.HasValue)
+            .ToList()
+            .ForEach(r => service.RewordQuestion(r.Task.Id, r.Task.Question.Value, r.Terminal.Value));
+
+    void PlacedCardsGone(TaskService service) =>
         prompts.All
             .Where(p => service.Now - p.At >= CardGrace)
             // Only while the task still shows the very question placed (the settle rules' condition too).
             .Where(p => service.Board.Tasks.Any(t => t.Id == p.Task && t.Status == TaskStatus.WaitingOnYou && t.Question.HasValue && t.Question.Value == p.Question))
-            .Where(p => !(permissions?.Of(p.Session).Any(q => q.Request.IsAskUserQuestion) ?? false))
+            .Where(p => !HasCard(service, p.Session))
             .Select(p => (Placement: p, Terminal: DialogQuestion.ToTerminal(p.Question)))
             .Where(r => r.Terminal.HasValue)
             .ToList()
