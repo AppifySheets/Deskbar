@@ -21,8 +21,11 @@ public sealed class SessionPrompts(Func<DateTimeOffset> now)
     /// <summary>How long a noted detail may name a dialog: the Notification follows its dialog by six seconds.</summary>
     public static readonly TimeSpan DetailFor = TimeSpan.FromMinutes(2);
 
-    /// <summary>A question placed on a task from a session's dialog, and the transcript it is answered in.</summary>
-    public sealed record Placement(string Session, Guid Task, string Question, Maybe<TranscriptMark> Mark);
+    /// <summary>
+    /// A question placed on a task from a session's dialog, the transcript it is answered in, and when it was placed (so a
+    /// page-led question is not reworded before its card had time to register, RemoteControl.CardsGone).
+    /// </summary>
+    public sealed record Placement(string Session, Guid Task, string Question, Maybe<TranscriptMark> Mark, DateTimeOffset At);
 
     readonly Dictionary<string, (PromptDetail Detail, Maybe<TranscriptMark> Mark)> details = new(StringComparer.Ordinal);
     readonly List<Placement> placed = [];
@@ -51,7 +54,18 @@ public sealed class SessionPrompts(Func<DateTimeOffset> now)
     public void Placed(string session, Guid task, string question, Maybe<TranscriptMark> mark)
     {
         placed.RemoveAll(p => p.Session == session);
-        placed.Add(new Placement(session, task, question, mark));
+        placed.Add(new Placement(session, task, question, mark, now()));
+    }
+
+    /// <summary>
+    /// The placement's question now reads <paramref name="question"/> (its card left the page and it was reworded,
+    /// RemoteControl.CardsGone). Its mark and time stay, so it settles exactly as before; a placement no longer held
+    /// changes nothing.
+    /// </summary>
+    public void Reworded(Placement placement, string question)
+    {
+        var at = placed.IndexOf(placement);
+        if (at >= 0) placed[at] = placement with { Question = question };
     }
 
     /// <summary>Removes and returns the placements whose transcript has moved on: their dialogs were answered.</summary>

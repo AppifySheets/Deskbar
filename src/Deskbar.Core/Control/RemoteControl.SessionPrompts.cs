@@ -48,8 +48,33 @@ public sealed partial class RemoteControl
     /// </summary>
     public void SettlePrompts()
     {
-        if (tasks is { } service) Settle(service, prompts.Moved());
+        if (tasks is not { } service) return;
+        Settle(service, prompts.Moved());
+        CardsGone(service);
     }
+
+    /// <summary>How long a page-led dialog question waits for its card to register before the terminal's lead is put back.</summary>
+    public static readonly TimeSpan CardGrace = TimeSpan.FromSeconds(30);
+
+    // A PAGE-LED QUESTION WHOSE CARD IS GONE (task 28fd8550, DialogQuestion's header). The card left the page while the
+    // dialog still waits in the terminal: held past PermissionDesk.HeldFor, handed back with "Answer in the terminal", or
+    // it never registered (the hook missing, a refused slot). The question then says the terminal's lead instead, in place
+    // (TaskService.RewordQuestion: no new bubble, no move to the top), and its placement follows, so the settle rules,
+    // which compare the exact text, still find it. CardGrace covers the moment between PreToolUse, which places the
+    // question, and the PermissionRequest that registers the card. A dialog answered on the card is settled by its
+    // PostToolUse a moment after the card goes; a tick in between rewords it first, which the settle also accepts
+    // (IsDialogQuestion).
+    void CardsGone(TaskService service) =>
+        prompts.All
+            .Where(p => service.Now - p.At >= CardGrace)
+            // Only while the task still shows the very question placed (the settle rules' condition too).
+            .Where(p => service.Board.Tasks.Any(t => t.Id == p.Task && t.Status == TaskStatus.WaitingOnYou && t.Question.HasValue && t.Question.Value == p.Question))
+            .Where(p => !(permissions?.Of(p.Session).Any(q => q.Request.IsAskUserQuestion) ?? false))
+            .Select(p => (Placement: p, Terminal: DialogQuestion.ToTerminal(p.Question)))
+            .Where(r => r.Terminal.HasValue)
+            .ToList()
+            .ForEach(r => service.RewordQuestion(r.Placement.Task, r.Placement.Question, r.Terminal.Value)
+                .Tap(() => prompts.Reworded(r.Placement, r.Terminal.Value)));
 
     // A Notification: blinked already (the reply passed in), then, for a question type, the question on the task.
     ControlReply PromptAsked(ClaudeHookEvent hook, string? from, ControlReply blinked)

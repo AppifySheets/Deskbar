@@ -605,10 +605,13 @@ public static class SessionBriefing
         "Never put free text with quotes or & | < > on the command line.",
         "While you work on it:",
         $"  {Shim} task status-line - --session {sessionId}   (keep it current, one short line)",
+        // NEVER "IN THE TERMINAL" (task 28fd8550): sessions copied the dialog question's old lead into their asks ("Pick in
+        // the session's terminal: ..."), sending Petre to a terminal for a question the task's page answers. The ask line says
+        // where the answer goes, so the session has no reason to name a place.
         // ONE ORDER FOR DONE (task 59d0aac1). The ask's follow-up used to end "(the pull request is merged), run task
         // answered, then task done", a third place saying merged means done. It now stops at `answered`: what comes after
         // a merge is the one ordered rule below, and a deploy a person has to make is named here as an ask like a merge.
-        $"  {Shim} task ask - --session {sessionId}   (when the next move is the user's (a pull request to merge, something to try live before it merges, a decision): what they must do in the first words, with what they must open (a pull request, a page) as a markdown link [text](https://...) (a file too: [text](file:///C:/path/page.html)); the task waits on them and moves to the top. Once they have done it, run {Shim} task answered --session {sessionId})",
+        $"  {Shim} task ask - --session {sessionId}   (when the next move is the user's (a pull request to merge, something to try live before it merges, a decision): what they must do in the first words, with what they must open as a markdown link [text](https://...) (a file too: [text](file:///C:/a.html)); the task waits on them at the top, where they answer it, never in your terminal. Once they have done it, run {Shim} task answered --session {sessionId})",
         // A MERGED PULL REQUEST IS DONE (task b326761d, Petre: "when a pr is merged and a session is waiting for me to
         // check it, it should say the task is done and i will only close it if i test it and it works"). Sessions read
         // "something to try live" as a reason to ask again after the merge, so the task sat in Waiting on you with "Try

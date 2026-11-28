@@ -96,6 +96,13 @@ public sealed record ClaudeHookEvent(string Event, string SessionId, string Fold
     public Maybe<string> DialogQuestion { get; init; }
 
     /// <summary>
+    /// The same questions led by DialogQuestion.PageLead (task 28fd8550), but only when the card on the task's page can
+    /// draw this dialog (DialogAsk.Parse accepts it); none otherwise. Whether the card is ON is the server's to decide
+    /// (RemoteControl.DialogAsked), so both texts are carried and it picks.
+    /// </summary>
+    public Maybe<string> DialogQuestionOnPage { get; init; }
+
+    /// <summary>
     /// An AskUserQuestion PostToolUse hook's answers in the task's thread wording ("Header: answer", one per line;
     /// DialogAsk.Summary), whether they were picked in the terminal or on the task's card (task c047d0a0), or none. Read
     /// from tool_response.answers, which maps each question's text to its answer: the tool's result as the 2026-11-28
@@ -167,6 +174,13 @@ public sealed record ClaudeHookEvent(string Event, string SessionId, string Fold
                 ToolName = Text(root, "tool_name"),
                 DialogQuestion = Text(root, "tool_name") == Tasks.DialogQuestion.Tool && root.TryGetProperty("tool_input", out var asked)
                     ? Tasks.DialogQuestion.From(asked)
+                    : Maybe<string>.None,
+                // The card refuses what DialogAsk.Parse refuses (no options, two questions alike), and then the terminal
+                // keeps the dialog, so only a dialog the card can draw gets a page-led question.
+                DialogQuestionOnPage = Text(root, "tool_name") == Tasks.DialogQuestion.Tool
+                                       && root.TryGetProperty("tool_input", out var drawn)
+                                       && DialogAsk.Parse(drawn.GetRawText()).HasValue
+                    ? Tasks.DialogQuestion.From(drawn, onPage: true)
                     : Maybe<string>.None,
                 DialogAnswers = Text(root, "tool_name") == Tasks.DialogQuestion.Tool
                                 && Text(root, "hook_event_name") == "PostToolUse"

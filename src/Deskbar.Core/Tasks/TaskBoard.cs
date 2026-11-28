@@ -325,6 +325,24 @@ public sealed record TaskBoard(IReadOnlyList<TaskItem> Tasks)
                 : t with { Status = TaskStatus.WaitingOnYou, Question = q.Trim(), QuestionOptions = given, QuestionIsDeploy = deploy, Raised = now, UpdatedAt = now, Assignee = Assignee.Me, WaitingSince = now, Pin = TopPin(TaskStatus.WaitingOnYou, id) },
                 q.Trim(), written, now))));
 
+    /// <summary>
+    /// The question the task waits on, reworded in place (task 28fd8550: a dialog question's card left the page, so its
+    /// lead now names the terminal, DialogQuestion.ToTerminal). Only while the task still waits on exactly
+    /// <paramref name="from"/>; the thread's unsettled question bubble with that text says <paramref name="to"/> as well.
+    /// Nothing else moves: not the line's place, Raised, WaitingSince or the assignee, since nothing new was asked. Any
+    /// other state returns this same board, which saves nothing.
+    /// </summary>
+    public Result<TaskBoard> RewordQuestion(Guid id, string from, string to, DateTimeOffset now) =>
+        Tasks.FirstOrDefault(t => t.Id == id) is { IsOpen: true, Status: TaskStatus.WaitingOnYou, Question.HasValue: true } task
+        && task.Question.Value == from && from != to
+            ? ChangeOpen(id, t => t with
+            {
+                Question = to,
+                UpdatedAt = now,
+                Comments = [.. t.Comments.Select(c => c.Asks && c.Settled.HasNoValue && c.Markdown == from ? c with { Markdown = to } : c)],
+            })
+            : this;
+
     /// <summary>Why an answer button does nothing once its options are no longer the open question's (see <see cref="OptionText"/>).</summary>
     public const string OptionsChanged = "That question or its answers changed; nothing was sent. Look at the task again.";
 
