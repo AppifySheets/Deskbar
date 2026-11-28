@@ -98,9 +98,17 @@ public sealed class ManagerActions : IDisposable
     // delivered. Touched only on `scheduler`.
     bool pending;
 
-    // A wake holds `pending`; a click that came meanwhile is run when the wake is done, never dropped.
+    // A wake holds `pending`; a click that came meanwhile is run when the wake is done, never dropped (with the attach it
+    // asked for: the terminal, or only the page).
     bool waking;
     bool openAfterWake;
+    bool openAfterWakeAttaches;
+
+    // PAGE MESSAGES WAITING THEIR TURN (task 6c4c067f). A message sent from the manager's page while a click, a wake or an
+    // earlier message holds `pending` waits here and goes out, in order, once that ends (Settled). Never dropped: the user
+    // already sees its bubble. Each entry is the text as delivered and its message as stored.
+    readonly Queue<(string Delivered, ManagerMessage Message)> queuedSends = new();
+    readonly SerialDisposable sending = new();
 
     /// <param name="stateDir">Deskbar's state folder (AppPaths.NewStateDir), so DESKBAR_APPDATA moves the manager too.</param>
     /// <param name="shimPath">The `deskbar.cmd` ControlCommandLine.WriteShim writes in the state folder.</param>
@@ -149,13 +157,24 @@ public sealed class ManagerActions : IDisposable
     /// Answers at once; refused while Claude sessions are off, as "Start Claude on this" is (the terminal profile the
     /// window opens with and the hooks exist only while they are on). A click while one is pending does nothing.
     /// </summary>
-    public Result Open()
+    /// <param name="attach">
+    /// Whether the click ends in the manager's terminal window (ClaudeTaskActions.AttachTo). Since task 6c4c067f the Manager
+    /// button and the manager line open the manager's PAGE in the tasks panel and call this with false: the same steps make
+    /// sure today's manager exists (attach to it, resume, start or claim it), and no window opens. True, the default, is
+    /// the page's "Open in terminal" and the pipe's `task manager`, which has no panel to look at.
+    /// </param>
+    public Result Open(bool attach = true)
     {
         if (!manager.State.ClaudeTasksInEffect) return Result.Failure(ClaudeTaskActions.FeatureOff);
         if (pending)
         {
-            // A wake is being delivered: the click runs right after it, so it never resumes the manager alongside it.
-            if (waking) openAfterWake = true;
+            // A wake is being delivered: the click runs right after it, so it never resumes the manager alongside it. A
+            // terminal asked for wins over a page-only open asked for in the same wait.
+            if (waking)
+            {
+                openAfterWake = true;
+                openAfterWakeAttaches |= attach;
+            }
             return Result.Success();
         }
         pending = true;
@@ -175,14 +194,131 @@ public sealed class ManagerActions : IDisposable
                 opened =>
                 {
                     pending = false;
-                    opened.Match(agent => actions.AttachTo(Title, Maybe<Guid>.None, agent, actions.Tell), Failed);
+                    opened.Match(agent => { if (attach) actions.AttachTo(Title, Maybe<Guid>.None, agent, actions.Tell); }, Failed);
+                    Settled();
                 },
                 error =>
                 {
                     pending = false;
                     Failed(error.Message);
+                    Settled();
                 });
         return Result.Success();
+    }
+
+    /// <summary>
+    /// A message the user wrote on the manager's page (task 6c4c067f; spec
+    /// docs/superpowers/specs/2026-11-28-manager-inbox-page-design.md, "Sending"). It is stored on today's record at once,
+    /// so the page draws the user's bubble straight away, the record is marked as the user having written (the question
+    /// and any unread answer cleared, Replying set: ManagerQuestion.AfterPrompt, since the waiter road never fires the
+    /// prompt hook that does it for a typed line), and the text goes to the manager as ManagerSession.PageMessage by the
+    /// first road that fits (Deliver). Answers at once; a failure later is told as Open's are. Refused while Claude sessions
+    /// are off, and in a copy built without the comment inbox (the tests of the click alone); blank text does nothing.
+    /// </summary>
+    /// <param name="openTask">The task whose page was open when the manager's page was opened, named to the manager as
+    /// "the current task" (ManagerSession.OpenTaskLine), or none.</param>
+    public Result Send(string text, Maybe<TaskItem> openTask)
+    {
+        if (!manager.State.ClaudeTasksInEffect) return Result.Failure(ClaudeTaskActions.FeatureOff);
+        if (inbox is null) return Result.Failure("The manager cannot be written to in this copy.");
+        if (string.IsNullOrWhiteSpace(text)) return Result.Success();
+        var words = text.Trim();
+        var delivered = ManagerSession.PageMessage(words, ManagerSession.OpenTaskLine(Maybe.From(words), openTask));
+        var message = new ManagerMessage(Guid.NewGuid(), scheduler.Now, words);
+        // Today's record takes it now. With none (the first message of the day, the page opened before midnight) the
+        // record the start makes takes it (Started).
+        if (manager.State.Manager is { } record && record.Day == today())
+            manager.SetManagerSession(Written(ManagerSession.WithMessage(record, message), delivered));
+        queuedSends.Enqueue((delivered, message));
+        if (!pending) Settled();
+        return Result.Success();
+    }
+
+    // The record once the user's message reached it: AfterPrompt's change, or the record as it was when nothing changed.
+    static ManagerRecord Written(ManagerRecord record, string delivered) =>
+        ManagerQuestion.AfterPrompt(Maybe.From(record), record.SessionId, Maybe.From(delivered)).GetValueOrDefault(record);
+
+    // `pending` has just been released (or was free): a click that waited on a wake runs first, then the next page message.
+    // Each runs under `pending` and comes back here when it ends, so waiting work goes out one at a time, in order.
+    void Settled()
+    {
+        if (pending) return;
+        if (openAfterWake)
+        {
+            var attach = openAfterWakeAttaches;
+            openAfterWake = openAfterWakeAttaches = false;
+            Open(attach);
+            return;
+        }
+        if (queuedSends.Count == 0) return;
+        var (delivered, message) = queuedSends.Dequeue();
+        Deliver(delivered, message);
+    }
+
+    // One page message to the manager. The list is read fresh (a poll can be fifteen seconds old, and resuming a manager
+    // that runs forks a copy) and ManagerSession.Next says what today's manager is:
+    //   * none, or not resumable (StartNew): a new manager started with the message as its FIRST prompt, in place of the
+    //     overview (the user asked something of their own), and the message stored on the record the start makes;
+    //   * not running (Resume): a bare resume with the message, only once a fresh list says it is gone (ResumedWith);
+    //   * running (Attach, Claim): the comment roads over its one session, as a wake (CommentWake.PlanFor): its inbox while
+    //     it is busy (never a stop that would kill the turn; its turn's Stop starts a waiter that finds the message at once)
+    //     or has a live waiter, else a stop and a resume with the message.
+    void Deliver(string delivered, ManagerMessage message)
+    {
+        pending = true;
+        var day = today();
+        sending.Disposable = OnScheduler(sessions.ListNow)
+            .SelectMany(listed => listed.Match(
+                list => Road(ManagerSession.Next(Maybe.From(manager.State.Manager), day, list, TranscriptExists,
+                    agent => ManagerSession.IsManager(agent.Folder, folder, longPath)), list, day, delivered, message),
+                error => Observable.Return(Result.Failure(
+                    $"Claude Code's list of sessions could not be read, so your message did not reach the manager:\n\n{error}"))))
+            .Catch((Exception e) => Observable.Return(Result.Failure(e.Message)))
+            .Subscribe(sent =>
+            {
+                pending = false;
+                sent.TapError(Failed);
+                Settled();
+            });
+    }
+
+    IObservable<Result> Road(ManagerStep step, IReadOnlyCollection<ClaudeAgent> listed, DateOnly day, string delivered, ManagerMessage message) =>
+        step switch
+        {
+            ManagerStep.StartNew start => StopFirst(start.StopFirst)
+                .SelectMany(_ => Started(day, delivered))
+                .Select(found => found.Tap(_ => StoreOnNewRecord(delivered, message)))
+                .Select(found => found.IsSuccess ? Result.Success() : Result.Failure(found.Error)),
+            ManagerStep.Resume resume => ResumedWith(resume.SessionId, delivered),
+            ManagerStep.Attach attach => ToRunning(attach.Agent.SessionId, listed, delivered),
+            ManagerStep.Claim claim => Observable.Defer(() =>
+            {
+                manager.SetManagerSession(new ManagerRecord(claim.Agent.SessionId, day, scheduler.Now));
+                StoreOnNewRecord(delivered, message);
+                return ToRunning(claim.Agent.SessionId, listed, delivered);
+            }),
+            _ => Observable.Return(Result.Failure($"Unknown manager step {step}")),
+        };
+
+    // The page message on a record the send itself made (a start or a claim): stored as Send stores it on today's.
+    void StoreOnNewRecord(string delivered, ManagerMessage message)
+    {
+        if (manager.State.Manager is not { } record || record.Messages?.Any(m => m.Id == message.Id) == true) return;
+        manager.SetManagerSession(Written(ManagerSession.WithMessage(record, message), delivered));
+    }
+
+    // A running manager: the road a comment takes to a task's running session (CommentWake.PlanFor over its one session).
+    IObservable<Result> ToRunning(string sessionId, IReadOnlyCollection<ClaudeAgent> listed, string delivered)
+    {
+        var session = new TaskSession(sessionId, folder, DateTimeOffset.MinValue, Maybe<DateTimeOffset>.None);
+        return CommentWake.PlanFor([session], listed.ToList(), sessions.TranscriptExists, inbox!.Lapsed) switch
+        {
+            WakePlan.Inbox => Observable.Return(inbox.Deliver(sessionId, delivered)),
+            WakePlan.Resume => ResumedWith(sessionId, delivered),
+            WakePlan.StopThenResume => StopFirst(listed.TryFirst(a => a.SessionId == sessionId)).SelectMany(_ => ResumedWith(sessionId, delivered)),
+            WakePlan.Nothing nothing => Observable.Return(Result.Failure(nothing.Why)),
+            var road => Observable.Return(Result.Failure($"Unknown wake road {road}")),
+        };
     }
 
     // The step Next chose, ending in the session to attach to, or why there is none.
@@ -200,10 +336,16 @@ public sealed class ManagerActions : IDisposable
 
     // A new manager: the briefing written, `claude --bg` with the measured flags, and once it is listed, its full id stored
     // with the day of the click, so the next click that day attaches or resumes it rather than starting another.
-    IObservable<Result<ClaudeAgent>> Started(DateOnly day) =>
-        Briefed(briefing => OnScheduler(() => sessions.RunAndFind(ManagerSession.StartArguments(briefing, shim), folder))
+    // `firstMessage`: a page message that made the start (task 6c4c067f), its first prompt in place of the overview.
+    // The page messages of a record of the SAME day are carried onto the new one (its manager's transcript was gone, so a
+    // new one started): the user's side of the day's chat stays on the page.
+    IObservable<Result<ClaudeAgent>> Started(DateOnly day, string? firstMessage = null) =>
+        Briefed(briefing => OnScheduler(() => sessions.RunAndFind(ManagerSession.StartArguments(briefing, shim, firstMessage), folder))
             // Since = now: the manager's first turn reads the board, so events are counted from its start (ManagerWakes).
-            .Select(found => found.Tap(agent => manager.SetManagerSession(new ManagerRecord(agent.SessionId, day, scheduler.Now)))));
+            .Select(found => found.Tap(agent => manager.SetManagerSession(new ManagerRecord(agent.SessionId, day, scheduler.Now)
+            {
+                Messages = manager.State.Manager is { } before && before.Day == day ? before.Messages : null,
+            }))));
 
     // Yesterday's idle manager is stopped before today's starts, so two managers never run side by side. `claude stop`
     // returns once the process is gone (measured). A stop that fails (the session ended in the second since the list was
@@ -329,9 +471,8 @@ public sealed class ManagerActions : IDisposable
                 Unread = current.Unread || (sent.IsSuccess && after.Unread),
                 HandedBack = sent.IsSuccess ? after.HandedBack : current.HandedBack,
             });
-        if (!openAfterWake) return;
-        openAfterWake = false;
-        Open();
+        // A click that came during the wake, then any page message that waited on it (task 6c4c067f).
+        Settled();
     }
 
     // An untrusted folder gets the trust offer (ClaudeTaskActions.OfferTrust); anything else is told as it is.
@@ -356,6 +497,7 @@ public sealed class ManagerActions : IDisposable
 
     public void Dispose()
     {
+        sending.Dispose();
         ticks.Dispose();
         opening.Dispose();
         wakingUp.Dispose();

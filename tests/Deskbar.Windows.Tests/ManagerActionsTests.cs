@@ -631,4 +631,140 @@ public class ManagerActionsTests
         Assert.Empty(rig.Cli.Calls.Where(c => c.Arguments is not ["agents", "--json"]));
         Assert.Null(rig.Harness.Manager.State.Manager);
     }
+
+    // THE MANAGER'S PAGE (task 6c4c067f; spec docs/superpowers/specs/2026-11-28-manager-inbox-page-design.md, "Sending"):
+    // a message written on the page reaches the manager by the comment roads, is stored for the page's bubble, and marks
+    // the record as the user having written. Open(attach: false) makes sure the manager exists without a window.
+    static Rig PageRig(bool listed = true, bool busy = false, bool waiter = true)
+    {
+        var rig = new Rig(wakes: true);
+        rig.Harness.Manager.SetManagerSession(new ManagerRecord(Earlier, Today, ManagerStart));
+        rig.WriteTranscript(Earlier);
+        if (waiter) Assert.True(rig.Inbox.Register(Earlier).IsSuccess);
+        if (listed) rig.Cli.Listed.Add(new Row(Earlier, rig.Folder, Busy: busy));
+        return rig;
+    }
+
+    static string InboxText(Rig rig) => File.ReadAllText(Path.Combine(rig.InboxFolder, Earlier + ".md"));
+
+    [Fact]
+    public void Send_while_the_first_turn_runs_goes_to_the_inbox()
+    {
+        using var rig = PageRig(busy: true, waiter: false);
+
+        Assert.True(rig.Manager.Send("what is stuck?", Maybe<TaskItem>.None).IsSuccess);
+        rig.Settle();
+
+        Assert.Equal(ManagerSession.PageMessage("what is stuck?", Maybe<string>.None) + "\n", InboxText(rig));
+        Assert.Empty(rig.Cli.Acts);
+    }
+
+    [Fact]
+    public void Send_stores_the_message_and_marks_the_record_replying()
+    {
+        using var rig = PageRig();
+        rig.Harness.Manager.SetManagerSession(rig.Harness.Manager.State.Manager! with { Question = "Which one?", AskedAt = Origin });
+
+        rig.Manager.Send("  the first  ", Maybe<TaskItem>.None);
+
+        var stored = rig.Harness.Manager.State.Manager!;
+        Assert.Equal("the first", Assert.Single(stored.Messages!).Text);
+        Assert.True(stored.Replying);
+        Assert.Null(stored.Question);
+    }
+
+    [Fact]
+    public void Send_to_a_listed_idle_manager_with_a_live_waiter_goes_to_the_inbox()
+    {
+        using var rig = PageRig();
+
+        rig.Manager.Send("hello", Maybe<TaskItem>.None);
+        rig.Settle();
+
+        Assert.StartsWith(ManagerSession.PageMessageOpening, InboxText(rig));
+        Assert.Empty(rig.Cli.Acts);
+    }
+
+    [Fact]
+    public void Send_to_an_idle_manager_whose_waiter_lapsed_stops_and_resumes_it_with_the_message()
+    {
+        using var rig = PageRig(waiter: false);
+
+        rig.Manager.Send("hello", Maybe<TaskItem>.None);
+        rig.Clock.AdvanceBy((ManagerActions.ResumePause * (ManagerActions.ResumeChecks + 1)).Ticks);
+
+        Assert.Equal(["stop", Earlier[..8]], rig.Cli.Acts[0].Arguments);
+        Assert.Equal(["--bg", "--resume", Earlier, "--", ManagerSession.PageMessage("hello", Maybe<string>.None)], rig.Cli.Acts[1].Arguments);
+    }
+
+    [Fact]
+    public void Send_with_no_manager_starts_one_with_the_message()
+    {
+        using var rig = new Rig(wakes: true);
+
+        rig.Manager.Send("start with this", Maybe<TaskItem>.None);
+        rig.Settle();
+
+        var start = Assert.Single(rig.Cli.Acts);
+        Assert.Equal(ManagerSession.StartArguments(rig.BriefingPath, rig.ShimForward, ManagerSession.PageMessage("start with this", Maybe<string>.None)),
+            start.Arguments);
+        var stored = rig.Harness.Manager.State.Manager!;
+        Assert.Equal(rig.Cli.NextId, stored.SessionId);
+        Assert.Equal("start with this", Assert.Single(stored.Messages!).Text);
+        Assert.True(stored.Replying);
+    }
+
+    [Fact]
+    public void Two_sends_during_a_pending_click_go_in_order()
+    {
+        using var rig = PageRig();
+
+        Assert.True(rig.Manager.Open(attach: false).IsSuccess);
+        rig.Manager.Send("one", Maybe<TaskItem>.None);
+        rig.Manager.Send("two", Maybe<TaskItem>.None);
+        rig.Settle();
+        rig.Settle();
+
+        var text = InboxText(rig);
+        Assert.True(text.IndexOf("\n\none", StringComparison.Ordinal) < text.IndexOf("\n\ntwo", StringComparison.Ordinal));
+        Assert.Equal(["one", "two"], rig.Harness.Manager.State.Manager!.Messages!.Select(m => m.Text));
+    }
+
+    [Fact]
+    public void Open_without_attach_attaches_no_window()
+    {
+        using var rig = PageRig();
+
+        Assert.True(rig.Manager.Open(attach: false).IsSuccess);
+        rig.Settle();
+
+        Assert.Empty(rig.Launches);
+    }
+
+    [Fact]
+    public void Send_names_the_task_that_was_open()
+    {
+        using var rig = PageRig();
+        var task = new TaskItem(Stalled, "Tasks redesign", Maybe<Guid>.None, Deskbar.Core.Tasks.TaskStatus.InProgress, "",
+            Maybe<string>.None, Origin, Origin, Origin, [], []);
+
+        rig.Manager.Send("is this one stuck?", Maybe.From(task));
+        rig.Settle();
+
+        Assert.Contains($"{ManagerSession.OpenTaskOpening} 51a11ed0 \"Tasks redesign\"", InboxText(rig));
+    }
+
+    [Fact]
+    public void Send_with_Claude_sessions_off_is_refused_and_stores_nothing()
+    {
+        using var rig = PageRig();
+        Assert.True(rig.Harness.Manager.SetClaudeTasks(false).IsSuccess);
+
+        var refused = rig.Manager.Send("hello", Maybe<TaskItem>.None);
+        rig.Settle();
+
+        Assert.Equal(ClaudeTaskActions.FeatureOff, refused.Error);
+        Assert.Null(rig.Harness.Manager.State.Manager!.Messages);
+        Assert.False(File.Exists(Path.Combine(rig.InboxFolder, Earlier + ".md")));
+    }
 }
