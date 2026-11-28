@@ -47,6 +47,9 @@ namespace Deskbar.Core.Control;
 //   PreToolUse           only for AskUserQuestion, Claude Code's multiple-choice dialog: its questions become the task's
 //                        question, as `task ask` would make them (task 493b7ba9, DialogQuestion). Nothing to read.
 //
+// A THROWAWAY session (a temp or job tmp folder, no task ever; task 98a6378a, IsThrowaway) gets nothing from SessionStart
+// and UserPromptSubmit and is never adopted, like the manager.
+//
 // The three task events do nothing at all, and print nothing, for a HEADLESS session (`claude -p`, SDK runs, scheduled
 // agents; ClaudeHookEvent's rule), when sessions do not keep tasks (AppState.ClaudeTasksInEffect: a hook entry left
 // behind by a crash must not act on a setting that is off), and in a copy with no task service.
@@ -125,7 +128,10 @@ public sealed partial class RemoteControl
     {
         "SessionStart" when IsManagerFolder(folder) => Said(SessionBriefing.Manager(hook.SessionId)),
         "UserPromptSubmit" when IsManagerFolder(folder) => ManagerPrompted(hook),
-        "SessionStart" => Said(SessionStarted(Attended(service, hook), hook, folder)),
+        // A throwaway's SessionStart is decided inside SessionStarted, after a /clear or a resume has had the chance to
+        // put it back on its task (review of task 98a6378a's branch); its prompts are decided here.
+        "UserPromptSubmit" when IsThrowaway(service, hook, folder) => Quiet,
+        "SessionStart" => Said(SessionStarted(service, hook, folder)),
         "UserPromptSubmit" => Said(Prompted(Attended(service, hook), hook)),
         "SessionEnd" => Ended(service, hook),
         "PreToolUse" => DialogAsked(service, hook, folder),
@@ -240,6 +246,19 @@ public sealed partial class RemoteControl
 
     // The folder is already normalised (Folder), the same way the task forms read it (RemoteControl.Tasks).
     bool IsManagerFolder(string? folder) => ManagerSession.IsManager(folder, taskSessions?.ManagerFolder ?? "", LongPath);
+
+    // A THROWAWAY SESSION IS LEFT OUT OF TASKS (task 98a6378a, ThrowawayFolder has the story): a session working in a temp
+    // folder or a Claude job's tmp folder, that no task has ever held, is answered before Attended runs, as the manager is
+    // above. So SessionStart offers it no task (it gets nothing at all, and makes none), a prompt gets no reminder line,
+    // and the keeper never adopts it (HeardAttended is never called). With no task, nothing resumes or nudges it either.
+    // "Ever held" counts closed tasks too: a throwaway that made a task of its own (`task new`, a deliberate test of the
+    // board) or was put on one keeps every task event from then on, its resume on a closed task included.
+    // Only these two events: Notification and Stop blink as for any session (they act on no task), and the task-bound
+    // events, the permission card's included (it needs the session's task, Permission.cs), find no task to act on. So a
+    // probe that means to test the card or the board from a temp folder runs `task new` itself first.
+    bool IsThrowaway(TaskService service, ClaudeHookEvent hook, string? folder) =>
+        (taskSessions?.Throwaway(folder) ?? false)
+        && !service.Board.Tasks.Any(t => t.Sessions.Any(s => s.Id == hook.SessionId));
 
     static TaskService Attended(TaskService service, ClaudeHookEvent hook)
     {
@@ -420,6 +439,12 @@ public sealed partial class RemoteControl
         if (service.Board.LastTaskOf(hook.SessionId).HasNoValue && hook.Source.Map(s => s == "clear").GetValueOrDefault(false) && folder is not null)
             service.JoinAfterClear(hook.SessionId, folder, stored => FolderPath.Same(stored, folder, LongPath));
         var own = service.Board.TaskOf(hook.SessionId);
+        // A THROWAWAY STILL WITH NO TASK (task 98a6378a, IsThrowaway) hears nothing and is not marked attended, so it is
+        // never adopted. Checked only now, after the steps above: a /clear in a temp folder starts a NEW id that holds no
+        // task yet, and JoinAfterClear is what moves the cleared task over to it; checked earlier, the task was left
+        // behind on the replaced id (review of the branch).
+        if (own.HasNoValue && IsThrowaway(service, hook, folder)) return "";
+        Attended(service, hook);
         // The workspace whose tasks are offered is found the way `task new` finds one (SessionWorkspace): the VS Code
         // window showing the folder, else the workspace of the latest task worked on in the session's repo. The window
         // alone left a session started in a terminal (no VS Code window on its folder) offered only the free Claude

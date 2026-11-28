@@ -735,6 +735,14 @@ public sealed record TaskSessionCommands(
     public string ManagerFolder { get; init; } = "";
 
     /// <summary>
+    /// Whether a session's folder (already normalised) is a throwaway one, a temp folder or a Claude job's tmp folder
+    /// (ThrowawayFolder, task 98a6378a): such a session is offered no task and never adopted. An init property for the
+    /// same reason as Transcript; the default leaves every folder alone, so a test's own temp folders keep behaving as
+    /// before, and the app hands in the real temp and profile folders.
+    /// </summary>
+    public Func<string?, bool> Throwaway { get; init; } = _ => false;
+
+    /// <summary>
     /// `task manager`, the bar's Manager button's twin (ManagerActions.Open in the app): opens today's manager session,
     /// attaching to it, resuming it or starting it. Answers at once; a later failure is told in a message. An init
     /// property for the same reason as Transcript; the default refuses.

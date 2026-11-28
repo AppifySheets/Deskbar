@@ -2053,6 +2053,10 @@ public partial class App : Application
                 StartQuietly = (task, folder, model) => claudeActions?.Start(task, folder, model, quiet: true) ?? Result.Failure(ClaudeActionsNotReady),
                 // The manager session's folder, so a call from it is refused close, delete and done (manager session design).
                 ManagerFolder = Core.Tasks.ManagerSession.FolderIn(AppPaths.NewStateDir),
+                // A session in the temp folder or a Claude job's tmp folder is a throwaway probe, offered no task and
+                // never adopted (task 98a6378a, ThrowawayFolder).
+                Throwaway = folder => Core.Control.ThrowawayFolder.Is(folder, Path.GetTempPath(),
+                    Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), LongPath.Of),
                 // `task manager`, the Manager button's twin (ManagerActions.Open), read when the command arrives.
                 Manager = () => managerActions?.Open() ?? Result.Failure(ClaudeActionsNotReady),
                 // `task overview` tells working from idle by the latest list's busy flag (ClaudeTaskActions.Busy).
