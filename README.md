@@ -839,7 +839,9 @@ first answer, a few seconds apart. A refused request costs no usage, so the aski
 it stops as soon as no session is stopped on the limit. When another session of yours gets past the limit first,
 Claude Code's own note in its transcript tells Deskbar sooner. A session that Claude Code warned about the limit and
 that finished its turn and stopped by itself is woken too, with a message telling it to carry on, once the limit is
-lifted or resets. One whose task waits on your answer is left for your answer.
+lifted or resets. One whose task waits on your answer is left for your answer. A resumed session is told that the
+limit is over, and one that keeps waiting for the reset time although its own requests go through again is told to
+carry on.
 A session that keeps stopping straight after being woken, whose transcript Claude Code no longer keeps, or
 whose resume fails (Claude's message goes into the thread), is left alone and its task waits on you with the
 reason until you act on it: set its status and it tries again, or double-click it to bring the session back

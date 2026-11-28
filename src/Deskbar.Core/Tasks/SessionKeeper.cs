@@ -79,6 +79,23 @@ public static class SessionKeeper
     /// </summary>
     public const string ContinueMessage = "Continue from where you left off. Note: this session was resumed by Deskbar after it stopped.";
 
+    /// <summary>
+    /// The message a session stopped on the usage limit is resumed with (KeeperStep.Resume.AfterLimit, task e948b383).
+    /// The bare ContinueMessage left the limit's own words ("resets 2:10pm") standing in the conversation, and a session
+    /// woken early on them waited for that time by itself (session a8c3dd64, 2026-11-28): so it says the limit is over.
+    /// </summary>
+    public const string LimitContinueMessage =
+        "Continue from where you left off. Note: this session was resumed by Deskbar after it stopped on the usage limit. "
+        + "The limit is over now, so do " + UsageLimitSigns.ToldMarker + ": carry on with your task.";
+
+    /// <summary>
+    /// What a session holding itself on a limit its own replies prove gone is told (UsageLimitSigns.HeldAfterLift). It
+    /// carries UsageLimitSigns.ToldMarker, so once it is in the transcript the session counts as told.
+    /// </summary>
+    public const string HeldNudge =
+        "The usage limit you stopped on is over: your requests have been answered since. Do " + UsageLimitSigns.ToldMarker
+        + "; carry on with your task now.";
+
     /// <summary>Within this long of a resume the session is left alone, whatever the list says.</summary>
     public static readonly TimeSpan Grace = TimeSpan.FromSeconds(30);
 
@@ -394,9 +411,26 @@ public static class SessionKeeper
 
     /// <summary>The sessions stopped on a wrap_up note that may be woken now (see the comment above).</summary>
     /// <param name="stoppedOnNote">UsageLimitSigns.StoppedOnNote for a session's transcript.</param>
+    /// <param name="heldAfterLift">
+    /// UsageLimitSigns.HeldAfterLift for a session's transcript: a session that holds itself on a limit its own replies
+    /// prove gone. Woken at once, with its own words (NoteStopWake.Held). Left out, none is.
+    /// </param>
     public static IReadOnlyList<NoteStopWake> NoteStopWakes(
         TaskBoard board, IReadOnlyCollection<ClaudeAgent> live, Func<TaskSession, Maybe<DateTimeOffset>> stoppedOnNote,
-        LimitSigns limitSigns, DateTimeOffset now) =>
+        LimitSigns limitSigns, DateTimeOffset now, Func<TaskSession, Maybe<DateTimeOffset>>? heldAfterLift = null) =>
+        Wakeable(board, live)
+            .Select(pair => (pair.Task, pair.Session, StoppedAt: stoppedOnNote(pair.Session)))
+            .Where(item => item.StoppedAt.HasValue && NoteStopDue(item.StoppedAt.Value, limitSigns, now))
+            .Select(item => new NoteStopWake(item.Task.Id, item.Session.Id, item.StoppedAt.Value))
+            .Concat(Wakeable(board, live)
+                .Select(pair => (pair.Task, pair.Session, ErrorAt: (heldAfterLift ?? (_ => Maybe<DateTimeOffset>.None))(pair.Session)))
+                .Where(item => item.ErrorAt.HasValue)
+                .Select(item => new NoteStopWake(item.Task.Id, item.Session.Id, item.ErrorAt.Value) { Held = true }))
+            .DistinctBy(wake => wake.SessionId)
+            .ToList();
+
+    // The latest session of each task a wrap_up or self-held wake may reach (see the comment above NoteStopFallback).
+    static IEnumerable<(TaskItem Task, TaskSession Session)> Wakeable(TaskBoard board, IReadOnlyCollection<ClaudeAgent> live) =>
         board.Tasks
             .Where(task => task.IsClaudes && task.Status is TaskStatus.Backlog or TaskStatus.InProgress)
             .Where(task => !LeftAlone(task) && !GivenUp(task))
@@ -404,11 +438,7 @@ public static class SessionKeeper
             .Select(task => (Task: task, Session: task.Sessions.MaxBy(session => session.Joined)!))
             .Where(pair => !pair.Session.Replaced)
             .Where(pair => live.Any(agent => agent.SessionId == pair.Session.Id && !agent.Busy))
-            .DistinctBy(pair => pair.Session.Id)
-            .Select(pair => (pair.Task, pair.Session, StoppedAt: stoppedOnNote(pair.Session)))
-            .Where(item => item.StoppedAt.HasValue && NoteStopDue(item.StoppedAt.Value, limitSigns, now))
-            .Select(item => new NoteStopWake(item.Task.Id, item.Session.Id, item.StoppedAt.Value))
-            .ToList();
+            .DistinctBy(pair => pair.Session.Id);
 
     static bool NoteStopDue(DateTimeOffset stoppedAt, LimitSigns signs, DateTimeOffset now) =>
         signs.LiftedSince(stoppedAt)
@@ -497,4 +527,11 @@ public sealed record ResumeLedger(IReadOnlyDictionary<string, IReadOnlyList<Date
 /// A session that stopped on a wrap_up note (SessionKeeper.NoteStopWakes) and may be woken now; <see cref="StoppedAt"/>
 /// is the note's moment, so the app sends one wake per stop.
 /// </summary>
-public sealed record NoteStopWake(Guid TaskId, string SessionId, DateTimeOffset StoppedAt);
+public sealed record NoteStopWake(Guid TaskId, string SessionId, DateTimeOffset StoppedAt)
+{
+    /// <summary>
+    /// Not a wrap_up stop but a session holding itself on a limit its own replies prove gone (UsageLimitSigns.HeldAfterLift);
+    /// <see cref="StoppedAt"/> is then its limit error's moment.
+    /// </summary>
+    public bool Held { get; init; }
+}

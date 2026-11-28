@@ -15,9 +15,12 @@ public class UsageLimitSignsTests
     static string Prompt(DateTimeOffset at, string text = "go") =>
         "{\"type\":\"user\",\"timestamp\":\"" + Stamp(at) + "\",\"message\":{\"role\":\"user\",\"content\":\"" + text + "\"}}";
 
-    static string Reply(DateTimeOffset at, string stop = "end_turn") =>
+    static string Reply(DateTimeOffset at, string stop = "end_turn", string text = "ok") =>
         "{\"type\":\"assistant\",\"timestamp\":\"" + Stamp(at)
-        + "\",\"message\":{\"model\":\"claude-opus-5-5\",\"role\":\"assistant\",\"stop_reason\":\"" + stop + "\",\"content\":[{\"type\":\"text\",\"text\":\"ok\"}]}}";
+        + "\",\"message\":{\"model\":\"claude-opus-5-5\",\"role\":\"assistant\",\"stop_reason\":\"" + stop + "\",\"content\":[{\"type\":\"text\",\"text\":\"" + text + "\"}]}}";
+
+    // What session a8c3dd64 answered each time, cut down.
+    const string Waiting = "It's waiting for the usage limit to lift at 14:10.";
 
     static string Note(DateTimeOffset at, string kind, bool sidechain = false) =>
         "{\"type\":\"user\",\"isSidechain\":" + (sidechain ? "true" : "false") + ",\"isMeta\":true,\"usageLimitNote\":\"" + kind + "\",\"timestamp\":\"" + Stamp(at)
@@ -82,6 +85,53 @@ public class UsageLimitSignsTests
     [Fact]
     public void A_turn_that_died_on_the_error_after_the_note_is_not_a_note_stop() =>
         Assert.Equal(Maybe<DateTimeOffset>.None, UsageLimitSigns.StoppedOnNote([Prompt(T), Note(T.AddSeconds(1), "wrap_up"), LimitError(T.AddSeconds(20))]));
+
+    // Session a8c3dd64 on 2026-11-28: its turn died on the limit at 07:25 (reset 14:10); Deskbar's asks woke it from 07:40
+    // on, every reply went through, and each time it said it was waiting for 14:10 and stopped.
+    [Fact]
+    public void A_session_whose_own_replies_follow_its_limit_error_holds_itself() =>
+        Assert.Equal(new LimitErrorSign(T, ResetsAt),
+            UsageLimitSigns.HeldAfterLift([Prompt(T.AddSeconds(-5)), LimitError(T), Prompt(T.AddMinutes(15), "Deskbar: no session has worked"), Reply(T.AddMinutes(15).AddSeconds(5), text: Waiting)]).Value);
+
+    // Second review, finding 1: a session that worked after the lift (the keeper resumed it, Petre typed into it) has
+    // replies after the error too; its last words are its work, not the limit.
+    [Fact]
+    public void A_session_that_worked_after_the_lift_does_not_hold_itself() =>
+        Assert.Equal(Maybe<LimitErrorSign>.None,
+            UsageLimitSigns.HeldAfterLift([LimitError(T), Prompt(T.AddMinutes(5)), Reply(T.AddMinutes(9), text: "Built it; PR 12 is open and CI is green.")]));
+
+    // Second review, finding 2: once told the limit is over (the held nudge, the keeper's limit resume), its answer is
+    // one more reply after the error, and it must not be told again after a Deskbar restart.
+    [Theory]
+    [InlineData(SessionKeeper.HeldNudge)]
+    [InlineData(SessionKeeper.LimitContinueMessage)]
+    public void A_session_told_the_limit_is_over_does_not_hold_itself(string told) =>
+        Assert.Equal(Maybe<LimitErrorSign>.None,
+            UsageLimitSigns.HeldAfterLift([LimitError(T), Prompt(T.AddMinutes(15), "Deskbar's watch: " + told), Reply(T.AddMinutes(16), text: "Still " + Waiting)]));
+
+    [Fact]
+    public void A_release_note_after_the_error_means_it_was_told() =>
+        Assert.Equal(Maybe<LimitErrorSign>.None,
+            UsageLimitSigns.HeldAfterLift([LimitError(T), Prompt(T.AddMinutes(15)), Note(T.AddMinutes(15), "release"), Reply(T.AddMinutes(16), text: Waiting)]));
+
+    [Fact]
+    public void A_session_still_refused_does_not_hold_itself() =>
+        Assert.Equal(Maybe<LimitErrorSign>.None,
+            UsageLimitSigns.HeldAfterLift([Prompt(T.AddSeconds(-5)), LimitError(T), Prompt(T.AddMinutes(15)), LimitError(T.AddMinutes(15).AddSeconds(1))]));
+
+    [Fact]
+    public void A_session_working_after_its_limit_error_does_not_hold_itself_yet() =>
+        Assert.Equal(Maybe<LimitErrorSign>.None,
+            UsageLimitSigns.HeldAfterLift([LimitError(T), Prompt(T.AddMinutes(15)), Reply(T.AddMinutes(15).AddSeconds(5), "tool_use")]));
+
+    [Fact]
+    public void Made_up_replies_after_the_error_prove_nothing() =>
+        Assert.Equal(Maybe<LimitErrorSign>.None,
+            UsageLimitSigns.HeldAfterLift([LimitError(T), Prompt(T.AddMinutes(15)), Reply(T.AddMinutes(15).AddSeconds(1), "end_turn").Replace("claude-opus-5-5", "<synthetic>")]));
+
+    [Fact]
+    public void A_session_that_never_hit_the_limit_does_not_hold_itself() =>
+        Assert.Equal(Maybe<LimitErrorSign>.None, UsageLimitSigns.HeldAfterLift([Prompt(T), Reply(T.AddSeconds(5))]));
 
     // --- the probe -------------------------------------------------------------------------------------------------------
 
