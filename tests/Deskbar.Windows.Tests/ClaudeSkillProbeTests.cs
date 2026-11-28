@@ -21,7 +21,7 @@ public class ClaudeSkillProbeTests
         var skills = await ClaudeSkillProbe.Skills(repo.FullName, TimeSpan.FromSeconds(60));
 
         Assert.True(skills.IsSuccess, skills.IsFailure ? skills.Error : "");
-        Assert.Contains("refresh-pr", skills.Value);
+        Assert.Contains("refresh-pr", skills.Value.All);
     }
 
     [Fact]

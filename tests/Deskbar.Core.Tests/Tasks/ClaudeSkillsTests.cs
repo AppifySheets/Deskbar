@@ -9,12 +9,13 @@ public class ClaudeSkillsTests
 {
     // Cut down from a real init line (claude 2.1.332, 2026-11-26): the skills array, beside fields the list ignores.
     const string InitLine =
-        """{"type":"system","subtopic":"x","subtype":"init","cwd":"E:\\repos\\TaskSpaces","skills":["humanizer","refresh-pr","superpowers:brainstorming","bad name",""],"slash_commands":["compact","humanizer"]}""";
+        """{"type":"system","subtopic":"x","subtype":"init","cwd":"E:\\repos\\TaskSpaces","skills":["humanizer","refresh-pr","superpowers:brainstorming","bad name",""],"slash_commands":["compact","humanizer","bad name"]}""";
 
     [Fact]
     public void The_init_line_gives_the_skills_and_nothing_else_does()
     {
-        Assert.Equal(["humanizer", "refresh-pr", "superpowers:brainstorming"], ClaudeSkills.FromInit(InitLine).Value);
+        Assert.Equal(["humanizer", "refresh-pr", "superpowers:brainstorming"], ClaudeSkills.FromInit(InitLine).Value.Skills);
+        Assert.Equal(["compact", "humanizer"], ClaudeSkills.FromInit(InitLine).Value.Commands);
         Assert.True(ClaudeSkills.FromInit("""{"type":"system","subtype":"hook_started"}""").HasNoValue);
         Assert.True(ClaudeSkills.FromInit("""{"type":"assistant","skills":["x"]}""").HasNoValue);
         Assert.True(ClaudeSkills.FromInit("not json").HasNoValue);
@@ -81,6 +82,26 @@ public class ClaudeSkillsTests
         Assert.Equal(["iam-check-data", "iam-deploy-staging"],
             ClaudeSkills.Own(["humanizer", "iam-check-data", "superpowers:brainstorming", "simplify", "iam-deploy-staging"],
                 ["humanizer", "superpowers:brainstorming", "simplify", "summary"]));
+
+    // Task b3fb4e8c: in personalized-health (claude 2.1.332, 2026-11-28) "skills" left iam-check-data out while
+    // "slash_commands" had it, beside the built-ins that every folder's commands carry, the home folder's too.
+    static readonly ClaudeInit Repo = new(["humanizer", "iam-logs"], ["compact", "humanizer", "iam-check-data", "iam-logs", "deskbar"]);
+    static readonly ClaudeInit Home = new(["humanizer"], ["compact", "humanizer", "deskbar"]);
+
+    [Fact]
+    public void A_skill_only_the_commands_name_is_listed_and_a_built_in_is_not() =>
+        Assert.Equal(["iam-logs", "iam-check-data"], ClaudeSkills.Own(Repo.All, Home.All));
+
+    [Fact]
+    public void A_title_may_run_the_folders_own_command_but_never_a_built_in()
+    {
+        Assert.Equal(["humanizer", "iam-logs", "iam-check-data"], Repo.Known(Home));
+        Assert.Equal(["humanizer", "iam-logs"], Repo.Known(CSharpFunctionalExtensions.Maybe<ClaudeInit>.None));
+    }
+
+    [Fact]
+    public void An_init_line_without_commands_still_gives_its_skills() =>
+        Assert.Empty(ClaudeSkills.FromInit("""{"type":"system","subtype":"init","skills":["humanizer"]}""").Value.Commands);
 
     [Fact]
     public void With_one_folder_nothing_is_named() =>

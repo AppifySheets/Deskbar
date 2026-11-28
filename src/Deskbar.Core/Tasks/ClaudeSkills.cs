@@ -16,8 +16,18 @@ namespace Deskbar.Core.Tasks;
 // and Claude Code's bundled ones. Measured 2026-11-26 on claude 2.1.332: 108 skills in E:\repos\TaskSpaces with
 // refresh-pr among them, the same 108 less refresh-pr plus update-site in deskbar-site, the line about 3 s after the
 // start. Pointed at a closed port (ANTHROPIC_BASE_URL=http://127.0.0.1:9) the same line still came with all 108, so it
-// is printed before any model call: the probe reads it, ends the process, and costs nothing on the account. The same
-// line's "slash_commands" also lists built-in commands (/compact, /clear), which are not what this list is for.
+// is printed before any model call: the probe reads it, ends the process, and costs nothing on the account.
+//
+// "skills" IS NOT EVERY SKILL, SO "slash_commands" IS READ TOO (task b3fb4e8c, "/skills don't show latest skills, like
+// /iam-check-data"). Measured 2026-11-28 on claude 2.1.332 in E:\repos\personalized-health: its .claude/skills holds 11
+// iam-* skills, and "slash_commands" names all 11, but "skills" names only 7. iam-check-data, iam-health-record,
+// iam-parse-docs and iam-text-layer-to-lab-values are missing from it, and so is the user's own ~/.claude/skills/deskbar.
+// Not the description budget (SLASH_COMMAND_TOOL_CHAR_BUDGET=200000 changed nothing) and not the file size (a 38 KB
+// skill is in, a 24 KB one out); Claude Code does not say why. "slash_commands" is the list of what typing "/" can run
+// there, so it is the complete one; the price is that it also carries the built-in commands (/compact, /clear, /model).
+// Those are in every folder, the home folder too, so ClaudeSkills.Own takes them away with the user's own skills, and
+// ClaudeInit.Known keeps them out of the "does a title run a skill" check. Every name in "skills" is also in
+// "slash_commands" (same measurement), so the two together lose nothing either list had.
 //
 // WHAT A SKILL TITLE STARTS: a message that begins "/<skill> <words>" runs the skill even with more lines under it, and
 // everything after the name becomes the skill's arguments (measured the same day with /humanizer, the transcript reads
@@ -46,10 +56,11 @@ public static class ClaudeSkills
     public const string NoModel = "http://127.0.0.1:9";
 
     /// <summary>
-    /// The skills named by one line of the probe's output, when it is the init line; none for any other line, or a
-    /// line that is not JSON.
+    /// The skills and commands named by one line of the probe's output, when it is the init line; none for any other
+    /// line, or a line that is not JSON. The init line needs its "skills" array; "slash_commands" is read when present
+    /// and taken as empty when not, so a Claude Code that stops printing it lists what it did before this change.
     /// </summary>
-    public static Maybe<IReadOnlyList<string>> FromInit(string line)
+    public static Maybe<ClaudeInit> FromInit(string line)
     {
         try
         {
@@ -59,19 +70,26 @@ public static class ClaudeSkills
                    && root.TryGetProperty("type", out var type) && type.ValueKind == JsonValueKind.String && type.GetString() == "system"
                    && root.TryGetProperty("subtype", out var subtype) && subtype.ValueKind == JsonValueKind.String && subtype.GetString() == "init"
                    && root.TryGetProperty("skills", out var skills) && skills.ValueKind == JsonValueKind.Array
-                ? Maybe.From<IReadOnlyList<string>>(skills.EnumerateArray()
-                    .Where(s => s.ValueKind == JsonValueKind.String)
-                    .Select(s => s.GetString()!)
-                    .Where(IsSkillName)
-                    .Distinct(StringComparer.Ordinal)
-                    .ToList())
-                : Maybe<IReadOnlyList<string>>.None;
+                ? new ClaudeInit(Names(skills),
+                    root.TryGetProperty("slash_commands", out var commands) && commands.ValueKind == JsonValueKind.Array
+                        ? Names(commands)
+                        : [])
+                : Maybe<ClaudeInit>.None;
         }
         catch (JsonException)
         {
-            return Maybe<IReadOnlyList<string>>.None;
+            return Maybe<ClaudeInit>.None;
         }
     }
+
+    // The strings of one of the init line's arrays that can follow a "/", each once, in Claude Code's order.
+    static IReadOnlyList<string> Names(JsonElement array) =>
+        array.EnumerateArray()
+            .Where(s => s.ValueKind == JsonValueKind.String)
+            .Select(s => s.GetString()!)
+            .Where(IsSkillName)
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
 
     // A skill's name as Claude Code accepts it after "/": letters, digits, '-', '_', '.', and ':' between a plugin's name
     // and its skill's. Anything else (a space, a second '/') ends the name, which is also what keeps a path such as
@@ -152,6 +170,28 @@ public static class ClaudeSkills
     /// <summary>The skill a task's title starts with ("/refresh-pr 245" names refresh-pr); none for any other title.</summary>
     public static Maybe<string> SkillOf(string title) =>
         Leading.Match(title) is { Success: true } m ? m.Groups[1].Value : Maybe<string>.None;
+}
+
+/// <summary>
+/// What Claude Code's init line says one folder has: <paramref name="Skills"/> is its "skills" array, which leaves some
+/// skills out, and <paramref name="Commands"/> its "slash_commands", which has every skill and the built-in commands
+/// besides (the header of <see cref="ClaudeSkills"/> has the measurement).
+/// </summary>
+public sealed record ClaudeInit(IReadOnlyList<string> Skills, IReadOnlyList<string> Commands)
+{
+    /// <summary>Everything typing "/" can run in the folder: both lists, each name once. Built-ins included.</summary>
+    public IReadOnlyList<string> All => Skills.Union(Commands, StringComparer.Ordinal).ToList();
+
+    /// <summary>
+    /// The names a task title may run as a skill here (ClaudeSessions.KnowsSkill, SkillFolders): the "skills" array,
+    /// plus the commands the home folder does not have, which are the folder's own skills the array left out. A built-in
+    /// such as /logout is in every folder's commands and never in "skills", so it is never one of these. Without the
+    /// home folder's answer, only the "skills" array counts, as before the commands were read.
+    /// </summary>
+    public IReadOnlyList<string> Known(Maybe<ClaudeInit> home) =>
+        home.Match(
+            atHome => Skills.Union(Commands.Except(atHome.Commands, StringComparer.Ordinal), StringComparer.Ordinal).ToList(),
+            () => Skills);
 }
 
 /// <summary>

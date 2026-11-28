@@ -8,9 +8,10 @@ namespace Deskbar.Windows.Claude;
 
 // ASKS CLAUDE CODE WHICH SKILLS A FOLDER HAS (task 3a872301; ClaudeSkills in Core has the design and the measurements).
 // Runs `claude -p` in the folder with ClaudeSkills.ProbeArguments, reads its output a line at a time until the init
-// line, takes the "skills" array from it, and ends the process and anything it started. That line comes about 3 s
-// after the start and before any model call, and the run points the API at a closed port (ClaudeSkills.NoModel) as
-// well, so a probe that was not ended in time fails at its first request instead of spending anything.
+// line, takes its "skills" and "slash_commands" arrays (ClaudeInit; task b3fb4e8c says why both), and ends the process
+// and anything it started. That line comes about 3 s after the start and before any model call, and the run points the
+// API at a closed port (ClaudeSkills.NoModel) as well, so a probe that was not ended in time fails at its first request
+// instead of spending anything.
 //
 // Not ClaudeCli.Run: that waits for the program to exit and hands back all of its output, and this one must stop
 // reading, and stop the program, at one line. The environment is cleaned the same way (ClaudeCli.StrippedVariables
@@ -22,17 +23,17 @@ namespace Deskbar.Windows.Claude;
 public static class ClaudeSkillProbe
 {
     /// <summary>
-    /// The skills Claude Code has in <paramref name="folder"/>, or why they could not be read (claude missing, the
+    /// The skills and commands Claude Code has in <paramref name="folder"/>, or why they could not be read (claude missing, the
     /// folder gone, no init line within <paramref name="timeout"/>). Never throws for those.
     /// </summary>
-    public static Task<Result<IReadOnlyList<string>>> Skills(string folder, TimeSpan timeout) =>
+    public static Task<Result<ClaudeInit>> Skills(string folder, TimeSpan timeout) =>
         !Directory.Exists(folder)
-            ? Task.FromResult(Result.Failure<IReadOnlyList<string>>($"The folder {folder} no longer exists."))
+            ? Task.FromResult(Result.Failure<ClaudeInit>($"The folder {folder} no longer exists."))
             : ClaudeLocator.Find() is { HasValue: true } program
                 ? Run(program.Value, folder, timeout)
-                : Task.FromResult(Result.Failure<IReadOnlyList<string>>(ClaudeLocator.NotFound));
+                : Task.FromResult(Result.Failure<ClaudeInit>(ClaudeLocator.NotFound));
 
-    static async Task<Result<IReadOnlyList<string>>> Run(string program, string folder, TimeSpan timeout)
+    static async Task<Result<ClaudeInit>> Run(string program, string folder, TimeSpan timeout)
     {
         var info = new ProcessStartInfo(program)
         {
@@ -53,7 +54,7 @@ public static class ClaudeSkillProbe
         try
         {
             using var process = Process.Start(info);
-            if (process is null) return Result.Failure<IReadOnlyList<string>>("Could not start claude.");
+            if (process is null) return Result.Failure<ClaudeInit>("Could not start claude.");
             process.StandardInput.Close();
             // Stderr is drained so a full pipe cannot stall the program; what it says is kept for a failure.
             var errors = process.StandardError.ReadToEndAsync();
@@ -67,7 +68,7 @@ public static class ClaudeSkillProbe
             }
             catch (OperationCanceledException)
             {
-                return Result.Failure<IReadOnlyList<string>>($"Claude Code did not list its skills within {timeout.TotalSeconds:0} s.");
+                return Result.Failure<ClaudeInit>($"Claude Code did not list its skills within {timeout.TotalSeconds:0} s.");
             }
             finally
             {
@@ -76,16 +77,16 @@ public static class ClaudeSkillProbe
         }
         catch (Exception e) when (e is System.ComponentModel.Win32Exception or InvalidOperationException or IOException)
         {
-            return Result.Failure<IReadOnlyList<string>>($"Could not run claude: {e.Message}");
+            return Result.Failure<ClaudeInit>($"Could not run claude: {e.Message}");
         }
     }
 
     // Reads lines until one is the init line (its skills) or the output ends (none).
-    static async Task<Maybe<IReadOnlyList<string>>> InitLine(StreamReader output, CancellationToken token)
+    static async Task<Maybe<ClaudeInit>> InitLine(StreamReader output, CancellationToken token)
     {
         while (await output.ReadLineAsync(token) is { } line)
-            if (ClaudeSkills.FromInit(line) is { HasValue: true } skills) return skills;
-        return Maybe<IReadOnlyList<string>>.None;
+            if (ClaudeSkills.FromInit(line) is { HasValue: true } init) return init;
+        return Maybe<ClaudeInit>.None;
     }
 
     // The probe and whatever it started (its hooks' shells) are ended once the line is read, or on a failure. Killing a
