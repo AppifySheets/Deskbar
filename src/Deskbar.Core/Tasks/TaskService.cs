@@ -329,11 +329,36 @@ public sealed class TaskService(ITaskStore store, Func<DateTimeOffset> now, Func
             && failing.SetEquals(unreachable)
             && cannotAsk == blind;
         if (same) return;
+        // When this build was first heard of (task fa22a198, RunningQuestions): the running-change watch starts with the
+        // app and the build is fixed for the life of the process, so this is when Deskbar started, give or take a moment.
+        // A question asked before it can have been about installing this very build.
+        if (!runningBuild.HasValue || runningBuild.Value != build) runningSince = now();
         runningBuild = build;
         arrivals = facts.ToImmutableDictionary();
         unreachable = failing;
         blind = cannotAsk;
         changed.OnNext(Unit.Default);
+        // The answer that fills a tick can also settle an "update Deskbar" question (task fa22a198): a change that now runs
+        // in this Deskbar was the thing the user was asked to install.
+        RunningQuestions.Settlements(Board, build, arrivals, runningSince).ToList().ForEach(SettleRunning);
+    }
+
+    // When the running build was first heard of (Arrived); a question asked before it may be settled by it.
+    DateTimeOffset runningSince;
+
+    /// <summary>
+    /// Deskbar settles a question the running build answers (RunningQuestions, task fa22a198): the thread says which
+    /// version carries which pull requests, and the session is woken through the watch's nudges to report the deploy and
+    /// finish. Saves and pulses only when the task still waited on that very question (TaskBoard.SettleQuestion).
+    /// </summary>
+    void SettleRunning(RunningSettlement settlement)
+    {
+        var settled = Board.SettleQuestion(settlement.TaskId, settlement.Question, settlement.Note, now(), makeId());
+        if (ReferenceEquals(settled, Board)) return;
+        trace?.Invoke($"running changes: settled the question of task {settlement.TaskId}: {settlement.Note}");
+        Commit(settled);
+        // After the commit, as SettleQuestion does: the session reads a board that already shows the question settled.
+        watchNudges.OnNext(new WatchNudge(settlement.TaskId, settlement.Wake));
     }
 
     /// <summary>Makes a task a subtask of another, or (none) a plain task again (TaskBoard.SetParent).</summary>
