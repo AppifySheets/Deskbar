@@ -311,6 +311,7 @@ public sealed class ClaudePermissionScriptTests : IDisposable
     [InlineData("allow")]
     [InlineData("deny")]
     [InlineData("edits")]
+    [InlineData("auto")]
     [InlineData("pass")]
     public void A_verdict_word_on_a_dialog_slot_prints_nothing(string word)
     {

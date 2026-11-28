@@ -188,7 +188,10 @@ public sealed class PermissionDesk(string folder, Func<DateTimeOffset> now)
                 request.IsDialog
                     ? Result.Failure<string>("This question takes its answers, not Allow or Deny.")
                     : index >= 0 && index < request.Suggestions.Count
-                        ? PermissionAnswer.SuggestionLine(request.Suggestions[index])
+                        // Re-serialising the entry can throw on text JSON allows but .NET will not write (a lone
+                        // surrogate escape, say), which must not reach the click handler as an exception.
+                        ? Result.Try(() => PermissionAnswer.SuggestionLine(request.Suggestions[index]),
+                            _ => "This choice could not be handed to Claude Code. Answer it in the terminal.")
                         : Result.Failure<string>("This choice is not one Claude Code offered. Answer it in the terminal."),
             PermissionAnswer.FetchWord);
 
@@ -219,15 +222,15 @@ public sealed class PermissionDesk(string folder, Func<DateTimeOffset> now)
     public bool AnsweredOnCardSince(string sessionId, DateTimeOffset since) =>
         answeredOnCard.TryGetValue(sessionId, out var at) && at >= since;
 
-    /// <summary>How long a dialog's answer line waits to be fetched: the script reads the answer file within a tick or two.</summary>
+    /// <summary>How long a fetched answer line waits to be fetched: the script reads the answer file within a tick or two.</summary>
     public static readonly TimeSpan FetchWindow = TimeSpan.FromMinutes(1);
 
-    // The dialogs' answer lines waiting for their scripts, by slot, with the code a fetch must show (AnswerDialog,
-    // AnswerPlan, Fetch).
+    // The answer lines waiting for their scripts, by slot, with the code a fetch must show: a dialog's or a plan's
+    // (AnswerDialog, AnswerPlan) and a picked suggestion's (AnswerSuggestion, task bd55bd54). Fetch hands them over.
     readonly Dictionary<string, (string Code, string Line, DateTimeOffset Until)> handedLines = [];
 
     /// <summary>
-    /// A dialog's answer line, handed ONCE to the script of <paramref name="slot"/> that shows its code
+    /// An answer line (a dialog's, a plan's or a picked suggestion's), handed ONCE to the script of <paramref name="slot"/> that shows its code
     /// (`claude-permission --fetch`, RemoteControl.Permission). Refused for a wrong code, a slot with no line waiting, and
     /// a line past <see cref="FetchWindow"/>; a line handed or expired is gone.
     /// </summary>
