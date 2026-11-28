@@ -128,8 +128,10 @@ public partial class TasksBoardTests
         Assert.False(t.Controller.ManagerPageInFront);
     });
 
+    // Task dcfc8287: Esc in the docked manager closes it as its × does, the space given back and the state saved closed.
+    // The seam says the box holds no words, as when the panel has just opened with the keyboard in its empty box.
     [Fact]
-    public void Esc_leaves_the_docked_panel_open() => StaThread.Run(() =>
+    public void Esc_closes_the_docked_panel_and_saves_it_closed() => StaThread.Run(() =>
     {
         var fake = new ManagerFake();
         using var t = BuildWithManager(fake);
@@ -137,13 +139,56 @@ public partial class TasksBoardTests
         t.Controller.ShowManager();
         d.Window.EscapeIgnoresThreadWhile = () => false;
 
+        Assert.True(d.Window.Press(Key.Escape, ModifierKeys.None));
+
+        Assert.False(t.Controller.ManagerDockOpen);
+        Assert.False(d.Window.IsOpen);
+        Assert.False(t.Harness.Manager.State.ManagerDockOpen);
+        Assert.False(t.Controller.ManagerPageInFront);
+        // Only the manager's panel: the tasks panel was not opened or touched by the key.
+        Assert.False(t.Controller.IsOpen);
+    });
+
+    // An Esc close drops nothing: words in the box (the keyboard elsewhere on the page) come back on the next open.
+    [Fact]
+    public void A_draft_comes_back_after_Esc_closed_the_docked_panel() => StaThread.Run(() =>
+    {
+        var fake = new ManagerFake();
+        using var t = BuildWithManager(fake);
+        using var d = DockManager(t);
+        t.Controller.ShowManager();
+        d.Window.ManagerBox!.Text = "not sent yet";
+        d.Window.EscapeIgnoresThreadWhile = () => false; // the keyboard is not in the box
+
+        Assert.True(d.Window.Press(Key.Escape, ModifierKeys.None));
+        Assert.False(t.Controller.ManagerDockOpen);
+
+        t.Controller.ShowManager();
+
+        Assert.True(t.Controller.ManagerDockOpen);
+        Assert.Equal("not sent yet", d.Window.ManagerBox!.Text);
+        Assert.Empty(fake.Sent);
+    });
+
+    // While the box has the keyboard and words in it, Esc is the box's (as on a task's page): the panel stays and the words
+    // with it, so a stray Esc mid-message does not hide what was being written. Not taken, so nothing redraws either.
+    [Fact]
+    public void Esc_with_words_in_the_box_leaves_the_docked_panel_open() => StaThread.Run(() =>
+    {
+        var fake = new ManagerFake();
+        using var t = BuildWithManager(fake);
+        using var d = DockManager(t);
+        t.Controller.ShowManager();
+        d.Window.ManagerBox!.Text = "half a thought";
+        d.Window.EscapeIgnoresThreadWhile = () => true; // the box has the keyboard, with text in it
+
         var rebuilds = d.Window.Rebuilds;
 
-        // Not taken at all (review finding): a back would redraw, and the redraw would put the page straight back.
         Assert.False(d.Window.Press(Key.Escape, ModifierKeys.None));
         Assert.Equal(rebuilds, d.Window.Rebuilds);
         Assert.True(t.Controller.ManagerDockOpen);
         Assert.True(d.Window.ManagerPageShown);
+        Assert.Equal("half a thought", d.Window.ManagerBox!.Text);
     });
 
     [Fact]
