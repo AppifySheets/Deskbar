@@ -373,6 +373,10 @@ written for the floating window and now describe the panel; 64a to 64n cover wha
     task (its title and its status line): the task stays; a word that matches nothing hides it. Esc clears the
     box. Type again: a × shows at the box's right end (none while it is empty); click it: the box is empty, every
     task is back, the × is gone and the keyboard is still in the box. Close and reopen the panel: the search is empty.
+64t. Chip beside the buttons (task 9966ab91). In the Inbox, point at a line with a long title: the buttons come out at
+    its right end and the workspace chip moves left to sit just before them, whole; the title ends in "…" sooner and
+    the line keeps its height. Click the chip while the buttons show: the move menu opens. Move the pointer off: the
+    chip goes back to the right end. Select a line: its buttons stay out and its chip stays beside them.
 64s. Search always showing (task b14e4203). In the Inbox, the search box sits under the header with nothing clicked,
     and the header has no magnifier. Click into the box and type: the lines filter. Esc: the box empties and stays.
     Open a task's page: the empty box is gone; press Ctrl+F there and it comes back with the keyboard. Back: the list
