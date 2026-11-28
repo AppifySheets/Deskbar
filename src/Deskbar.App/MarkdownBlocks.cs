@@ -169,10 +169,12 @@ internal static class MarkdownBlocks
         Inlines(text ?? "", new Reading(open ?? Open, null)).ToArray();
 
     // What a reading hands down to every construct: where a link's click goes, and where a copy goes. Copy is null
-    // where nothing copies: in a TextBlock (InlinesOf) and inside a link's text (see the header).
-    sealed record Reading(Action<Uri> Open, Copier? Copy)
+    // where nothing copies: in a TextBlock (InlinesOf) and inside a link's text (see the header). InLink is set while a
+    // link's own text is read: a bare address there stays text, because WPF throws when a Hyperlink is placed anywhere
+    // inside another one (task 7f151ba3, [https://...](https://...) closed the app).
+    sealed record Reading(Action<Uri> Open, Copier? Copy, bool InLink = false)
     {
-        public Reading WithoutCopy => this with { Copy = null };
+        public Reading InsideLink => this with { Copy = null, InLink = true };
     }
 
     // How a copyable part copies: Put places the text and says whether it got there (false: the clipboard was busy), and
@@ -410,11 +412,13 @@ internal static class MarkdownBlocks
             return new Bold().With(Inlines(match.Groups["boldText"].Value, open));
         if (match.Groups["italic"].Success)
             return new Italic().With(Inlines(match.Groups["italicText"].Value, open));
+        // Inside a link's text no second link is made (see Reading): a bracketed link there cannot match, since its text
+        // holds no ], but a bare address can, and it stays the text it is, underlined by the link around it.
         if (match.Groups["link"].Success)
-            return Address(match.Groups["linkUrl"].Value) is { } uri
-                ? Link(Inlines(match.Groups["linkText"].Value, open.WithoutCopy), uri, open.Open)
+            return Address(match.Groups["linkUrl"].Value) is { } uri && !open.InLink
+                ? Link(Inlines(match.Groups["linkText"].Value, open.InsideLink), uri, open.Open)
                 : new Run(match.Value);
-        return Address(match.Value) is { } bare ? Link([new Run(match.Value)], bare, open.Open) : new Run(match.Value);
+        return Address(match.Value) is { } bare && !open.InLink ? Link([new Run(match.Value)], bare, open.Open) : new Run(match.Value);
     }
 
     // A quoted phrase: its marks as plain text either side of its words, the words copyable on their own. Where nothing

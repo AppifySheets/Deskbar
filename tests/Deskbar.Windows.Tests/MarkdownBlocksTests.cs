@@ -108,6 +108,25 @@ public class MarkdownBlocksTests
         Assert.Equal([new Uri("https://github.com/AppifySheets/Deskbar/pull/398")], opened);
     });
 
+    // Task 7f151ba3: a link whose text is itself an address, [https://...](https://...), read its text again, found a
+    // bare address there and put a Hyperlink inside the Hyperlink, which WPF refuses with an exception that closed the
+    // app. A link's text is one link; an address in it, bold or not, is text. The same holds in a TextBlock's inlines.
+    [Theory]
+    [InlineData("[https://github.com/AppifySheets/Deskbar/pull/700](https://github.com/AppifySheets/Deskbar/pull/700)")]
+    [InlineData("[**https://github.com/AppifySheets/Deskbar/pull/700**](https://github.com/AppifySheets/Deskbar/pull/700)")]
+    [InlineData("[the page file:///C:/Projects/index.html](file:///C:/Projects/index.html)")]
+    public void An_address_in_a_link_s_text_is_not_a_second_link(string markdown) => StaThread.Run(() =>
+    {
+        var opened = new List<Uri>();
+        var link = Assert.Single(InlinesOf(MarkdownBlocks.Render(markdown, opened.Add)).OfType<Hyperlink>());
+        Assert.DoesNotContain(link.Inlines.SelectMany(Deep), inline => inline is Hyperlink);
+        link.RaiseEvent(new RoutedEventArgs(Hyperlink.ClickEvent));
+        Assert.Single(opened);
+
+        var inlines = MarkdownBlocks.InlinesOf(markdown).SelectMany(Deep).ToArray();
+        Assert.Single(inlines.OfType<Hyperlink>());
+    });
+
     [Fact]
     public void A_bare_web_address_is_a_link() => StaThread.Run(() =>
     {
