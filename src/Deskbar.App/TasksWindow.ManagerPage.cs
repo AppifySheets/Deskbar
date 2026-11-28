@@ -114,6 +114,8 @@ public partial class TasksWindow
             StopTranscript();
         }
         managerPage = true;
+        // As a task's page opened from the list (OpenInboxPage): its empty search row starts hidden.
+        inboxSearchOpen = false;
         inboxPage = null;
         inboxPageStack.Clear();
         // Drawn now only while the Inbox already shows: a draw of a List view left over from before the board's switch would

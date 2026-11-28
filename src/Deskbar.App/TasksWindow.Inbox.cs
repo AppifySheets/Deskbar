@@ -13,8 +13,8 @@ namespace Deskbar.App;
 //
 //   THE FRAME   while the Inbox shows, the panel takes the mockup's colours (InboxLook), the toolbar's title line and chip
 //               rows give way to the Inbox's header (InboxHeader), and the view switch moves to a footer (InboxFooter):
-//                 1. "Tasks", then the search button (today's search box, under the header, Ctrl+F too), "+ New" (today's
-//                    add box, under the header) and the panel's ×;
+//                 1. "Tasks", then "+ New" (today's add box, under the header) and the panel's ×; the search box (today's,
+//                    Ctrl+F too) sits under the header, always on show over the lines (task b14e4203, PaintSearchRow);
 //                 2. the tabs, Needs you, Claude and Notes, then All (the three together), each with its mark and its
 //                    count;
 //                 3. "This workspace | Everywhere" (today's Current workspace checkbox, same memory), and Filter, which
@@ -55,8 +55,9 @@ public partial class TasksWindow
     /// <summary>For the tests: whether the search row shows under the Inbox's header.</summary>
     internal bool InboxSearchShown => SearchRow.Visibility == Visibility.Visible;
 
-    // The tab on show, the search row asked for by its button, and the Filter sheet unfolded: the window's own state, part of
-    // the redraw signature (InboxSignature), kept while the panel is open.
+    // The tab on show, the search row asked for by Ctrl+F on a page (on the list it always shows, PaintSearchRow), and the
+    // Filter sheet unfolded: the window's own state, part of the redraw signature (InboxSignature), kept while the panel
+    // is open.
     InboxTab inboxTab = InboxTab.NeedsYou;
     bool inboxSearchOpen;
     bool inboxFilterOpen;
@@ -125,14 +126,7 @@ public partial class TasksWindow
             inboxSheet.Child = null;
             filtersHome.Children.Add(Filters);
         }
-        // The toolbar stays in place, focusable (FocusBoard puts the keyboard there), and in the Inbox holds only the
-        // search row, shown while asked for or while it has text. With the row hidden it takes no room at all.
-        var searching = on && (inboxSearchOpen || SearchBox.Text.Length > 0);
-        if (on) SearchRow.Visibility = searching ? Visibility.Visible : Visibility.Collapsed;
-        SearchRow.Margin = on ? new Thickness(0) : new Thickness(0, 6, 0, 0);
-        Toolbar.Padding = !on ? new Thickness(10, 8, 10, 8) : searching ? new Thickness(12, 8, 12, 8) : new Thickness(0);
-        Toolbar.BorderThickness = !on || searching ? new Thickness(0, 0, 0, 1) : new Thickness(0);
-        Toolbar.BorderBrush = on ? InboxLook.Hairline : ThreadEdge;
+        PaintSearchRow(on);
         if (!on)
         {
             InboxHeader.Child = null;
@@ -143,6 +137,30 @@ public partial class TasksWindow
             inboxRevealPending = null;
             LeaveInboxPage();
         }
+    }
+
+    // THE SEARCH ROW IS ALWAYS THERE IN THE INBOX'S LIST (task b14e4203, the owner: "keep the search field always
+    // showing"). It used to hide behind a search button in the header and come out on a click or Ctrl+F, so every search
+    // took a click before the typing; now it sits under the header whenever the list does, and the button is gone.
+    // The toolbar it lives in stays in place, focusable (FocusBoard puts the keyboard there), and in the Inbox holds only
+    // this row. A task's page and the manager's page hide the row while it is empty, as they hide the header above it:
+    // a page has its own top row (Back, the title), and an empty box over it would only take room. With text the row
+    // stays over a page too, so the search a page was opened from is still in sight, and Ctrl+F on a page brings it
+    // back (inboxSearchOpen, ShowInboxSearch). Called by PaintInboxChrome, and again at the end of DrawInbox, because
+    // the page's draw can close the page (its thread folded elsewhere) after the chrome was painted for it.
+    // A task's page or the manager's page is over the list.
+    bool OnInboxPage => inboxPage is not null || managerPage;
+
+    void PaintSearchRow(bool on)
+    {
+        var onPage = OnInboxPage;
+        var searching = on && (!onPage || inboxSearchOpen || SearchBox.Text.Length > 0);
+        if (on) SearchRow.Visibility = searching ? Visibility.Visible : Visibility.Collapsed;
+        SearchRow.Margin = on ? new Thickness(0) : new Thickness(0, 6, 0, 0);
+        // With the row hidden (on a page) the toolbar takes no room at all: no padding, no hairline.
+        Toolbar.Padding = !on ? new Thickness(10, 8, 10, 8) : searching ? new Thickness(12, 8, 12, 8) : new Thickness(0);
+        Toolbar.BorderThickness = !on || searching ? new Thickness(0, 0, 0, 1) : new Thickness(0);
+        Toolbar.BorderBrush = on ? InboxLook.Hairline : ThreadEdge;
     }
 
     // Everything the Inbox's own state adds to what is drawn, for the redraw signature: the tab, the search row, the sheet,
@@ -200,6 +218,8 @@ public partial class TasksWindow
         // The manager's page (task 6c4c067f, TasksWindow.ManagerPage.cs) in a task page's place while it is open.
         if (managerPage) DrawManagerPage();
         else DrawInboxPage(view);
+        // The page decided above (opened, kept or closed): the search row follows it (PaintSearchRow).
+        PaintSearchRow(true);
     }
 
     static string EmptyTabText(InboxTab tab) => tab switch
@@ -225,8 +245,8 @@ public partial class TasksWindow
         add.Height = 30;
         add.Margin = new Thickness(4, 0, 4, 0);
         add.ToolTip = "Write a note";
-        var search = GlyphButton("search", "Search", ToggleInboxSearch, "Search titles, status lines, questions, an id or a PR number (Ctrl+F)");
-        new[] { close, add, search }.ToList().ForEach(b =>
+        // No search button here any more: the search row under the header is always on show (PaintSearchRow).
+        new[] { close, add }.ToList().ForEach(b =>
         {
             DockPanel.SetDock(b, Dock.Right);
             top.Children.Add(b);
@@ -365,29 +385,17 @@ public partial class TasksWindow
         RedrawInbox();
     }
 
-    // The search button: the search row under the header, and the keyboard in it; pressed again with nothing typed, the
-    // row goes away again.
-    void ToggleInboxSearch()
-    {
-        if (inboxSearchOpen && SearchBox.Text.Length == 0)
-        {
-            inboxSearchOpen = false;
-            RedrawInbox();
-            FocusBoard();
-            return;
-        }
-        FocusSearch();
-    }
-
-    // Ctrl+F and the search button (FocusSearch): in the Inbox the row is hidden until asked for, so it is shown first, or
-    // the keyboard would go to a box nobody can see.
+    // Ctrl+F (FocusSearch): on a task's or the manager's page the row is hidden while empty (PaintSearchRow), so it is
+    // shown first, or the keyboard would go to a box nobody can see. On the Inbox's list it is already there.
     void ShowInboxSearch()
     {
-        if (latest?.Inbox is null || inboxSearchOpen) return;
+        // Asked for on a page even while the box has text, so an Esc that empties it there leaves the row in sight.
+        if (latest?.Inbox is null || inboxSearchOpen || !OnInboxPage) return;
         inboxSearchOpen = true;
-        // Drawn again, so the signature knows the row is asked for; painted at once too, in case a redraw is held.
+        // Drawn again, so the signature knows the row is asked for; the row painted at once too, in case a redraw is
+        // held. Only the row: PaintInboxChrome would also bring back the header and foot the page has just hidden.
         RedrawInbox();
-        if (latest is not null) PaintInboxChrome(latest);
+        PaintSearchRow(true);
         UpdateLayout();
     }
 

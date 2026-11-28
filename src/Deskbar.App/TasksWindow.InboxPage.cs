@@ -82,6 +82,9 @@ public partial class TasksWindow
         inboxListOffset = Scroller.VerticalOffset;
         inboxPageStack.Clear();
         inboxPage = id;
+        // A page opened from the list starts with its empty search row hidden (PaintSearchRow): a Ctrl+F on an earlier
+        // page is spent. Cleared here, not when a page is left, because back on the list the row shows either way.
+        inboxSearchOpen = false;
         if (Actions?.OpenPage is { } open) open(id);
         else Actions?.Pick(id);
     }

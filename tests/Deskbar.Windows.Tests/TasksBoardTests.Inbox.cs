@@ -1005,25 +1005,54 @@ public partial class TasksBoardTests
         Assert.Equal(0, Turning(LineOf(t.Window, k.Idle)));
     });
 
-    // Ctrl+F and the search button show the search row under the Inbox's header and put the keyboard in it.
+    // Task b14e4203: the search row is always on show under the Inbox's header, with no search button to bring it out,
+    // and Ctrl+F puts the keyboard in it.
     [Fact]
-    public void Ctrl_f_and_the_search_button_show_and_focus_the_search_box() => StaThread.Run(() =>
+    public void The_search_row_always_shows_and_ctrl_f_focuses_it() => StaThread.Run(() =>
     {
         using var t = Build();
         InboxTasks(t);
         t.Controller.Show();
         ChooseInbox(t);
-        Assert.False(t.Window.InboxSearchShown);
+        Assert.True(t.Window.InboxSearchShown);
+        Assert.Empty(Inside(t.Window.InboxHeaderShown!).OfType<Button>().Where(b => AutomationProperties.GetName(b) == "Search"));
 
         Assert.True(t.Window.Press(Key.F, ModifierKeys.Control));
         Assert.True(t.Window.InboxSearchShown);
         Assert.True(t.Window.SearchBox.IsKeyboardFocused);
 
-        Click(ButtonNamed(t.Window.InboxHeaderShown!, "Search"));
+        // Esc empties it and hands the keyboard back, and the row stays.
+        Assert.True(t.Window.Press(Key.Escape, ModifierKeys.None));
+        Assert.False(t.Window.SearchBox.IsKeyboardFocused);
+        Assert.True(t.Window.InboxSearchShown);
+    });
+
+    // Task b14e4203: a task's page hides the empty search row, as it hides the header; Ctrl+F there brings it back, and
+    // the list shows it again after Back.
+    [Fact]
+    public void A_page_hides_the_empty_search_row_until_ctrl_f() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var k = InboxTasks(t);
+        t.Controller.Show();
+        ChooseInbox(t);
+
+        Click(LineOf(t.Window, k.Asking));
+        Assert.Equal(k.Asking, t.Window.InboxPageShown);
         Assert.False(t.Window.InboxSearchShown);
-        Click(ButtonNamed(t.Window.InboxHeaderShown!, "Search"));
+
+        Assert.True(t.Window.Press(Key.F, ModifierKeys.Control));
         Assert.True(t.Window.InboxSearchShown);
         Assert.True(t.Window.SearchBox.IsKeyboardFocused);
+        // Only the row comes back: the Inbox's header and foot stay hidden behind the page (review finding).
+        Assert.Equal(Visibility.Collapsed, t.Window.InboxHeader.Visibility);
+        Assert.False(t.Window.InboxFooterOnShow);
+
+        // Esc ends the search, a second Esc goes back to the list, where the row shows.
+        Assert.True(t.Window.Press(Key.Escape, ModifierKeys.None));
+        Assert.True(t.Window.Press(Key.Escape, ModifierKeys.None));
+        Assert.Null(t.Window.InboxPageShown);
+        Assert.True(t.Window.InboxSearchShown);
     });
 
     // A pull request's number finds its task in the Inbox, past the tabs.
