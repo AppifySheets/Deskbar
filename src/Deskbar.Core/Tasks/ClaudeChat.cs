@@ -21,7 +21,15 @@ namespace Deskbar.Core.Tasks;
 //   * ONE CONTENT BLOCK PER ASSISTANT LINE. A reply that thinks, says something and calls two tools is four lines
 //     that share `message.id`, each with a single block of type "thinking", "text" or "tool_use". So a chat item
 //     is built from lines, and two text lines of one message.id (Claude spoke, ran a tool, spoke again) stay two
-//     messages while two adjacent text lines of the SAME id are joined. Thinking blocks are not shown.
+//     messages while two adjacent text lines of the SAME id are joined.
+//   * A THINKING BLOCK IS EMPTY, OR IT IS A NARRATION. Current models write `"thinking":""` (the reasoning is not kept),
+//     except for a short line saying what Claude is about to do ("The round's 33 lines are mapped, checking precedents
+//     next"), which the terminal prints as an ordinary line ending in "· summary". Measured on 2026-11-28 over every
+//     transcript on this machine: 12,457 non-empty thinking blocks (Opus 5.5, Fable 5.1 and 5.2), 81 to about 400
+//     characters, and every one of them carried the narration kind in its signature. So a non-empty thinking block is
+//     shown as Claude's message, its own one (never joined to the text after it, as the terminal keeps them apart),
+//     and an empty one is skipped (task daf3b1b2: "some messages are missing from the chat that are present in the
+//     terminal"). The signature itself is not decoded: an undocumented format is no gate to hang a message on.
 //   * A TOOL'S OUTCOME COMES LATER, as a "user" line whose content has a tool_result block carrying `tool_use_id` and,
 //     when the tool failed, `is_error: true`. It is not a user message and never shown as one; it only marks a step
 //     done or failed. Its `toolUseResult` sibling (the raw output) is never read: it is what makes lines huge.
@@ -33,6 +41,14 @@ namespace Deskbar.Core.Tasks;
 //     block, <system-reminder> blocks, "[Image: source: ...]" notes); those are dropped from the text.
 //   * A PROMPT TYPED WHILE CLAUDE WAS BUSY has no "user" line. It is an "attachment" line of attachment.type
 //     "queued_command" with commandMode "prompt" and origin.kind "human", prompt a string or a list of text blocks.
+//   * ANOTHER SESSION'S MESSAGE (SendMessage from a second Claude session) is origin.kind "peer" and its text is wrapped
+//     in <cross-session-message from="..." from-name="<that session's title>" ...>body</cross-session-message>. It
+//     comes in one of two shapes, never both for one message (measured 2026-11-28, 81 messages): a queued_command
+//     attachment whose prompt IS the tag (the message arrived mid-turn), or an isMeta "user" line reading "Another
+//     Claude session sent a message:\n<cross-session-message ...>...</cross-session-message>" and then a note of
+//     Claude Code's own for the model. The terminal shows either as "Message from @<name>: body", so the chat shows
+//     the body as a Peer message signed with the name. Other peer lines stay hidden: a subagent's hand-back is a peer
+//     line too, but wrapped in <agent-message>, and it is Claude's own helper reporting, which the terminal folds away.
 //   * A SUBAGENT'S OWN TURNS carry `isSidechain:true`. Current versions keep them in separate agent-<id>.jsonl files,
 //     older ones wrote them into the parent's file. They are not the main chat, so they are skipped, with one
 //     exception: a transcript whose ONLY chat content is sidechain (such a subagent file read on its own) shows that.
@@ -321,6 +337,11 @@ public static class ClaudeChat
                     case "text":
                         lane.AddClaudeText(IdOf(root, lane), messageId, Str(block, "text"), isError, at);
                         break;
+                    // A narration (see the file's comment): its own message, so no message id to join it by. An empty
+                    // thinking block (the usual case) is dropped inside AddClaudeText.
+                    case "thinking" when Str(block, "thinking") is { } thought && IsNarration(thought):
+                        lane.AddClaudeText(IdOf(root, lane), null, thought, false, at);
+                        break;
                     case "tool_use" when Str(block, "name") is { Length: > 0 } name:
                         var input = block.TryGetProperty("input", out var i) ? i : default;
                         lane.AddStep(Str(block, "id") ?? IdOf(root, lane), KindOf(name), LabelOf(name, input), at, IsHousekeeping(name, input));
@@ -340,24 +361,74 @@ public static class ClaudeChat
                     if (block.ValueKind == JsonValueKind.Object && Str(block, "type") == "tool_result" && Str(block, "tool_use_id") is { } toolId)
                         lane.Finish(toolId, failed: ClaudeTranscript.IsTrue(block, "is_error"));
 
+            var origin = root.TryGetProperty("origin", out var o) ? o : default;
+            // Another session's message is written isMeta (see the file's comment), so it is taken before that rule.
+            if (IsPeer(origin))
+            {
+                AddPeerText(lane, IdOf(root, lane), content, ClaudeTranscript.TimestampOf(root));
+                return;
+            }
             if (ClaudeTranscript.IsTrue(root, "isMeta") || ClaudeTranscript.IsTrue(root, "isCompactSummary")) return;
-            if (!IsHuman(root.TryGetProperty("origin", out var origin) ? origin : default)) return;
+            if (!IsHuman(origin)) return;
             AddHumanText(lane, IdOf(root, lane), content, ClaudeTranscript.TimestampOf(root));
         }
 
-        // A prompt typed while Claude was busy (see the file's comment): the only trace of it is the queued_command.
+        // A prompt typed while Claude was busy, or another session's message that arrived mid-turn (see the file's
+        // comment): the only trace of either is the queued_command.
         static void AddQueued(Lane lane, JsonElement root)
         {
             if (!root.TryGetProperty("attachment", out var attachment) || attachment.ValueKind != JsonValueKind.Object) return;
             if (Str(attachment, "type") != "queued_command" || Str(attachment, "commandMode") != "prompt") return;
-            if (!IsHuman(attachment.TryGetProperty("origin", out var origin) ? origin : default)) return;
             if (!attachment.TryGetProperty("prompt", out var prompt)) return;
-            AddHumanText(lane, IdOf(root, lane), prompt, ClaudeTranscript.TimestampOf(root));
+            var origin = attachment.TryGetProperty("origin", out var o) ? o : default;
+            if (IsPeer(origin)) AddPeerText(lane, IdOf(root, lane), prompt, ClaudeTranscript.TimestampOf(root));
+            else if (IsHuman(origin)) AddHumanText(lane, IdOf(root, lane), prompt, ClaudeTranscript.TimestampOf(root));
         }
 
         // origin absent (older versions, and every human prompt before origin existed) or kind "human".
         static bool IsHuman(JsonElement origin) =>
             origin.ValueKind != JsonValueKind.Object || Str(origin, "kind") is null or "human";
+
+        // Another session, not a subagent of this one: every hand-back measured (2,785 of them) carried `handback` or
+        // `senderTaskId` in its origin, and no cross-session message did (863).
+        static bool IsPeer(JsonElement origin) =>
+            origin.ValueKind == JsonValueKind.Object && Str(origin, "kind") == "peer"
+            && !origin.TryGetProperty("handback", out _) && !origin.TryGetProperty("senderTaskId", out _);
+
+        // A narration's shape: one short paragraph. Real reasoning, which an older model or another Claude Code version
+        // may keep in the block, runs to paragraphs; the terminal folds that away, so the chat does too. The longest
+        // narration measured was 641 characters.
+        static bool IsNarration(string thought) =>
+            thought.Trim() is { Length: > 0 and <= 1000 } one && !one.Contains("\n\n", StringComparison.Ordinal) && !one.Contains("\r\n\r\n", StringComparison.Ordinal);
+
+        // Another session's message: the body of its <cross-session-message> tag, signed with the sender's from-name. A
+        // peer line without that tag (a subagent's <agent-message> hand-back, an older wording) is not shown.
+        static void AddPeerText(Lane lane, string id, JsonElement content, Maybe<DateTimeOffset> at)
+        {
+            var raw = content.ValueKind switch
+            {
+                JsonValueKind.String => content.GetString(),
+                JsonValueKind.Array => string.Join("\n", content.EnumerateArray()
+                    .Where(block => block.ValueKind == JsonValueKind.Object && Str(block, "type") == "text")
+                    .Select(block => Str(block, "text"))),
+                _ => null,
+            };
+            if (raw is null || CrossSession.Match(raw) is not { Success: true } match) return;
+            var body = match.Groups["body"].Value.Trim();
+            if (body.Length == 0) return;
+            var name = FromName.Match(match.Groups["attrs"].Value) is { Success: true } named ? named.Groups["name"].Value.Trim() : "";
+            lane.AddPeerText(id, name, body, at);
+        }
+
+        // The tag opens the text (after Claude Code's "Another Claude session sent a message:" lead in the user-line shape),
+        // so a tag merely quoted inside some other text is not taken for a message. It runs to its closing tag, or to the
+        // end of a cut text. Whatever Claude Code writes after the closing tag (a note to the model about trusting peers)
+        // is outside the body and so never shown.
+        static readonly Regex CrossSession = new(
+            @"\A\s*(?:Another Claude session sent a message:\s*)?<cross-session-message(?<attrs>[^>]*)>(?<body>.*?)(?:</cross-session-message>|\z)",
+            RegexOptions.Singleline | RegexOptions.Compiled);
+
+        static readonly Regex FromName = new(@"\bfrom-name=""(?<name>[^""]*)""", RegexOptions.Compiled);
 
         static void AddHumanText(Lane lane, string id, JsonElement content, Maybe<DateTimeOffset> at)
         {
@@ -416,25 +487,46 @@ public static class ClaudeChat
     {
         readonly List<Node> nodes = [];
         readonly Dictionary<string, StepState> steps = new(StringComparer.Ordinal);
+        readonly HashSet<string> ids = new(StringComparer.Ordinal);
         readonly int max = Math.Max(1, maxItems);
         int counter;
 
         public int Count => nodes.Count;
         public string NextId() => "n" + ++counter;
 
-        public void AddItem(ChatItem item) => Append(new Node { Item = item });
+        public void AddItem(ChatItem item)
+        {
+            if (Seen(item.Id)) return;
+            Append(new Node { Item = item });
+        }
+
+        // A LINE WRITTEN AGAIN. Some transcripts append an assistant line a second time, same uuid, far later in the file
+        // (measured 2026-11-28: 336 text lines and 108 narrations on this machine). It is the same message, not a new one,
+        // so an item whose id is already kept is not added again; without this the bubble showed twice and the panel got
+        // two slots for one key. Only kept items are remembered, so the set stays as small as the lane.
+        bool Seen(string id) => ids.Contains(id);
 
         public void AddUserText(string id, string text, int images, Maybe<DateTimeOffset> at)
         {
+            if (Seen(id)) return;
             // The same prompt can be written twice, as a queued_command and then as the user line it became; the
             // second copy is not a second message.
             if (nodes.Count > 0 && nodes[^1].Item is ChatMessage { Role: ChatRole.User } last && last.Text == Cut(text) && last.Images == images) return;
             Append(new Node { Item = new ChatMessage(id, ChatRole.User, Cut(text), images, false, at) });
         }
 
+        // Another session's message. Like a prompt, the same message written twice in a row is shown once (the two
+        // shapes were never seen together, but nothing in Claude Code promises that).
+        public void AddPeerText(string id, string from, string text, Maybe<DateTimeOffset> at)
+        {
+            if (Seen(id)) return;
+            if (nodes.Count > 0 && nodes[^1].Item is ChatMessage { Role: ChatRole.Peer } last && last.From == from && last.Text == Cut(text)) return;
+            Append(new Node { Item = new ChatMessage(id, ChatRole.Peer, Cut(text), 0, false, at) { From = from } });
+        }
+
         public void AddClaudeText(string id, string? messageId, string? text, bool isError, Maybe<DateTimeOffset> at)
         {
-            if (string.IsNullOrWhiteSpace(text)) return;
+            if (string.IsNullOrWhiteSpace(text) || Seen(id)) return;
             // Two adjacent text lines of one API message are one message (Claude's text in two blocks); text before and
             // after a tool use are two, because a run of steps sits between them.
             if (messageId is not null && nodes.Count > 0 && nodes[^1] is { MessageId: { } previous, Item: ChatMessage { Role: ChatRole.Claude } message } node && previous == messageId)
@@ -466,13 +558,17 @@ public static class ClaudeChat
         void Append(Node node)
         {
             nodes.Add(node);
+            if (node.Item is { } added) ids.Add(added.Id);
             // Trim in batches (when twice the cap is held) so the list is not shifted on every line; Snapshot returns
-            // only the last `max` either way. The tool ids of a trimmed run go with it.
+            // only the last `max` either way. The tool ids of a trimmed run, and a trimmed item's id, go with it.
             if (nodes.Count <= max * 2) return;
             var drop = nodes.Count - max;
             foreach (var gone in nodes.Take(drop))
+            {
+                if (gone.Item is { } item) ids.Remove(item.Id);
                 if (gone.Run is not null)
                     foreach (var step in gone.Run) steps.Remove(step.Id);
+            }
             nodes.RemoveRange(0, drop);
         }
 
@@ -509,12 +605,18 @@ public static class ClaudeChat
 /// item of one snapshot with the next and redraw only what changed: a run of steps keeps its Id while it grows.</summary>
 public abstract record ChatItem(string Id, Maybe<DateTimeOffset> At);
 
-public enum ChatRole { User, Claude }
+/// <summary>Who wrote a message: the owner, this session's Claude, or another Claude session (SendMessage across sessions).</summary>
+public enum ChatRole { User, Claude, Peer }
 
 /// <summary>A message. <see cref="Images"/> is how many pictures the owner attached (their bytes are not in the chat).
 /// <see cref="IsError"/> is Claude Code's own report of an API error (a usage limit, an overloaded server) written in
 /// Claude's place.</summary>
-public sealed record ChatMessage(string Id, ChatRole Role, string Text, int Images, bool IsError, Maybe<DateTimeOffset> At) : ChatItem(Id, At);
+public sealed record ChatMessage(string Id, ChatRole Role, string Text, int Images, bool IsError, Maybe<DateTimeOffset> At) : ChatItem(Id, At)
+{
+    /// <summary>For a <see cref="ChatRole.Peer"/> message, the sending session's name as Claude Code gave it (its title,
+    /// often cut with "…"), or empty when it gave none. Empty for the other roles.</summary>
+    public string From { get; init; } = "";
+}
 
 /// <summary>The steps Claude took between two messages, oldest first. The item's At is its first step's.</summary>
 public sealed record ChatSteps(string Id, IReadOnlyList<ChatStep> Steps, Maybe<DateTimeOffset> At) : ChatItem(Id, At);

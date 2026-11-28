@@ -210,9 +210,10 @@ internal sealed class ChatStreamPanel : StackPanel
             .ToDictionary(p => p.Key, p => p.Sign, StringComparer.Ordinal);
     }
 
-    // Two neighbouring entries are one run: both the session's messages, of one role, on the same day.
+    // Two neighbouring entries are one run: both the session's messages, of one role (and, for another session's
+    // messages, from the same session), on the same day.
     static bool Joins(StreamEntry entry, StreamEntry next) =>
-        entry.Item is ChatMessage a && next.Item is ChatMessage b && a.Role == b.Role
+        entry.Item is ChatMessage a && next.Item is ChatMessage b && a.Role == b.Role && a.From == b.From
         && entry.At.ToLocalTime().Date == next.At.ToLocalTime().Date;
 
     // Whether the drawn item and the new one say the same: a run by its steps (the list is a new object every snapshot), the
@@ -332,7 +333,15 @@ internal sealed class ChatStreamPanel : StackPanel
     {
         var mine = message.Role == ChatRole.User;
         var at = message.At.HasValue ? message.At.Value.ToLocalTime() : (DateTimeOffset?)null;
-        var view = new TaskCommentView(Guid.Empty, mine ? "you" : "Claude", !mine, at?.ToString("HH:mm") ?? "", message.Text)
+        // Another Claude session's message (task daf3b1b2, the terminal's "Message from @name"): on Claude's side, in
+        // Claude's colours, signed with that session's name so it does not read as this session's own words.
+        var author = message.Role switch
+        {
+            ChatRole.User => "you",
+            ChatRole.Peer => PeerName(message.From),
+            _ => "Claude",
+        };
+        var view = new TaskCommentView(Guid.Empty, author, !mine, at?.ToString("HH:mm") ?? "", message.Text)
         {
             Who = mine ? CommentAuthor.You : CommentAuthor.Claude,
             Time = at?.ToString("HH:mm") ?? "",
@@ -379,7 +388,22 @@ internal sealed class ChatStreamPanel : StackPanel
             parts.Children.Add(chip);
         }
         if (message.IsError) AutomationProperties.SetHelpText(parts, "Claude Code's own message about an error");
+        if (message.Role == ChatRole.Peer)
+        {
+            var whole = message.From.Length > 0 ? $"A message from another Claude session, {message.From}" : "A message from another Claude session";
+            AutomationProperties.SetHelpText(parts, whole);
+            parts.ToolTip = whole;
+        }
         return ChatThread.Message(view, parts, []);
+    }
+
+    // The name under another session's message: "from <its title>", cut so a long task title does not fill the line.
+    internal static string PeerName(string from)
+    {
+        const int max = 40;
+        var name = from.Trim();
+        return name.Length == 0 ? "another session"
+            : "from " + (name.Length <= max ? name : name[..max].TrimEnd() + "…");
     }
 
     // A break in the chat, a dim centred line like Deskbar's own events.
