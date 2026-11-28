@@ -514,10 +514,13 @@ Type a note into the box at its top and press Enter (Shift+Enter starts a new li
 the note's description). Enter first opens the workspace menu under the box, with the keyboard on
 the workspace you are on (or on the one picked by the chip under the box), so you see where the note
 will land before it does: Enter again adds it there, the arrows or the first letters of another
-workspace's name move to that one, and Esc goes back to the text without adding anything. The new note is selected and glows blue for a moment,
-so you can see where it landed; the tasks panel's own add box does the same. To hand the note to Claude
-straight away, press the play button after the flag toggles, or Ctrl+Enter, instead of Enter (Ctrl+Enter asks for the workspace the same way): the note is
-added and Claude starts on it in the background. No terminal opens and nothing moves: the keyboard goes back to where you
+workspace's name move to that one, and Esc goes back to the text without adding anything. Enter also hands the note to
+Claude: it is added and Claude starts on it in the background, in the workspace's one folder or one you pick. Where Claude
+has no folder to start in (a workspace with no repo, Claude sessions turned off, or Claude Code not installed), Enter only adds the note. To only
+add it anywhere, press Ctrl+Enter instead (it asks for the workspace the same way): the new note is selected and glows
+blue for a moment, so you can see where it landed. The play button after the flag toggles starts Claude as Enter does,
+and asks for a folder when the workspace has none; the tasks panel's own add box works the same. When Claude starts, no
+terminal opens and nothing moves: the keyboard goes back to where you
 were typing, and a small "Claude started" card shows for a few seconds in the corner of the screen, without taking focus (click it to open the session). The camera beside the flag toggles does the same with a picture of the window you were working in: the task gets the picture and the window's name, and Claude starts on it. Type `/` at the start of the box to pick one of the repo's own Claude Code
 skills for that workspace, the ones its repos keep in `.claude/skills` (the list comes from Claude Code itself), and the session starts by running it. A line on the bar has no tick box, so a long title
 gets its whole second row; click a line to open its task in the tasks panel, and close it there or

@@ -3677,32 +3677,42 @@ public partial class TasksWindow : Window
         if (key is not (Key.Enter or Key.Return) || modifiers.HasFlag(ModifierKeys.Shift)) return KeyOutcome.Ignored;
         // A held Enter repeats; only the first press counts, so it cannot also pick from the menu it opened.
         if (isRepeat) return KeyOutcome.NewLine;
-        // Ctrl+Enter is the Start Claude button's key (task 3c40dec9).
-        var startClaude = modifiers.HasFlag(ModifierKeys.Control);
+        // ENTER STARTS CLAUDE, CTRL+ENTER ONLY ADDS (task 64c9eb8f; Petre: "switch enter vs ctrl+enter"), as in the bar's
+        // add box (FloatingBar.OnTaskAddKey says why). Before it Ctrl+Enter was the Start Claude button's key (task
+        // 3c40dec9). A plain Enter starts Claude only where the App's rule lets it (EnterStartsClaudeOn, judged on the
+        // workspace the note goes to once picked); elsewhere it only adds, as Ctrl+Enter does.
+        var onlyAdd = modifiers.HasFlag(ModifierKeys.Control);
         // THE WORKSPACE ASKED AT ENTER (task 6184e8bf; Petre: "when i press enter, open a workspace selection which i
         // can select with the keyboard so that i don't accidentally create a task in the wrong workspace"). With
         // something to add, Enter opens the chip's menu with the keyboard on where the note would go now; a second
         // Enter takes it, the arrows or a name's first letters move to another, and the pick adds the note there (with
-        // Claude started when this press was Ctrl+Enter). Esc adds nothing and leaves the text. The bar's add box does
+        // Claude started when this press was a plain Enter and that workspace lets it start). Esc adds nothing and leaves the text. The bar's add box does
         // the same (FloatingBar.AskTaskTarget). An empty box is refused as before, with no menu.
         if ((AddBox.Text.Trim().Length > 0 || AddBoxImages.Count > 0) && (addChosen ?? latest?.AddTarget) is { } target)
         {
             AddPickMenu = OpenAddPlaceMenu(target, () =>
             {
-                addPickAdded = AddFromBox(startClaude);
+                addPickAdded = AddFromBox(startClaude: !onlyAdd && EnterStartsClaudeOn(addChosen ?? latest?.AddTarget));
                 if (!addPickAdded && AddBoxShown) AddBox.Focus();
             });
             return KeyOutcome.Posted;
         }
-        return AddFromBox(startClaude) ? KeyOutcome.Posted : KeyOutcome.NewLine;
+        // Nothing to add (or no target): refused as before, so nothing starts either.
+        return AddFromBox(startClaude: false) ? KeyOutcome.Posted : KeyOutcome.NewLine;
     }
+
+    // Whether a plain Enter starts Claude on a note added to `target` (task 64c9eb8f): the controller's EnterStartsClaude
+    // on its workspace, and only while it can start Claude at all. None of either (the tests, a copy without Claude
+    // sessions), Enter only adds.
+    bool EnterStartsClaudeOn(TaskPlaceChoice? target) =>
+        target is not null && Actions?.AddNoteAndStartClaude is not null && Actions.EnterStartsClaude?.Invoke(target.Workspace) == true;
 
     // Whether the last pick from Enter's menu added its note, for the tests (TypeNote).
     bool addPickAdded;
 
     // The box's note added, where the chip says with the flags the toggles say, and the box closed; whether it was added.
-    // With `startClaude` (the Start Claude button or Ctrl+Enter) the note is then handed to Claude through the
-    // controller's AddNoteAndStartClaude; with none wired, it is added as Enter adds it. A `shot` (the camera, task
+    // With `startClaude` (the Start Claude button, or Enter since task 64c9eb8f) the note is then handed to Claude through the
+    // controller's AddNoteAndStartClaude; with none wired, it is only added. A `shot` (the camera, task
     // 494d34ee) is one more picture after the pending ones, with the line naming its window under the typed lines.
     bool AddFromBox(bool startClaude, WindowShot.Shot? shot = null)
     {
@@ -3722,7 +3732,7 @@ public partial class TasksWindow : Window
     // ADD AND START CLAUDE (task 3c40dec9; Petre: "when adding a task, have a button to start immediately with claude").
     // After the flag toggles, before the workspace chip: adds the box's note as Enter does, then runs "Start Claude on
     // this" on it (TasksBoard.AddNoteAndStartClaude), which starts in the workspace's one folder or opens the folder pick
-    // list. Ctrl+Enter in the box is the same. The glyph is the line's own Start Claude button's, Segoe's "Play" (U+E768),
+    // list. Enter in the box is the same (Ctrl+Enter until task 64c9eb8f). The glyph is the line's own Start Claude button's, Segoe's "Play" (U+E768),
     // so the two read as one action. Unfocusable (Flat), so a refused add leaves the keyboard in the box. None while the
     // controller cannot start Claude, as the line's button.
     internal const string AddAndStartClaudeText = "Add and start Claude";
@@ -3736,7 +3746,7 @@ public partial class TasksWindow : Window
                 if (!AddFromBox(startClaude: true) && AddBoxShown) AddBox.Focus();
             }, new Thickness(5, 2, 5, 2));
         button.Background = Brushes.Transparent;
-        button.ToolTip = "Add and start Claude (Ctrl+Enter): adds the task and starts a Claude session on it";
+        button.ToolTip = "Add and start Claude (Enter): adds the task and starts a Claude session on it";
         button.Margin = new Thickness(4, 0, 0, 0);
         return button;
     }

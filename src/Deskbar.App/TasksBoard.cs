@@ -280,7 +280,7 @@ public sealed partial class TasksBoard : IDisposable
         Func<TaskItem, Action<string>, ContextMenu?>? pickFolder = null, Func<Guid, Result>? runNow = null,
         Func<Guid, Task<IReadOnlyList<SkillChoice>>>? taskSkills = null,
         Func<TaskSession, Maybe<string>>? transcriptOf = null, Action<Guid>? startClaudeInBackground = null,
-        Func<Result<WindowShot.Shot>>? shootWindow = null)
+        Func<Result<WindowShot.Shot>>? shootWindow = null, Func<Maybe<Guid>, bool>? enterStartsClaude = null)
     {
         this.pickFolder = pickFolder;
         this.runNow = runNow;
@@ -353,6 +353,8 @@ public sealed partial class TasksBoard : IDisposable
             AddNoteAndStartClaude = (startClaudeInBackground ?? startClaude) is { } start
                 ? (title, workspace, quadrant, describe) => AddNoteAndStartClaude(start, title, workspace, quadrant, describe)
                 : null,
+            // A plain Enter in the add box starts Claude where this says so (task 64c9eb8f); none, Enter only adds.
+            EnterStartsClaude = enterStartsClaude,
             // The add box's camera (task 494d34ee, WindowShot): the picture of the window Petre was in before Deskbar. Only
             // with a way to start Claude, since the camera adds and starts in one press. None, the camera is not shown.
             ShootWindow = (startClaudeInBackground ?? startClaude) is null ? null : shootWindow,
@@ -1273,7 +1275,7 @@ public sealed partial class TasksBoard : IDisposable
             .Bind(_ => Result.Success()));
 
     // ADD AND START CLAUDE (task 3c40dec9; Petre: "when adding a task, have a button to start immediately with claude").
-    // The add box's Start Claude button and Ctrl+Enter: the note is added exactly as Enter adds it, then handed to
+    // The add box's Start Claude button and Enter (Ctrl+Enter until task 64c9eb8f): the note is added as a plain add adds it, then handed to
     // "Start Claude on this" (`startClaude`, the App's ClaudeTaskActions.Offer), so the one folder starts at once and
     // several open the pick list, with every refusal that item has. Queued on the panel's thread rather than run inside
     // the key press or click, so the add box has closed (TasksWindow.HideAdd) before Offer asks a question or opens its
@@ -2342,10 +2344,18 @@ internal sealed partial record TasksWindowActions(
     public Func<Guid, Task<IReadOnlyList<SkillChoice>>>? TaskSkills { get; init; }
 
     /// <summary>
-    /// The add box's Start Claude button and Ctrl+Enter (task 3c40dec9): AddNote's note, then "Start Claude on this" on
-    /// it; whether the add worked. None, the button is not shown and Ctrl+Enter adds as Enter does.
+    /// The add box's Start Claude button and Enter (task 3c40dec9; Enter since task 64c9eb8f, Ctrl+Enter before):
+    /// AddNote's note, then "Start Claude on this" on it; whether the add worked. None, the button is not shown and Enter
+    /// only adds, as Ctrl+Enter does.
     /// </summary>
     public Func<string, Maybe<Guid>, Quadrant, Func<Guid, Result<string>>?, bool>? AddNoteAndStartClaude { get; init; }
+
+    /// <summary>
+    /// Whether a plain Enter in the add box starts Claude on a note for this workspace (task 64c9eb8f; Petre: "switch
+    /// enter vs ctrl+enter"): the App's ClaudeTaskActions.EnterStartsClaude, Claude sessions on and a folder for the task
+    /// to start in. Where it says no, Enter only adds, as Ctrl+Enter does. None, Enter only adds.
+    /// </summary>
+    public Func<Maybe<Guid>, bool>? EnterStartsClaude { get; init; }
 
     /// <summary>
     /// The add box's camera (task 494d34ee): the picture of the window Petre was in before he clicked Deskbar, and the

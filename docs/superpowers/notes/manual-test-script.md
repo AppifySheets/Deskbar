@@ -218,11 +218,11 @@ The task list at the bottom of the bar (spec `docs/superpowers/specs/2026-11-22-
     the text stays, and Enter files the note there.
 46a. Enter asks for the workspace (task 6184e8bf). Click in the box, type "probe", press Enter: nothing is added
     yet; the workspace menu opens under the chip with the white keyboard edge on the workspace you are on. Enter
-    again: the note lands there. Type "probe 2", Enter, then type "sp" (or the first letters of another
+    again: the note lands there (and Claude starts on it, see AS2). Type "probe 2", Enter, then type "sp" (or the first letters of another
     workspace): the keyboard edge jumps to it; Enter files the note there. Type "probe 3", Enter, then Esc: the
     menu closes, nothing is added, "probe 3" is still in the box with the caret in it. Hold Enter down for a
     second on "probe 4": only the menu opens, nothing is picked by the repeats. Ctrl+Enter on "probe 5": the
-    menu opens, Enter picks, and Claude starts on it. In the tasks panel's + Add box, Enter, Enter and Esc do
+    menu opens, Enter picks, and the note is only added, with no Claude. In the tasks panel's + Add box, Enter, Enter and Esc do
     the same.
 46b. The arrows cross groups (task f94524ce). Open any workspace menu (a line's workspace chip will do) with the
     keyboard on a workspace inside a group, say iam.ge. Up: the white edge goes to the line above, into the group
@@ -1580,21 +1580,23 @@ AS1. Type a note into the bar's box. After the important and urgent toggles ther
      card in the bottom-right corner says "Claude started" with the task's title, keeps the keyboard where it was,
      stays while the pointer rests on it and fades after about five seconds. The task shows in the tasks panel's
      Claude block.
-AS2. Type another note and press Ctrl+Enter instead: the same. Plain Enter only adds (and selects the new note).
-AS3. The tasks panel, + Add: the same play button sits after the toggles, before the workspace chip, and Ctrl+Enter
-     does the same. The box closes once the note is added, and the panel stays on the task and thread you had open.
+AS2. (Task 64c9eb8f.) Type another note and press Enter, Enter instead: the same, the card shows. Ctrl+Enter, Enter
+     only adds (and selects the new note). On a workspace with no folder (no repo, no VS Code window), Enter, Enter
+     only adds too and no folder list opens; the play button there still opens it.
+AS3. The tasks panel, + Add: the same play button sits after the toggles, before the workspace chip, and Enter
+     does the same (Ctrl+Enter only adds). The box closes once the note is added, and the panel stays on the task and thread you had open.
 AS3a. Click the "Claude started" card: the task's workspace comes to the front with its Claude window, as a
      double-click on the task's line does.
-AS3b. Make a start fail (a workspace whose one folder is untrusted): Ctrl+Enter still tells you at once, with the
+AS3b. Make a start fail (a workspace whose one folder is untrusted): Enter still tells you at once, with the
      trust offer, and no "Claude started" card shows.
-AS3c. Two Ctrl+Enters in a row: one card, the newer task's. With two folders, pick one from the list: the keyboard
+AS3c. Two notes added with Enter in a row: one card, the newer task's. With two folders, pick one from the list: the keyboard
      goes back to the window you were typing in.
 AS4. In a workspace whose tasks know several folders (or none), the button adds the note and opens the folder pick
      list at the pointer, as "Start Claude on this" does. Esc on the list leaves a plain note.
 AS5a. (Task 3a872301.) Type `/` in the bar's box on a workspace whose tasks know this repo. A list opens under the box
      saying it is asking Claude Code, then, within a few seconds, the skills: `/refresh-pr` among them. Type `ref`: the
      list narrows to the skills that start with or contain it. Down, then Tab: the box reads `/<that skill> ` with the
-     caret after the space. Type `245` and press Ctrl+Enter: the task "/refresh-pr 245" is added and a Claude session
+     caret after the space. Type `245` and press Enter, Enter: the task "/refresh-pr 245" is added and a Claude session
      starts on it whose first message runs /refresh-pr.
 AS5b. Type `/` again: the list now opens at once. Esc closes it and keeps the box's text; Esc again clears the box.
      Click a skill in the list: it goes into the box and the caret stays there. User-wide skills (/humanizer,

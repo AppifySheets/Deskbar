@@ -50,11 +50,20 @@ public partial class FloatingBar
     internal Func<Guid, ContextMenu?>? StartClaude { get; init; }
 
     /// <summary>
-    /// The add box's Ctrl+Enter and play button (task 7b17a573): the App's ClaudeTaskActions.OfferInBackground, which
-    /// starts the session with no window and confirms it with a card that takes no focus (ClaudeStartedNotice). Unset (the tests), the add box
-    /// falls back to <see cref="StartClaude"/>.
+    /// The add box's Enter (Ctrl+Enter before task 64c9eb8f) and play button (task 7b17a573): the App's
+    /// ClaudeTaskActions.OfferInBackground, which starts the session with no window and confirms it with a card that takes
+    /// no focus (ClaudeStartedNotice). Unset (the tests), the add box falls back to <see cref="StartClaude"/>.
     /// </summary>
     internal Func<Guid, ContextMenu?>? StartClaudeInBackground { get; init; }
+
+    /// <summary>
+    /// Whether a plain Enter in the add box starts Claude on the note it adds (task 64c9eb8f; Petre: "switch enter vs
+    /// ctrl+enter"), for the note's workspace and, for a subtask, its parent: the App's
+    /// ClaudeTaskActions.EnterStartsClaude, Claude sessions on and a folder for such a task to start in. Where it says no,
+    /// Enter only adds, as Ctrl+Enter does, so a note on a workspace with no folder does not open a folder pick list on
+    /// every add. Unset (the tests), Enter only adds.
+    /// </summary>
+    internal Func<Maybe<Guid>, Maybe<Guid>, bool>? EnterStartsClaude { get; init; }
 
     // What the add box's start runs: the background start when the App gave one, else the line menu's.
     Func<Guid, ContextMenu?>? AddedTaskStarter => StartClaudeInBackground ?? StartClaude;

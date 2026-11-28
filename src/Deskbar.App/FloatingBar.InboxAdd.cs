@@ -9,8 +9,8 @@ using Deskbar.Core.Tasks;
 namespace Deskbar.App;
 
 // THE ADD BOX AND ITS ROW IN THE INBOX LOOK (Deskbar task 740a2231; the owner: the box and the row under it did not fit
-// the new design). Only the drawing changes, and only while the tasks panel shows its Inbox: typing, pictures, Enter,
-// Ctrl+Enter, Esc, the placeholder's words, the chip's menu, the toggles' meaning and the play button's work are all
+// the new design). Only the drawing changes, and only while the tasks panel shows its Inbox: typing, pictures, Enter
+// (which starts Claude since task 64c9eb8f), Ctrl+Enter, Esc, the placeholder's words, the chip's menu, the toggles' meaning and the play button's work are all
 // FloatingBar.TaskList.cs's, and the old look is put back exactly when the Inbox goes.
 //
 // What the row under the box holds, today and in this look (the panel button and Manager went to the list's foot,
