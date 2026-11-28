@@ -536,7 +536,8 @@ public sealed partial class RemoteControl
         // `task ask`, a question or (deploy) a deploy hand-over (task a87891ca): the options are split off the text before
         // the task is looked up, so a bad list refuses the whole ask and stores nothing.
         ControlReply Ask(string text, bool deploy) => AnswerOptions.Split(text)
-            .Bind(asked => Own().Bind(t => service.Ask(t.Id, asked.Question, session, asked.Options, deploy).Map(() => (t.Id, Gave: asked.Options.Count > 0))))
+            // A dialog's lead copied into the ask is dropped (task 28fd8550, DialogQuestion.WithoutLead).
+            .Bind(asked => Own().Bind(t => service.Ask(t.Id, DialogQuestion.WithoutLead(asked.Question), session, asked.Options, deploy).Map(() => (t.Id, Gave: asked.Options.Count > 0))))
             .Tap(_ => Attention(folder))
             .Match(asked => AskedReply(service.Board, service.Board.Tasks.First(x => x.Id == asked.Id), asked.Gave), ControlReply.Fail);
 

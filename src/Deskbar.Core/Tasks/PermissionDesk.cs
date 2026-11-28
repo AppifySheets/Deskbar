@@ -187,8 +187,19 @@ public sealed class PermissionDesk(string folder, Func<DateTimeOffset> now)
             {
                 handedLines[slot] = (code, line, now() + FetchWindow);
                 Write(path, AnswerFile, $"{code} {PermissionAnswer.DialogWord}\n");
-            }));
+            }))
+            // Noted for RemoteControl.CardsGone (task 28fd8550): the card leaves the desk the moment Send is pressed, a few
+            // seconds before the dialog's PostToolUse settles the question, and in that gap the question must not be
+            // reworded to "Answer in the session's terminal" as if the card had been handed back.
+            .Tap(() => answeredOnCard[found.Request.SessionId] = now());
     }
+
+    // When each session's dialog was last answered on its card (AnswerDialog), for AnsweredOnCardSince.
+    readonly Dictionary<string, DateTimeOffset> answeredOnCard = new(StringComparer.Ordinal);
+
+    /// <summary>Whether the session's dialog was answered on its card at or after <paramref name="since"/> (AnswerDialog).</summary>
+    public bool AnsweredOnCardSince(string sessionId, DateTimeOffset since) =>
+        answeredOnCard.TryGetValue(sessionId, out var at) && at >= since;
 
     /// <summary>How long a dialog's answer line waits to be fetched: the script reads the answer file within a tick or two.</summary>
     public static readonly TimeSpan FetchWindow = TimeSpan.FromMinutes(1);

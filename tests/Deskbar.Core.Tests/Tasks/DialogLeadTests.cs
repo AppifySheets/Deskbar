@@ -34,6 +34,7 @@ public sealed class DialogLeadTests : IDisposable
     public void Dispose()
     {
         if (Directory.Exists(box)) Directory.Delete(box, true);
+        if (Directory.Exists(box + "-2")) Directory.Delete(box + "-2", true);
     }
 
     sealed class MemoryTaskStore : ITaskStore
@@ -192,6 +193,72 @@ public sealed class DialogLeadTests : IDisposable
         control.SettlePrompts();
 
         Assert.Equal($"{DialogQuestion.PageLead} something else", Task().Question.Value);
+    }
+
+    // Send on the card takes it off the desk seconds before the dialog's PostToolUse arrives (the branch's review, finding
+    // 2): a tick in that gap must not say "Answer in the session's terminal" about the question just answered on the page.
+    [Fact]
+    public void A_dialog_just_answered_on_the_card_keeps_the_page_lead()
+    {
+        var (_, control) = Ready();
+        Hook(control, ToolHook("PreToolUse"));
+        Card(control);
+        now += RemoteControl.CardGrace + TimeSpan.FromSeconds(5);
+
+        Assert.True(desk.AnswerDialog("req-1-2", new Dictionary<string, string> { ["Pick a colour"] = "Blue" }).IsSuccess);
+        Assert.Empty(desk.Of(Session));
+        now += TimeSpan.FromSeconds(5);
+        control.SettlePrompts();
+
+        Assert.Equal(Page, Task().Question.Value);
+    }
+
+    // DESKBAR RESTARTED while the dialog waited (the branch's review, finding 1): placements and cards live in memory, so the
+    // new copy holds neither, and the terminal keeps the dialog. The orphaned page-led question gets the terminal's lead on
+    // the first tick, and the dialog's answer still settles it.
+    [Fact]
+    public void A_restart_gives_an_orphaned_page_lead_the_terminal_lead()
+    {
+        var (manager, control) = Ready();
+        Hook(control, ToolHook("PreToolUse"));
+        Card(control);
+
+        var restarted = new RemoteControl(manager, tasks: tasks, permissions: new PermissionDesk(box + "-2", () => now));
+        restarted.SettlePrompts();
+        Assert.Equal(Terminal, Task().Question.Value);
+
+        Hook(restarted, ToolHook("PostToolUse"));
+        Assert.Equal(TaskStatus.InProgress, Task().Status);
+    }
+
+    // The dialog answered right after a restart, before any tick: the page-led question settles by its own text, with no
+    // placement to go by (IsDialogQuestion's page branch).
+    [Fact]
+    public void A_page_led_question_settles_by_its_text_after_a_restart()
+    {
+        var (manager, control) = Ready();
+        Hook(control, ToolHook("PreToolUse"));
+
+        Hook(new RemoteControl(manager, tasks: tasks, permissions: desk), ToolHook("PostToolUse"));
+
+        Assert.Equal(TaskStatus.InProgress, Task().Status);
+        Assert.True(Task().Question.HasNoValue);
+    }
+
+    // A session's own `task ask` that copied a dialog's lead loses it: the ask is answered on the task's page anyway, and
+    // only a dialog question may start with the page's lead (the restart rule above depends on it).
+    [Theory]
+    [InlineData("Answer in the session's terminal: should it remind? Yes or no.")]
+    [InlineData("Answer on the task's page:   should it remind? Yes or no.")]
+    public void A_copied_lead_is_dropped_from_a_sessions_ask(string asked)
+    {
+        var (_, control) = Ready();
+
+        control.Execute(["task", "ask", asked, "--session", Session]);
+
+        Assert.Equal("should it remind? Yes or no.", Task().Question.Value);
+        Assert.Equal("Merge it", DialogQuestion.WithoutLead("Merge it"));
+        Assert.Equal(DialogQuestion.Lead, DialogQuestion.WithoutLead(DialogQuestion.Lead));
     }
 
     // The board's own rule: only the very question rewords, and a task waiting on another keeps its board.
