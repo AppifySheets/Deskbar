@@ -56,6 +56,8 @@ public sealed class ManagerPageTests : IDisposable
     [InlineData("> From your page: PR 599 needs rebasing\n\nRebased.", "Rebased.")]
     [InlineData("\n> From your page: one\n> From your page: two\n\nBoth done.\n\nDetails.", "Both done.\n\nDetails.")]
     [InlineData("> From your page: only the echo", "")]
+    [InlineData("> From your page: fix A\n> fix B\n\nDone.", "Done.")]
+    [InlineData("> From your page: fix A\n\n> a quote of my own\n\nDone.", "> a quote of my own\n\nDone.")]
     [InlineData("Rebased.\n\n> From your page: later in the reply", "Rebased.\n\n> From your page: later in the reply")]
     [InlineData("> a quote of my own\n\nRebased.", "> a quote of my own\n\nRebased.")]
     public void WithoutEcho_drops_only_the_echo_lines_at_the_start(string reply, string shown) =>
