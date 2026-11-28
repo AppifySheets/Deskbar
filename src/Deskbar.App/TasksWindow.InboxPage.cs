@@ -271,7 +271,7 @@ public partial class TasksWindow
     // Part of the redraw signature: the page's stack and the task's PR links (which no other signature reads).
     string InboxPageSignature(TasksView view) =>
         inboxPage is not { } id ? ""
-        : $"|page{id}|{string.Join(',', inboxPageStack)}|" + string.Join(',', AllRows(view).Where(r => r.Id == id).SelectMany(r => r.PullRequests).Select(p => p.Key)) + PermissionSignature(id) + AnswersSignature(view, id);
+        : $"|page{id}|{string.Join(',', inboxPageStack)}|{windowProblem}|" + string.Join(',', AllRows(view).Where(r => r.Id == id).SelectMany(r => r.PullRequests).Select(p => p.Key)) + PermissionSignature(id) + AnswersSignature(view, id);
 
     // The page over the list while one is open, or the list; a page whose task no longer has its thread open (closed,
     // deleted, folded by a filter or from elsewhere) is left, back to the list.
@@ -584,6 +584,7 @@ public partial class TasksWindow
             AutomationProperties.SetName(why, "Why the deploy can't be checked");
             top.Children.Add(why);
         }
+        if (CloseBlockers(row, mark) is { } blockers) top.Children.Add(blockers);
         return new Border
         {
             Padding = new Thickness(8, 10, 10, 6),
@@ -591,6 +592,93 @@ public partial class TasksWindow
             BorderThickness = new Thickness(0, 0, 0, 1),
             Child = top,
         };
+    }
+
+    internal const string CloseBlockersTag = "page-close-blockers";
+    internal const string OpenSubtaskLinkTag = "page-open-subtask";
+
+    // How many open subtasks the header lists by name before "and N more": it is docked and never scrolls, so it stays short.
+    const int HeaderSubtasks = 3;
+
+    // THE REFUSAL AND WHAT IT IS ABOUT, AT THE TOP (task 2106492b; Petre, on a finished parent's page after "Close task":
+    // "can't close because it has a subtask? show the subtask clearly at the top and show me that message inside the
+    // task, not only on the list"). The page used to draw the refusal (TaskRowView.Problem) first in its body, but the
+    // body opens scrolled to its end, where the newest comments and the Close button are, so on any chat longer than the
+    // page the refusal sat above the fold and only the list's line behind the page showed it. The open subtasks were in
+    // the body too, under the description, just as far out of sight. So both live in the header, which is docked:
+    //   * the refusal, in the problem line's orange, whatever it is about (open subtasks, Claude still working, ...);
+    //   * the open subtasks, each a link that opens its page (OpenSubtaskPage; in a task window, its own window), while
+    //     closing is on the table: a finished page, whose Close button they would refuse, or a refusal on show. On a
+    //     working parent they stay in the body only, since nobody is about to close it and the header would only grow.
+    // Only the close refusal brings the subtasks in (a failed Reevaluate or move on a working parent is about something
+    // else, and listing subtasks under it would read as its cause); a finished page lists them before any click.
+    // Null when there is neither. IN A TASK WINDOW the words are left to the window: TasksBoard.Report already puts a
+    // refusal on the task on the window's own problem line, right above the page (TaskDetailWindow.InboxProblem), so
+    // drawing it here too would show it twice. The row carries it only when the panel also draws the task's line, so the
+    // window hands its line's text over (ShowWindowProblem) and that decides whether the subtasks come, under that line.
+    FrameworkElement? CloseBlockers(TaskRowView row, InboxMark mark)
+    {
+        var refusal = !pageInWindow && row.Problem is { Length: > 0 } problem ? problem : null;
+        var shownRefusal = pageInWindow ? windowProblem : refusal;
+        // The close refusal opens with these words whatever subtask it names (TaskViews.CloseSubtasksFirst).
+        var refusedForSubtasks = row.OpenSubtasks.Count > 0 && shownRefusal is { } said
+            && said.StartsWith(TaskViews.CloseSubtasksFirst(row.OpenSubtasks.Count), StringComparison.Ordinal);
+        var closable = mark is InboxMark.Finished or InboxMark.FinishedNotRunning or InboxMark.DeployUnchecked;
+        var subtasks = refusedForSubtasks || closable ? row.OpenSubtasks : [];
+        if (refusal is null && subtasks.Count == 0) return null;
+        var block = new StackPanel { Tag = CloseBlockersTag, Margin = new Thickness(36, 4, 10, 2) };
+        AutomationProperties.SetName(block, subtasks.Count > 0 ? "What keeps it open" : "Refused");
+        if (refusal is not null)
+        {
+            var words = ProblemOf(refusal);
+            words.FontSize = 12.5;
+            words.FontWeight = FontWeights.SemiBold;
+            words.Margin = new Thickness(0, 0, 0, subtasks.Count > 0 ? 4 : 0);
+            block.Children.Add(words);
+        }
+        if (subtasks.Count > 0)
+        {
+            // A caption says what the lines are, unless the close refusal's words right above them already do.
+            if (!(refusedForSubtasks && refusal is not null))
+                block.Children.Add(Text(subtasks.Count == 1 ? "OPEN SUBTASK" : $"{subtasks.Count} OPEN SUBTASKS", 11, InboxLook.Ink3,
+                    FontWeights.SemiBold, new Thickness(0, 0, 0, 2)));
+            subtasks.Take(HeaderSubtasks).ToList().ForEach(sub => block.Children.Add(OpenSubtaskLink(sub)));
+            if (subtasks.Count > HeaderSubtasks)
+                block.Children.Add(Text($"and {subtasks.Count - HeaderSubtasks} more, in the thread below", 12, InboxLook.Ink3,
+                    FontWeights.Normal, new Thickness(4, 1, 0, 0)));
+        }
+        return new Border
+        {
+            // An orange rule down its left edge, so the block reads as one thing that stands in the way.
+            BorderBrush = ProblemInk,
+            BorderThickness = new Thickness(2, 0, 0, 0),
+            Padding = new Thickness(8, 2, 0, 2),
+            Margin = new Thickness(0, 2, 0, 4),
+            Child = block,
+        };
+    }
+
+    // One open subtask in the header: "↳ title · status", a click opening its page the way its line in the thread does.
+    // A dock, not Row's horizontal stack: a stack measures its parts at any width, so a long title would never trim and
+    // would run past the header's edge. The arrow keeps its room and one text block takes what is left, the title and the
+    // status as two runs so the status sits right after the title, cut with an ellipsis (the full title in the tooltip).
+    Button OpenSubtaskLink(SubtaskView sub)
+    {
+        var arrow = Text("↳", 12.5, InboxLook.Ink3, margin: new Thickness(0, 0, 6, 0));
+        var title = Text("", 12.5, InboxLook.Ink, FontWeights.SemiBold);
+        title.Inlines.Add(new Run(sub.Title));
+        title.Inlines.Add(new Run("  · " + TaskViews.StatusName(sub.Status)) { FontSize = 12, FontWeight = FontWeights.Normal, Foreground = InboxLook.Ink3 });
+        title.TextTrimming = TextTrimming.CharacterEllipsis;
+        DockPanel.SetDock(arrow, Dock.Left);
+        var parts = new DockPanel { LastChildFill = true };
+        parts.Children.Add(arrow);
+        parts.Children.Add(title);
+        var link = InboxButton(parts, sub.Title, () => OpenSubtaskPage(sub.Id), new Thickness(4, 1, 6, 1), Brushes.Transparent, 6, ignoredWhen: ClickIgnored);
+        link.Tag = OpenSubtaskLinkTag;
+        link.HorizontalAlignment = HorizontalAlignment.Stretch;
+        link.HorizontalContentAlignment = HorizontalAlignment.Stretch;
+        link.ToolTip = $"Open the subtask: {sub.Title}";
+        return link;
     }
 
     // A pull request's link, opened the way a link in the task's text is (TasksBoard.OpenLink: the task's workspace first).
@@ -601,8 +689,8 @@ public partial class TasksWindow
 
     FrameworkElement PageBody(TaskRowView row, InboxMark mark)
     {
+        // The refusal is not drawn here any more: it is in the header (CloseBlockers, task 2106492b), which stays in sight.
         var body = new StackPanel { Margin = new Thickness(10, 8, 10, 10) };
-        if (row.Problem is { Length: > 0 } problem) body.Children.Add(ProblemOf(problem));
         // The description in full, its pictures under it (TextOf's parts for an open line, uncut: the page has the room).
         if (row.Description.Length > 0)
         {

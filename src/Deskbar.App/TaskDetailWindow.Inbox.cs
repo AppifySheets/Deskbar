@@ -96,6 +96,8 @@ public partial class TaskDetailWindow
         // The text of a refusal on no task that was already showing.
         inboxProblem.Text = ProblemText.Text;
         inboxProblem.Visibility = ProblemText.Visibility;
+        // Before the first ShowPage, so it only sets what that first draw reads (task 2106492b).
+        shown.ShowWindowProblem(ProblemText.Visibility == Visibility.Visible ? ProblemText.Text : null);
     }
 
     // The Inbox was left: the old window comes back and draws once more from the view it is handed.
@@ -126,6 +128,8 @@ public partial class TaskDetailWindow
         if (inboxProblem is null) return;
         inboxProblem.Text = text ?? "";
         inboxProblem.Visibility = string.IsNullOrEmpty(text) ? Visibility.Collapsed : Visibility.Visible;
+        // The page lists the open subtasks under a refused close (task 2106492b, TasksWindow.ShowWindowProblem).
+        renderer?.ShowWindowProblem(text);
     }
 
     // The fourth hook, in OnClosed: the page's window goes with this one.

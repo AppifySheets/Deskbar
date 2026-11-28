@@ -1678,6 +1678,11 @@ public sealed partial class TasksBoard : IDisposable
         ClaudeWorking = TaskBoard.ClaudeStillWorking(task),
         // Not finished and not merged (task 579f2e4c): the tick's tip says it will ask before closing.
         Unfinished = tasks.Unfinished(task),
+        // What stands between an open task and its close (task 2106492b): its page shows these at the top. Only while
+        // open, as Subtasks, so a closed line costs nothing.
+        OpenSubtasks = open
+            ? tasks.Board.OpenSubtasks(task.Id).Select(c => new SubtaskView(c.Id, FloatingBar.FirstLine(c.Title), c.Status, c.StatusLine)).ToArray()
+            : [],
         // An open thread lists the task's subtasks (follow-up: an open parent showed none of them).
         Subtasks = open
             // EVERY SUBTASK CARRIES ITS WHOLE ROW (task 249a1e8a; Petre, on a screenshot of a parent's thread where the
@@ -2114,6 +2119,13 @@ internal sealed record TaskRowView(Guid Id, string Title, string Detail, TaskSta
 
     /// <summary>The task's subtasks while its thread is open, for the thread's list; empty while closed.</summary>
     public IReadOnlyList<SubtaskView> Subtasks { get; init; } = [];
+
+    /// <summary>
+    /// The task's OPEN subtasks while its thread is open, every one of them (task 2106492b), empty while closed. Unlike
+    /// <see cref="Subtasks"/> nothing is taken out for being drawn elsewhere in the list: a task's page shows them at its
+    /// top while closing is on the table, so the subtask a close is refused for is in sight on the page itself.
+    /// </summary>
+    public IReadOnlyList<SubtaskView> OpenSubtasks { get; init; } = [];
 
     /// <summary>The first line of the task a closed duplicate names (task links), or null: its status reads "Duplicate".</summary>
     public string? DuplicateOfTitle { get; init; }

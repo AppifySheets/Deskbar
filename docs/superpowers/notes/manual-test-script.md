@@ -1980,3 +1980,13 @@ MI3. Open a task's page, then click Manager and ask "is the current task stuck?"
 MI4. Press Esc with the keyboard in the box: the page stays. Click outside the box and press Esc: back.
 MI5. "⋯", Open in terminal: the manager's terminal opens docked beside the panel, as the button did before. `deskbar.cmd task manager` opens that terminal too.
 MI6. Close the manager's session (`claude stop <id>`), then send a message from the page: it is resumed with your message, and your bubble shows once, not twice.
+
+## A parent's page shows what keeps it open
+
+A finished task's page names its open subtasks at the top, and a refused close says why there too ([Deskbar task 2106492b](https://deskbar.app/task#2106492b-8fb7-4fd1-ad56-e605c33099b6)). Two notes, one a subtask of the other, the parent marked done, the Inbox chosen.
+
+CB1. Open the parent's page from the Finished tab and give it enough comments to scroll: under the state line, in the header that does not scroll, an orange-edged block reads "OPEN SUBTASK" with "↳ <subtask> · <status>" under it.
+CB2. Click Close task: the task stays, and the block now starts with "Close its open subtask first: "<subtask>"" in orange. The list's line behind the page carries the same words, and the page's body does not repeat them.
+CB3. Click the subtask in the block: its own page opens, and Back returns to the parent's page.
+CB4. Give the parent four open subtasks: the block lists three and "and 1 more, in the thread below".
+CB5. Open the parent in its own window (Open in window) and press Close task there: the words show on the window's line above the page, once, and the subtasks under the state line.
