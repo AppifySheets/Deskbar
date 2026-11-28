@@ -41,6 +41,8 @@ public partial class FloatingBar
     object? oldImportantContent;
     object? oldUrgentContent;
     object? oldStartContent;
+    object? oldFromWindowContent;
+    TextBlock? inboxFromWindowGlyph;
     Border? inboxChipFace;
     System.Windows.Shapes.Ellipse? inboxChipDot;
     TextBlock? inboxChipName;
@@ -99,6 +101,12 @@ public partial class FloatingBar
                 taskAddImportant.Button.Content = InboxToggleFace(taskAddImportant, ref inboxImportant);
                 taskAddUrgent.Button.Content = InboxToggleFace(taskAddUrgent, ref inboxUrgent);
                 taskAddStartClaude.Content = InboxStartFace();
+                // The camera (task 494d34ee) stays among the chips, after the toggles, drawn like an "off" toggle.
+                if (taskAddFromWindow is not null)
+                {
+                    oldFromWindowContent = taskAddFromWindow.Content;
+                    taskAddFromWindow.Content = InboxFromWindowFace();
+                }
                 // The play button at the row's right end: out of the wrapping chips, into the row's own right-hand
                 // column (the one the panel button used, which the Inbox look leaves empty).
                 if (taskAddChips?.Parent is Grid addRow && taskAddStartClaude.Parent is Panel chips)
@@ -118,6 +126,7 @@ public partial class FloatingBar
                 taskAddImportant.Button.Content = oldImportantContent;
                 taskAddUrgent.Button.Content = oldUrgentContent;
                 taskAddStartClaude.Content = oldStartContent;
+                if (taskAddFromWindow is not null) taskAddFromWindow.Content = oldFromWindowContent;
                 // Back to its place, last of the chips, as BuildTaskList put it.
                 if (taskAddStartClaude.Parent is Grid addRow && taskAddChips is not null)
                 {
@@ -149,6 +158,19 @@ public partial class FloatingBar
             inboxParentLabel.MaxWidth = 2 * ChipTextCeiling + 20;
         }
         if (inboxStartGlyph is not null) inboxStartGlyph.FontSize = Text(8.5);
+        if (inboxFromWindowGlyph is not null) inboxFromWindowGlyph.FontSize = Text(8.5);
+    }
+
+    // The camera's face (task 494d34ee, FloatingBar.TaskFromWindow.cs): its glyph on nothing in the second ink, the shape
+    // of an "off" toggle beside it, since it sits with the toggles and is a quiet one-press action like them.
+    Border InboxFromWindowFace()
+    {
+        inboxFromWindowGlyph = new TextBlock
+        {
+            Text = AddFromWindowGlyph, FontFamily = IconFont, Foreground = InboxLook.Ink2, FontSize = Text(8.5),
+            VerticalAlignment = VerticalAlignment.Center, HorizontalAlignment = HorizontalAlignment.Center,
+        };
+        return new Border { CornerRadius = new CornerRadius(9), Padding = new Thickness(6, 2, 6, 2), Child = inboxFromWindowGlyph, Margin = new Thickness(2, 0, 0, 0) };
     }
 
     // Once: the box's edge follows the keyboard, and each toggle's face follows the "on" or "off" PaintAddFlags sets.

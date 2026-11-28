@@ -111,7 +111,8 @@ public partial class FloatingBarTaskListTests
         Func<TaskItem, Maybe<string>>? goalTitle = null, IObservable<System.Reactive.Unit>? goalChanges = null,
         Func<Guid, ContextMenu?>? startClaude = null, IObservable<bool>? panelShown = null, string? stateDir = null,
         Action<Guid>? openParent = null, Action? openManager = null, Func<ManagerAsk?>? managerAsks = null,
-        Func<TaskItem, bool>? opensClaudeSession = null, Func<Guid, ContextMenu?>? startClaudeInBackground = null)
+        Func<TaskItem, bool>? opensClaudeSession = null, Func<Guid, ContextMenu?>? startClaudeInBackground = null,
+        Func<nint, Result<WindowShot.Shot>>? shootWindow = null, Action<string>? showRefusal = null)
     {
         var harness = Harness.Build();
         var minutes = 0;
@@ -150,6 +151,9 @@ public partial class FloatingBarTaskListTests
             StartClaudeInBackground = startClaudeInBackground,
             OpensClaudeSession = opensClaudeSession,
             OpenParentTask = openParent,
+            // The camera never captures a real window in a test (task 494d34ee); without a probe it refuses.
+            ShootWindow = shootWindow ?? (_ => Result.Failure<WindowShot.Shot>(WindowShot.NoWindowText)),
+            ShowRefusal = showRefusal,
             // Pictures pasted into the add box are written here, never into the real profile.
             TaskStateDir = stateDir ?? Path.GetTempPath(),
         };
@@ -3728,6 +3732,105 @@ public partial class FloatingBarTaskListTests
 
         using var plain = Build();
         Assert.Equal(Visibility.Collapsed, plain.Bar.TaskAddStartClaudeButton!.Visibility);
+    });
+
+    // A picture of a window, made of four black pixels, for the camera's tests (task 494d34ee).
+    internal static WindowShot.Shot FakeShot(string caption) =>
+        new(TaskImageFiles.FromBitmap(System.Windows.Media.Imaging.BitmapSource.Create(2, 2, 96, 96, PixelFormats.Bgr32, null, new byte[16], 8)).Value, caption);
+
+    // Task 494d34ee (Petre: "add a task from the window open on the screen as a separate button near the urgent/important
+    // buttons, to start immediately in the current workspace"): the camera after the two toggles takes a picture of the
+    // window Petre was in (the one the box hands the keyboard back to), adds it as a task in the workspace in front and
+    // starts Claude on it in the background. Nothing typed makes a "Picture" task; typed words are its title. Its
+    // description names the window and holds the picture. Shown only while the play button is.
+    [Fact]
+    public void The_add_rows_camera_adds_the_window_in_front_as_a_task_and_starts_Claude() => StaThread.Run(() =>
+    {
+        var stateDir = Directory.CreateTempSubdirectory("deskbar-shot-").FullName;
+        try
+        {
+            var shot = new List<nint>();
+            var background = new List<Guid>();
+            var handedBack = new List<nint>();
+            using var t = Build(handedBack: handedBack, stateDir: stateDir,
+                startClaude: _ => null,
+                startClaudeInBackground: id =>
+                {
+                    background.Add(id);
+                    return null;
+                },
+                shootWindow: hwnd =>
+                {
+                    shot.Add(hwnd);
+                    return Result.Success(FakeShot("Picture of the window \"Build failed\" (Code) on screen."));
+                });
+            var camera = t.Bar.TaskAddFromWindowButton!;
+            Assert.Equal(Visibility.Visible, camera.Visibility);
+            Assert.Equal(FloatingBar.AddFromWindowText, AutomationProperties.GetName(camera));
+            // Beside the toggles: right after Urgent, before the play glyph.
+            var row = Assert.IsType<WrapPanel>(camera.Parent);
+            Assert.Equal(row.Children.IndexOf(t.Bar.TaskAddStartClaudeButton!) - 1, row.Children.IndexOf(camera));
+
+            // On the idle, empty box: the editor's picture, a "Picture" task in the workspace in front, started.
+            Click(camera);
+            t.Bar.Dispatcher.Invoke(() => { }, DispatcherPriority.ApplicationIdle);
+            Assert.Equal([Editor], shot);
+            var picture = Assert.Single(t.Tasks.Board.Tasks);
+            Assert.Equal("Picture", picture.Title);
+            Assert.Equal(t.Gepha, picture.WorkspaceId.Value);
+            Assert.Contains("Picture of the window \"Build failed\" (Code) on screen.", picture.Description);
+            Assert.Contains("task-images", picture.Description);
+            Assert.Equal([picture.Id], background);
+            Assert.Equal([Editor], handedBack);
+
+            // With words typed: they are the title, and the caption goes under the later lines.
+            ClickBox(t);
+            t.Box.Text = "Why is this red\nIt was green this morning";
+            Click(camera);
+            t.Bar.Dispatcher.Invoke(() => { }, DispatcherPriority.ApplicationIdle);
+            var typed = t.Tasks.Board.Tasks.Single(x => x.Title == "Why is this red");
+            Assert.StartsWith("It was green this morning\n\nPicture of the window", typed.Description);
+            Assert.Equal([picture.Id, typed.Id], background);
+            Assert.Equal("", t.Box.Text);
+
+            using var plain = Build();
+            Assert.Equal(Visibility.Collapsed, plain.Bar.TaskAddFromWindowButton!.Visibility);
+        }
+        finally
+        {
+            Directory.Delete(stateDir, recursive: true);
+        }
+    });
+
+    // Task 494d34ee: with no window to take (an empty desktop, only the taskbar), the camera says so and adds nothing;
+    // the idle box it opened goes back to idle and the keyboard goes back. A draft being typed stays in the box.
+    [Fact]
+    public void The_add_rows_camera_with_no_window_says_so_and_adds_nothing() => StaThread.Run(() =>
+    {
+        var refusals = new List<string>();
+        var background = new List<Guid>();
+        var handedBack = new List<nint>();
+        using var t = Build(handedBack: handedBack, showRefusal: refusals.Add,
+            startClaude: _ => null,
+            startClaudeInBackground: id =>
+            {
+                background.Add(id);
+                return null;
+            });
+
+        Click(t.Bar.TaskAddFromWindowButton!);
+        t.Bar.Dispatcher.Invoke(() => { }, DispatcherPriority.ApplicationIdle);
+        Assert.Equal([WindowShot.NoWindowText], refusals);
+        Assert.Empty(t.Tasks.Board.Tasks);
+        Assert.Empty(background);
+        Assert.Equal([Editor], handedBack);
+
+        ClickBox(t);
+        t.Box.Text = "Half a thought";
+        Click(t.Bar.TaskAddFromWindowButton!);
+        Assert.Equal(2, refusals.Count);
+        Assert.Empty(t.Tasks.Board.Tasks);
+        Assert.Equal("Half a thought", t.Box.Text);
     });
 
     // Task 7b17a573 (Petre: "only start a task and don't open a terminal. confirm it has started as a mild notification,

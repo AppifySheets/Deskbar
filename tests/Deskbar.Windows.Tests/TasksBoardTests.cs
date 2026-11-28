@@ -99,7 +99,8 @@ public partial class TasksBoardTests
         Func<TaskItem, Action<string>, ContextMenu?>? pickFolder = null, Func<Guid, Result>? runNow = null,
         Func<string, Maybe<string>>? askRepeat = null, Func<string, bool>? folderExists = null,
         Func<TaskSession, Maybe<string>>? transcriptOf = null,
-        Func<Guid, Task<IReadOnlyList<SkillChoice>>>? taskSkills = null, Action<Guid>? startClaudeInBackground = null)
+        Func<Guid, Task<IReadOnlyList<SkillChoice>>>? taskSkills = null, Action<Guid>? startClaudeInBackground = null,
+        Func<Result<WindowShot.Shot>>? shootWindow = null)
     {
         var harness = Harness.Build();
         var minutes = 0;
@@ -132,7 +133,7 @@ public partial class TasksBoardTests
         }, undoTimer: timers.Start, now: () => Start.AddHours(1), selection: selection,
             sessionsOf: sessionsOf, startClaude: startClaude, openSession: openSession, sessionsChanged: sessionsChanged,
             workingOf: workingOf, pickFolder: pickFolder, runNow: runNow, transcriptOf: transcriptOf,
-            taskSkills: taskSkills, startClaudeInBackground: startClaudeInBackground)
+            taskSkills: taskSkills, startClaudeInBackground: startClaudeInBackground, shootWindow: shootWindow)
         {
             // The manager line's click (task 61e4d143); none by default, so no manager line is drawn.
             OpenManager = openManager,
@@ -5119,6 +5120,52 @@ public partial class TasksBoardTests
         plain.Controller.ToggleThread(other);
         Assert.DoesNotContain(plain.Window.OpenMenuFor(other).Items.OfType<MenuItem>(), i => i.Header is TextBlock { Text: "Start Claude on this" });
         Assert.DoesNotContain(Inside(plain.Window).OfType<Button>(), b => AutomationProperties.GetName(b) == "Start Claude on this");
+    });
+
+    // Task 494d34ee (Petre: "add a task from the window open on the screen as a separate button near the urgent/important
+    // buttons, ..."): the panel's add box has the camera beside its toggles. A press adds the window's picture as a task,
+    // with the box's words as its title, and starts Claude on it; no window to take is said on the problem line and adds
+    // nothing. Without a way to start Claude there is no camera.
+    [Fact]
+    public void The_add_box_camera_adds_the_window_in_front_and_starts_Claude() => StaThread.Run(() =>
+    {
+        var stateDir = Directory.CreateTempSubdirectory("deskbar-shot-").FullName;
+        try
+        {
+            var started = new List<Guid>();
+            var window = Result.Failure<WindowShot.Shot>(WindowShot.NoWindowText);
+            using var t = Build(startClaude: started.Add, stateDir: stateDir, shootWindow: () => window);
+            t.Controller.Show();
+            Click(ButtonNamed(t.Window, "Add"));
+
+            // No window: the problem line says so, nothing is added, and the box stays open.
+            Click(ButtonNamed(t.Window, TasksWindow.AddFromWindowText));
+            Assert.Empty(t.Tasks.Board.Tasks);
+            Assert.True(t.Window.AddBoxShown);
+            Assert.Equal(WindowShot.NoWindowText, t.Window.ProblemText.Text);
+
+            window = Result.Success(FloatingBarTaskListTests.FakeShot("Picture of the window \"Inbox\" (Outlook) on screen."));
+            t.Window.AddBox.Text = "Answer this";
+            Click(ButtonNamed(t.Window, TasksWindow.AddFromWindowText));
+            var task = Assert.Single(t.Tasks.Board.Tasks);
+            Assert.Equal("Answer this", task.Title);
+            Assert.Contains("Picture of the window \"Inbox\" (Outlook) on screen.", task.Description);
+            Assert.Contains("task-images", task.Description);
+            Assert.False(t.Window.AddBoxShown);
+            Assert.Equal("", t.Window.ProblemText.Text);
+            t.Window.Dispatcher.Invoke(() => { }, System.Windows.Threading.DispatcherPriority.ApplicationIdle);
+            Assert.Equal([task.Id], started);
+
+            // A copy that cannot start Claude has no camera, even with a way to shoot.
+            using var plain = Build(shootWindow: () => window);
+            plain.Controller.Show();
+            Click(ButtonNamed(plain.Window, "Add"));
+            Assert.False(HasButtonNamed(plain.Window, TasksWindow.AddFromWindowText));
+        }
+        finally
+        {
+            Directory.Delete(stateDir, recursive: true);
+        }
     });
 
     // Task 3c40dec9 (Petre: "when adding a task, have a button to start immediately with claude"): the add box has a Start

@@ -2959,6 +2959,9 @@ public partial class App : Application
                 // The add box's Ctrl+Enter and play button (task 7b17a573): the same start in the background, with no
                 // window and a "Claude started" card that takes no focus.
                 startClaudeInBackground: id => claudeActions?.OfferInBackground(id),
+                // The add box's camera (task 494d34ee): the window Petre was in before Deskbar, which only the bar's
+                // foreground hook knows (a click in the panel makes the panel the window in front). Read at the press.
+                shootWindow: () => WindowShot.Of(floatingBar?.WindowBeforeDeskbar ?? 0),
                 // The add box's "/" list of skills (task 3a872301), as the bar's (WorkspaceSkillsOf).
                 workspaceSkills: WorkspaceSkillsOf,
                 // The comment boxes' "/" list of skills (task 29bdd158): the skills where the task's session runs.
