@@ -33,9 +33,22 @@ namespace Deskbar.Core.Tasks;
 // tool's refusal or the interruption). A transcript that is gone or shorter than the mark counts as moved on: the session
 // is not the one that asked.
 //
+// THE ASKING MESSAGE CAN LAND AFTER THE MARK (task 0978f3f4, "no question in chat"). Measured on 2026-11-28 with Claude
+// Code 2.1.332, a background session asking AskUserQuestion: the PreToolUse hook placed the question and took the mark at
+// 09:09:03.48, and the assistant line carrying that very AskUserQuestion tool_use was written to the transcript at
+// 09:09:03.78. The next five-second tick read it as the conversation going on and settled the question while the
+// dialog still waited (`claude agents` still said "input needed" half an hour later). So a mark taken for a dialog
+// tool names that tool (Asking), and an "assistant" line that carries a tool_use of that tool, or belongs to the same
+// API message as one (Claude Code writes a message's thinking, text and tool_use blocks as separate lines sharing
+// message.id), is the question itself arriving late, not an answer. The answer, a refusal or Esc always writes a
+// "user" line (the tool's result or the interruption), so nothing that settles a dialog is lost. Only the dialog tools
+// (AskUserQuestion, ExitPlanMode) name themselves: their answer IS the tool's result, so the user line follows at once.
+// A tool permission (Bash, say) does not, since there the assistant line is the first sign of an Allow and the user
+// line waits until the command finishes, which can be minutes.
+//
 // Read-only, shared with Claude Code's writer (FileShare.ReadWrite | Delete), and only the bytes past the mark: the length
 // is checked first, so a question whose transcript has not grown costs one file-size look per tick.
-public sealed record TranscriptMark(string Path, long Length)
+public sealed record TranscriptMark(string Path, long Length, Maybe<string> Asking = default)
 {
     // The lines that mean the conversation went on: the tool ran or was refused, or Claude or the user spoke.
     static readonly string[] Moving = ["assistant", "user"];
@@ -50,10 +63,13 @@ public sealed record TranscriptMark(string Path, long Length)
                     System.IO.Path.GetDirectoryName(t) ?? "", System.IO.Path.GetFileNameWithoutExtension(t),
                     "subagents", $"agent-{agentId.Value}.jsonl")).AsMaybe());
 
-    /// <summary>The transcript's length now, or None when there is no transcript to watch (no path, or no file).</summary>
-    public static Maybe<TranscriptMark> Take(Maybe<string> path) =>
+    /// <summary>
+    /// The transcript's length now, or None when there is no transcript to watch (no path, or no file). <paramref
+    /// name="asking"/> names the dialog tool the mark is for, whose own late-written line must not count (the header).
+    /// </summary>
+    public static Maybe<TranscriptMark> Take(Maybe<string> path, Maybe<string> asking = default) =>
         path.Bind(p => Result.Try(() => new FileInfo(p)).Ensure(f => f.Exists, "no transcript")
-            .Map(f => new TranscriptMark(p, f.Length)).AsMaybe());
+            .Map(f => new TranscriptMark(p, f.Length, asking)).AsMaybe());
 
     /// <summary>
     /// Whether the session has moved on from the question: a conversation line ("assistant" or "user") written past the
@@ -72,16 +88,43 @@ public sealed record TranscriptMark(string Path, long Length)
             var appended = reader.ReadToEnd();
             // Only whole lines: the text after the last newline may be a line Claude Code is still writing.
             var whole = appended[..(appended.LastIndexOf('\n') + 1)];
-            return whole.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Any(IsConversation);
+            var lines = whole.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Select(Read).Where(l => l.HasValue).Select(l => l.Value).ToList();
+            // The API messages that carry the asking tool's tool_use: every line of them is the question, not an answer.
+            var askingMessages = lines.Where(l => l.Type == "assistant" && Asking.HasValue && l.Tools.Contains(Asking.Value))
+                .Select(l => l.Message).Where(m => m.Length > 0).ToHashSet(StringComparer.Ordinal);
+            return lines.Any(l => Moving.Contains(l.Type, StringComparer.Ordinal) && !IsAsking(l, askingMessages));
         }).GetValueOrDefault(false);
 
-    static bool IsConversation(string line) =>
+    // An assistant line of the asking message (see the header): it carries the dialog tool's tool_use, or shares its message.id.
+    bool IsAsking(Line line, IReadOnlySet<string> askingMessages) =>
+        line.Type == "assistant"
+        && Asking.HasValue
+        && (line.Tools.Contains(Asking.Value) || (line.Message.Length > 0 && askingMessages.Contains(line.Message)));
+
+    // What a transcript line says that MovedOn needs: its type, its API message id ("" when none) and the tools its
+    // tool_use blocks name. None for a line that does not parse or is not an object with a string type.
+    sealed record Line(string Type, string Message, IReadOnlyList<string> Tools);
+
+    static Maybe<Line> Read(string text) =>
         Result.Try(() =>
         {
-            using var document = JsonDocument.Parse(line);
-            return document.RootElement.ValueKind == JsonValueKind.Object
-                && document.RootElement.TryGetProperty("type", out var type)
-                && type.ValueKind == JsonValueKind.String
-                && Moving.Contains(type.GetString(), StringComparer.Ordinal);
-        }).GetValueOrDefault(false);
+            using var document = JsonDocument.Parse(text);
+            var root = document.RootElement;
+            if (root.ValueKind != JsonValueKind.Object
+                || !root.TryGetProperty("type", out var type)
+                || type.ValueKind != JsonValueKind.String) return Maybe<Line>.None;
+            var message = root.TryGetProperty("message", out var m) && m.ValueKind == JsonValueKind.Object ? m : default;
+            var id = message.ValueKind == JsonValueKind.Object && message.TryGetProperty("id", out var i) && i.ValueKind == JsonValueKind.String
+                ? i.GetString() ?? "" : "";
+            var tools = message.ValueKind == JsonValueKind.Object && message.TryGetProperty("content", out var c) && c.ValueKind == JsonValueKind.Array
+                ? c.EnumerateArray()
+                    .Where(b => b.ValueKind == JsonValueKind.Object
+                                && b.TryGetProperty("type", out var t) && t.ValueKind == JsonValueKind.String && t.GetString() == "tool_use"
+                                && b.TryGetProperty("name", out var n) && n.ValueKind == JsonValueKind.String)
+                    .Select(b => b.GetProperty("name").GetString() ?? "")
+                    .ToList()
+                : [];
+            return Maybe.From(new Line(type.GetString() ?? "", id, tools));
+        }).GetValueOrDefault(Maybe<Line>.None);
 }

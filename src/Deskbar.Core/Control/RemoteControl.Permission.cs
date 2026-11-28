@@ -84,9 +84,11 @@ public sealed partial class RemoteControl
             && !IsManagerFolder(Folder(request.From) ?? Folder(hook.Folder))
             && service.Board.TaskOf(asked.SessionId).HasValue
                 // A background session is watched through `claude agents` (listed); any other through where its
-                // transcript stands now, which grows only once the question is answered (TranscriptMark).
+                // transcript stands now, which grows only once the question is answered (TranscriptMark). A dialog's mark
+                // names its tool, so the asking line written a moment late does not take the card off (task 0978f3f4).
                 ? desk.Register(slot, asked, listed: hook.Background,
-                        mark: hook.Background ? null : TranscriptMark.Take(TranscriptMark.For(hook.Transcript, asked.AgentId)).GetValueOrDefault())
+                        mark: hook.Background ? null : TranscriptMark.Take(TranscriptMark.For(hook.Transcript, asked.AgentId),
+                            asked.IsDialog ? Maybe.From(asked.Tool) : Maybe<string>.None).GetValueOrDefault())
                     // A dialog's slot is told so ("<code> dialog"): its script then fetches and prints the line Deskbar
                     // holds for the dialog word and nothing else (PermissionAnswer.LineFor).
                     .Match(code => Said(asked.IsDialog ? $"{code} {PermissionAnswer.DialogKind}\r\n" : code + "\r\n"), _ => Quiet)
