@@ -2087,3 +2087,5 @@ PC1. Ask it to run `echo "$APPDATA" > pc1.txt`. The card's buttons match the ter
 PC2. Back in the default mode, ask it to run `git init`. The card adds "Yes, and don't ask again for: git init *" before the auto mode choice, as the terminal does. Click it: the command runs, and the scratch folder's `.claude/settings.local.json` now allows `git init *`.
 PC3. Ask it to write a file: the card offers Yes and No only, as the terminal does.
 PC4. **No** on any card refuses the call and the session says the user denied it in Deskbar.
+
+DP1. (task 1f6ae26e) With a plain question waiting, a quiet task handed back and a task handed over with `task ask - --deploy` (merged, waiting for your deploy) asked before both: the Inbox's Needs you tab lists Questions first, then Went quiet, then a "To deploy" caption ("merged, not running yet") holding the deploy task with its amber ring, then Finished.

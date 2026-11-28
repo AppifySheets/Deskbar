@@ -157,6 +157,34 @@ public class InboxTabsTests
             Sections(Inbox(Busy), InboxTab.NeedsYou));
     }
 
+    // Task 1f6ae26e: a task that only waits for his deploy asks for less than a question or a quiet session, so it sits
+    // below both, under its own caption, and above Finished. It is asked first here, so the List's order (oldest ask
+    // first) would have put it at the top of the questions.
+    [Fact]
+    public void A_task_waiting_for_the_deploy_sits_below_the_questions_and_went_quiet()
+    {
+        var deploy = Claudes("Manager panel", "s0");
+        Change(b => b.Ask(deploy, "Install v2.6.86, which has the panel.", clock, deploy: true));
+        var k = EveryKind();
+        var view = Inbox(Busy);
+
+        Assert.Equal([(InboxSection.Questions, k.Asking), (InboxSection.WentQuiet, k.Quiet), (InboxSection.Deploys, deploy), (InboxSection.Finished, k.Done)],
+            Sections(view, InboxTab.NeedsYou));
+        Assert.Equal(InboxMark.WaitsForDeploy, view.Lines.Single(l => l.Id == deploy).Mark);
+        Assert.Equal(("To deploy", "merged, not running yet"), InboxTabs.CaptionOf(InboxSection.Deploys));
+    }
+
+    // Answer buttons make a merged task's ask a real question (DeployWait.Waits), so it stays with the questions.
+    [Fact]
+    public void A_merged_task_asking_with_answer_buttons_stays_a_question()
+    {
+        var merged = Claudes("Portal stack", "s0");
+        Change(b => b.Ask(merged, "Redeploy now or after the demo?", clock, options: ["Now", "After the demo"]));
+        var view = Inbox(hollow: t => t.Id == merged);
+
+        Assert.Equal([(InboxSection.Questions, merged)], Sections(view, InboxTab.NeedsYou));
+    }
+
     [Fact]
     public void Finished_keeps_full_discs_before_rings()
     {
