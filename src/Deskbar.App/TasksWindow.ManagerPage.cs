@@ -38,7 +38,8 @@ namespace Deskbar.App;
 // second TasksWindow made with ManagerOnly set, which TasksBoard.DockManager docks on a strip of its own just inside the
 // tasks panel (inside the bar while the panel is closed): the slot the manager's terminal had (ManagerDock). That window
 // draws nothing but this page (DrawManagerOnly): no toolbar, no add row, no Inbox header or foot, no list. Its top has a
-// close × in place of the back arrow (there is nothing to go back to), Esc leaves it alone, its grip resizes its own strip
+// close × in place of the back arrow (there is nothing to go back to), Esc closes it as the × does unless the box has the
+// keyboard with words in it (CloseDockOnEscape, task dcfc8287), its grip resizes its own strip
 // (ResizeManagerDock) and Alt+F4 closes only it (CloseManagerDock). The tasks panel's own copy of this code is no longer
 // reached (TasksBoard.ShowManager opens the docked window), but stays the fallback for a board with no dock (the tests).
 public partial class TasksWindow
@@ -145,10 +146,26 @@ public partial class TasksWindow
     // The page opens with the keyboard in its empty box (TasksWindow.PageFocus.cs), and one Esc still goes back from there.
     bool ManagerBack()
     {
-        // The docked window has nowhere to go back to, and Esc closing the whole panel by accident would be worse.
-        if (ManagerOnly || !managerPage || latest?.Inbox is null) return false;
+        if (ManagerOnly) return CloseDockOnEscape();
+        if (!managerPage || latest?.Inbox is null) return false;
         if (PageBoxKeepsEscape()) return false;
         BackFromManager();
+        return true;
+    }
+
+    // ESC CLOSES THE DOCKED MANAGER (task dcfc8287, the owner: "esc in manager window should close it"). The docked window has
+    // no list to go back to, so Esc does what its × does (CloseManagerDock, TasksBoard.HideManager): the panel hides, its
+    // strip gives the space back to the windows, and the saved state says closed. The earlier ruling (task 71aae045) left Esc
+    // untaken here for fear of closing the panel by accident; the owner asked for the close. The guard that stays is the one
+    // a task page has: while the keyboard is in the box with words in it, Esc is the box's and the panel stays, so a stray Esc
+    // mid-message hides nothing. With the keyboard elsewhere on the page (chat text selected, a step unfolded) Esc does
+    // close it, words or not; nothing is lost, since the draft is kept (drafts) and the box shows it on the next open. The page opens with the keyboard in its EMPTY box, so one Esc closes it straight after
+    // opening. Everything Escape() undoes first (an edit, a skill list) still goes first: this is reached only after them.
+    // Untaken (false) when the board wired no close, so the key is left alone rather than eaten.
+    bool CloseDockOnEscape()
+    {
+        if (PageBoxKeepsEscape() || CloseManagerDock is not { } close) return false;
+        close();
         return true;
     }
 
@@ -201,7 +218,8 @@ public partial class TasksWindow
         // In the docked window (ManagerOnly) a close × at the far right instead: there is no list to go back to.
         if (ManagerOnly)
         {
-            var close = GlyphButton("x", CloseManagerText, () => CloseManagerDock?.Invoke(), CloseManagerText);
+            // The tooltip names Esc as the back arrow's does ("Back (Esc)"): Esc closes the panel too (CloseDockOnEscape).
+            var close = GlyphButton("x", CloseManagerText, () => CloseManagerDock?.Invoke(), CloseManagerText + " (Esc)");
             close.VerticalAlignment = VerticalAlignment.Top;
             DockPanel.SetDock(close, Dock.Right);
             first.Children.Add(close);

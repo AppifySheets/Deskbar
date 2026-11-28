@@ -2059,7 +2059,7 @@ Since [Deskbar task 71aae045](https://deskbar.app/task#71aae045-f7d9-47b8-8eee-8
 
 MD1. Tasks panel open on a task's page. Click Manager on the bar: a second full-height panel docks just inside the tasks panel with the manager's page (violet tile, "Manager", × at the top right, the box at the foot with a blinking caret). The tasks panel still shows the task's page. Maximized windows shrink to make room.
 MD2. Type straight away, without clicking: the text goes into the manager's box. Enter sends it and the manager names the task open in the tasks panel as "the current task".
-MD3. Press Esc outside the box: the manager's panel stays. Click ×: it closes and the space goes back to the windows.
+MD3. Click ×: the manager's panel closes and the space goes back to the windows. Open it again and press Esc straight away, with the box empty: it closes the same way ([Deskbar task dcfc8287](https://deskbar.app/task#dcfc8287-0d7c-4bd8-8dea-c8dfad7288cb)). Open it once more, type a few words and press Esc: the panel stays and the words with it. Pointing at × shows "Close the manager (Esc)".
 MD4. Close the tasks panel while the manager's panel is open: the manager's panel moves out to sit just inside the bar. Open the tasks panel again: the manager's panel ends up inside it again (bar, tasks, manager).
 MD5. Drag the manager panel's inner edge: it takes the new width, and the next open uses it.
 MD6. Leave the manager's panel open and restart Deskbar: it comes back docked, without taking the keyboard.

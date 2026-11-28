@@ -3842,7 +3842,8 @@ public partial class TasksWindow : Window
     }
 
     // Esc undoes the innermost thing: in the search box, the search (Task 7: emptied, and the keyboard back to the board);
-    // else a rename, else the add box. It does not close the panel: the × and Alt+F4 do.
+    // else a rename, else the add box. It does not close the tasks panel: the × and Alt+F4 do. The manager's docked window
+    // is the exception: with nothing else to undo, Esc closes it as its × does (ManagerBack, CloseDockOnEscape).
     bool Escape()
     {
         if (SearchBox.IsKeyboardFocusWithin) EndSearch();
