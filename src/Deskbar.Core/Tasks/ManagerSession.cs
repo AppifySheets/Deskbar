@@ -154,8 +154,11 @@ public static class ManagerSession
     /// nothing: no task open, or a prompt that is not the user's message (a Deskbar wake, or the first message Deskbar
     /// starts the manager with).
     /// </summary>
+    // A message from the manager's page (task 6c4c067f) gets none from the hook: it carries the line of the task its page
+    // was opened over (PageMessage), and when a resume delivers it as a prompt the user may have opened another page since.
     public static Maybe<string> OpenTaskLine(Maybe<string> prompt, Maybe<TaskItem> open) =>
         IsUsersMessage(prompt.GetValueOrDefault(""))
+        && !prompt.GetValueOrDefault("").TrimStart().StartsWith(PageMessageOpening, StringComparison.Ordinal)
             ? open.Map(task => $"{OpenTaskOpening} {task.Id.ToString()[..8]} \"{OneLine(task.Title, 80)}\". "
                                + "\"Current task\", \"this task\" or \"the open task\" in the message means this one.")
             : Maybe<string>.None;

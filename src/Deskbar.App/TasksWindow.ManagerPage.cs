@@ -59,6 +59,9 @@ public partial class TasksWindow
         {
             managerFrom = inboxPage;
             if (inboxPage is null) inboxListOffset = Scroller.VerticalOffset;
+            // The task page's poll and stream end here (review of task 6c4c067f): left running, the manager's first items
+            // would land in that task's stream until the manager's page had one of its own.
+            StopTranscript();
         }
         managerPage = true;
         inboxPage = null;
@@ -96,9 +99,11 @@ public partial class TasksWindow
     }
 
     // Part of the redraw signature while the page shows: the user's messages (a send changes only them).
+    // The poll's source too: the manager starting, stopping or being replaced changes the state words and the stream.
     string ManagerPageSignature() =>
         !managerPage ? ""
-        : $"|manager|{managerFrom}|" + (Actions?.ManagerMessages?.Invoke() is { } messages ? $"{messages.Count}{messages.LastOrDefault()?.Id}" : "");
+        : $"|manager|{managerFrom}|{transcript?.Source.Kind}|{transcript?.Source.SessionId}|"
+          + (Actions?.ManagerMessages?.Invoke() is { } messages ? $"{messages.Count}{messages.LastOrDefault()?.Id}" : "");
 
     // The page, drawn in DrawInbox's place for a task's page.
     void DrawManagerPage()

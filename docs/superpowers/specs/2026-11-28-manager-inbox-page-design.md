@@ -57,8 +57,8 @@ button is the way in). The violet "Manager asks" / "Manager answered" line stays
 
 ### The page
 
-- Top: back arrow, the violet manager mark (ManagerLook), "Manager", the state in words ("working", "idle", "not
-  running": from the poll's ChatSourceKind and the sessions list) and ⋯ with "Open in terminal".
+- Top: back arrow, the violet manager mark (ManagerLook), "Manager", the state in words (running, asleep or not
+  running yet, from the poll's ChatSourceKind and the sessions list) and ⋯ with "Open in terminal".
 - Body: a ChatStreamPanel bottom-aligned in a FastScrollViewer, kept across redraws and held at its end exactly as the
   task page does (KeepPlace / pageHold logic shared, keyed by a fixed `ManagerSession.PageId` Guid).
 - Foot: the message box, styled as the task page's docked comment box, hint "Message the manager…".

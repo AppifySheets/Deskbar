@@ -1120,7 +1120,8 @@ public partial class App : Application
     // The manager page's transcript (TasksBoard.ManagerChat): the stored manager's one session, in the manager's folder,
     // running or not by the latest list, its file found as a task session's is (worktree project folders included).
     Core.Tasks.ChatSource ManagerChatSource() =>
-        manager?.State.Manager is { } record && claudeSessions is { } sessions && claudeActions is { } actions
+        manager?.State.Manager is { } record && record.Day == DateOnly.FromDateTime(DateTime.Now)
+        && claudeSessions is { } sessions && claudeActions is { } actions
             ? Core.Tasks.ClaudeChatSource.Choose(
                 [new Core.Tasks.TaskSession(record.SessionId, Core.Tasks.ManagerSession.FolderIn(AppPaths.NewStateDir), DateTimeOffset.MinValue, Maybe<DateTimeOffset>.None)],
                 session => actions.StateOf(session.Id), sessions.TranscriptOf)

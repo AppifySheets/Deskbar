@@ -104,6 +104,12 @@ public sealed class ManagerActions : IDisposable
     bool openAfterWake;
     bool openAfterWakeAttaches;
 
+    // Whether the click holding `pending` ends in the terminal, and whether a page message's delivery holds it. "Open in
+    // terminal" during a page-only open, or during a delivery, is another intent than the work in flight, so it waits and
+    // runs after it (Settled) rather than being dropped as a repeat of the same click (review of task 6c4c067f).
+    bool openingAttaches;
+    bool delivering;
+
     // PAGE MESSAGES WAITING THEIR TURN (task 6c4c067f). A message sent from the manager's page while a click, a wake or an
     // earlier message holds `pending` waits here and goes out, in order, once that ends (Settled). Never dropped: the user
     // already sees its bubble. Each entry is the text as delivered and its message as stored.
@@ -170,7 +176,7 @@ public sealed class ManagerActions : IDisposable
         {
             // A wake is being delivered: the click runs right after it, so it never resumes the manager alongside it. A
             // terminal asked for wins over a page-only open asked for in the same wait.
-            if (waking)
+            if (waking || delivering || attach && !openingAttaches)
             {
                 openAfterWake = true;
                 openAfterWakeAttaches |= attach;
@@ -178,6 +184,7 @@ public sealed class ManagerActions : IDisposable
             return Result.Success();
         }
         pending = true;
+        openingAttaches = attach;
         // The click is the user looking: whatever a wake brought is read from here on (the dot goes), and so is the
         // manager's answer to their message (task 2c5de076, ManagerQuestion.Seen: the line goes; a question stays).
         if (manager.State.Manager is { Unread: true } unread) manager.SetManagerSession(unread with { Unread = false });
@@ -265,7 +272,7 @@ public sealed class ManagerActions : IDisposable
     //     or has a live waiter, else a stop and a resume with the message.
     void Deliver(string delivered, ManagerMessage message)
     {
-        pending = true;
+        pending = delivering = true;
         var day = today();
         sending.Disposable = OnScheduler(sessions.ListNow)
             .SelectMany(listed => listed.Match(
@@ -276,7 +283,7 @@ public sealed class ManagerActions : IDisposable
             .Catch((Exception e) => Observable.Return(Result.Failure(e.Message)))
             .Subscribe(sent =>
             {
-                pending = false;
+                pending = delivering = false;
                 sent.TapError(Failed);
                 Settled();
             });
@@ -289,8 +296,18 @@ public sealed class ManagerActions : IDisposable
                 .SelectMany(_ => Started(day, delivered))
                 .Select(found => found.Tap(_ => StoreOnNewRecord(delivered, message)))
                 .Select(found => found.IsSuccess ? Result.Success() : Result.Failure(found.Error)),
-            ManagerStep.Resume resume => ResumedWith(resume.SessionId, delivered),
-            ManagerStep.Attach attach => ToRunning(attach.Agent.SessionId, listed, delivered),
+            // A message Send could not store (no record for today yet: the page's own Open was still starting the manager)
+            // is stored here, on the record that exists by now, so its bubble is drawn and the answer still asks (AfterPrompt).
+            ManagerStep.Resume resume => Observable.Defer(() =>
+            {
+                StoreOnNewRecord(delivered, message);
+                return ResumedWith(resume.SessionId, delivered);
+            }),
+            ManagerStep.Attach attach => Observable.Defer(() =>
+            {
+                StoreOnNewRecord(delivered, message);
+                return ToRunning(attach.Agent.SessionId, listed, delivered);
+            }),
             ManagerStep.Claim claim => Observable.Defer(() =>
             {
                 manager.SetManagerSession(new ManagerRecord(claim.Agent.SessionId, day, scheduler.Now));
@@ -300,10 +317,11 @@ public sealed class ManagerActions : IDisposable
             _ => Observable.Return(Result.Failure($"Unknown manager step {step}")),
         };
 
-    // The page message on a record the send itself made (a start or a claim): stored as Send stores it on today's.
+    // The page message on today's record when Send could not put it there (no record for today then): a start or a claim
+    // the send made, or the one the page's own Open made meanwhile. Once only: a message already on it is left.
     void StoreOnNewRecord(string delivered, ManagerMessage message)
     {
-        if (manager.State.Manager is not { } record || record.Messages?.Any(m => m.Id == message.Id) == true) return;
+        if (manager.State.Manager is not { } record || record.Day != today() || record.Messages?.Any(m => m.Id == message.Id) == true) return;
         manager.SetManagerSession(Written(ManagerSession.WithMessage(record, message), delivered));
     }
 

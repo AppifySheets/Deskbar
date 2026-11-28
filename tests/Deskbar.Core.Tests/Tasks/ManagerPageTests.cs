@@ -80,14 +80,19 @@ public sealed class ManagerPageTests : IDisposable
     }
 
     [Fact]
-    public void OpenTaskLine_counts_a_page_message_as_the_users()
+    public void OpenTaskLine_adds_nothing_to_a_page_message_which_carries_its_own()
     {
         var task = new TaskItem(Guid.NewGuid(), "Some task", Maybe<Guid>.None, Deskbar.Core.Tasks.TaskStatus.InProgress, "",
             Maybe<string>.None, at, at, at, [], []);
 
         var line = ManagerSession.OpenTaskLine(Maybe.From(ManagerSession.PageMessage("hello", Maybe<string>.None)), Maybe.From(task));
 
-        Assert.True(line.HasValue);
+        Assert.False(line.HasValue);
+        // The page message still counts as the user's own words for the answered line (AfterPrompt).
+        var record = new ManagerRecord(Id, today, Question: "Which?");
+        var after = ManagerQuestion.AfterPrompt(record, Id, Maybe.From(ManagerSession.PageMessage("hello", Maybe<string>.None)));
+        Assert.True(after.Value.Replying);
+        Assert.Null(after.Value.Question);
     }
 
     [Fact]
