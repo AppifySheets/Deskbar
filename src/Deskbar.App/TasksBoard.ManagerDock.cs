@@ -110,20 +110,10 @@ public sealed partial class TasksBoard
 
     // Brought to the user as the tasks panel is (Arrived): raised and activated through the App's seam, never over a
     // full-screen window, and the keyboard into the box only once it is the active window (focusing an inactive one would
-    // activate it from under whatever is in front).
-    void ManagerArrived(TasksWindow shown, TasksPanel strip)
-    {
-        if (!shown.IsVisible || strip.BehindFullScreen) return;
-        var hwnd = new System.Windows.Interop.WindowInteropHelper(shown).EnsureHandle();
-        var activated = bringForward is { } seam ? seam(hwnd) : ManagerActivatedHere(shown);
-        if (activated) shown.FocusBoard();
-    }
-
-    static bool ManagerActivatedHere(TasksWindow shown)
-    {
-        shown.ActivateHere();
-        return true;
-    }
+    // activate it from under whatever is in front). The same ComeForward the tasks panel uses (TasksBoard.Arrival.cs),
+    // which tries again for a moment while the shell has not yet placed the just-shown window on a desktop: on the first
+    // open after a start it had not, every time, and the box never got the keyboard (task b62c4472).
+    void ManagerArrived(TasksWindow shown, TasksPanel strip) => ComeForward(shown, strip);
 
     // Each board redraw reaches the docked manager too (Refresh); it draws only when its page's own signature changed. It
     // ignores the view's rows (review finding: building a whole board for it on every pulse, with the tasks panel closed,

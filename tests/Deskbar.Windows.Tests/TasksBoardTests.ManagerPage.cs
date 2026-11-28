@@ -36,9 +36,12 @@ public partial class TasksBoardTests
         }
     }
 
-    static Board BuildWithManager(ManagerFake fake, Func<ChatSource>? chat = null, Func<TaskSession, Maybe<string>>? transcriptOf = null)
+    // `activates` is the bring-forward seam's answer (Build's), for the arrival retries (TasksBoard.Arrival.cs).
+    static Board BuildWithManager(ManagerFake fake, Func<ChatSource>? chat = null, Func<TaskSession, Maybe<string>>? transcriptOf = null,
+        Func<bool>? activates = null)
     {
-        var t = Build(sendToManager: fake.Send, openManagerTerminal: fake.Terminal, managerChat: chat, transcriptOf: transcriptOf, openManager: () => Result.Success());
+        var t = Build(sendToManager: fake.Send, openManagerTerminal: fake.Terminal, managerChat: chat, transcriptOf: transcriptOf, openManager: () => Result.Success(),
+            activates: activates);
         fake.Board = t;
         t.Harness.Manager.SetManagerSession(new ManagerRecord("5a1e0c2b-1111-4222-8333-944455556666", DateOnly.FromDateTime(Start.Date)));
         return t;

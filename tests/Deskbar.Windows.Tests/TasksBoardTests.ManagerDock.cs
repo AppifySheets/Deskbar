@@ -58,6 +58,27 @@ public partial class TasksBoardTests
         Assert.Equal(System.Windows.Visibility.Collapsed, ((System.Windows.FrameworkElement)d.Window.FindName("Toolbar")).Visibility);
     });
 
+    // Task b62c4472 (Petre: "should automatically focus the field for me to enter text"): the first open after a start
+    // came up with no keyboard in the box, because the seam refused the window the shell had not placed on a desktop yet
+    // (the trace: "not on the desktop in front" 100 ms after "docked (shown)"). The arrival is tried again, and the box
+    // gets the keyboard once the seam says yes.
+    [Fact]
+    public void The_docked_manager_box_gets_the_keyboard_once_the_shell_has_placed_the_panel() => StaThread.Run(() =>
+    {
+        var fake = new ManagerFake();
+        var asked = 0;
+        using var t = BuildWithManager(fake, activates: () => ++asked >= 2);
+        using var d = DockManager(t);
+
+        t.Controller.ShowManager();
+        Assert.False(d.Window.ManagerBox!.IsKeyboardFocused);
+
+        t.Timers.FireAll();
+
+        Assert.Equal(2, asked);
+        Assert.True(d.Window.ManagerBox!.IsKeyboardFocused, "the docked manager's box has no keyboard focus");
+    });
+
     [Fact]
     public void A_send_from_the_docked_panel_names_the_task_open_in_the_Inbox() => StaThread.Run(() =>
     {
