@@ -139,12 +139,13 @@ public partial class TasksWindow
         InboxPage.Visibility = Visibility.Collapsed;
     }
 
-    // Esc on a page (Escape): back, unless the keyboard is in a comment box, where Esc is the box's (review M5 of the List).
+    // Esc on a page (Escape): back, unless the keyboard is in a comment box with text in it, where Esc is the box's (review
+    // M5 of the List). An empty box gives it up, since a page opens with the keyboard in its box (TasksWindow.PageFocus.cs).
     bool InboxBack()
     {
         if (ManagerBack()) return true;
         if (inboxPage is null || latest?.Inbox is null || pageInWindow) return false;
-        if (EscapeIgnoresThreadWhile?.Invoke() ?? commentBoxes.Values.Any(box => box.IsKeyboardFocusWithin)) return false;
+        if (PageBoxKeepsEscape()) return false;
         BackFromPage();
         return true;
     }
@@ -153,8 +154,10 @@ public partial class TasksWindow
     bool InboxEditPage()
     {
         if (inboxPage is not { } id || latest?.Inbox is null || renaming is not null) return false;
+        // A comment box with text in it keeps F2 (typing goes on); an empty one gives it up, since a page opens with the
+        // keyboard in its box (TasksWindow.PageFocus.cs) and F2 must still rename the page's task from there.
         if (AddBoxShown && AddBox.IsKeyboardFocusWithin || SearchBox.IsKeyboardFocusWithin || subtaskBox?.IsKeyboardFocusWithin == true
-            || commentBoxes.Values.Any(box => box.IsKeyboardFocusWithin)) return false;
+            || commentBoxes.Values.Any(box => box.IsKeyboardFocusWithin && box.Text.Length > 0)) return false;
         BeginRename(id);
         return true;
     }
@@ -354,6 +357,8 @@ public partial class TasksWindow
     // are; redrawn, where it was held (KeepPlace keeps it there while content arrives or goes).
     void SettlePageScroll(ScrollViewer scroller, Guid id, PagePlace? hold)
     {
+        // A page it did not settle last has just opened: its box takes the keyboard after the draw (TasksWindow.PageFocus.cs).
+        if (pageScrolledFor != id) pageJustOpened = true;
         pageScrolledFor = id;
         pageHold = hold;
         scroller.ScrollChanged += (_, e) => KeepPlace(scroller, e);

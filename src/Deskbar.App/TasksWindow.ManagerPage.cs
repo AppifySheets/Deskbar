@@ -139,12 +139,13 @@ public partial class TasksWindow
         if (from is null) RestoreListOffset();
     }
 
-    // Esc on the manager's page (InboxBack): back, unless the keyboard is in the box, where Esc is the box's.
+    // Esc on the manager's page (InboxBack): back, unless the keyboard is in the box with text in it, where Esc is the box's.
+    // The page opens with the keyboard in its empty box (TasksWindow.PageFocus.cs), and one Esc still goes back from there.
     bool ManagerBack()
     {
         // The docked window has nowhere to go back to, and Esc closing the whole panel by accident would be worse.
         if (ManagerOnly || !managerPage || latest?.Inbox is null) return false;
-        if (EscapeIgnoresThreadWhile?.Invoke() ?? commentBoxes.Values.Any(box => box.IsKeyboardFocusWithin)) return false;
+        if (PageBoxKeepsEscape()) return false;
         BackFromManager();
         return true;
     }

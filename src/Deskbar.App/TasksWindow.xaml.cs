@@ -174,6 +174,9 @@ public partial class TasksWindow : Window
         // Its own checklist icon (TasksIcon). The panel is no longer listed on the bar (the App opts its handle out, as
         // it does the bar's own), but Windows still asks a window for its icon in a debug dump or a trace.
         Icon = TasksIcon.Image;
+        // A page on show gets the keyboard in its box when the panel comes back in front with nothing focused
+        // (TasksWindow.PageFocus.cs, task 64744611).
+        Activated += (_, _) => RefocusPageBox();
         // Esc undoes the innermost thing; F2 edits the selected line's title in place (Ruling 38); Ctrl+F goes to the
         // search box (Task 7). Through Press, so the tests can hand it the modifiers a synthetic key event cannot carry.
         PreviewKeyDown += (_, e) => e.Handled = Press(e.Key, Keyboard.Modifiers);
@@ -371,15 +374,20 @@ public partial class TasksWindow : Window
     }
 
     /// <summary>
-    /// The keyboard to the toolbar, never to a text box (the window opens on the board). Only once the controller has
-    /// brought the window forward and activated it: focusing an inactive window activates it.
+    /// The keyboard to the toolbar, never to a text box (the window opens on the board), unless a page is on show: then to
+    /// the page's box, since a page is a chat opened to write in (TasksWindow.PageFocus.cs, task 64744611). Only once the
+    /// controller has brought the window forward and activated it: focusing an inactive window activates it.
     /// </summary>
     // The manager's docked window has no toolbar: the keyboard goes straight to its message box (task 71aae045), so typing
     // to the manager needs no click first. With no box (no SendToManager wired) nothing takes it.
     internal void FocusBoard()
     {
-        if (!ManagerOnly) Toolbar.Focus();
-        else ManagerBox?.Focus();
+        if (ManagerOnly)
+        {
+            if (ManagerBox is { } managerBox) FocusBox(managerBox);
+        }
+        else if (OpenPageBox is { } box) FocusBox(box);
+        else Toolbar.Focus();
     }
 
     /// <summary>
@@ -505,6 +513,9 @@ public partial class TasksWindow : Window
         RefocusLink();
         RefocusSubtaskBox();
         RefocusDialogOther();
+        // A page that just opened (a task's or the manager's) puts the keyboard in its box (TasksWindow.PageFocus.cs),
+        // unless one of the restores above already gave a box in the page the keyboard.
+        FocusOpenedPage();
         // A view that arrived during the draw is drawn now.
         Flush();
     }

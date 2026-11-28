@@ -152,6 +152,24 @@ public partial class TaskDetailWindowInboxTests
         }
     });
 
+    // A TASK WINDOW OPENS WITH THE KEYBOARD IN ITS PAGE'S BOX (Deskbar task 64744611, "typing box should be active
+    // immediately"; TaskDetailWindow.FocusPageBox). Once the activation has settled, nothing else being focused.
+    [Fact]
+    public void A_task_window_activated_puts_the_keyboard_in_its_pages_box() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var id = t.Tasks.Create("focus on open", t.Sparrow, Session("s1")).Value.Id;
+        Assert.True(t.Board.OpenWindow(id).IsSuccess);
+        var host = t.Board.WindowOf(id)!;
+        var page = host.PageRenderer!;
+
+        host.Activate();
+        host.Dispatcher.Invoke(() => { }, System.Windows.Threading.DispatcherPriority.Background);
+
+        Assert.True(page.CommentBoxOf(id)!.IsKeyboardFocused,
+            $"the page's comment box has no keyboard focus (active {host.IsActive}, focused {Keyboard.FocusedElement?.GetType().Name ?? "none"})");
+    });
+
     // "/" IN THE COMMENT BOX OF A TASK'S PAGE (Deskbar task 9a06cb76, Petre on 2.6.67: '"/ " failed in comments section
     // of the task'; his trace showed no skill probe at all, and it worked once tried on a task with a session). Typed as
     // the keyboard types it, in a task's own window. The panel's thread has its own test in TasksBoardTests.
