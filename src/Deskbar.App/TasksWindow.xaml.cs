@@ -3548,6 +3548,8 @@ public partial class TasksWindow : Window
         // The important and urgent toggles first (Ruling 37, TasksWindow.AddFlags.cs), then the workspace chip.
         AddFlagToggles().ToList().ForEach(toggle => AddEnd.Children.Add(toggle));
         // Then Start Claude (task 3c40dec9), while the controller can start one: AddAndStartClaudeButton.
+        // The camera (task 494d34ee) before it, beside the toggles as Petre asked: AddFromWindowButton.
+        if (AddFromWindowButton() is { } fromWindow) AddEnd.Children.Add(fromWindow);
         if (AddAndStartClaudeButton() is { } start) AddEnd.Children.Add(start);
         var target = addChosen ?? latest?.AddTarget;
         if (target is null) return;
@@ -3585,15 +3587,16 @@ public partial class TasksWindow : Window
 
     // The box's note added, where the chip says with the flags the toggles say, and the box closed; whether it was added.
     // With `startClaude` (the Start Claude button or Ctrl+Enter) the note is then handed to Claude through the
-    // controller's AddNoteAndStartClaude; with none wired, it is added as Enter adds it.
-    bool AddFromBox(bool startClaude)
+    // controller's AddNoteAndStartClaude; with none wired, it is added as Enter adds it. A `shot` (the camera, task
+    // 494d34ee) is one more picture after the pending ones, with the line naming its window under the typed lines.
+    bool AddFromBox(bool startClaude, WindowShot.Shot? shot = null)
     {
         var target = addChosen ?? latest?.AddTarget;
         // The first line is the title and the lines after it the description (TaskNote.Split, task 98420dbc). Pasted
         // pictures (TasksWindow.Images.cs, "the add box") follow that text in the description, and with no words typed
         // the task is called "Picture".
-        var (title, body) = TaskNote.Split(AddBox.Text, AddBoxImages.Count);
-        var describe = AddDescription(body);
+        var (title, body) = TaskNote.Split(AddBox.Text, AddBoxImages.Count + (shot is null ? 0 : 1));
+        var describe = AddDescription(body, shot);
         var add = startClaude && Actions?.AddNoteAndStartClaude is { } andStart ? andStart : Actions?.AddNote;
         var added = add is not null && target is not null && add(title, target.Workspace, AddQuadrant, describe);
         if (!added) return false;
@@ -3621,6 +3624,38 @@ public partial class TasksWindow : Window
         button.ToolTip = "Add and start Claude (Ctrl+Enter): adds the task and starts a Claude session on it";
         button.Margin = new Thickness(4, 0, 0, 0);
         return button;
+    }
+
+    // A TASK FROM THE WINDOW ON SCREEN (task 494d34ee; Petre: "add a task from the window open on the screen as a separate
+    // button near the urgent/important buttons, to start immediately in the current workspace"). The camera after the
+    // flag toggles: a picture of the window Petre was in before he clicked Deskbar (the controller's ShootWindow, which
+    // asks the bar's foreground hook, WindowShot.cs has the rules), added with the box's words, if any, as the play button
+    // adds a note and then Claude started on it. No window to take is said on the problem line and nothing is added. None
+    // while the controller cannot shoot or start Claude. Segoe's "Camera" (U+E722), as the bar's camera.
+    internal const string AddFromWindowText = "Add from this window and start Claude";
+
+    Button? AddFromWindowButton()
+    {
+        if (Actions?.ShootWindow is null || Actions.AddNoteAndStartClaude is null) return null;
+        var button = Flat(new TextBlock { Text = "\uE722", FontFamily = IconFont, FontSize = 12, Foreground = DimInk },
+            AddFromWindowText, AddFromWindow, new Thickness(5, 2, 5, 2));
+        button.Background = Brushes.Transparent;
+        button.ToolTip = "Add from this window: takes a picture of the window you were in, adds it as a task and starts Claude on it";
+        button.Margin = new Thickness(4, 0, 0, 0);
+        return button;
+    }
+
+    // The press: the picture, then the add that starts Claude. Internal for the tests.
+    internal void AddFromWindow()
+    {
+        if (Actions?.ShootWindow is not { } shoot) return;
+        shoot().Match(
+            shot =>
+            {
+                ShowProblem(null);
+                if (!AddFromBox(startClaude: true, shot) && AddBoxShown) AddBox.Focus();
+            },
+            ShowProblem);
     }
 
     // For the tests: types into the add box and presses a key.

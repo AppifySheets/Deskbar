@@ -1584,6 +1584,23 @@ AS5e. (Task 29bdd158.) Open the thread of a Claude task whose session works in t
 AS5. The button on an empty box adds nothing and starts nothing. With Claude sessions off in Manage the note is
      still added, and the same refusal "Start Claude on this" gives says why no session started.
 
+## Add from the window on screen
+
+(Task 494d34ee.) Claude sessions on, in a workspace whose tasks know exactly one folder.
+
+AW1. Work in a browser window, then press the camera in the bar's add row, right after the important and urgent
+     toggles. Without typing anything: a task called "Picture" is added to the workspace you are on, Claude starts on it
+     in the background and the "Claude started" card shows. The keyboard goes back to the browser. Open the task: its
+     description reads "Picture of the window "<the browser's title>" (msedge) on screen." with the picture under it,
+     the browser window alone (no bar, no strip, no black border round it). The session renames the task after reading.
+AW2. Type "Why is this red" in the box, then press the camera: the task is called "Why is this red", same picture.
+AW3. A Notepad window (it has a classic frame): the picture has no black edge at its sides or bottom.
+AW4. Switch to an empty desktop, click the desktop, press the camera: a message says there is no window on this desktop
+     to take a picture of, and nothing is added. The keyboard is left as it was.
+AW5. The tasks panel, + Add: the camera sits after the toggles, before the play button. Click your browser, then the
+     panel's camera: the same task. With no window, the panel's problem line says so.
+AW6. The bar in the Inbox look (panel on the Inbox): the camera sits after the toggles, drawn like an "off" toggle.
+
 ## Reevaluate
 
 (Task 3dd07539.) The tasks panel open on the List, with a Claude task waiting on you whose question is already

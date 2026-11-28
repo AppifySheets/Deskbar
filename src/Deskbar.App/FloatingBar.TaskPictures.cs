@@ -87,13 +87,15 @@ public partial class FloatingBar
 
     // What the add hands TaskService.AddNote: none for a one-line note without pictures (a plain note, as before), else
     // the writer of the new task's description: the lines typed after the title (`body`, TaskNote.Split), then the
-    // pictures saved under the new task's id. A copy, so a paste landing mid-add cannot change what is written.
-    Func<Guid, Result<string>>? TaskAddDescription(string body)
+    // pictures saved under the new task's id. A copy, so a paste landing mid-add cannot change what is written. A window's
+    // `shot` (the camera button, task 494d34ee) adds its line after the typed lines and its picture after the pasted ones.
+    Func<Guid, Result<string>>? TaskAddDescription(string body, WindowShot.Shot? shot = null)
     {
-        if (taskAddImages.Count == 0 && body.Length == 0) return null;
-        if (taskAddImages.Count == 0) return _ => Result.Success(body);
-        var pictures = taskAddImages.ToArray();
-        return id => TaskImageFiles.Save(TaskStateDir, id, pictures, TaskNow()).Map(saved => TaskImages.Join(body, saved));
+        var text = shot is null ? body : WindowShot.WithCaption(body, shot.Caption);
+        TaskImageFiles.Pending[] pictures = shot is null ? [.. taskAddImages] : [.. taskAddImages, shot.Picture];
+        if (pictures.Length == 0 && text.Length == 0) return null;
+        if (pictures.Length == 0) return _ => Result.Success(text);
+        return id => TaskImageFiles.Save(TaskStateDir, id, pictures, TaskNow()).Map(saved => TaskImages.Join(text, saved));
     }
 
     // One pending picture: its thumbnail with a small x over the top right corner. The x is a task button, so it never
