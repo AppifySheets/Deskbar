@@ -17,6 +17,8 @@ namespace Deskbar.Core.Tasks;
 //   * every `expireEvery` the questions held past PermissionDesk.HeldFor go, and so do those of terminal and VS Code
 //     sessions whose transcript went on past the question (PermissionDesk.Settle, TranscriptMark): the user answered in
 //     the session's own dialog. That look costs a file-size check per question while nothing has been written;
+//   * on the same tick, the questions whose hook script stopped touching its heartbeat file (PermissionDesk.Quiet): the
+//     script was killed or its session's console went, so nothing would read a click;
 //   * Dispose (Deskbar exits): every question is released.
 //
 // The session's own hook events (Stop, UserPromptSubmit, SessionEnd) forget its questions too; that is in
@@ -47,6 +49,9 @@ public sealed class PermissionKeeper : IDisposable
         {
             desk.Expire();
             desk.Settle();
+            // A question whose hook script stopped beating: the script is gone, so a click would answer nothing (task
+            // ca73633d, PermissionDesk.Quiet).
+            desk.Quiet();
         }));
     }
 

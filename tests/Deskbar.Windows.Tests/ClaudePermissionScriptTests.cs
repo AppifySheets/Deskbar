@@ -47,8 +47,14 @@ public sealed class ClaudePermissionScriptTests : IDisposable
             UseShellExecute = false, CreateNoWindow = true,
         };
         var process = Process.Start(start)!;
-        process.StandardInput.Write("""{"session_id":"s1","hook_event_name":"PermissionRequest","tool_name":"Bash"}""");
-        process.StandardInput.Close();
+        // A script whose call gets no code ends at once, sometimes before this write: its stdin is then closed and the
+        // write throws "The pipe is being closed" (seen in No_code_ends_it_at_once_printing_nothing). What the test checks
+        // is what the script did, so a stdin it no longer reads is not a failure. The bytes go to the base stream, so the
+        // writer holds nothing that a later Close or Dispose would try to flush into the closed pipe.
+        try { process.StandardInput.BaseStream.Write(Encoding.UTF8.GetBytes("""{"session_id":"s1","hook_event_name":"PermissionRequest","tool_name":"Bash"}""")); }
+        catch (IOException) { }
+        try { process.StandardInput.Close(); }
+        catch (IOException) { }
         return process;
     }
 
@@ -97,6 +103,28 @@ public sealed class ClaudePermissionScriptTests : IDisposable
         Answer(slot, text);
         var (exitCode, stdout) = Finished(process);
         return (exitCode, stdout, slot);
+    }
+
+    // THE HEARTBEAT (task ca73633d, PermissionDesk.Quiet): while it waits, the script touches the alive file in its slot,
+    // and touches it again a beat later, so Deskbar can tell its card still has a reader.
+    [Fact]
+    public void A_waiting_script_touches_its_heartbeat_file_and_again_a_beat_later()
+    {
+        var script = Prepared(Code);
+        using var process = Started(script);
+        var slot = Slot(script, process);
+        var alive = Path.Combine(slot, PermissionDesk.AliveFile);
+        DateTime? Beat() => File.Exists(alive) ? File.GetLastWriteTimeUtc(alive) : null;
+
+        var until = DateTime.UtcNow + Limit;
+        while (DateTime.UtcNow < until && Beat() is null) Thread.Sleep(50);
+        var first = Beat();
+        Assert.NotNull(first);
+        while (DateTime.UtcNow < until && Beat() == first) Thread.Sleep(100);
+        Assert.NotEqual(first, Beat());
+
+        Answer(slot, $"{Code} allow\n");
+        Assert.Equal(PermissionAnswer.AllowLine, Finished(process).Stdout.TrimEnd('\r', '\n'));
     }
 
     [Theory]
