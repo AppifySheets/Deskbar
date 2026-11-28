@@ -1599,8 +1599,9 @@ AS2. (Task 64c9eb8f.) Type another note and press Enter, Enter instead: the same
      only adds too and no folder list opens; the play button there still opens it.
 AS3. The tasks panel, + Add: the same play button sits after the toggles, before the workspace chip, and Enter
      does the same (Ctrl+Enter only adds). The box closes once the note is added, and the panel stays on the task and thread you had open.
-AS3a. Click the "Claude started" card: the task's workspace comes to the front with its Claude window, as a
-     double-click on the task's line does.
+AS3a. Click the "Claude started" card: the tasks panel comes forward on the task's page (the Inbox view), with
+     Claude's messages coming in. No terminal opens and the desktop does not change. In the List view the task's
+     thread unfolds in the list instead (task f284968f).
 AS3b. Make a start fail (a workspace whose one folder is untrusted): Enter still tells you at once, with the
      trust offer, and no "Claude started" card shows.
 AS3c. Two notes added with Enter in a row: one card, the newer task's. With two folders, pick one from the list: the keyboard

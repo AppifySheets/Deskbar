@@ -540,9 +540,16 @@ public partial class App : Application
     // "CLAUDE STARTED", the add boxes' Enter confirmation (Ctrl+Enter until task 64c9eb8f; task 7b17a573; Petre: "only start a task and don't open
     // a terminal. confirm it has started as a mild notification, don't even take me away from my current thread").
     // A card of the app's own in the screen's corner that never takes the foreground (ClaudeStartedNotice says why not a
-    // tray balloon: Windows drops this app's, #123). A newer card replaces the one on show. Clicking it is asking for
-    // the session after all, so the click goes where a double-click on the task's line goes (ClaudeTaskActions.Go: its
-    // workspace, then its window), with the task as the board has it at the click.
+    // tray balloon: Windows drops this app's, #123). A newer card replaces the one on show.
+    //
+    // CLICKING IT OPENS THE TASK'S CHAT, NOT A TERMINAL (Deskbar task f284968f; Petre: "clicking a task just started
+    // notification opens a terminal, should open chat window"). The click used to go where a double-click on the line
+    // goes (ClaudeTaskActions.Go), and for a session started in the background that meant attaching a new terminal to
+    // it: the very window the background start had spared him. Now it goes where a click on the task's line on the bar
+    // goes (TasksBoard.ShowTask): the tasks panel comes forward on the task, which in the Inbox view is the task's page,
+    // with Claude's messages and steps read live from the session's transcript (TasksWindow.Transcript.cs). No desktop
+    // switch either, since the panel is on every desktop. In the List view the same call unfolds the task's thread in
+    // the list, the closest that view has. A task gone from the board by the click (deleted in the 5 s) opens nothing.
     ClaudeStartedNotice? claudeStartedNotice;
 
     void NotifyClaudeStarted(Core.Tasks.TaskItem task)
@@ -552,8 +559,13 @@ public partial class App : Application
         var notice = new ClaudeStartedNotice(task.Title);
         notice.Clicked += () =>
         {
-            if (tasks?.Board.Tasks.FirstOrDefault(t => t.Id == id) is { } current)
-                claudeActions?.Go(current).TapError(e => ClickTrace.Write($"claude started notice: open refused: {e}"));
+            if (tasks?.Board.Tasks.Any(t => t.Id == id) != true)
+            {
+                ClickTrace.Write($"claude started notice: {id} is no longer on the board, nothing to open");
+                return;
+            }
+            tasksBoard?.ShowTask(id);
+            ClickTrace.Write($"claude started notice: opened {id} in the tasks panel");
         };
         notice.Closed += (_, _) =>
         {

@@ -25,8 +25,8 @@ namespace Deskbar.App;
 //   * no sound, and it fades by itself after a few seconds. While the pointer rests on it, it stays.
 //   * a newer notice replaces an older one (App.NotifyClaudeStarted closes the last), so a burst of Enters leaves
 //     one card, not a stack.
-// A click on it is asking for the session after all: Clicked fires and the card closes; the App goes to the session as a
-// double-click on the task's line does.
+// A click on it is asking to see the session after all: Clicked fires and the card closes; the App opens the task's chat
+// (its page in the tasks panel, App.NotifyClaudeStarted), never a terminal (task f284968f).
 //
 // The caller hands the handle to WindowMonitor.Ignore BEFORE Show (EnsureHandle), as for every window of the app's own:
 // the monitor does not skip this process, and a card shown first would get a button in the bar or a tile.
@@ -46,7 +46,7 @@ public sealed class ClaudeStartedNotice : Window
 
     readonly DispatcherTimer timer;
 
-    /// <summary>A click on the card: the App opens the task's session. The card closes itself after raising it.</summary>
+    /// <summary>A click on the card: the App opens the task's chat in the tasks panel. The card closes itself after raising it.</summary>
     public event Action? Clicked;
 
     public ClaudeStartedNotice(string taskTitle)
@@ -63,7 +63,7 @@ public sealed class ClaudeStartedNotice : Window
         Title = "Claude started";
         Content = Card(taskTitle);
         Cursor = Cursors.Hand;
-        ToolTip = "Open the session";
+        ToolTip = "Open the task's chat";
 
         timer = new DispatcherTimer { Interval = Stay };
         timer.Tick += (_, _) => FadeWhenLeft();
