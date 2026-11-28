@@ -170,7 +170,9 @@ public partial class TasksWindow
             $"{commentsWidth}{actionWidth}{reevaluateLeads}{columnWidths}",
             string.Join('|', settledOpen.Order()), string.Join('|', earlierOpen.Order()), string.Join('|', longOpen.Order()),
             BodyHeightsSignature,
-            string.Join('|', view.Places.Select(p => $"{p.IsGroup}{p.Workspace}{p.Name}{(p.Colour as System.Windows.Media.SolidColorBrush)?.Color}")),
+            // The Recent row (task 46eddcb0) is left out: it reorders whenever a note lands in another workspace, the
+            // lines draw nothing from it, and the menus read it from `latest` when they open.
+            string.Join('|', view.Places.Where(p => !p.Recent).Select(p => $"{p.IsGroup}{p.Workspace}{p.Name}{(p.Colour as System.Windows.Media.SolidColorBrush)?.Color}")),
             $"{Now().ToLocalTime().Date:yyyy-MM-dd}");
 
     // Everything a row draws, as text: the record's own members (a record prints them all), with each list spelled out,

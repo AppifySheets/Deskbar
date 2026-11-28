@@ -778,7 +778,7 @@ public sealed partial class TasksBoard : IDisposable
     // What a task window draws: the task's line with its thread open (comments, sessions, subtasks), the workspaces for
     // its "Move to…" menu, and the clock its times are told against.
     TaskDetailView DetailOf(TaskItem task) =>
-        WithInboxPage(new(RowOf(task, open: true), WorkspaceChipMenu.Entries(manager.State, withNone: true), now()), task);
+        WithInboxPage(new(RowOf(task, open: true), WorkspaceChipMenu.Entries(manager.State, withNone: true, tasks: tasks.Board.Tasks), now()), task);
 
     public void Filter(TaskFilter shown)
     {
@@ -1483,8 +1483,9 @@ public sealed partial class TasksBoard : IDisposable
                 x.Filter == TaskFilter.WaitingOnYou && x.Count > 0))
             .ToArray();
         // Every workspace menu of the window (move, the workspace filter, the add box's chip) is the task list's one
-        // workspace menu: chips in their colours, in the bar's order, grouped as on the bar, none first.
-        var places = WorkspaceChipMenu.Entries(manager.State, withNone: true);
+        // workspace menu: chips in their colours, in the bar's order, grouped as on the bar, none first, under the Recent
+        // row of the workspaces the newest tasks went to (task 46eddcb0), which is why it is handed the whole board.
+        var places = WorkspaceChipMenu.Entries(manager.State, withNone: true, tasks: tasks.Board.Tasks);
         var addTarget = shown.Any ? PlaceOf(manager.CurrentWorkspaceId) : PlaceOf(shown.Workspace);
         // The Matrix's four cells (Ruling 28), drawn instead of the groups while the switch says so (AppState.TasksMatrix).
         // Not split by Busy (task 10b49554 review): a compact Matrix line shows no sessions, so a line moving between

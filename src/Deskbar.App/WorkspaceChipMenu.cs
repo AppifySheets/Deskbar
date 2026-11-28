@@ -9,6 +9,7 @@ using CSharpFunctionalExtensions;
 using Deskbar.Core.Domain;
 using Deskbar.Core.Geometry;
 using Deskbar.Core.Persistence;
+using Deskbar.Core.Tasks;
 
 namespace Deskbar.App;
 
@@ -32,6 +33,14 @@ namespace Deskbar.App;
 // Tab and Shift+Tab walk them in a cycle, the arrow keys move by where the chips are drawn, across group captions
 // (ChipGrid, task f94524ce), Enter or Space picks, Esc closes. The menu opens with the keyboard on the current choice, which keeps its blue outline. Typing a name's
 // first letters moves the keyboard to that chip (TypeAheadMatch, task 6184e8bf), and a held Enter's repeats pick nothing.
+//
+// RECENT FIRST (task 46eddcb0, Petre: "show recent workspaces at the top and let me select from them first, so i don't
+// have to go through unused workspaces with a keyboard"). Given the tasks, the menu opens with a "Recent" row above
+// everything else: the workspaces of the newest tasks (RecentTaskWorkspaces, which says why that measure), each drawn
+// as its chip, with a hairline under the row. The same workspaces stay in their usual places below as well, so the
+// bar's order Petre knows by heart does not shift each time he adds a task. The Recent row comes first in the menu's
+// order, so the keyboard starts there (on the current choice when that is recent, else on the row's first chip), the
+// arrows reach it first, and type to jump finds a recent workspace before its twin further down.
 //
 // The colours are LaneColour's, the resolution the switcher and quick find share with the bar: a group's colour for its
 // members, a workspace's own by its defined position otherwise. A workspace that opted out of colour gets the neutral
@@ -69,9 +78,13 @@ internal static class WorkspaceChipMenu
     /// <summary>
     /// One entry of the menu: a group's caption (<see cref="IsGroup"/>, never clickable), or a choice of a workspace or
     /// of none. <see cref="Colour"/> is the lane colour, null for none and for a workspace without one.
-    /// <see cref="InGroup"/> marks a workspace that belongs to the caption before it.
+    /// <see cref="InGroup"/> marks a workspace that belongs to the caption before it. <see cref="Recent"/> marks the
+    /// "Recent" caption and its chips (task 46eddcb0), which the menu draws above everything else.
     /// </summary>
-    internal sealed record Entry(bool IsGroup, Maybe<Guid> Workspace, string Name, Brush? Colour, bool InGroup = false);
+    internal sealed record Entry(bool IsGroup, Maybe<Guid> Workspace, string Name, Brush? Colour, bool InGroup = false, bool Recent = false);
+
+    /// <summary>The caption over the menu's Recent row.</summary>
+    internal const string RecentCaption = "Recent";
 
     /// <summary>
     /// A chip that is not a workspace, placed first (the window's workspace filter has "All workspaces"): its words,
@@ -82,8 +95,11 @@ internal static class WorkspaceChipMenu
     /// <summary>
     /// The menu's entries in the bar's order, with "none" first when <paramref name="withNone"/>. A workspace
     /// <paramref name="include"/> turns down is left out, and a group with no member left loses its caption too.
+    /// Given <paramref name="tasks"/>, the entries start with the Recent row: its caption and the workspaces of the
+    /// newest tasks (<see cref="RecentTaskWorkspaces"/>), which then appear again in their usual places.
     /// </summary>
-    internal static IReadOnlyList<Entry> Entries(AppState state, bool withNone, Func<Workspace, bool>? include = null)
+    internal static IReadOnlyList<Entry> Entries(AppState state, bool withNone, Func<Workspace, bool>? include = null,
+        IEnumerable<TaskItem>? tasks = null)
     {
         var shown = include ?? (_ => true);
         var blocks = state.Blocks();
@@ -99,7 +115,22 @@ internal static class WorkspaceChipMenu
                 : choices.Prepend(new Entry(true, Maybe<Guid>.None, group.Name,
                     BrushOf(WorkspacePalette.For(group.Color, Math.Max(0, state.ColourSlotOf(group))))));
         });
-        return (withNone ? lines.Prepend(new Entry(false, Maybe<Guid>.None, "none", null)) : lines).ToArray();
+        var all = withNone ? lines.Prepend(new Entry(false, Maybe<Guid>.None, "none", null)) : lines;
+        return RecentRow(state, shown, tasks).Concat(all).ToArray();
+    }
+
+    // The Recent row's entries: its caption, then a chip per recent workspace in the order RecentTaskWorkspaces gives
+    // (newest first). Nothing at all without tasks, or when no task has a workspace still on the menu, so the menu
+    // never shows a caption over an empty row.
+    static IReadOnlyList<Entry> RecentRow(AppState state, Func<Workspace, bool> shown, IEnumerable<TaskItem>? tasks)
+    {
+        if (tasks is null) return [];
+        var byId = state.Workspaces.ToDictionary(w => w.Id);
+        var recent = RecentTaskWorkspaces.Of(tasks, id => byId.TryGetValue(id, out var w) && shown(w))
+            .Select(id => byId[id])
+            .Select(w => new Entry(false, w.Id, w.Name, BrushOf(LaneColour.Of(state, w)), InGroup: true, Recent: true))
+            .ToArray();
+        return recent.Length == 0 ? [] : recent.Prepend(new Entry(true, Maybe<Guid>.None, RecentCaption, null, Recent: true)).ToArray();
     }
 
     /// <summary>
@@ -142,11 +173,17 @@ internal static class WorkspaceChipMenu
         // Width only clips (measured: chips ran to 535 DIP in a menu 150 wide). The inner width is the menu's less its
         // padding and the template's edge.
         var inner = Math.Max(40, menu.Width - menu.Padding.Left - menu.Padding.Right - TemplateEdge);
+        // Each caption with the members that follow it. The Recent row (task 46eddcb0) goes above everything, the
+        // block of extras, "none" and the ungrouped workspaces included, and carries a hairline under it: that next
+        // block has no caption of its own, so without the line its chips would read as more of the Recent row.
+        var captioned = entries.Select((entry, at) => (entry, at)).Where(x => x.entry.IsGroup)
+            .Select(x => (x.entry, block: Block(x.entry,
+                entries.Skip(x.at + 1).TakeWhile(e => e.InGroup).Select(e => Choice(e, current, pick, menu)).ToArray(), inner,
+                atTop: x.entry.Recent, ruled: x.entry.Recent)))
+            .ToArray();
+        captioned.Where(x => x.entry.Recent).ToList().ForEach(x => menu.Items.Add(x.block));
         if (first.Length > 0) menu.Items.Add(Block(null, first, inner));
-
-        // Each caption with the members that follow it.
-        entries.Select((entry, at) => (entry, at)).Where(x => x.entry.IsGroup).ToList().ForEach(x =>
-            menu.Items.Add(Block(x.entry, entries.Skip(x.at + 1).TakeWhile(e => e.InGroup).Select(e => Choice(e, current, pick, menu)).ToArray(), inner)));
+        captioned.Where(x => !x.entry.Recent).ToList().ForEach(x => menu.Items.Add(x.block));
 
         // The keyboard starts on the current choice, or on the first chip.
         menu.Opened += (_, _) => StartChip(menu).Tap(chip => chip.Focus());
@@ -270,7 +307,10 @@ internal static class WorkspaceChipMenu
     // still fit when the scroll viewer's vertical bar shows on a long menu (its horizontal one is disabled).
     const double TemplateEdge = 8;
 
-    static StackPanel Block(Entry? caption, IReadOnlyList<Button> chips, double width)
+    // A block at the top of the menu (the Recent row) drops the 6 DIP above its caption, which only separates a block
+    // from the one above it; a ruled block ends in a hairline in the menu's edge colour. The hairline is no WrapPanel,
+    // so Chips never mistakes it for chips.
+    static StackPanel Block(Entry? caption, IReadOnlyList<Button> chips, double width, bool atTop = false, bool ruled = false)
     {
         var block = new StackPanel();
         if (caption is not null)
@@ -281,13 +321,14 @@ internal static class WorkspaceChipMenu
                 FontSize = 10,
                 FontWeight = FontWeights.Bold,
                 Foreground = caption.Colour ?? NoneInk,
-                Margin = new Thickness(1, 6, 0, 2),
+                Margin = new Thickness(1, atTop ? 0 : 6, 0, 2),
                 IsHitTestVisible = false,
                 Focusable = false,
             });
         var wrap = new WrapPanel { Width = width };
         chips.ToList().ForEach(chip => wrap.Children.Add(chip));
         block.Children.Add(wrap);
+        if (ruled) block.Children.Add(new Border { Height = 1, Background = SurfaceEdge, Margin = new Thickness(0, 1, 0, 4), IsHitTestVisible = false });
         return block;
     }
 

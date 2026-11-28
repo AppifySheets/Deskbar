@@ -3048,7 +3048,7 @@ public partial class TasksBoardTests
 
         var menu = Assert.IsAssignableFrom<ContextMenu>(t.Window.OpenedMenu);
         Assert.True(menu.IsOpen);
-        Click(WorkspaceChipMenu.Chips(menu).Single(c => AutomationProperties.GetName(c) == "Sparrow"));
+        Click(WorkspaceChipMenu.Chips(menu).First(c => AutomationProperties.GetName(c) == "Sparrow"));
         Assert.False(menu.IsOpen);
         Assert.Equal("Sparrow ▾", Inside(ButtonNamed(t.Window, "Add to workspace")).OfType<TextBlock>().Single().Text);
 
@@ -3314,6 +3314,22 @@ public partial class TasksBoardTests
         ids.Where(id => id != ids[2]).ToList().ForEach(id => Assert.Same(before[id], LineOf(t.Window, id)));
         // The lines stand in the order the view lists them, the new one where the old one was.
         Assert.Equal(t.Window.Keys, Inside(t.Window).OfType<Button>().Where(b => b.Tag is Guid).Select(b => (Guid)b.Tag).ToArray());
+    });
+
+    // Task 46eddcb0: the workspace menus' Recent row reorders when a note lands in another workspace, but no line draws
+    // it, so it is kept out of the reuse key and the lines already drawn stay as they were (pre-PR review).
+    [Fact]
+    public void A_note_filed_elsewhere_reorders_the_recent_row_without_rebuilding_the_lines() => StaThread.Run(() =>
+    {
+        using var t = Build();
+        var ids = Enumerable.Range(1, 3).Select(i => t.Tasks.AddNote($"note {i}", t.Gepha).Value.Id).ToArray();
+        t.Controller.Show();
+        var before = ids.ToDictionary(id => id, id => LineOf(t.Window, id));
+
+        t.Tasks.AddNote("elsewhere", t.Sparrow);
+
+        Assert.True(t.Window.LinesBuilt <= 1);
+        ids.ToList().ForEach(id => Assert.Same(before[id], LineOf(t.Window, id)));
     });
 
     // A kept line is the line it was: its click still picks and opens it, the selection paints on it, its age is still
@@ -3729,7 +3745,7 @@ public partial class TasksBoardTests
 
         var menu = Assert.IsAssignableFrom<ContextMenu>(t.Window.OpenedMenu);
         Assert.True(menu.IsOpen);
-        Click(WorkspaceChipMenu.Chips(menu).Single(c => AutomationProperties.GetName(c) == "Sparrow"));
+        Click(WorkspaceChipMenu.Chips(menu).First(c => AutomationProperties.GetName(c) == "Sparrow"));
         Assert.Equal("Workspace: Sparrow", t.Window.WorkspaceFilterLabel);
     });
 
@@ -3761,7 +3777,7 @@ public partial class TasksBoardTests
         var menu = Assert.IsAssignableFrom<ContextMenu>(t.Window.OpenedMenu);
         Assert.DoesNotContain(WorkspaceChipMenu.Chips(menu), c => AutomationProperties.GetName(c) == "Current workspace");
         Assert.DoesNotContain(WorkspaceChipMenu.Chips(menu), c => AutomationProperties.GetItemStatus(c) == WorkspaceChipMenu.CurrentStatus);
-        Click(WorkspaceChipMenu.Chips(menu).Single(c => AutomationProperties.GetName(c) == "Sparrow"));
+        Click(WorkspaceChipMenu.Chips(menu).First(c => AutomationProperties.GetName(c) == "Sparrow"));
         Assert.False(t.Window.CurrentWorkspaceOn);
         Assert.Equal([there], t.Window.Keys);
     });
@@ -5465,7 +5481,7 @@ public partial class TasksBoardTests
 
         Click(LineButton(TasksWindow.MoveToText));
         var move = Assert.IsAssignableFrom<ContextMenu>(t.Window.OpenedMenu);
-        Click(WorkspaceChipMenu.Chips(move).Single(c => AutomationProperties.GetName(c) == "Sparrow"));
+        Click(WorkspaceChipMenu.Chips(move).First(c => AutomationProperties.GetName(c) == "Sparrow"));
         Assert.Equal(t.Sparrow, t.Tasks.Board.Tasks.Single(x => x.Id == id).WorkspaceId.Value);
 
         Click(LineButton(TasksWindow.DeleteText));
@@ -5492,7 +5508,7 @@ public partial class TasksBoardTests
         var move = Assert.IsAssignableFrom<ContextMenu>(t.Window.OpenedMenu);
         Assert.Same(chip, move.PlacementTarget);
         Assert.Equal("GEPHA", AutomationProperties.GetName(WorkspaceChipMenu.StartChip(move).GetValueOrThrow()));
-        Click(WorkspaceChipMenu.Chips(move).Single(c => AutomationProperties.GetName(c) == "Sparrow"));
+        Click(WorkspaceChipMenu.Chips(move).First(c => AutomationProperties.GetName(c) == "Sparrow"));
         Assert.Equal(t.Sparrow, t.Tasks.Board.Tasks.Single(x => x.Id == id).WorkspaceId.Value);
 
         Assert.True(t.Controller.Close(id).IsSuccess);

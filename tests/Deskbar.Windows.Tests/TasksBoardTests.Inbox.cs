@@ -1239,7 +1239,7 @@ public partial class TasksBoardTests
 
         Click(ButtonNamed(LineOf(t.Window, k.Asking), TasksWindow.PlaceChipName));
         var move = t.Window.OpenedMenu!;
-        Click(WorkspaceChipMenu.Chips(move).Single(c => AutomationProperties.GetName(c) == "Sparrow"));
+        Click(WorkspaceChipMenu.Chips(move).First(c => AutomationProperties.GetName(c) == "Sparrow"));
 
         Assert.Equal(t.Sparrow, t.Tasks.Board.Tasks.Single(x => x.Id == k.Asking).WorkspaceId.Value);
     });
