@@ -45,16 +45,76 @@ public class ClaudeChatTests
     [Fact]
     public void An_empty_transcript_is_an_empty_chat() => Assert.Empty(ClaudeChat.Parse([]));
 
-    // One reply is several lines with one block each, and thinking is never shown.
+    // One reply is several lines with one block each; an empty thinking block (the usual kind) is not shown.
     [Fact]
-    public void Thinking_blocks_are_not_shown_and_two_text_lines_of_one_message_are_joined()
+    public void Empty_thinking_blocks_are_not_shown_and_two_text_lines_of_one_message_are_joined()
     {
-        const string thinking = """{"type":"assistant","uuid":"t1","message":{"id":"m9","model":"claude-test","content":[{"type":"thinking","thinking":"secret","signature":"x"}]}}""";
+        const string thinking = """{"type":"assistant","uuid":"t1","message":{"id":"m9","model":"claude-test","content":[{"type":"thinking","thinking":"","signature":"x"}]}}""";
         var chat = ClaudeChat.Parse([thinking, Said("First part", "m9", "a1"), Said("Second part", "m9", "a2")]);
 
         var only = Message(Assert.Single(chat));
         Assert.Equal("First part\n\nSecond part", only.Text);
         Assert.Equal("a1", only.Id);
+    }
+
+    // Task daf3b1b2: the terminal prints a thinking block's narration ("... · summary"), so the chat shows it, as its own
+    // message even when text of the same API message follows.
+    [Fact]
+    public void A_thinking_narration_is_claudes_own_message()
+    {
+        const string narration = """{"type":"assistant","uuid":"t2","timestamp":"2026-01-02T03:04:06Z","message":{"id":"m9","model":"claude-test","content":[{"type":"thinking","thinking":"The sample lines are mapped; checking the rest next.\n\n","signature":"x"}]}}""";
+        var chat = ClaudeChat.Parse([Human("Go"), narration, Said("Agreed, writing it up", "m9", "a1")]);
+
+        Assert.Equal(["Go", "The sample lines are mapped; checking the rest next.", "Agreed, writing it up"], chat.Select(i => Message(i).Text));
+        Assert.Equal(ChatRole.Claude, Message(chat[1]).Role);
+        Assert.Equal("t2", chat[1].Id);
+    }
+
+    // Task daf3b1b2: another session's message, in either shape Claude Code writes it, is a Peer message signed with the
+    // sender's name; the note Claude Code adds after the tag is not part of it, and a subagent's hand-back stays hidden.
+    [Fact]
+    public void Another_sessions_message_is_a_peer_message_in_both_shapes()
+    {
+        const string queued = """{"type":"attachment","uuid":"p1","timestamp":"2026-01-02T03:04:09Z","attachment":{"type":"queued_command","commandMode":"prompt","origin":{"kind":"peer","from":"uds:x","name":"Sample task"},"prompt":"<cross-session-message from=\"uds:x\" from-name=\"Sample task\" from-mode=\"prompting\">\nOverlap check: I take lines 1 to 9.\n</cross-session-message>"}}""";
+        const string meta = """{"type":"user","uuid":"p2","isMeta":true,"origin":{"kind":"peer","from":"uds:y"},"message":{"role":"user","content":"Another Claude session sent a message:\n<cross-session-message from=\"uds:y\" from-name=\"Other task\">\nSplit confirmed.\n</cross-session-message>\n\nA note to the model about peers."}}""";
+        const string handBack = """{"type":"user","uuid":"p3","isMeta":true,"origin":{"kind":"peer","from":"a1"},"message":{"role":"user","content":"Another Claude session sent a message:\n<agent-message from=\"a1\">\n[Subagent hand-back] report\n</agent-message>"}}""";
+
+        var chat = ClaudeChat.Parse([Said("Working"), queued, Said("Agreed"), meta, handBack]);
+
+        Assert.Equal(["Working", "Overlap check: I take lines 1 to 9.", "Agreed", "Split confirmed."], chat.Select(i => Message(i).Text));
+        Assert.Equal([ChatRole.Claude, ChatRole.Peer, ChatRole.Claude, ChatRole.Peer], chat.Select(i => Message(i).Role));
+        Assert.Equal(["", "Sample task", "", "Other task"], chat.Select(i => Message(i).From));
+    }
+
+    // A subagent's report that QUOTES the tag (a review of this very code) is still a hand-back, by its origin and
+    // because the tag does not open its text.
+    [Fact]
+    public void A_hand_back_quoting_the_cross_session_tag_is_not_a_peer_message()
+    {
+        const string byOrigin = """{"type":"user","uuid":"h1","isMeta":true,"origin":{"kind":"peer","from":"a1","senderTaskId":"a1"},"message":{"role":"user","content":"<cross-session-message from=\"x\">\nquoted\n</cross-session-message>"}}""";
+        const string byText = """{"type":"user","uuid":"h2","isMeta":true,"origin":{"kind":"peer","from":"a2"},"message":{"role":"user","content":"Another Claude session sent a message:\n<agent-message from=\"a2\">\nThe parser reads <cross-session-message from=\"x\">quoted</cross-session-message>\n</agent-message>"}}""";
+
+        Assert.Empty(ClaudeChat.Parse([byOrigin, byText]));
+    }
+
+    // Real reasoning kept in a thinking block (paragraphs, or long) is folded away as the terminal folds it.
+    [Fact]
+    public void A_thinking_block_of_real_reasoning_is_not_shown()
+    {
+        static string Thinking(string uuid, string text) =>
+            $$$"""{"type":"assistant","uuid":"{{{uuid}}}","message":{"id":"m-{{{uuid}}}","model":"claude-test","content":[{"type":"thinking","thinking":{{{J(text)}}},"signature":"x"}]}}""";
+
+        Assert.Empty(ClaudeChat.Parse([Thinking("r1", "First I look at the file.\n\nThen I weigh the options."), Thinking("r2", new string('x', 1001))]));
+    }
+
+    // A line Claude Code wrote a second time, same uuid, later in the file is one message.
+    [Fact]
+    public void A_line_written_again_with_the_same_uuid_is_shown_once()
+    {
+        var chat = ClaudeChat.Parse([Said("Reply", "m1", "a1"), Tool("t1", "Read", Path("X.cs")), Said("Reply", "m1", "a1")]);
+
+        Assert.Equal(2, chat.Count);
+        Assert.Equal("Reply", Message(chat[0]).Text);
     }
 
     // ---- steps ------------------------------------------------------------------------------------------------------
