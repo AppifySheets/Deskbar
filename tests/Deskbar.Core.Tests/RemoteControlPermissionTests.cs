@@ -173,6 +173,83 @@ public sealed class RemoteControlPermissionTests : IDisposable
         Assert.Empty(desk.All);
     }
 
+    // THE FETCH (`claude-permission --fetch --slot <s> --json <code>`): the script's last step for a dialog. The reply is
+    // the line the user's Send left, once, for the right code; every other call is Quiet.
+    static string[] FetchCall(string slot, string code) => ["claude-permission", "--fetch", "--slot", slot, "--json", code];
+
+    (WorkspaceManager Manager, string Code, string Line) AnsweredDialog()
+    {
+        var manager = Ready();
+        var code = Registered(manager, Call(Slot(), DialogHook())).Output.Split(' ')[0];
+        var colours = new Dictionary<string, string> { ["Pick a colour"] = "Blue" };
+        Assert.True(desk.AnswerDialog("req-1-2", colours).IsSuccess);
+        return (manager, code, DialogAsk.Parse(DialogInputOf(DialogHook())).Value.AnswerLine(colours).Value);
+    }
+
+    // The tool_input of DialogHook(), for the line the desk should hand over.
+    static string DialogInputOf(string hook) =>
+        System.Text.Json.JsonDocument.Parse(hook).RootElement.GetProperty("tool_input").GetRawText();
+
+    [Fact]
+    public void The_fetch_replies_the_line_and_crlf_once_for_the_right_code()
+    {
+        var (manager, code, line) = AnsweredDialog();
+
+        var first = Registered(manager, FetchCall("req-1-2", code));
+        var second = Registered(manager, FetchCall("req-1-2", code));
+
+        Assert.Equal(line + "\r\n", first.Output);
+        Assert.Equal((ControlReply.Ok, ""), (second.ExitCode, second.Output));
+    }
+
+    [Theory]
+    [InlineData("wrong code")]
+    [InlineData("not hex")]
+    [InlineData("unknown slot")]
+    [InlineData("no slot")]
+    [InlineData("no desk")]
+    [InlineData("no json")]
+    public void The_fetch_is_quiet_otherwise(string why)
+    {
+        var (manager, code, _) = AnsweredDialog();
+        string[] call = why switch
+        {
+            "wrong code" => FetchCall("req-1-2", "fedcba9876543210fedcba9876543210"),
+            "not hex" => FetchCall("req-1-2", "zz"),
+            "unknown slot" => FetchCall("req-9-9", code),
+            "no slot" => ["claude-permission", "--fetch", "--json", code],
+            "no json" => ["claude-permission", "--fetch", "--slot", "req-1-2"],
+            _ => FetchCall("req-1-2", code),
+        };
+
+        var reply = Registered(manager, call, withDesk: why != "no desk");
+
+        Assert.Equal("", reply.Output);
+    }
+
+    // A fetch sent to a question nobody answered (a plain permission card) hands over nothing.
+    [Fact]
+    public void The_fetch_of_an_unanswered_question_is_quiet()
+    {
+        var manager = Ready();
+        var code = Registered(manager, Call(Slot(), DialogHook())).Output.Split(' ')[0];
+
+        Assert.Equal("", Registered(manager, FetchCall("req-1-2", code)).Output);
+    }
+
+    [Fact]
+    public void ParseClaudeHook_reads_the_valueless_fetch_option()
+    {
+        var fetch = ControlArguments.ParseClaudeHook(["--fetch", "--slot", "req-1-2", "--json", "abc"]).Value;
+        var plain = ControlArguments.ParseClaudeHook(["--slot", "req-1-2", "--json", "abc"]).Value;
+
+        Assert.True(fetch.Fetch);
+        Assert.Equal(("req-1-2", "abc"), (fetch.Slot, fetch.Json));
+        Assert.False(plain.Fetch);
+        // In any position, and not a flag that takes a value.
+        Assert.True(ControlArguments.ParseClaudeHook(["--slot", "req-1-2", "--json", "abc", "--fetch"]).Value.Fetch);
+    }
+
     // Every case that is not a question Deskbar can show answers NOTHING: the script then prints nothing, and the terminal
     // dialog stays. Never an allow, never a code.
     public static TheoryData<string> Refusals =>

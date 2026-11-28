@@ -44,7 +44,7 @@ public partial class TaskDetailWindowInboxTests
         }
     }
 
-    static Rig Build(bool inbox = true, Func<Guid, Task<IReadOnlyList<SkillChoice>>>? taskSkills = null)
+    static Rig Build(bool inbox = true, Func<Guid, Task<IReadOnlyList<SkillChoice>>>? taskSkills = null, Func<DateTime>? pageClock = null)
     {
         var harness = Harness.Build();
         var minutes = 0;
@@ -66,7 +66,7 @@ public partial class TaskDetailWindowInboxTests
             NewTaskWindow = () => new TaskDetailWindow
             {
                 StateDir = scratch, OpenImage = _ => { }, Now = () => Start.AddHours(1),
-                PageClickClock = () => Start.UtcDateTime.AddSeconds(seconds++),
+                PageClickClock = pageClock ?? (() => Start.UtcDateTime.AddSeconds(seconds++)),
             },
             BringTaskWindowForward = brought.Add,
             // A link's final open recorded, never a real browser.
