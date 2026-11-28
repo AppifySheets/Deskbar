@@ -3803,20 +3803,30 @@ public partial class FloatingBarTaskListTests
     });
 
     // Task 494d34ee: with no window to take (an empty desktop, only the taskbar), the camera says so and adds nothing;
-    // the idle box it opened goes back to idle and the keyboard goes back. A draft being typed stays in the box.
+    // the idle box it opened goes back to idle and the keyboard goes back. A draft being typed stays in the box, and Enter
+    // later still hands the keyboard back. The refusal's stand-in deactivates the bar, as the real message box does by
+    // taking the foreground (OnDeactivated ends typing and forgets the window; review of task 494d34ee).
     [Fact]
     public void The_add_rows_camera_with_no_window_says_so_and_adds_nothing() => StaThread.Run(() =>
     {
         var refusals = new List<string>();
         var background = new List<Guid>();
         var handedBack = new List<nint>();
-        using var t = Build(handedBack: handedBack, showRefusal: refusals.Add,
+        FloatingBar? shown = null;
+        var deactivate = typeof(Window).GetMethod("OnDeactivated", BindingFlags.NonPublic | BindingFlags.Instance)!;
+        using var t = Build(handedBack: handedBack,
+            showRefusal: text =>
+            {
+                refusals.Add(text);
+                deactivate.Invoke(shown, [EventArgs.Empty]);
+            },
             startClaude: _ => null,
             startClaudeInBackground: id =>
             {
                 background.Add(id);
                 return null;
             });
+        shown = t.Bar;
 
         Click(t.Bar.TaskAddFromWindowButton!);
         t.Bar.Dispatcher.Invoke(() => { }, DispatcherPriority.ApplicationIdle);
@@ -3831,6 +3841,28 @@ public partial class FloatingBarTaskListTests
         Assert.Equal(2, refusals.Count);
         Assert.Empty(t.Tasks.Board.Tasks);
         Assert.Equal("Half a thought", t.Box.Text);
+        // The draft's Enter still hands the keyboard back to the editor.
+        t.Bar.Dispatcher.Invoke(() => { }, DispatcherPriority.ApplicationIdle);
+        Press(t.Bar, t.Box, Key.Enter);
+        Assert.Single(t.Tasks.Board.Tasks);
+        Assert.Equal([Editor, Editor], handedBack);
+    });
+
+    // Task 494d34ee: the window noted when the box opened is only pictured while it is on the desktop in front. After a
+    // switch it is left behind, and the camera falls back to the last outside window on this desktop, here none.
+    [Fact]
+    public void The_add_rows_camera_never_pictures_a_window_on_another_desktop() => StaThread.Run(() =>
+    {
+        var shot = new List<nint>();
+        using var t = Build(onCurrentDesktop: _ => false, startClaude: _ => null, showRefusal: _ => { },
+            shootWindow: hwnd =>
+            {
+                shot.Add(hwnd);
+                return Result.Failure<WindowShot.Shot>(WindowShot.NoWindowText);
+            });
+        Click(t.Bar.TaskAddFromWindowButton!);
+        Assert.Equal([(nint)0], shot);
+        Assert.Empty(t.Tasks.Board.Tasks);
     });
 
     // Task 7b17a573 (Petre: "only start a task and don't open a terminal. confirm it has started as a mild notification,
