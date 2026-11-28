@@ -7,6 +7,7 @@ using System.Windows.Markup;
 using System.Windows.Media;
 using CSharpFunctionalExtensions;
 using Deskbar.Core.Domain;
+using Deskbar.Core.Geometry;
 using Deskbar.Core.Persistence;
 
 namespace Deskbar.App;
@@ -28,8 +29,8 @@ namespace Deskbar.App;
 // IT STAYS A CONTEXT MENU, so every rule the bar keeps for its menus still holds (HoldFadeWhileOpen holds the fade and
 // defers rebuilds, #77; a click away and Esc close it), with its item container overridden (ChipMenu): the blocks are
 // their own containers, so no MenuItem chrome pads them. The chips are focusable buttons, so the keyboard still works:
-// Tab and Shift+Tab (and the arrow keys, through directional navigation) walk them in a cycle, Enter or Space picks,
-// Esc closes. The menu opens with the keyboard on the current choice, which keeps its blue outline. Typing a name's
+// Tab and Shift+Tab walk them in a cycle, the arrow keys move by where the chips are drawn, across group captions
+// (ChipGrid, task f94524ce), Enter or Space picks, Esc closes. The menu opens with the keyboard on the current choice, which keeps its blue outline. Typing a name's
 // first letters moves the keyboard to that chip (TypeAheadMatch, task 6184e8bf), and a held Enter's repeats pick nothing.
 //
 // The colours are LaneColour's, the resolution the switcher and quick find share with the bar: a group's colour for its
@@ -156,6 +157,25 @@ internal static class WorkspaceChipMenu
             if (e.IsRepeat && e.Key is Key.Enter or Key.Return) e.Handled = true;
         };
 
+        // THE ARROWS, answered here (task f94524ce, Petre: "can't go to other grouped workspace, can't go to deskbar
+        // from here with the keyboard"). Left to WPF they stopped at a block's edge, so no arrow left a group. ChipGrid
+        // decides from where the chips are drawn: Left and Right step through every chip in order, Up and Down go to
+        // the nearest chip on the line above or below, whichever block it is in, both wrapping at the ends. Held arrows
+        // repeat on purpose. The chip the key came from is the event's source (the keyboard is on it); a key with no
+        // chip under it, the menu having opened without the keyboard, puts the keyboard on the start chip first.
+        menu.PreviewKeyDown += (_, e) =>
+        {
+            if (StepOf(e.Key) is not { } step) return;
+            (ChipOf(menu, e.OriginalSource) is { HasValue: true } from ? ArrowTarget(menu, from.Value, step) : StartChip(menu))
+                .Tap(chip =>
+                {
+                    chip.Focus();
+                    // The menu scrolls when it is taller than the screen; keep the chip the keyboard is on in sight.
+                    chip.BringIntoView();
+                });
+            e.Handled = true;
+        };
+
         // TYPE TO JUMP (task 6184e8bf: a workspace "which i can select with the keyboard"). With twenty-odd workspaces
         // the arrows take many presses, so letters typed while the menu is open move the keyboard to the first chip
         // whose name starts with them, "sp" to Sparrow; after a pause of TypeAheadPause the next letter starts afresh.
@@ -196,6 +216,37 @@ internal static class WorkspaceChipMenu
     internal static Maybe<Button> StartChip(ContextMenu menu) =>
         Chips(menu) is var chips && chips.Count > 0
             ? chips.FirstOrDefault(c => AutomationProperties.GetItemStatus(c) == CurrentStatus) ?? chips[0]
+            : Maybe<Button>.None;
+
+    /// <summary>
+    /// The chip an arrow key moves the keyboard to from <paramref name="from"/>, by where the chips are drawn
+    /// (<see cref="ChipGrid"/>); none when the menu is not laid out, so nothing can be measured.
+    /// </summary>
+    internal static Maybe<Button> ArrowTarget(ContextMenu menu, Button from, ChipStep step)
+    {
+        var chips = Chips(menu);
+        if (!chips.All(menu.IsAncestorOf)) return Maybe<Button>.None;
+        var boxes = chips
+            .Select(c => c.TransformToAncestor(menu).TransformBounds(new Rect(c.RenderSize)))
+            .Select(r => new ChipBox(r.Left, r.Top, r.Width, r.Height))
+            .ToArray();
+        return ChipGrid.Next(boxes, chips.ToList().IndexOf(from), step).Map(at => chips[at]);
+    }
+
+    // The arrow keys the menu answers itself; any other key is left alone.
+    static ChipStep? StepOf(Key key) => key switch
+    {
+        Key.Left => ChipStep.Left,
+        Key.Right => ChipStep.Right,
+        Key.Up => ChipStep.Up,
+        Key.Down => ChipStep.Down,
+        _ => null,
+    };
+
+    // The chip a key event came from: the chip itself, or the chip holding the element it came from.
+    static Maybe<Button> ChipOf(ContextMenu menu, object source) =>
+        source is Visual visual
+            ? Maybe.From(Chips(menu).FirstOrDefault(chip => chip == visual || chip.IsAncestorOf(visual)))
             : Maybe<Button>.None;
 
     /// <summary>Every chip of a menu, in order, for the menu's own focus and for the tests.</summary>

@@ -224,6 +224,11 @@ The task list at the bottom of the bar (spec `docs/superpowers/specs/2026-11-22-
     second on "probe 4": only the menu opens, nothing is picked by the repeats. Ctrl+Enter on "probe 5": the
     menu opens, Enter picks, and Claude starts on it. In the tasks panel's + Add box, Enter, Enter and Esc do
     the same.
+46b. The arrows cross groups (task f94524ce). Open any workspace menu (a line's workspace chip will do) with the
+    keyboard on a workspace inside a group, say iam.ge. Up: the white edge goes to the line above, into the group
+    above, past its caption, and on up to the top block with more presses. Down from the top block's last line:
+    it lands in the first group. Right on a group's last chip: the next group's first. Up on the top line wraps to
+    the bottom, Down on the bottom line to the top. Enter picks wherever the edge is.
 47. Click a line of a note on another workspace: the tasks panel opens (or comes forward, and takes the foreground) on that task, selected,
     scrolled into view and expanded to its comments, and you stay where you are. Double-click the line: you go to
     its workspace (only when both presses land on the same line: click one line and double-click the line beside
