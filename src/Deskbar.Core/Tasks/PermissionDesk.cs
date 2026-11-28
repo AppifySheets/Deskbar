@@ -293,7 +293,11 @@ public sealed class PermissionDesk(string folder, Func<DateTimeOffset> now)
     }
 
     /// <summary>Questions held past <see cref="HeldFor"/> taken off, their slots deleted. True when any went.</summary>
-    public bool Expire() => Drop(h => now() >= h.Until);
+    public bool Expire()
+    {
+        RetryUndeleted();
+        return Drop(h => now() >= h.Until);
+    }
 
     // THE SCRIPT'S HEARTBEAT (task ca73633d, the review of the day-long hold). A card is only worth a click while its hook
     // script still reads the slot, and a day is long enough for the script to stop without a word reaching Deskbar:
@@ -392,7 +396,27 @@ public sealed class PermissionDesk(string folder, Func<DateTimeOffset> now)
     }
 
     // A slot that will not go (held open by the script for a moment) is left; the script's own deadline ends it.
-    void Delete(string slot) => Result.Try(() => Directory.Delete(SlotPath(slot), recursive: true));
+    // A slot whose folder could not be deleted is tried again on every Expire (every five seconds from the keeper) until it
+    // goes (the branch's review). Since the heartbeat a dropped slot is no longer empty: the script reopens its alive file
+    // every beat (and a virus scanner may look at it), so a delete landing in that instant meets a sharing violation, or a
+    // file made again between the file delete and the folder's removal. Nothing else would retry, the question is already
+    // off the desk, and the script, finding its slot still there, would beat on until its day-long deadline.
+    readonly HashSet<string> undeleted = new(StringComparer.Ordinal);
+
+    void Delete(string slot)
+    {
+        if (!Deleted(slot)) undeleted.Add(slot);
+    }
+
+    bool Deleted(string slot) =>
+        Result.Try(() =>
+        {
+            var path = SlotPath(slot);
+            if (Directory.Exists(path)) Directory.Delete(path, recursive: true);
+        }).IsSuccess;
+
+    // The slots left over from an earlier failed delete, tried again.
+    void RetryUndeleted() => undeleted.RemoveWhere(Deleted);
 
     string SlotPath(string slot) => Path.Combine(folder, slot);
 }

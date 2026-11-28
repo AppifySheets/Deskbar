@@ -350,9 +350,11 @@ static class ClaudeSkill
         // THE HEARTBEAT (task ca73633d, PermissionDesk.Quiet): the empty alive file touched on the first tick and every
         // BeatTicks after, so Deskbar can tell a card whose script still reads the slot from one whose script was killed
         // (an older session's shorter hook timeout) or went with its console. A slot already deleted is not made again:
-        // the redirect fails, quietly, and the next tick's look ends the script.
+        // the redirect fails, quietly, and the next tick's look ends the script. The 2>nul comes FIRST: cmd sets up
+        // redirections left to right, so one written after the failing > is not yet in place and the error reaches the
+        // hook's stderr (the branch's review, probed).
         "@set /a beat-=1",
-        $"@if %beat% leq 0 type nul > \"%slot%\\{Core.Tasks.PermissionDesk.AliveFile}\" 2>nul",
+        $"@if %beat% leq 0 2>nul type nul > \"%slot%\\{Core.Tasks.PermissionDesk.AliveFile}\"",
         $"@if %beat% leq 0 set /a beat={Core.Tasks.PermissionDesk.BeatTicks}",
         "@set /a left-=1",
         "@if %left% leq 0 goto done",

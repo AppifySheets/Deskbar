@@ -225,6 +225,35 @@ public sealed class PermissionDeskTests : IDisposable
     }
 
     [Fact]
+    public void A_script_that_stays_silent_after_a_sleep_still_goes()
+    {
+        var desk = Desk();
+        desk.Register(Slot(), Request());
+        Beat("req-1-2");
+        desk.Quiet();
+        clock += TimeSpan.FromHours(1);
+        desk.Quiet();
+        LookFor(desk, PermissionDesk.Silent);
+        Assert.Empty(desk.All);
+    }
+
+    [Fact]
+    public void A_slot_that_could_not_be_deleted_is_deleted_on_a_later_look()
+    {
+        var desk = Desk();
+        desk.Register(Slot(), Request());
+        var alive = Path.Combine(box, "req-1-2", PermissionDesk.AliveFile);
+        // The script holding its alive file open, as at the instant of a beat: the delete meets a sharing violation.
+        using (new FileStream(alive, FileMode.Create, FileAccess.Write, FileShare.None))
+        {
+            Assert.True(desk.Forget("s1"));
+            Assert.True(Directory.Exists(Path.Combine(box, "req-1-2")));
+        }
+        desk.Expire();
+        Assert.False(Directory.Exists(Path.Combine(box, "req-1-2")));
+    }
+
+    [Fact]
     public void The_hook_timeout_leaves_room_for_a_day_of_slow_ticks() =>
         Assert.True(PermissionDesk.HookTimeoutSeconds >= PermissionDesk.ScriptSeconds * 1.05);
 
