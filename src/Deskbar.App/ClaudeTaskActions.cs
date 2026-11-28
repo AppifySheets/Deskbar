@@ -704,6 +704,16 @@ public sealed class ClaudeTaskActions : IDisposable
     /// </summary>
     public bool KnowsActivity => Latest.HasValue;
 
+    /// <summary>
+    /// Where one session stands by the latest list (task 6c4c067f, the manager's page): listed and busy is Working, listed
+    /// is Idle, not listed (or no list: the feature off, nothing read yet) is Ended. The manager has no task, so its page
+    /// asks by its session id where a task's page asks by its task (SessionsOf).
+    /// </summary>
+    public SessionState StateOf(string sessionId) =>
+        Latest.Bind(list => list.TryFirst(agent => agent.SessionId == sessionId))
+            .Map(agent => agent.Busy ? SessionState.Working : SessionState.Idle)
+            .GetValueOrDefault(SessionState.Ended);
+
     // --- helpers ----------------------------------------------------------------------------------------------------
 
     Maybe<TaskItem> Current(Guid id) => tasks.Board.Tasks.TryFirst(t => t.Id == id);

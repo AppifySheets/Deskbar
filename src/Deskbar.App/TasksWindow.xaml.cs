@@ -2656,6 +2656,8 @@ public partial class TasksWindow : Window
             actions.Add(Small(new TextBlock { Text = "Edit", Foreground = DimInk, FontSize = 10 }, "Edit comment", () => BeginEditComment(comment.Id), "Edit your comment"));
         // RULING 62: any comment can be settled (a question that has its answer) or brought back, from its own button; the
         // comment stays either way.
+        // Not on the manager's page (task 6c4c067f): its bubbles are the user's messages to the manager, no task's comments.
+        if (taskId != Deskbar.Core.Tasks.ManagerSession.PageId)
         actions.Add(Small(new TextBlock { Text = comment.Settled ? "Unsettle" : "Settle", Foreground = DimInk, FontSize = 10 },
             comment.Settled ? "Unsettle comment" : "Settle comment",
             () => Actions?.SettleComment(comment.Id, !comment.Settled),
@@ -2876,11 +2878,13 @@ public partial class TasksWindow : Window
             AcceptsReturn = true,
             MaxHeight = 120,
         };
-        AutomationProperties.SetName(box, "New comment");
+        // The manager's page (task 6c4c067f) uses this same box under ManagerSession.PageId: its words say who it reaches.
+        var toManager = id == Deskbar.Core.Tasks.ManagerSession.PageId;
+        AutomationProperties.SetName(box, toManager ? "Message the manager" : "New comment");
         var placeholder = new TextBlock
         {
             Tag = "comment-placeholder",
-            Text = CommentPlaceholder,
+            Text = toManager ? ManagerPlaceholder : CommentPlaceholder,
             FontSize = 12,
             Foreground = HeaderInk,
             IsHitTestVisible = false,
@@ -2900,12 +2904,14 @@ public partial class TasksWindow : Window
         // while the list is open its Enter picks instead of posting.
         commentSkills[id] = new SkillCompletion(box,
             () => Actions?.TaskSkills is { } skills ? skills(id) : Task.FromResult<IReadOnlyList<SkillChoice>>([]),
-            () => Actions?.TaskSkills is not null,
+            // Not in the manager's box: the manager runs only Deskbar's own commands, so it has no skills to list.
+            () => Actions?.TaskSkills is not null && !toManager,
             new SkillCompletion.Look(Frozen(0xFF, 0x15, 0x16, 0x1A), PickedEdge, Ink, DimInk, SelectedFill),
             SkillCompletion.CommentAsking, SkillCompletion.CommentNone);
         box.PreviewKeyDown += (_, e) => e.Handled = PressInComment(id, e.Key, Keyboard.Modifiers) != KeyOutcome.Ignored;
         // Ctrl+V and drops of pictures (TasksWindow.Images.cs). After the handler above, which sets Handled for every key.
-        TakePictures(box, id);
+        // Not in the manager's box: the manager cannot read files, so a picture would reach it as a path it cannot open.
+        if (!toManager) TakePictures(box, id);
         // The keyboard leaving the box frees a redraw that waited for it.
         box.LostKeyboardFocus += (_, _) => Flush();
         commentBoxes[id] = box;
@@ -2913,9 +2919,9 @@ public partial class TasksWindow : Window
         // THE BOX AS A CHAT'S (task 39bc9c4d): a rounded box with a round send button inside its right end, in place of the
         // square box with a "Comment" button under it. The button keeps its name, "Post comment", for automation and the
         // tests. It sits at the bottom, so it stays by the last line as the box grows.
-        var post = Flat(SendArrow(), "Post comment", () => Post(id), new Thickness(0));
+        var post = Flat(SendArrow(), toManager ? "Send to the manager" : "Post comment", () => Post(id), new Thickness(0));
         post.Background = Brushes.Transparent;
-        post.ToolTip = "Post the comment (Enter)";
+        post.ToolTip = toManager ? "Send to the manager (Enter)" : "Post the comment (Enter)";
         post.VerticalAlignment = VerticalAlignment.Bottom;
         post.Margin = new Thickness(6, 0, 0, 0);
         Grid.SetColumn(post, 1);
@@ -2991,7 +2997,8 @@ public partial class TasksWindow : Window
         if (CommentWithPictures(id, text.Trim().Length == 0 ? "" : text) is not { } comment) return false;
         drafts.Remove(id);
         if (commentBoxes.TryGetValue(id, out var box)) box.Text = "";
-        if (Actions.Comment(id, comment.Markdown))
+        // The manager's box (task 6c4c067f) sends to the manager rather than posting a comment on a task.
+        if (id == Deskbar.Core.Tasks.ManagerSession.PageId ? SendToManager(comment.Markdown) : Actions.Comment(id, comment.Markdown))
         {
             Posted(id);
             return true;

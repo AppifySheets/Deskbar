@@ -638,8 +638,14 @@ The Manager button on the bar opens one background Claude session a day, on the 
 whole board. It reads `deskbar.cmd task overview`, which prints one line per open task, and acts only through
 `deskbar.cmd task` commands: it can comment on a task, which wakes an idle session, and it can pass your words to a
 task that is waiting on you. It cannot close, delete or finish a task, and only what you say after "The user says:"
-counts as you. Click again to bring its window forward; the next day a click ends yesterday's and starts a new one.
-`deskbar.cmd task show <id>` prints one task in full and `deskbar.cmd task manager` does what the button does.
+counts as you. The next day a click ends yesterday's and starts a new one.
+
+The manager opens as a page in the tasks panel's Inbox, the way a task opens there: what it said and did as a chat, and
+a box at the foot. Type in the box and press Enter to send it a message (Shift+Enter starts a new line). With no
+manager running yet that day, your message starts one. If you opened the manager from a task's page, your message names
+that task as "the current task", and the back arrow (or Esc) takes you back to it. "Open in terminal" on the page's
+"⋯" menu opens the manager's own Claude Code window, docked beside the panel, as the button did before.
+`deskbar.cmd task show <id>` prints one task in full and `deskbar.cmd task manager` opens that terminal.
 
 On a day you have opened it, Deskbar also wakes the manager when a Claude task is handed back to you because its
 session stopped without asking or finishing. It is woken at most once every half hour, never in the middle of a turn,
@@ -663,9 +669,9 @@ themselves again.
 When the manager needs a decision from you, its question shows as a violet line at the top of the bar's task list and
 of the tasks panel, above every task's question. Click it to open the manager; your reply clears it.
 
-When the manager answers a message of yours while its window is not in front, the same violet line says "Manager
-answered" with the first line of the answer, in the bar's task list and at the top of the Inbox. Opening the manager,
-bringing its window forward or writing to it again clears it. Its replies to Deskbar's own wakes leave no line.
+When the manager answers a message of yours while neither its page nor its window is in front, the same violet line
+says "Manager answered" with the first line of the answer, in the bar's task list and at the top of the Inbox. Opening
+the manager, bringing its window forward or writing to it again clears it. Its replies to Deskbar's own wakes leave no line.
 
 "The current task", "this task" or "the open task" in a message to the manager means the task whose page is open in
 the Inbox as you send it: Deskbar adds a line naming that task to your message. With the panel closed or showing a list,

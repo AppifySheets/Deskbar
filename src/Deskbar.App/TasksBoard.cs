@@ -205,6 +205,19 @@ public sealed partial class TasksBoard : IDisposable
     /// </summary>
     internal Func<Result>? OpenManager { get; init; }
 
+    // THE MANAGER'S PAGE (task 6c4c067f; spec docs/superpowers/specs/2026-11-28-manager-inbox-page-design.md). Set by the
+    // App beside OpenManager; none (the tests of other things, a copy without Claude sessions) and the page has no box, no
+    // terminal item and no chat.
+
+    /// <summary>A message from the manager's page (ManagerActions.Send), with the task that was open as it was opened.</summary>
+    internal Func<string, Maybe<TaskItem>, Result>? SendToManager { get; init; }
+
+    /// <summary>The page's "Open in terminal": the manager's terminal window, as the button opened it before (ManagerActions.Open).</summary>
+    internal Func<Result>? OpenManagerTerminal { get; init; }
+
+    /// <summary>The manager's transcript for its page: today's stored manager, its folder, running or not. UI thread, cheap.</summary>
+    internal Func<ChatSource>? ManagerChat { get; init; }
+
     /// <summary>
     /// What finally opens a link once OpenLink has gone to the task's workspace: MarkdownBlocks.Open, the default browser
     /// for a web address and FileLink's plan for a file. The tests replace it, so a run never starts a browser.
@@ -341,6 +354,12 @@ public sealed partial class TasksBoard : IDisposable
             // The manager line's click (task 61e4d143): the Manager button's own click, read when it happens, since the
             // App sets OpenManager after this constructor. A refusal shows on the problem line like any other.
             OpenManager = () => Report(OpenManager?.Invoke() ?? Result.Failure("The manager is not available.")),
+            // The manager's page (task 6c4c067f): its box, its "Open in terminal" and the user's messages it draws. Read when
+            // they happen, as OpenManager is, since the App sets them after this constructor.
+            SendToManager = (text, from) => Report(SendToManager?.Invoke(text,
+                from is { } id ? tasks.Board.Tasks.TryFirst(t => t.Id == id) : Maybe<TaskItem>.None) ?? Result.Failure("The manager is not available.")),
+            OpenManagerTerminal = () => Report(OpenManagerTerminal?.Invoke() ?? Result.Failure("The manager is not available.")),
+            ManagerMessages = () => manager.State.Manager?.Messages ?? [],
             StopClaudeAndClose = id => Close(id, stopClaude: true),
             CloseAnyway = id => Close(id, anyway: true),
             OpenSession = openSession is null ? null : (id, session) => OpenSession(id, session),
@@ -470,7 +489,9 @@ public sealed partial class TasksBoard : IDisposable
         + $"|{manager.State.Manager?.Question}|{manager.State.Manager?.AskedAt}"
         // The manager's answer (task 2c5de076) the same way: the turn's end, opening the manager and its window coming
         // to the front change only Answer and AnsweredAt.
-        + $"|{manager.State.Manager?.Answer}|{manager.State.Manager?.AnsweredAt}";
+        + $"|{manager.State.Manager?.Answer}|{manager.State.Manager?.AnsweredAt}"
+        // The user's messages on the manager's page (task 6c4c067f): a send changes only Messages, and the page must draw it.
+        + $"|{manager.State.Manager?.Messages?.Count}|{manager.State.Manager?.Messages?.LastOrDefault()?.Id}";
 
     /// <summary>
     /// The window's handle, created if it is not yet: what the App pins to every desktop, opts out of the window list
@@ -1028,6 +1049,8 @@ public sealed partial class TasksBoard : IDisposable
     // Resolved on the UI thread, since the states come from the same list the thread draws.
     ChatSource ChatSourceOf(Guid id)
     {
+        // The manager's page (task 6c4c067f) follows the manager's transcript under ManagerSession.PageId, no task's id.
+        if (id == ManagerSession.PageId) return ManagerChat?.Invoke() ?? ChatSource.Nothing;
         if (transcriptOf is not { } pathOf || tasks.Board.Tasks.TryFirst(t => t.Id == id) is not { HasValue: true } found) return ChatSource.Nothing;
         var states = sessionsOf(found.Value).ToDictionary(s => s.Id, s => s.State);
         return ClaudeChatSource.Choose(found.Value.Sessions, s => states.GetValueOrDefault(s.Id, SessionState.Ended), pathOf);
@@ -2272,6 +2295,15 @@ internal sealed partial record TasksWindowActions(
 
     /// <summary>The manager line's click (task 61e4d143): opens the manager session.</summary>
     public Action? OpenManager { get; init; }
+
+    /// <summary>The manager page's box (task 6c4c067f): the text and the task page it was opened from; a refusal keeps the text.</summary>
+    public Func<string, Guid?, Result>? SendToManager { get; init; }
+
+    /// <summary>The manager page's "Open in terminal" (task 6c4c067f).</summary>
+    public Action? OpenManagerTerminal { get; init; }
+
+    /// <summary>The user's messages the manager's page draws as their bubbles (ManagerRecord.Messages), oldest first.</summary>
+    public Func<IReadOnlyList<ManagerMessage>>? ManagerMessages { get; init; }
 
     /// <summary>The stop menu's "Stop Claude and close" (task 37cd7081): TasksBoard.Close with stopClaude.</summary>
     public Func<Guid, Result>? StopClaudeAndClose { get; init; }

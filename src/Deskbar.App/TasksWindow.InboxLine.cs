@@ -385,7 +385,7 @@ public partial class TasksWindow
     {
         if (latest?.Inbox is not { } inbox) return false;
         inboxJustAdded = id;
-        if (inboxPage is not null) return true;
+        if (inboxPage is not null || managerPage) return true;
         // TabToShow: on All the line is on show already, so All stays (it holds the line in every tab it moves to).
         if (inbox.Tabbed && inbox.TabToShow(id, inboxTab) is { HasValue: true } tab) inboxTab = tab.Value;
         inboxFollowed = id;

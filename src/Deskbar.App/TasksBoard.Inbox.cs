@@ -35,6 +35,27 @@ public sealed partial class TasksBoard
         Refresh();
     }
 
+    /// <summary>
+    /// The Manager button and the manager line (task 6c4c067f; spec docs/superpowers/specs/2026-11-28-manager-inbox-page-design.md):
+    /// the panel comes forward (opening when it was hidden) on the Inbox, with the manager's page over the list, the way a
+    /// click on an Inbox line opens a task's page. The App makes sure today's manager exists beside this
+    /// (ManagerActions.Open without attach); the page reads its transcript and writes to it through SendToManager.
+    /// </summary>
+    public void ShowManager()
+    {
+        Show();
+        statsShown = false;
+        _ = manager.SaveTasksPanel(PanelState with { Inbox = true });
+        window.ShowManagerPage();
+        Refresh();
+    }
+
+    /// <summary>
+    /// Whether the user is looking at the manager's page: the panel is open and draws it. The manager's answer then needs
+    /// no "Manager answered" line, as when its terminal window is in front (ManagerQuestion.AfterStop's inFront).
+    /// </summary>
+    public bool ManagerPageInFront => IsOpen && window.ManagerPageShown;
+
     // List or Matrix chosen: the Inbox is left, and remembered as left. The caller redraws.
     void LeaveInbox() => _ = manager.SaveTasksPanel(PanelState with { Inbox = false });
 

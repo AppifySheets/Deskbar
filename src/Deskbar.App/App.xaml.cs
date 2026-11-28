@@ -1105,6 +1105,27 @@ public partial class App : Application
     bool ManagerWindowAt(WindowHandle window) =>
         manager?.KnownWindows.Any(w => w.Handle == window && Core.Tasks.ManagerSession.IsWindow(w.ProcessPath, w.Title)) ?? false;
 
+    // THE MANAGER BUTTON AND LINE OPEN THE MANAGER'S PAGE (task 6c4c067f; spec
+    // docs/superpowers/specs/2026-11-28-manager-inbox-page-design.md): the tasks panel comes forward on the Inbox with the
+    // manager's page, and today's manager is made sure of without a window (Open with attach false: attached to, resumed,
+    // started or claimed as the click did before). The terminal is the page's "Open in terminal" and the pipe's
+    // `task manager`, both still ManagerActions.Open with its window.
+    Result OpenManagerPage()
+    {
+        if (managerActions is null) return Result.Failure(ClaudeActionsNotReady);
+        tasksBoard?.ShowManager();
+        return managerActions.Open(attach: false);
+    }
+
+    // The manager page's transcript (TasksBoard.ManagerChat): the stored manager's one session, in the manager's folder,
+    // running or not by the latest list, its file found as a task session's is (worktree project folders included).
+    Core.Tasks.ChatSource ManagerChatSource() =>
+        manager?.State.Manager is { } record && claudeSessions is { } sessions && claudeActions is { } actions
+            ? Core.Tasks.ClaudeChatSource.Choose(
+                [new Core.Tasks.TaskSession(record.SessionId, Core.Tasks.ManagerSession.FolderIn(AppPaths.NewStateDir), DateTimeOffset.MinValue, Maybe<DateTimeOffset>.None)],
+                session => actions.StateOf(session.Id), sessions.TranscriptOf)
+            : Core.Tasks.ChatSource.Nothing;
+
     // The VS Code window a Claude session works in, from the session's folder, by the rule the control pipe's `open`
     // and `attention` use to find a caller's window (RemoteControl.CallerOf, EditorFolder.Best), each window offering its
     // current title and the one it had before a rename. Two windows on the same folder are both VS Code, so the first
@@ -2022,7 +2043,9 @@ public partial class App : Application
                 FolderExists = Directory.Exists,
                 // The manager's reply asks for the user's attention unless its window was in front as the turn ended
                 // (task 2c5de076, ManagerQuestion.AfterStop). Read on the UI thread, where pipe requests run.
-                ManagerInFront = () => ManagerWindowAt(new WindowHandle(NativeMethods.GetForegroundWindow())),
+                ManagerInFront = () => ManagerWindowAt(new WindowHandle(NativeMethods.GetForegroundWindow()))
+                    // ...or its page shows in the open tasks panel (task 6c4c067f), where the user reads the answer arrive.
+                    || tasksBoard?.ManagerPageInFront == true,
                 // "The current task" in the user's message to the manager is the task open in the Inbox (task fcdf47f1,
                 // ManagerSession.OpenTaskLine). Read on the UI thread when the prompt hook arrives, like ManagerInFront.
                 InboxPage = () => tasksBoard?.OpenInboxPage ?? Maybe<Guid>.None,
@@ -2506,9 +2529,10 @@ public partial class App : Application
                 // "+N more" and "All tasks": the tasks panel shown or hidden (TasksBoard.Toggle). The board is built
                 // with quick find below, so it is read through the field.
                 ToggleTasksPanel = () => tasksBoard?.Toggle(),
-                // The Manager button: today's manager session (ManagerActions.Open). A refusal (Claude sessions off, not ready)
-                // is said at once in a message box, as the Start Claude menu says its own; a failure later is told by Open itself.
-                OpenManager = () => (managerActions?.Open() ?? Result.Failure(ClaudeActionsNotReady))
+                // The Manager button: today's manager session, on its page in the tasks panel (task 6c4c067f, OpenManagerPage).
+                // A refusal (Claude sessions off, not ready) is said at once in a message box, as the Start Claude menu says
+                // its own; a failure later is told by Open itself.
+                OpenManager = () => OpenManagerPage()
                     .TapError(error => MessageBox.Show(error, "Deskbar", MessageBoxButton.OK, MessageBoxImage.Information)),
                 // Its dot: Deskbar woke the manager and the user has not opened it since (ManagerRecord.Unread, event wakes).
                 ManagerUnread = () => manager.State.Manager is { Unread: true },
@@ -3012,9 +3036,14 @@ public partial class App : Application
                     && m.WorkspaceOf(new WindowHandle(hwnd))
                         .Map(w => Core.Tiling.TilingGate.Acts(w, Core.Tiling.TilingGate.Allowed(Entitlement.Current.IsPro)))
                         .GetValueOrDefault(false),
-                // The manager line's click (task 61e4d143): the Manager button's own ManagerActions.Open; a refusal shows
-                // on the panel's problem line.
-                OpenManager = () => managerActions?.Open() ?? Result.Failure(ClaudeActionsNotReady),
+                // The manager line's click (task 61e4d143): the Manager button's own, the manager's page (task 6c4c067f);
+                // a refusal shows on the panel's problem line.
+                OpenManager = OpenManagerPage,
+                // The manager's page (task 6c4c067f): its box sends through ManagerActions.Send, "Open in terminal" is the
+                // button's old click (Open with its window), and its chat reads today's manager's transcript.
+                SendToManager = (text, task) => managerActions?.Send(text, task) ?? Result.Failure(ClaudeActionsNotReady),
+                OpenManagerTerminal = () => managerActions?.Open() ?? Result.Failure(ClaudeActionsNotReady),
+                ManagerChat = ManagerChatSource,
                 // Allow / Deny from a task's page: the questions on show, as cards on the page and the Inbox's mark.
                 Permissions = PermissionDesk,
             };

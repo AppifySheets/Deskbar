@@ -10,7 +10,8 @@ public partial class TasksWindow
 {
     // A page is open (in the panel, or the task window's own, ShowPage): its comments, question and description are drawn in
     // full. Nothing on the List runs with it, since a page covers the List while it is open.
-    bool FullBubbles => inboxPage is not null;
+    // The manager's page (task 6c4c067f) is a page too.
+    bool FullBubbles => inboxPage is not null || managerPage;
 
     // The guard's button: a flat, borderless button that can take the keyboard, as the stream's own (ChatStreamPanel).
     Button GuardButton(UIElement content, string name, Action press)
