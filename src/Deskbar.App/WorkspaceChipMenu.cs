@@ -124,7 +124,9 @@ internal static class WorkspaceChipMenu
             BorderBrush = SurfaceEdge,
             Foreground = Ink,
         };
-        // Tab, Shift+Tab and the arrows walk the chips in a cycle (see the header).
+        // Tab and Shift+Tab walk the chips in a cycle (see the header). The arrows never reach WPF's directional
+        // navigation: the PreviewKeyDown handler below answers them with ChipGrid. The setting stays as the fallback
+        // should that handler ever let an arrow through.
         KeyboardNavigation.SetTabNavigation(menu, KeyboardNavigationMode.Cycle);
         KeyboardNavigation.SetDirectionalNavigation(menu, KeyboardNavigationMode.Cycle);
 
@@ -225,7 +227,9 @@ internal static class WorkspaceChipMenu
     internal static Maybe<Button> ArrowTarget(ContextMenu menu, Button from, ChipStep step)
     {
         var chips = Chips(menu);
-        if (!chips.All(menu.IsAncestorOf)) return Maybe<Button>.None;
+        // Not laid out yet: a chip outside the menu's visual tree cannot be measured, and one with no size would put
+        // every chip on a line of its own.
+        if (!chips.All(c => menu.IsAncestorOf(c) && c.RenderSize is { Width: > 0, Height: > 0 })) return Maybe<Button>.None;
         var boxes = chips
             .Select(c => c.TransformToAncestor(menu).TransformBounds(new Rect(c.RenderSize)))
             .Select(r => new ChipBox(r.Left, r.Top, r.Width, r.Height))
