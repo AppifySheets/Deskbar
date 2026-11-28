@@ -412,6 +412,10 @@ public partial class TasksWindow
         manager.ToolTip = "Open the manager session";
         DockPanel.SetDock(manager, Dock.Right);
         dock.Children.Add(manager);
+        // The keys card's quiet entry (task b61f79de), so the card is found without knowing ? or F1.
+        var keys = KeysHint();
+        DockPanel.SetDock(keys, Dock.Right);
+        dock.Children.Add(keys);
         // Which view is on show: Stats lies over the others, the Inbox is drawn only while chosen, the Matrix only while
         // the switch says so and the panel is wide enough (view.Matrix is already both).
         var shown = view.Stats is not null ? "Stats" : view.Inbox is not null ? "Inbox" : view.Matrix ? "Matrix" : "List";

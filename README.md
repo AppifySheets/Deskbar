@@ -572,6 +572,14 @@ multiple-choice dialog waits on you the same way, until you answer it in the ter
 finished: a done task gets a green tick (a hollow green ring while what it merged is not running yet, filling in once it is: for a change to Deskbar, once the copy you are running holds it; for a change to any other app, once the session reports the version it saw running in that app's logs or health page with `task deployed`, or you pick "Mark deployed" on the task's menu; while Deskbar is still asking GitHub, in the minute after a task turns Done, it shows the ring too, never the full tick; only when GitHub cannot be asked at all, say with no `gh` or offline, does a done task keep the full tick; under the questions, the done tasks with a full tick come first and the hollow rings after them), and every line in the tasks panel shows its status (a slim line in its tooltip). Only you close a task. Double-click a Claude task to go to its session, and pick "Start Claude
 on this" on a note's menu to hand it to a new Claude session.
 
+The panel works from the keyboard alone. Up and Down (Home, End) walk the lines, Enter opens the selected task's
+page in the Inbox (its thread in the List), and Esc goes back. Left and Right switch the Inbox's tabs, and Ctrl+1 to
+Ctrl+4 switch between Inbox, List, Matrix and Stats. The menu key or Shift+F10 opens the task's ... menu, then the
+arrows walk it. C goes to the comment box, P opens the task's pull request, W moves it to another workspace, R
+rechecks its state and N adds a task. A page opens with the keyboard in its comment box, so there the letters are
+Alt+P, Alt+W, Alt+R and Alt+N, and Page Up and Page Down scroll the page. Press ? or F1, or click "? keys" at the
+panel's foot, for a card listing the keys of the view you are in.
+
 In the tasks panel the menu's actions are also small buttons on the line itself, before its "⋯": Edit, Open in
 window, Add subtask, Assign to, Related to, Move to and Delete, as many as the panel's width has room for. Before
 them every open task's line has one Claude button, a small spark: orange on a task that has a Claude session

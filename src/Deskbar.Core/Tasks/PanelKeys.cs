@@ -47,7 +47,8 @@ public static class PanelKeys
         return shown[Math.Clamp(at + by, 0, shown.Count - 1)];
     }
 
-    // Every key of the panel with the places it acts in, in the order the card lists them: moving first, then opening and
+    // The letters answer to Alt+letter too: on a page the keyboard is in the comment box, where a plain letter is typed
+    // (TasksWindow.Keys.cs). Every key of the panel with the places it acts in, in the order the card lists them: moving first, then opening and
     // leaving, then switching, then acting on the task, then the card itself last so it is always where the eye ends.
     static readonly (PanelKey Key, PanelPlace[] In)[] All =
     [
@@ -60,11 +61,11 @@ public static class PanelKeys
         (new("Left / Right", "The tab before or after"), [PanelPlace.InboxList]),
         (new("Ctrl+1 to Ctrl+4", "Inbox, List, Matrix, Stats"), Everywhere),
         (new("Menu key or Shift+F10", "The task's ⋯ menu"), OnATask),
-        (new("C", "Write a comment"), [PanelPlace.InboxPage, PanelPlace.List, PanelPlace.Matrix]),
-        (new("P", "Open its pull request"), OnATask),
-        (new("W", "Move it to another workspace"), OnATask),
-        (new("R", "Recheck its state"), OnATask),
-        (new("N", "Add a task"), Everywhere),
+        (new("C or Alt+C", "Write a comment"), [PanelPlace.InboxPage, PanelPlace.List, PanelPlace.Matrix]),
+        (new("P or Alt+P", "Open its pull request"), OnATask),
+        (new("W or Alt+W", "Move it to another workspace"), OnATask),
+        (new("R or Alt+R", "Recheck its state"), OnATask),
+        (new("N or Alt+N", "Add a task"), Everywhere),
         (new("F2", "Rename the task"), OnATask),
         (new("Ctrl+F", "Search"), Everywhere),
         (new("? or F1", "These keys"), Everywhere),
