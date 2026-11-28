@@ -50,6 +50,9 @@ public class ClaudeSessionsTests
         public Func<string, string?, Result<string>>? Start { get; set; }
         public Func<string, Result<string>>? Stop { get; set; }
 
+        // The usage limit probe's answer (task e948b383, UsageLimitProbe); unscripted it is refused, the limit holds.
+        public Func<Result<string>>? Probe { get; set; }
+
         // Sessions the list shows busy; every other row is idle.
         public HashSet<string> Busy { get; } = [];
 
@@ -66,6 +69,7 @@ public class ClaudeSessionsTests
         public IReadOnlyList<Call> Resumes => Calls.Where(c => c.Arguments is ["--bg", "--resume", ..]).ToList();
         public IReadOnlyList<Call> Reads => Calls.Where(c => c.Arguments is ["agents", "--json"]).ToList();
         public IReadOnlyList<Call> Stops => Calls.Where(c => c.Arguments is ["stop", _]).ToList();
+        public IReadOnlyList<Call> Probes => Calls.Where(c => c.Arguments is ["-p", ..]).ToList();
 
         public Task<Result<string>> Run(IReadOnlyList<string> arguments, string? workingDirectory, TimeSpan timeout)
         {
@@ -80,6 +84,7 @@ public class ClaudeSessionsTests
                 // The start, with its --name=<task title> (task 3ed1c569) between the settings and the message.
                 ["--bg", "--model", _, "--settings", _, .., var message] => Start?.Invoke(message, workingDirectory) ?? Result.Failure<string>("no start scripted"),
                 ["stop", var shortId] => Stop?.Invoke(shortId) ?? Stopped(shortId),
+                ["-p", ..] => Probe?.Invoke() ?? Result.Failure<string>("claude exited with 1: You've hit your limit"),
                 _ => Result.Failure<string>($"unexpected claude call: {string.Join(" ", arguments)}"),
             });
         }
@@ -1293,4 +1298,156 @@ public class ClaudeSessionsTests
         Assert.Single(rig.Cli.Resumes);
         Assert.Empty(rig.Reopened);
     }
+
+    // TASK e948b383, 2026-11-28: the five-hour limit stopped sessions at 07:25 with "resets 14:10", Petre had it lifted at
+    // about 07:28, and another session's transcript said so with a release note. The stopped session waited for 14:10.
+    // Now any transcript's proof that the API answers again, newer than the stop, wakes it at the next poll.
+    [Fact]
+    public void A_limit_lifted_early_wakes_the_stopped_session_before_its_reset()
+    {
+        using var rig = new Rig();
+        var (taskId, sessionId) = rig.Running("limits");
+        // Stopped ten minutes ago (LimitedTranscript puts the error an hour before the reset), reset in fifty.
+        LimitedTranscript(rig, sessionId, Origin + TimeSpan.FromMinutes(50));
+        OtherTranscript(rig, Release(Origin - TimeSpan.FromMinutes(5)));
+        rig.Begin();
+
+        rig.RunTo(ClaudeSessions.Poll + SessionKeeper.Spacing + Seconds(1));
+
+        Assert.Equal(["stop", sessionId[..8]], Assert.Single(rig.Cli.Stops).Arguments);
+        Assert.Equal(["--bg", "--resume", sessionId, ContinueText], Assert.Single(rig.Cli.Resumes).Arguments);
+        Assert.Contains(rig.Task(taskId).Comments, c => c.ByDeskbar && c.Markdown.StartsWith("Resumed, since the usage limit", StringComparison.Ordinal));
+    }
+
+    // Proof from before the stop is an earlier limit's story: it wakes nothing.
+    [Fact]
+    public void Proof_older_than_the_stop_does_not_wake_it()
+    {
+        using var rig = new Rig();
+        var (_, sessionId) = rig.Running("limits");
+        LimitedTranscript(rig, sessionId, Origin + TimeSpan.FromMinutes(50));
+        OtherTranscript(rig, Release(Origin - TimeSpan.FromMinutes(20)));
+        rig.Begin();
+
+        rig.RunTo(TimeSpan.FromMinutes(5));
+
+        Assert.Empty(rig.Cli.Stops);
+        Assert.Empty(rig.Cli.Resumes);
+    }
+
+    // Session 2c94ab8f, 2026-11-28: warned by Claude Code's wrap_up note, it finished its turn and stopped, with no API
+    // error for the keeper to see. Its waiter is alive, so once the limit is over it is told to carry on through the
+    // watch's quiet road, once, and the thread says so.
+    [Fact]
+    public void A_session_that_stopped_on_a_wrap_up_note_is_told_to_carry_on_once_the_limit_is_lifted()
+    {
+        using var rig = new Rig();
+        var (taskId, sessionId) = rig.Running("limits");
+        var nudges = new List<WatchNudge>();
+        using var watching = rig.Tasks.WatchNudges.Subscribe(nudges.Add);
+        var stoppedAt = Origin - TimeSpan.FromMinutes(10);
+        var path = ClaudeTranscript.PathOf(rig.Home, @"E:\repos\Work", sessionId);
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        File.WriteAllLines(path,
+        [
+            """{"type":"user","message":{"role":"user","content":"start"}}""",
+            "{\"type\":\"user\",\"isMeta\":true,\"usageLimitNote\":\"wrap_up\",\"timestamp\":\"" + stoppedAt.ToString("O") + "\",\"message\":{\"role\":\"user\",\"content\":\"[Usage limit reached]\"}}",
+            "{\"type\":\"assistant\",\"timestamp\":\"" + (stoppedAt + Seconds(16)).ToString("O") + "\",\"message\":{\"model\":\"claude-opus-5-5\",\"role\":\"assistant\",\"stop_reason\":\"end_turn\",\"content\":[{\"type\":\"text\",\"text\":\"Stopped on the usage limit.\"}]}}",
+        ]);
+        OtherTranscript(rig, Release(Origin - TimeSpan.FromMinutes(5)));
+        rig.Begin();
+
+        rig.RunTo(TimeSpan.FromMinutes(5));
+
+        Assert.Equal((taskId, ClaudeSessions.NoteStopNudge), (Assert.Single(nudges).TaskId, nudges[0].Text));
+        Assert.Single(rig.Task(taskId).Comments, c => c.ByDeskbar && c.Markdown.StartsWith("The usage limit it stopped on is over", StringComparison.Ordinal));
+        Assert.Empty(rig.Cli.Stops);
+        Assert.Empty(rig.Cli.Resumes);
+    }
+
+    // Petre: "deskbar should basically poll if there's still a limit and resume if not". With every session stopped no
+    // transcript can prove the limit gone, so Deskbar asks Claude, every ProbeEvery while a session is stopped, and
+    // wakes the stopped session on the first answer.
+    [Fact]
+    public void The_probe_runs_while_a_session_is_stopped_and_its_answer_wakes_it()
+    {
+        using var rig = new Rig();
+        var (_, sessionId) = rig.Running("limits");
+        LimitedTranscript(rig, sessionId, Origin + TimeSpan.FromMinutes(50));
+        rig.Begin();
+
+        rig.RunTo(UsageLimitProbe.ProbeEvery + TimeSpan.FromMinutes(1));
+        Assert.Equal(2, rig.Cli.Probes.Count);
+        Assert.Equal(UsageLimitProbe.Arguments, rig.Cli.Probes[0].Arguments);
+        Assert.Empty(rig.Cli.Resumes);
+
+        rig.Cli.Probe = () => Result.Success("""{"type":"result","subtype":"success","is_error":false,"result":"OK"}""");
+        rig.RunTo(2 * UsageLimitProbe.ProbeEvery + TimeSpan.FromMinutes(1));
+
+        Assert.Equal(3, rig.Cli.Probes.Count);
+        Assert.Equal(["stop", sessionId[..8]], Assert.Single(rig.Cli.Stops).Arguments);
+        Assert.Equal(["--bg", "--resume", sessionId, ContinueText], Assert.Single(rig.Cli.Resumes).Arguments);
+    }
+
+    // Second review, finding A: should the probe be wrong about the stopped session's limit (one Haiku does not share), it
+    // would answer every five minutes and restart the session every time until the reset. The session hitting the SAME
+    // limit again after a wake on a proof marks that limit as one proofs do not lift: no more probes, no more restarts.
+    [Fact]
+    public void A_session_that_hits_the_same_limit_after_a_wake_on_a_proof_waits_for_its_reset()
+    {
+        using var rig = new Rig();
+        var (_, sessionId) = rig.Running("limits");
+        var resetsAt = Origin + TimeSpan.FromHours(3);
+        var path = ClaudeTranscript.PathOf(rig.Home, @"E:\repos\Work", sessionId);
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        void HitLimitAt(DateTimeOffset at) => File.WriteAllLines(path,
+        [
+            """{"type":"user","message":{"role":"user","content":"start"}}""",
+            "{\"type\":\"assistant\",\"timestamp\":\"" + at.ToString("O") + "\",\"isApiErrorMessage\":true,\"apiErrorParams\":{\"rate_limit_info\":{\"resetsAt\":"
+                + resetsAt.ToUnixTimeSeconds() + "}},\"message\":{\"role\":\"assistant\",\"stop_reason\":\"stop_sequence\"}}",
+        ]);
+        HitLimitAt(Origin - TimeSpan.FromMinutes(10));
+        rig.Cli.Probe = () => Result.Success("""{"type":"result","subtype":"success","is_error":false,"result":"OK"}""");
+        // The woken session hits the same limit again a little after its resume.
+        rig.Cli.Resume = id =>
+        {
+            rig.Clock.Schedule(TimeSpan.FromSeconds(20), () => HitLimitAt(rig.Clock.Now));
+            return Result.Success($"backgrounded · {id[..8]} · resumed");
+        };
+        rig.Begin();
+
+        rig.RunTo(TimeSpan.FromMinutes(2));
+        Assert.Single(rig.Cli.Resumes);
+        var probes = rig.Cli.Probes.Count;
+
+        rig.RunTo(TimeSpan.FromMinutes(40));
+
+        Assert.Single(rig.Cli.Resumes);
+        Assert.Equal(probes, rig.Cli.Probes.Count);
+    }
+
+    // The probe is only for a stopped session: with none, Claude is never asked, and it costs nothing.
+    [Fact]
+    public void No_session_stopped_on_the_limit_means_no_probe()
+    {
+        using var rig = new Rig();
+        rig.Running("working");
+        rig.Begin();
+
+        rig.RunTo(TimeSpan.FromMinutes(20));
+
+        Assert.Empty(rig.Cli.Probes);
+    }
+
+    // A transcript of some other session in another folder, as the scan of every recent transcript finds it.
+    static void OtherTranscript(Rig rig, params string[] lines)
+    {
+        var path = ClaudeTranscript.PathOf(rig.Home, @"E:\repos\Other", Guid.NewGuid().ToString());
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        File.WriteAllLines(path, lines);
+    }
+
+    static string Release(DateTimeOffset at) =>
+        "{\"type\":\"user\",\"isMeta\":true,\"usageLimitNote\":\"release\",\"timestamp\":\"" + at.ToString("O")
+        + "\",\"message\":{\"role\":\"user\",\"content\":\"[Earlier usage-limit notes no longer apply.]\"}}";
 }

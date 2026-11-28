@@ -210,6 +210,48 @@ public sealed class ClaudeSessions : IDisposable
     // each is said once a run; a limit hit again after a wake has a new reset moment and is said again.
     ImmutableHashSet<(string SessionId, DateTimeOffset ResetsAt)> limitNoted = ImmutableHashSet<(string, DateTimeOffset)>.Empty;
 
+    // WHAT EVERY RECENT TRANSCRIPT SAYS ABOUT THE USAGE LIMIT (task e948b383, UsageLimitSigns). While some open task's
+    // session is stopped on the limit, the transcripts written since the earliest such stop are read off the UI thread,
+    // at most every LimitScanEvery, for proof that the API answers again (Petre lifted the limit early) and for the
+    // latest limit error's reset. The answer is used by the next poll: the keeper wakes a session whose error is older
+    // than the proof (SessionKeeper.Plan's limitLifted), and NoteStopWakes wakes sessions that stopped on a wrap_up note.
+    LimitSigns limitSigns = LimitSigns.None;
+    bool limitScanRunning;
+    DateTimeOffset lastLimitScan = DateTimeOffset.MinValue;
+
+    // THE PROBE (task e948b383, UsageLimitProbe; Petre: "deskbar should basically poll if there's still a limit and resume
+    // if not"). While a session is stopped on the limit and no proof of a lift since is known, Claude is asked every
+    // UsageLimitProbe.ProbeEvery with the smallest request; an answer is a proof as good as a transcript's, kept here as
+    // the moment the probe was sent. Both are dropped once no session is stopped on the limit.
+    bool probeRunning;
+    DateTimeOffset lastProbe = DateTimeOffset.MinValue;
+    Maybe<DateTimeOffset> probeLifted = Maybe<DateTimeOffset>.None;
+
+    // The latest proof the limit is gone, from the transcripts or the probe, whichever is later.
+    Maybe<DateTimeOffset> LimitLifted => LimitSigns.Later(limitSigns.Lifted, probeLifted);
+
+    // WRONG PROOFS (second review, finding A; UsageLimitProbe's header). liftWakes: per session, the reset its error named
+    // and when it was queued for a wake BEFORE that reset, so on a proof. refutedResets: resets a session hit again after
+    // such a wake, which proofs no longer lift (TurnError.IgnoreLift). Both in memory only: a Deskbar restart trusts proofs
+    // again, which costs at most one more wasted wake.
+    ImmutableDictionary<string, (DateTimeOffset ResetsAt, DateTimeOffset At)> liftWakes = ImmutableDictionary<string, (DateTimeOffset, DateTimeOffset)>.Empty;
+    ImmutableHashSet<DateTimeOffset> refutedResets = ImmutableHashSet<DateTimeOffset>.Empty;
+
+    // Whether a scan has landed since the current run of limit stops began (review finding 3). Until then limitSigns is
+    // empty, and a wrap_up stop judged on it alone would fall to the five-hour fallback although the scan might find the
+    // error that names a later reset.
+    bool limitScanLanded;
+
+    /// <summary>How often the transcripts are read for the usage limit's signs while a session is stopped on it.</summary>
+    public static readonly TimeSpan LimitScanEvery = TimeSpan.FromSeconds(30);
+
+    // Per transcript path, its signs as of the file's length and write time (read off the UI thread, so concurrent).
+    readonly System.Collections.Concurrent.ConcurrentDictionary<string, (long Length, DateTime Written, TranscriptLimitSigns Signs)> limitSignsByFile = new();
+
+    // The wrap_up stops already woken (NoteStopWakes), by session and the note's moment: one wake per stop. A wake that
+    // worked writes a release note and a new turn, so the stop is gone; one that did not is not repeated this run.
+    ImmutableHashSet<(string SessionId, DateTimeOffset StoppedAt)> noteStopWoken = ImmutableHashSet<(string, DateTimeOffset)>.Empty;
+
     // Sessions Start launched whose full id is not yet known, by short id, with the task and folder they belong to. A
     // list that shows one (Start's own search or a poll) joins it to its task.
     ImmutableDictionary<string, StartClaim> claims = ImmutableDictionary<string, StartClaim>.Empty;
@@ -625,6 +667,7 @@ public sealed class ClaudeSessions : IDisposable
         var resuming = manager.State.ClaudeResumeInEffect;
         // The manager is left out of what the keeper sees: it is never adopted as a task nor stopped as a finished one.
         var keeperView = KeeperView(listed);
+        RefuteLiftWakes();
         SessionKeeper.Plan(tasks.Board, keeperView, ledger,
                 resuming ? Resumable : _ => true,
                 // Whether a turn was cut off is read when the resume is ISSUED, off the UI thread (Issue), not here: a
@@ -635,10 +678,15 @@ public sealed class ClaudeSessions : IDisposable
                 AbsentSince,
                 // Task daeaa26c: a session stopped on a usage limit waits for the reset, then is woken (a listed one is
                 // stopped first). Read from the transcript's tail, cached until the file changes (LastTurnError).
-                resuming ? LimitError : null)
+                resuming ? LimitError : null,
+                // Task e948b383: or sooner, once a transcript shows the API answering again after its error.
+                resuming ? LimitLifted : Maybe<DateTimeOffset>.None)
             .ToList()
             .ForEach(step => Take(step, resuming));
         NoteLimits(listed, now, resuming);
+        // Task e948b383: sessions that stopped on a wrap_up note are told to carry on, and the signs read for the next poll.
+        WakeNoteStops(keeperView, now, resuming);
+        ScanLimitSignsIfDue(now, resuming);
         // Task 2eeb5589: windows a limit restart closed come back once their woken session is listed.
         Reopen(listed, now);
 
@@ -710,6 +758,7 @@ public sealed class ClaudeSessions : IDisposable
             // the window and Reopen opens it again on the woken session.
             case KeeperStep.Resume resume when resuming && !Queued(resume.Session.Id) && !(resume.StopFirst.HasValue && WindowInFrontOn(resume.TaskId)):
                 queue = queue.Enqueue(resume);
+                NoteLiftWake(resume);
                 break;
         }
     }
@@ -782,12 +831,226 @@ public sealed class ClaudeSessions : IDisposable
                 var interactive = listed.Any(agent => agent.SessionId == item.Session.Id && !agent.Background);
                 Say(item.Task.Id,
                     interactive ? $"Stopped on the usage limit, which resets at {when}. It runs in a window Deskbar cannot restart, so type in it once the limit has reset."
-                    : resuming && windowOpen(item.Task) ? $"Stopped on the usage limit. Deskbar resumes it once the limit resets at {when}, and opens its window again."
-                    : resuming ? $"Stopped on the usage limit. Deskbar resumes it once the limit resets at {when}."
+                    : resuming && windowOpen(item.Task) ? $"Stopped on the usage limit. Deskbar resumes it once the limit resets at {when}, or sooner if it is lifted, and opens its window again."
+                    : resuming ? $"Stopped on the usage limit. Deskbar resumes it once the limit resets at {when}, or sooner if it is lifted."
                     : $"Stopped on the usage limit, which resets at {when}.");
                 tasks.SetStatusLine(item.Task.Id, status)
                     .TapError(e => trace?.Invoke($"claude sessions: no status line on {item.Task.Id}: {e}"));
             });
+    }
+
+    // THE WRAP_UP STOPS (task e948b383, SessionKeeper.NoteStopWakes): a session that finished its turn after Claude Code
+    // warned it about the limit has a live comment waiter, so it is woken with a message on the watch's quiet road, once
+    // per stop, and the thread says so in one line.
+    void WakeNoteStops(IReadOnlyCollection<ClaudeAgent> keeperView, DateTimeOffset now, bool resuming)
+    {
+        if (!resuming || !limitScanLanded) return;
+        SessionKeeper.NoteStopWakes(tasks.Board, keeperView, StoppedOnLimitNote, limitSigns with { Lifted = LimitLifted }, now)
+            .Where(wake => !noteStopWoken.Contains((wake.SessionId, wake.StoppedAt)))
+            .ToList()
+            .ForEach(wake =>
+            {
+                noteStopWoken = noteStopWoken.Add((wake.SessionId, wake.StoppedAt));
+                trace?.Invoke($"claude sessions: {wake.SessionId} stopped on the usage limit's wrap_up note at {wake.StoppedAt:O}, told to carry on");
+                Say(wake.TaskId, "The usage limit it stopped on is over, so it was told to carry on.");
+                tasks.SendWatchNudge(new WatchNudge(wake.TaskId, NoteStopNudge));
+            });
+    }
+
+    /// <summary>What a session that stopped on a wrap_up note is told once the limit is over (task e948b383).</summary>
+    public const string NoteStopNudge =
+        "The usage limit you stopped on is over. Carry on with your task from where you stopped.";
+
+    // A wake for a limit whose reset is still ahead was made on a proof the limit is gone: remembered, so the same limit
+    // hit again after it refutes the proof (RefuteLiftWakes).
+    void NoteLiftWake(KeeperStep.Resume resume)
+    {
+        if (!resume.AfterLimit) return;
+        var now = scheduler.Now;
+        LimitError(resume.Session)
+            .Where(error => error.ResetsAt.Map(resetsAt => now < SessionKeeper.WakeAfterLimit(resetsAt)).GetValueOrDefault(false))
+            .Tap(error => liftWakes = liftWakes.SetItem(resume.Session.Id, (error.ResetsAt.Value, now)));
+    }
+
+    // Before each poll's plan: a session woken on a proof whose transcript ends on a NEWER error naming the same reset
+    // refutes the proof for that reset. A session no longer stopped on that limit is forgotten.
+    void RefuteLiftWakes()
+    {
+        var checkedWakes = liftWakes
+            .Select(pair => (pair.Key, pair.Value, Error: tasks.Board.Tasks.SelectMany(t => t.Sessions).FirstOrDefault(s => s.Id == pair.Key) is { } session
+                ? LastTurnError(session) : Maybe<TurnError>.None))
+            .ToList();
+        checkedWakes
+            .Where(w => w.Error.HasValue && w.Error.Value.ResetsAt == w.Value.ResetsAt && w.Error.Value.At.Map(at => at > w.Value.At).GetValueOrDefault(false))
+            .ToList()
+            .ForEach(w =>
+            {
+                if (!refutedResets.Contains(w.Value.ResetsAt))
+                    trace?.Invoke($"claude sessions: {w.Key} hit the usage limit again after a wake on a proof; proofs no longer lift the limit resetting {w.Value.ResetsAt:O}");
+                refutedResets = refutedResets.Add(w.Value.ResetsAt);
+            });
+        // Kept while the session still ends on an error with that reset (refuted or not yet answered); dropped otherwise.
+        liftWakes = checkedWakes
+            .Where(w => w.Error.HasValue && w.Error.Value.ResetsAt == w.Value.ResetsAt && !refutedResets.Contains(w.Value.ResetsAt)
+                || (w.Error.HasNoValue && scheduler.Now - w.Value.At < SessionKeeper.LoopWindow))
+            .ToImmutableDictionary(w => w.Key, w => w.Value);
+        refutedResets = refutedResets.Where(resetsAt => scheduler.Now < SessionKeeper.WakeAfterLimit(resetsAt)).ToImmutableHashSet();
+    }
+
+    // Starts a read of the transcripts' usage-limit signs when one is due: some open task's latest session is stopped on
+    // the limit (an error whose reset is still ahead, or a wrap_up note), none is running, and the last was
+    // LimitScanEvery ago. With no such session the signs are dropped, so an old proof never wakes a later stop.
+    void ScanLimitSignsIfDue(DateTimeOffset now, bool resuming)
+    {
+        var since = resuming ? EarliestLimitStop(now) : Maybe<DateTimeOffset>.None;
+        if (since.HasNoValue)
+        {
+            limitSigns = LimitSigns.None;
+            probeLifted = Maybe<DateTimeOffset>.None;
+            limitScanLanded = false;
+            return;
+        }
+        ProbeIfDue(now);
+        if (limitScanRunning || now - lastLimitScan < LimitScanEvery) return;
+        limitScanRunning = true;
+        lastLimitScan = now;
+        var from = since.Value;
+        OffThread(() => Task.FromResult(ReadLimitSigns(from, now)))
+            .Subscribe(
+                signs =>
+                {
+                    limitScanRunning = false;
+                    if (signs.Lifted != limitSigns.Lifted) trace?.Invoke($"claude sessions: the API answered outside the usage limit at {signs.Lifted.Map(at => at.ToString("O")).GetValueOrDefault("(never)")}");
+                    limitSigns = signs;
+                    limitScanLanded = true;
+                },
+                error =>
+                {
+                    limitScanRunning = false;
+                    trace?.Invoke($"claude sessions: usage limit signs not read: {error.Message}");
+                });
+    }
+
+    // Sends the probe when one is due: no proof of a lift since the earliest stop is known yet, none is running, and the
+    // last was UsageLimitProbe.ProbeEvery ago. It runs in the temp folder, where no project's settings apply (it reads
+    // none anyway, see UsageLimitProbe), and off the UI thread like every other claude call.
+    //
+    // Due only while some waiting stop is not yet covered by a proof (second review, finding B: gating on the earliest stop
+    // never probed for a later one), leaving out stops whose reset proofs no longer lift (finding A).
+    void ProbeIfDue(DateTimeOffset now)
+    {
+        if (!LimitStops(now).Any(stop => !stop.Refuted && !LimitLifted.Map(at => at > stop.At).GetValueOrDefault(false))) return;
+        if (probeRunning || now - lastProbe < UsageLimitProbe.ProbeEvery) return;
+        probeRunning = true;
+        lastProbe = now;
+        OffThread(() => cli.Run(UsageLimitProbe.Arguments, Path.GetTempPath(), UsageLimitProbe.Timeout))
+            .Subscribe(
+                output =>
+                {
+                    probeRunning = false;
+                    var answered = UsageLimitProbe.Answered(output);
+                    trace?.Invoke(answered
+                        ? $"claude sessions: the usage limit probe was answered, the limit is gone (sent {now:O})"
+                        : $"claude sessions: the usage limit probe was not answered: {output.Match(text => text, error => error)}".ReplaceLineEndings(" "));
+                    if (answered) probeLifted = now;
+                },
+                error =>
+                {
+                    probeRunning = false;
+                    trace?.Invoke($"claude sessions: the usage limit probe failed: {error.Message}");
+                });
+    }
+
+    // The earliest moment an open task's latest session stopped on the usage limit and is still waiting: its limit error
+    // (reset still ahead) or its wrap_up note. None when no session is stopped on the limit.
+    //
+    // Only stops something would act on count (review finding 4), or a stop nobody wakes would keep the scan and the probe
+    // going for days: an error stop on a task the keeper may wake (open, not given up, not a recurring task between runs),
+    // and a wrap_up stop NoteStopWakes may wake (not waiting on Petre, not woken already this run). Never older than
+    // LimitLookBack, which bounds how far back the scan reads files.
+    Maybe<DateTimeOffset> EarliestLimitStop(DateTimeOffset now) =>
+        LimitStops(now)
+            .Select(stop => stop.At < now - LimitLookBack ? now - LimitLookBack : stop.At)
+            .OrderBy(at => at)
+            .TryFirst();
+
+    // Every waiting limit stop EarliestLimitStop considers, with whether its reset is one proofs no longer lift.
+    IReadOnlyList<(DateTimeOffset At, bool Refuted)> LimitStops(DateTimeOffset now) =>
+        tasks.Board.Tasks
+            .Where(task => task.IsClaudes && task.IsOpen && task.Status is TaskStatus.Backlog or TaskStatus.InProgress or TaskStatus.WaitingOnYou)
+            .Where(task => !SessionKeeper.LeftAlone(task) && !SessionKeeper.GivenUp(task))
+            .Select(task => (Task: task, Session: LatestSession(task)))
+            .Where(pair => pair.Session is { HasValue: true, Value.Replaced: false })
+            .Select(pair => LimitError(pair.Session.Value)
+                .Where(error => error.ResetsAt.Map(resetsAt => now < SessionKeeper.WakeAfterLimit(resetsAt)).GetValueOrDefault(false))
+                .Bind(error => error.At.Map(at => (At: at, Refuted: error.IgnoreLift)))
+                .Or(() => pair.Task.Status == TaskStatus.WaitingOnYou
+                    ? Maybe<(DateTimeOffset At, bool Refuted)>.None
+                    : StoppedOnLimitNote(pair.Session.Value).Where(at => !noteStopWoken.Contains((pair.Session.Value.Id, at))).Map(at => (At: at, Refuted: false))))
+            .Where(stop => stop.HasValue)
+            .Select(stop => stop.Value)
+            .ToList();
+
+    // The furthest back a limit stop is looked at from: a week, the longest limit measured ("seven_day"), and a day more.
+    static readonly TimeSpan LimitLookBack = TimeSpan.FromDays(8);
+
+    // Reads the signs of every transcript written since `since` (less a minute, for clocks), each file cached by its
+    // length and write time. Runs off the UI thread. Only the top level of each project folder: a subagent's transcript
+    // lives in a subfolder and its replies count for nothing here (UsageLimitSigns skips isSidechain).
+    LimitSigns ReadLimitSigns(DateTimeOffset since, DateTimeOffset now)
+    {
+        var after = (since - TimeSpan.FromMinutes(1)).UtcDateTime;
+        var files = ProjectFolders()
+            .SelectMany(folder =>
+            {
+                try
+                {
+                    return new DirectoryInfo(folder).EnumerateFiles("*.jsonl").Where(file => file.LastWriteTimeUtc >= after).ToList();
+                }
+                catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+                {
+                    return [];
+                }
+            })
+            .ToList();
+        return LimitSigns.Of(files.Select(SignsOf).Where(signs => signs.HasValue).Select(signs => signs.Value));
+    }
+
+    Maybe<TranscriptLimitSigns> SignsOf(FileInfo file)
+    {
+        try
+        {
+            var (length, written) = (file.Length, file.LastWriteTimeUtc);
+            if (limitSignsByFile.TryGetValue(file.FullName, out var known) && known.Length == length && known.Written == written) return known.Signs;
+            var signs = UsageLimitSigns.Read(Tail(file.FullName));
+            limitSignsByFile[file.FullName] = (length, written, signs);
+            return signs;
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            return Maybe<TranscriptLimitSigns>.None;
+        }
+    }
+
+    // WHETHER THE SESSION STOPPED ON A WRAP_UP NOTE (UsageLimitSigns.StoppedOnNote), cached like LastTurnError.
+    readonly System.Collections.Concurrent.ConcurrentDictionary<string, (long Length, DateTime Written, Maybe<DateTimeOffset> At)> noteStops = new();
+
+    Maybe<DateTimeOffset> StoppedOnLimitNote(TaskSession session)
+    {
+        try
+        {
+            if (TranscriptOf(session).GetValueOrDefault() is not { } path) return Maybe<DateTimeOffset>.None;
+            var file = new FileInfo(path);
+            var (length, written) = (file.Length, file.LastWriteTimeUtc);
+            if (noteStops.TryGetValue(path, out var known) && known.Length == length && known.Written == written) return known.At;
+            var at = UsageLimitSigns.StoppedOnNote(Tail(path));
+            noteStops[path] = (length, written, at);
+            return at;
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            return Maybe<DateTimeOffset>.None;
+        }
     }
 
     // The status line NoteLimits writes, before the time. The tasks panel's Inbox reads it too (TasksBoard.Inbox.cs): it is
@@ -988,9 +1251,15 @@ public sealed class ClaudeSessions : IDisposable
         {
             // The thread's header already names Deskbar and the time (task aa42794f, "too much bla bla"), so the line
             // says only what happened.
-            Say(taskId, afterLimit ? "Resumed, since the usage limit it stopped on has reset. It was told to continue."
+            Say(taskId, afterLimit ? "Resumed, since the usage limit it stopped on is over. It was told to continue."
                 : cutOff ? "Resumed. Its last turn was cut off, so it was told to continue." : "Resumed.");
-            if (afterLimit) tasks.Board.Tasks.TryFirst(t => t.Id == taskId).Tap(ClearLimitLine);
+            if (afterLimit)
+            {
+                tasks.Board.Tasks.TryFirst(t => t.Id == taskId).Tap(ClearLimitLine);
+                // Forgotten as said (second review): should the woken session hit the same limit again, NoteLimits says so
+                // and puts the status line back, instead of leaving the line it just cleared empty.
+                limitNoted = limitNoted.Where(noted => noted.SessionId != sessionId).ToImmutableHashSet();
+            }
             return;
         }
 
@@ -1101,7 +1370,10 @@ public sealed class ClaudeSessions : IDisposable
     public Maybe<DateTimeOffset> LimitedUntil(TaskSession session) => LastTurnError(session).Bind(error => error.ResetsAt);
 
     // The error itself, for the keeper, only when it is a usage limit (it names a reset).
-    Maybe<TurnError> LimitError(TaskSession session) => LastTurnError(session).Where(error => error.ResetsAt.HasValue);
+    Maybe<TurnError> LimitError(TaskSession session) =>
+        LastTurnError(session)
+            .Where(error => error.ResetsAt.HasValue)
+            .Map(error => refutedResets.Contains(error.ResetsAt.Value) ? error with { IgnoreLift = true } : error);
 
     /// <summary>
     /// The session's last turn ended on an API error, so no Stop hook ran and no comment waiter can be alive for it

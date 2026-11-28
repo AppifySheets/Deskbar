@@ -146,7 +146,7 @@ public static class ClaudeTranscript
 
     // A usage limit's reset moment, from apiErrorParams.rate_limit_info.resetsAt or else quotaLimits.resetsAt (unix
     // seconds, see LastTurnError). An error that names none (an overloaded server, a lost connection) has no reset.
-    static Maybe<DateTimeOffset> ResetsAtOf(JsonElement root) =>
+    internal static Maybe<DateTimeOffset> ResetsAtOf(JsonElement root) =>
         new[] { At(root, "apiErrorParams", "rate_limit_info", "resetsAt"), At(root, "quotaLimits", "resetsAt") }
             .Where(value => value is { ValueKind: JsonValueKind.Number })
             .Select(value => value!.Value.TryGetInt64(out var seconds) ? DateTimeOffset.FromUnixTimeSeconds(seconds) : (DateTimeOffset?)null)
@@ -195,4 +195,11 @@ public sealed record TurnError(Maybe<DateTimeOffset> ResetsAt)
 {
     /// <summary>When Claude Code wrote the error (the entry's timestamp), or none when the entry has none.</summary>
     public Maybe<DateTimeOffset> At { get; init; } = Maybe<DateTimeOffset>.None;
+
+    /// <summary>
+    /// A proof that the limit is gone does not count for this error (task e948b383, second review, finding A): a session
+    /// woken on such a proof hit the limit with this same reset again, so the proof was wrong about this limit (one the
+    /// probe's model does not share, say), and only the reset moment wakes it now. Set by the app, never read from a file.
+    /// </summary>
+    public bool IgnoreLift { get; init; }
 }
