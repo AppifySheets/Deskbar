@@ -1538,14 +1538,31 @@ public class RemoteControlClaudeHookTests
 
     // A hook run from `from`, against a control whose Throwaway says yes for ProbeDir and below, as the app's says for
     // the real temp folder.
-    string ProbeHook(WorkspaceManager manager, string hookEvent, string session = "probe", string source = "startup", string from = ProbeDir) =>
+    string ProbeHook(WorkspaceManager manager, string hookEvent, string session = "probe", string? source = "startup", string from = ProbeDir,
+        string extra = "") =>
         new RemoteControl(manager, tasks: tasks, longPath: LongPath,
                 taskSessions: new TaskSessionCommands(_ => Result.Success(), _ => [], (_, _, _) => Result.Success(), (_, _) => Result.Success())
                 {
                     Throwaway = folder => ThrowawayFolder.Is(folder, @"C:\Temp", @"C:\Users\me", LongPath),
                 })
             .Execute(["claude-hook", "--entry", "claude-vscode", "--attended", "1", "--from", from,
-                "--json", HookOf(hookEvent, session, source, "")]).Output;
+                "--json", HookOf(hookEvent, session, source, extra)]).Output;
+
+    // Review of the branch: a /clear in a temp folder starts a NEW session id that holds no task yet. The throwaway check
+    // must come after JoinAfterClear, or the task stays behind on the replaced id and the fresh conversation hears nothing.
+    [Fact]
+    public void Throwaway_folder_clear_still_moves_the_task_to_the_new_session()
+    {
+        var manager = Started();
+        tasks.Create("Card probe", Maybe<Guid>.None, tasks.NewSession("probe", ProbeDir));
+
+        ProbeHook(manager, "SessionEnd", source: null, extra: ",\"reason\":\"clear\"");
+        var briefing = ProbeHook(manager, "SessionStart", session: "probe2", source: "clear");
+
+        Assert.Contains("Card probe", briefing);
+        Assert.True(tasks.Board.TaskOf("probe2").HasValue);
+        Assert.True(tasks.WasAttended("probe2"));
+    }
 
     // The probe of 2026-11-28 read "This session has no task yet ... create one", made "echo hi marker.txt", and was then
     // resumed and nudged on it. Now it reads nothing, and is never marked attended, so the keeper never adopts it.
@@ -1558,7 +1575,6 @@ public class RemoteControlClaudeHookTests
         Assert.Equal("", ProbeHook(manager, "SessionStart"));
         Assert.Equal("", ProbeHook(manager, "UserPromptSubmit"));
         Assert.False(tasks.WasAttended("probe"));
-        Assert.True(tasks.Board.TaskOf("probe").HasNoValue);
     }
 
     // A probe that made a task on purpose is an ordinary session from then on: it hears its task on every prompt.

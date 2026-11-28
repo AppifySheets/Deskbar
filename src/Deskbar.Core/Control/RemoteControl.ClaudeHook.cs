@@ -128,8 +128,10 @@ public sealed partial class RemoteControl
     {
         "SessionStart" when IsManagerFolder(folder) => Said(SessionBriefing.Manager(hook.SessionId)),
         "UserPromptSubmit" when IsManagerFolder(folder) => ManagerPrompted(hook),
-        "SessionStart" or "UserPromptSubmit" when IsThrowaway(service, hook, folder) => Quiet,
-        "SessionStart" => Said(SessionStarted(Attended(service, hook), hook, folder)),
+        // A throwaway's SessionStart is decided inside SessionStarted, after a /clear or a resume has had the chance to
+        // put it back on its task (review of task 98a6378a's branch); its prompts are decided here.
+        "UserPromptSubmit" when IsThrowaway(service, hook, folder) => Quiet,
+        "SessionStart" => Said(SessionStarted(service, hook, folder)),
         "UserPromptSubmit" => Said(Prompted(Attended(service, hook), hook)),
         "SessionEnd" => Ended(service, hook),
         "PreToolUse" => DialogAsked(service, hook, folder),
@@ -437,6 +439,12 @@ public sealed partial class RemoteControl
         if (service.Board.LastTaskOf(hook.SessionId).HasNoValue && hook.Source.Map(s => s == "clear").GetValueOrDefault(false) && folder is not null)
             service.JoinAfterClear(hook.SessionId, folder, stored => FolderPath.Same(stored, folder, LongPath));
         var own = service.Board.TaskOf(hook.SessionId);
+        // A THROWAWAY STILL WITH NO TASK (task 98a6378a, IsThrowaway) hears nothing and is not marked attended, so it is
+        // never adopted. Checked only now, after the steps above: a /clear in a temp folder starts a NEW id that holds no
+        // task yet, and JoinAfterClear is what moves the cleared task over to it; checked earlier, the task was left
+        // behind on the replaced id (review of the branch).
+        if (own.HasNoValue && IsThrowaway(service, hook, folder)) return "";
+        Attended(service, hook);
         // The workspace whose tasks are offered is found the way `task new` finds one (SessionWorkspace): the VS Code
         // window showing the folder, else the workspace of the latest task worked on in the session's repo. The window
         // alone left a session started in a terminal (no VS Code window on its folder) offered only the free Claude
