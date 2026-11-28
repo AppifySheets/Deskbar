@@ -74,7 +74,13 @@ public static class AskedPullRequests
     /// asks nothing else (no "?" outside its links).
     /// </summary>
     public static bool AsksMerge(string? question) =>
-        In(question).Count > 0 && MergeOpening.IsMatch(Opening(question!)) && !Url.Replace(question!, "").Contains('?');
+        In(question).Count > 0 && MergeOpening.IsMatch(Opening(question!)) && !AsksSomethingElse(question!);
+
+    /// <summary>
+    /// Whether the text has a question mark outside its links (a URL may carry a query string): it asks something, a
+    /// decision or a reply, and not only for an action the user takes. Also read by RunningQuestions (task fa22a198).
+    /// </summary>
+    public static bool AsksSomethingElse(string text) => Url.Replace(text, "").Contains('?');
 
     /// <summary>Whether a task waits on the user only for a merge (see above): the task's open question, with no answer buttons.</summary>
     public static bool AsksMerge(TaskItem task) =>
