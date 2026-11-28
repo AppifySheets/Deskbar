@@ -177,7 +177,10 @@ public sealed record TaskBoard(IReadOnlyList<TaskItem> Tasks)
         // as the task's own work for the prompt line, the merged ring and deploy reports.
         Lookup(id).Map(task => task.PullRequests.Any(p => p.Key == link.Key) || task.DeployPullRequests.Any(p => p.Key == link.Key)
             ? this
-            : Replaced(task with { PullRequests = [.. task.PullRequests, link], UpdatedAt = now }));
+            // A NEW PULL REQUEST ENDS "CANNOT TELL" (task 485ba96b, review finding): the session's report was about the
+            // changes recorded then, and kept, it would put that reason on a later merge nobody has said anything about
+            // (a "not done yet" round, a recurring task's next run). DeployUnknown is task-wide, so it goes.
+            : Replaced(task with { PullRequests = [.. task.PullRequests, link], DeployUnknown = Maybe<DeployUnknownReport>.None, UpdatedAt = now }));
 
     /// <summary>
     /// A deploy pull request for this task (task 1565789d, TaskItem.DeployPullRequests): appended once, so the same link
@@ -192,6 +195,9 @@ public sealed record TaskBoard(IReadOnlyList<TaskItem> Tasks)
             {
                 DeployPullRequests = [.. task.DeployPullRequests, link],
                 PullRequests = task.PullRequests.Where(p => p.Key != link.Key).ToArray(),
+                // A deploy pull request new to the task ends "cannot tell" as a new one in AddPullRequest does (task
+                // 485ba96b); one moved over from the task's own work was already covered by the report.
+                DeployUnknown = task.PullRequests.Any(p => p.Key == link.Key) ? task.DeployUnknown : Maybe<DeployUnknownReport>.None,
                 UpdatedAt = now,
             }));
 

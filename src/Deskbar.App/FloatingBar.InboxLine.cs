@@ -58,7 +58,8 @@ public partial class FloatingBar
     // The line's state mark, from its task as the panel reads it (InboxTabs.MarkOf).
     InboxMark BarMarkOf(TaskLine line) =>
         taskService?.Board.Tasks.FirstOrDefault(t => t.Id == line.Id) is { } task
-            ? InboxTabs.MarkOf(task, InboxMarks.StoppedOnLimit, hollow: _ => line.Delivery.Shipping, asksPermission: AsksPermission)
+            ? InboxTabs.MarkOf(task, InboxMarks.StoppedOnLimit, hollow: _ => line.Delivery.Shipping, asksPermission: AsksPermission,
+                @unchecked: _ => line.Delivery.Unchecked)
             : line.Claudes ? InboxMark.Idle : InboxMark.Note;
 
     // The caption's count on the Waiting on you block's first line, or null on every other line. The block is the bar's

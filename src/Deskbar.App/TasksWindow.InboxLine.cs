@@ -240,7 +240,7 @@ public partial class TasksWindow
         // check the deploy: no access to the Portainer logs on contabo1"), in place of the status line, which the page
         // still shows. Petre asked that the task state what the session lacks, and this is where a line states things.
         if (line.Mark == InboxMark.DeployUnchecked && row.Delivery.Unchecked)
-            words = row.Delivery.Note;
+            words = FloatingBar.FirstLine(row.Delivery.Note);
         if (words.Length == 0) return null;
         var text = new TextBlock
         {

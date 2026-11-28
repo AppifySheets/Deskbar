@@ -142,9 +142,10 @@ public static class InboxTabs
     /// <param name="hollow">Whether a Done task's tick is the hollow ring (its change does not run yet).</param>
     /// <param name="tabbed">Whether the tabs apply (<see cref="TabsApply"/>).</param>
     /// <param name="asksPermission">Whether a session of the task has a permission question on show (PermissionDesk).</param>
+    /// <param name="unchecked">Whether the task's delivery is DeliveryStage.Unchecked (task 485ba96b, TaskDelivery.Unchecked).</param>
     public static InboxView Split(IReadOnlyList<TaskGroup> listed, IReadOnlySet<Guid> nested, TaskBoard board,
         Func<TaskItem, bool> stoppedOnLimit, Func<TaskItem, bool>? busy = null, Func<TaskItem, bool>? hollow = null, bool tabbed = true,
-        Func<TaskItem, bool>? asksPermission = null)
+        Func<TaskItem, bool>? asksPermission = null, Func<TaskItem, bool>? @unchecked = null)
     {
         var lines = new List<InboxLine>();
         foreach (var group in listed)
@@ -156,7 +157,7 @@ public static class InboxTabs
                 // this group, which only a hand-edited file could make) is placed by its own state.
                 var under = nested.Contains(task.Id) && lines.Count > 0 && section != InboxSection.Matches;
                 if (!under) section = SectionOf(group.Kind, task, stoppedOnLimit, asksPermission);
-                var mark = MarkOf(task, stoppedOnLimit, busy, hollow, asksPermission);
+                var mark = MarkOf(task, stoppedOnLimit, busy, hollow, asksPermission, @unchecked);
                 lines.Add(new InboxLine(task.Id, TabOf(section), section, mark, SinceOf(task, mark), nested.Contains(task.Id),
                     board.Links(task.Id).Map(l => !l.IsEmpty).GetValueOrDefault(false)));
             }
@@ -199,8 +200,11 @@ public static class InboxTabs
     /// </summary>
     // A permission question on show (asksPermission, Allow / Deny from a task's page) outranks every
     // mark but closed and snoozed: the shield.
+    // `unchecked` (task 485ba96b): the delivery is DeliveryStage.Unchecked, its session cannot check the deploy. Asked of
+    // the delivery rather than read from TaskItem.DeployUnknown (review finding): the field stands while a pull request
+    // is still open or not asked about yet, and the mark must agree with the chip and the tick, which follow the stage.
     public static InboxMark MarkOf(TaskItem task, Func<TaskItem, bool> stoppedOnLimit, Func<TaskItem, bool>? busy = null,
-        Func<TaskItem, bool>? hollow = null, Func<TaskItem, bool>? asksPermission = null) =>
+        Func<TaskItem, bool>? hollow = null, Func<TaskItem, bool>? asksPermission = null, Func<TaskItem, bool>? @unchecked = null) =>
         task.Status == TaskStatus.Closed ? InboxMark.Closed
         : task.IsSnoozed ? InboxMark.Snoozed
         : asksPermission?.Invoke(task) == true ? InboxMark.AsksPermission
@@ -208,12 +212,15 @@ public static class InboxTabs
             // Merged, not running yet and no answer buttons: waiting for his deploy, not a question (task 1565789d,
             // DeployWait). `hollow` is the task's delivery: for a task that is not Done it is shipping only when merged.
             // A hand-over the session marked (`task ask --deploy`, task a87891ca) waits for the deploy too.
-            : DeployWait.Waits(task.Status, hollow?.Invoke(task) == true, task.QuestionOptions.Count, task.AwaitsDeploy) ? InboxMark.WaitsForDeploy
+            // A deploy its session already said it cannot check (task 485ba96b) is not waiting for his deploy: a plain
+            // question asked after it stays a question.
+            : DeployWait.Waits(task.Status, hollow?.Invoke(task) == true && @unchecked?.Invoke(task) != true, task.QuestionOptions.Count, task.AwaitsDeploy) ? InboxMark.WaitsForDeploy
             // A question that only asks for a merge (task b99e5596): the merge glyph, not the "?" bubble.
             : AskedPullRequests.AsksMerge(task) ? InboxMark.ReadyToMerge
             : InboxMark.Asks
         // Not running yet, and its session said it cannot check the deploy (task 485ba96b): the mark that says so.
-        : task.Status == TaskStatus.Done ? hollow?.Invoke(task) == true ? task.DeployUnknown.HasValue ? InboxMark.DeployUnchecked : InboxMark.FinishedNotRunning : InboxMark.Finished
+        : task.Status == TaskStatus.Done ? @unchecked?.Invoke(task) == true ? InboxMark.DeployUnchecked
+            : hollow?.Invoke(task) == true ? InboxMark.FinishedNotRunning : InboxMark.Finished
         : HandedBack(task) ? InboxMark.WentQuiet
         : !task.IsClaudes ? InboxMark.Note
         : stoppedOnLimit(task) ? InboxMark.UsageLimit

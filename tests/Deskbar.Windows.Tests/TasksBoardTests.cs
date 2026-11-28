@@ -1960,9 +1960,6 @@ public partial class TasksBoardTests
         Assert.False(HasRing());
     });
 
-    // Task 8470d176, phase 2: a Done task whose pull request in ANOTHER repository is merged keeps the ring until a deploy
-    // is reported, and its line menu offers "Mark deployed", which records one by hand and fills the ring. A Deskbar
-    // pull request waiting for the running build gets no such item: no report can fill that ring.
     // Task 485ba96b: a Done task merged elsewhere whose session said it cannot check the deploy gets the dashed ring and a
     // dashed "Can't check" chip, never the "Merged" ones, and "Mark deployed" is still on its menu: that is how it gets known.
     [Fact]
@@ -1987,6 +1984,9 @@ public partial class TasksBoardTests
         Assert.True(t.Tasks.CanMarkDeployed(t.Tasks.Board.Tasks.Single(x => x.Id == done)));
     });
 
+    // Task 8470d176, phase 2: a Done task whose pull request in ANOTHER repository is merged keeps the ring until a deploy
+    // is reported, and its line menu offers "Mark deployed", which records one by hand and fills the ring. A Deskbar
+    // pull request waiting for the running build gets no such item: no report can fill that ring.
     [Fact]
     public void Mark_deployed_fills_the_ring_of_a_change_merged_elsewhere() => StaThread.Run(() =>
     {

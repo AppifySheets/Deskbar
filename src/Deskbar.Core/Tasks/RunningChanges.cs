@@ -119,8 +119,10 @@ public static class RunningChanges
         // Open while any pull request is still open (the chip must not say "Merged" of one that is not), Merged otherwise.
         var stage = waiting.Any(l => facts[l.Key].State == PullRequestState.Open) ? DeliveryStage.Open : DeliveryStage.Merged;
         // Merged, and its session said it cannot tell whether that was deployed (task 485ba96b, TaskItem.DeployUnknown):
-        // Unchecked, its hover line the session's reason. Only from Merged: one still open is not deployed by anyone.
-        if (stage == DeliveryStage.Merged && task.DeployUnknown.HasValue)
+        // Unchecked, its hover line the session's reason. Only from Merged: one still open is not deployed by anyone. And
+        // only when every pull request still waiting is in another repository (review finding): this build's own are
+        // decided by the running build, which no session's report overrides, as with a deploy report.
+        if (stage == DeliveryStage.Merged && task.DeployUnknown.HasValue && waiting.All(l => !build.Builds(l)))
             return new TaskDelivery(DeliveryStage.Unchecked, UncheckedNote(task.DeployUnknown.Value));
         return new TaskDelivery(stage, string.Join(" ", waiting.Select(l => Waiting(l, facts[l.Key], build))));
     }

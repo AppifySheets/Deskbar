@@ -48,7 +48,7 @@ public static class SessionBriefing
     public const string ParkedNudge =
         StopNudgeOpening +
         $"If the next move is the user's (a pull request to merge, something to try before it merges, a decision), run {Shim} task ask with " +
-        $"what they must do, the text on stdin, and the pull request or page as a markdown link to click. If your pull request is merged, finish in order: released, deployed ({Shim} task deployed with the evidence, or {Shim} task ask - --deploy for a deploy a person makes), then {Shim} task done with what to try in the status line. " +
+        $"what they must do, the text on stdin, and the pull request or page as a markdown link to click. If your pull request is merged, finish in order: released, deployed ({Shim} task deployed with the evidence, {Shim} task ask - --deploy for a deploy a person makes, or {Shim} task deployed - --unknown with what you lack if you cannot see it), then {Shim} task done with what to try in the status line. " +
         "Otherwise stop without saying anything.";
 
     /// <summary>
@@ -276,6 +276,8 @@ public static class SessionBriefing
         // Answered first here too (review finding): a "nothing to deploy" report alone leaves the question standing, and
         // with no merged change left unreported nothing would ever check it again.
         + $"- if your change needs no deploy after all: {Shim} task answered --session <your session id>, then {Shim} task deployed - --session <your session id> with \"nothing to deploy\" and why, then finish as your briefing says\n"
+        // Task 485ba96b (review finding): a session that cannot look at all had no way out here and was woken for ever.
+        + $"- if you cannot see where it runs (no access to its logs, health page or deploy output): {Shim} task answered --session <your session id>, then {Shim} task deployed - --unknown --session <your session id> with what you lack, then finish as your briefing says\n"
         + "- if it does not run yet: change nothing on the task, do not comment or ask again, and end your turn. Deskbar checks back later, less often each time.\n"
         + "This is Deskbar, not the user: it settles no question by itself.\n";
 
