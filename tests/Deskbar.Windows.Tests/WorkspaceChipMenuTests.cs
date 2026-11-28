@@ -6,6 +6,7 @@ using System.Windows.Media;
 using CSharpFunctionalExtensions;
 using Deskbar.App;
 using Deskbar.Core.Domain;
+using Deskbar.Core.Geometry;
 using Deskbar.Core.Persistence;
 
 namespace Deskbar.Windows.Tests;
@@ -228,6 +229,64 @@ public class WorkspaceChipMenuTests
             var chips = WorkspaceChipMenu.Chips(menu).Select(c => c.TransformToAncestor(menu).TransformBounds(new Rect(c.RenderSize))).ToList();
             Assert.All(chips, chip => Assert.True(chip.Right <= menu.ActualWidth + 0.5, $"a chip ends at {chip.Right} in a menu {menu.ActualWidth} wide"));
             Assert.True(chips.Select(c => Math.Round(c.Top)).Distinct().Count() > 1, "the chips stayed on one row");
+            menu.IsOpen = false;
+            return 0;
+        });
+    });
+
+    // Task f94524ce, Petre: "can't go to other grouped workspace, can't go to deskbar from here with the keyboard". The
+    // arrows stopped at a group's edge. In a menu shaped like his (ungrouped workspaces, then groups under captions),
+    // Up from a chip deep in the groups climbs a line at a time, across every caption, to the first block; Down from
+    // the first block's last line lands in the first group; and the menu takes the arrow keys itself.
+    [Fact]
+    public void The_arrows_cross_group_captions() => StaThread.Run(() =>
+    {
+        var groups = Enumerable.Range(1, 4).Select(i => new Group(Guid.NewGuid(), $"Group {i}")).ToList();
+        var names = new[] { "Messengers", "Meta", "Research", "HRIS", "Rustdesk", "OTHER", "contabo",
+            "GPH", "core-api", "ecom", "Deskbar", "Deskbar site", "Personal", "dating", "Video", "iam.ge", "docs", "site" };
+        var workspaces = names.Select((name, i) => new Workspace(Guid.NewGuid(), name, Guid.NewGuid())
+        {
+            // Seven ungrouped, then groups of three, two, three and three.
+            GroupId = i < 7 ? null : i < 10 ? groups[0].Id : i < 12 ? groups[1].Id : i < 15 ? groups[2].Id : groups[3].Id,
+        }).ToList();
+        var state = AppState.Empty with { Workspaces = workspaces, Groups = groups };
+
+        WithAnchor(anchor =>
+        {
+            var menu = WorkspaceChipMenu.Build(WorkspaceChipMenu.Entries(state, withNone: true), Maybe<Guid>.None, _ => { }, anchor);
+            menu.IsOpen = true;
+            menu.UpdateLayout();
+            var chips = WorkspaceChipMenu.Chips(menu);
+            Button Named(string name) => chips.Single(c => NameOf(c) == name);
+            double TopOf(Button chip) => chip.TransformToAncestor(menu).TransformBounds(new Rect(chip.RenderSize)).Top;
+
+            // Up from iam.ge, the last group, a line at a time until it reaches the first block's first line.
+            var firstLine = TopOf(chips[0]);
+            var walked = new List<string>();
+            var at = Named("iam.ge");
+            while (TopOf(at) > firstLine + 0.5 && walked.Count < chips.Count)
+            {
+                var up = WorkspaceChipMenu.ArrowTarget(menu, at, ChipStep.Up).Value;
+                Assert.True(TopOf(up) < TopOf(at), $"Up from {NameOf(at)} went to {NameOf(up)}, not a line higher");
+                walked.Add(NameOf(up));
+                at = up;
+            }
+            Assert.Equal(firstLine, TopOf(at), 0.5);
+            // On the way it stood in Group 2, the group holding Deskbar.
+            Assert.Contains(walked, name => name.StartsWith("Deskbar"));
+
+            // Down from the first block's last chip lands in the first group.
+            Assert.Equal(groups[0].Id, workspaces.Single(w => w.Name == NameOf(WorkspaceChipMenu.ArrowTarget(menu, Named("contabo"), ChipStep.Down).Value)).GroupId);
+            // Right from the last chip of a group goes on to the next group's first.
+            Assert.Equal("Deskbar", NameOf(WorkspaceChipMenu.ArrowTarget(menu, Named("ecom"), ChipStep.Right).Value));
+
+            // The menu takes an arrow key itself, so WPF's own handling cannot stop it at a block's edge.
+            var key = new KeyEventArgs(Keyboard.PrimaryDevice, PresentationSource.FromVisual(Named("iam.ge")), 0, Key.Up)
+            {
+                RoutedEvent = Keyboard.PreviewKeyDownEvent,
+            };
+            Named("iam.ge").RaiseEvent(key);
+            Assert.True(key.Handled);
             menu.IsOpen = false;
             return 0;
         });
