@@ -2024,7 +2024,7 @@ The Manager button and the manager's violet line open the manager inside the tas
 MI1. Click Manager on the bar: the panel comes forward on the Inbox with the manager's page (violet tile, "Manager", the state under it, a box at the foot reading "Message the manager…"). No terminal window opens, and the manager is started or resumed as before.
 MI2. Type a message and press Enter: your bubble shows at once and the box empties; the manager's reply arrives in the chat as it would on a task's page. No "Manager answered" line appears while the page shows.
 MI3. Open a task's page, then click Manager and ask "is the current task stuck?": the manager names that task. The back arrow returns to the task's page; from the list, back returns to the list where it was scrolled.
-MI4. Press Esc with the keyboard in the box: the page stays. Click outside the box and press Esc: back.
+MI4. Type a few words in the box and press Esc: the page stays and the words are kept. Empty the box and press Esc: back (since task 64744611 the page opens with the keyboard in its box, so an empty box gives Esc up).
 MI5. The Claude button left of the manager's box (the one a task's page has there; no "⋯" at the top any more): the manager's terminal opens docked beside the panel, as the button did before. `deskbar.cmd task manager` opens that terminal too.
 MI6. Close the manager's session (`claude stop <id>`), then send a message from the page: it is resumed with your message, and your bubble shows once, not twice.
 
@@ -2049,3 +2049,13 @@ MD4. Close the tasks panel while the manager's panel is open: the manager's pane
 MD5. Drag the manager panel's inner edge: it takes the new width, and the next open uses it.
 MD6. Leave the manager's panel open and restart Deskbar: it comes back docked, without taking the keyboard.
 MD7. The Claude button left of the box: the panel closes and the manager's terminal docks in its place. A terminal opened another way (`deskbar.cmd task manager`) closes the panel the same way.
+
+## A page opens ready to type
+
+A task's page and a task's own window open with the keyboard in their box ([Deskbar task 64744611](https://deskbar.app/task#64744611-6cd8-4390-83a9-ed0a34dc5511)), as the manager's docked panel does (MD2). The Inbox chosen.
+
+PF1. Click an Inbox line and type at once, without clicking the box: the words land in the page's comment box, the caret blinking there.
+PF2. On a task's page, open a subtask's page from the thread, then press Back: each page you land on has the keyboard in its own box.
+PF3. On an open page, click the toolbar, then wait for a session's comment to redraw the page: the keyboard stays on the toolbar, it is not pulled back into the box.
+PF4. Type half a message on a page, click another window, wait ten seconds (the panel redraws), then click the panel's empty chat area: typing goes on in the box with the half message.
+PF5. With a task window open in the Inbox look, open it again from its line's ⋯ menu ("Open in window") after clicking elsewhere: it comes forward with the keyboard in its comment box.

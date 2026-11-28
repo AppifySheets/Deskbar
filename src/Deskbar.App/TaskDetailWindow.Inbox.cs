@@ -63,6 +63,20 @@ public partial class TaskDetailWindow
         return true;
     }
 
+    // THE PAGE'S BOX TAKES THE KEYBOARD WHEN THE WINDOW IS ACTIVATED AND NOTHING IN IT HAS IT (task 64744611, "typing box
+    // should be active immediately"; the panel's half is TasksWindow.PageFocus.cs). The page is drawn by a TasksWindow that
+    // is never shown, so it is never active and never focuses its own box; this window does, on its activation. Checked
+    // once the activation has settled (Input priority, after WPF has given back the element focused before): the window's
+    // first activation finds nothing focused, and so does one after a redraw replaced the box that had the keyboard while
+    // the window was in the background. An activation that finds the owner's element focused leaves it there. "Nothing
+    // focused" includes the window itself: WPF hands an activated window with no focused element the keyboard on the
+    // window (measured on the hidden desktop: Keyboard.FocusedElement was the TaskDetailWindow).
+    internal void FocusPageBox() => Dispatcher.BeginInvoke(() =>
+    {
+        if (!IsActive || IsKeyboardFocusWithin && !IsKeyboardFocused || renderer is not { } shown || latest?.Row.Id is not { } id) return;
+        if (shown.CommentBoxOf(id) is { } box) TasksWindow.FocusBox(box);
+    }, System.Windows.Threading.DispatcherPriority.Input);
+
     void EnterInboxLook(TaskDetailView view)
     {
         // An editor open in the old look keeps nothing, as Esc would (EndEdit); so does a comment edited in place.

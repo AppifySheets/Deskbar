@@ -102,7 +102,9 @@ public partial class TaskDetailWindow : Window
     public TaskDetailWindow()
     {
         InitializeComponent();
-        CommentBox.TextChanged += (_, _) => CommentPlaceholder.Visibility = CommentBox.Text.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
+        // The Inbox look's page opens with the keyboard in its box (TaskDetailWindow.Inbox.cs, FocusPageBox; task 64744611).
+        Activated += (_, _) => FocusPageBox();
+        CommentBox.TextChanged +=(_, _) => CommentPlaceholder.Visibility = CommentBox.Text.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
         // THE "/" LIST OF SKILLS (task 29bdd158), as the panel's comment boxes have: "/" at the start of the comment lists
         // the Claude Code skills of the folder the comment reaches (TasksWindowActions.TaskSkills, read at the keystroke,
         // since Actions is set after this constructor). Tab or Enter puts "/skill " in the box; Ctrl+Enter puts the pick in
