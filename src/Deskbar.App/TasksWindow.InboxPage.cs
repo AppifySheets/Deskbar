@@ -77,6 +77,8 @@ public partial class TasksWindow
     // A line's click: the task picked and its thread open on the board (TasksBoard.OpenPage), and its page open here.
     void OpenInboxPage(Guid id)
     {
+        // From the list only (the manager's page covers the lines), so the list's place is the one to keep.
+        LeaveManagerPage();
         inboxListOffset = Scroller.VerticalOffset;
         inboxPageStack.Clear();
         inboxPage = id;
@@ -126,6 +128,7 @@ public partial class TasksWindow
 
     void LeaveInboxPage()
     {
+        LeaveManagerPage();
         inboxPage = null;
         inboxPageStack.Clear();
         pageScroller = null;
@@ -139,6 +142,7 @@ public partial class TasksWindow
     // Esc on a page (Escape): back, unless the keyboard is in a comment box, where Esc is the box's (review M5 of the List).
     bool InboxBack()
     {
+        if (ManagerBack()) return true;
         if (inboxPage is null || latest?.Inbox is null || pageInWindow) return false;
         if (EscapeIgnoresThreadWhile?.Invoke() ?? commentBoxes.Values.Any(box => box.IsKeyboardFocusWithin)) return false;
         BackFromPage();
@@ -181,7 +185,13 @@ public partial class TasksWindow
             // a subtask opened from its parent's page stacks (OpenSubtaskPage). The one exception keeps "Open parent"
             // natural: showing the page right under this one on the stack goes back to it, popping it. The list's scroll
             // place stays the one taken when the first page opened.
-            if (inboxPage is { } current && current != id)
+            // The manager's page goes the same way (task 6c4c067f); its list place is the one to come back to.
+            if (managerPage)
+            {
+                LeaveManagerPage();
+                inboxPageStack.Clear();
+            }
+            else if (inboxPage is { } current && current != id)
             {
                 if (inboxPageStack.TryPeek(out var under) && under == id) inboxPageStack.Pop();
                 else inboxPageStack.Clear();
@@ -205,7 +215,7 @@ public partial class TasksWindow
         // replaces an open thread, and a page is the Inbox's open thread (the PM's ruling, see the header), so the page and
         // the tab under it stay. NOT FOR A TASK THE INBOX HAS NO LINE FOR (a filter or the search hides it): the List moves
         // nothing then either. Under a search the tabs do not apply and the one list is already on show.
-        if (inboxPage is not null) return true;
+        if (inboxPage is not null || managerPage) return true;
         if (terminalInFront && inbox.Tabbed && inbox.TabToShow(id, inboxTab) is { HasValue: true } holder && holder.Value != inboxTab)
         {
             inboxTab = holder.Value;
@@ -284,14 +294,7 @@ public partial class TasksWindow
             StopTranscript();
             return;
         }
-        var keep = pageScrolledFor == row.Id && pageScroller is { } old ? old.VerticalOffset : (double?)null;
-        // The place to come back to: the one held from before (a redraw that came while the content was short must not
-        // forget it), else where the old scroller is now. A page just opened has none and goes to its end.
-        PagePlace? hold = null;
-        if (pageScrolledFor == row.Id)
-            hold = pageHold is { } held && held.Task == row.Id ? held
-                : pageScroller is { } was ? new PagePlace(row.Id, AtPageEnd(was.VerticalOffset, was.ScrollableHeight), was.VerticalOffset)
-                : null;
+        var hold = HeldPlace(row.Id);
         var line = view.Inbox!.Lines.FirstOrDefault(l => l.Id == row.Id);
         var mark = line?.Mark ?? MarkOfRow(row);
         Scroller.Visibility = Visibility.Collapsed;
@@ -335,9 +338,23 @@ public partial class TasksWindow
         dock.Children.Add(pageScroller);
         DockBottom(dock, row, pageScroller);
         InboxPage.Child = dock;
-        // Opened: at its end, where the newest comments and the comment box are. Redrawn: where it was.
-        var scroller = pageScroller;
-        pageScrolledFor = row.Id;
+        SettlePageScroll(pageScroller, row.Id, hold);
+    }
+
+    // The place to come back to on a redraw of the page of `id`: the one held from before (a redraw that came while the
+    // content was short must not forget it), else where the old scroller is now. A page just opened has none and goes to
+    // its end. Shared by a task's page and the manager's (task 6c4c067f, keyed by ManagerSession.PageId).
+    PagePlace? HeldPlace(Guid id) =>
+        pageScrolledFor != id ? null
+        : pageHold is { } held && held.Task == id ? held
+        : pageScroller is { } was ? new PagePlace(id, AtPageEnd(was.VerticalOffset, was.ScrollableHeight), was.VerticalOffset)
+        : null;
+
+    // The new page's scroller, just put in InboxPage, settles: opened, at its end, where the newest messages and the box
+    // are; redrawn, where it was held (KeepPlace keeps it there while content arrives or goes).
+    void SettlePageScroll(ScrollViewer scroller, Guid id, PagePlace? hold)
+    {
+        pageScrolledFor = id;
         pageHold = hold;
         scroller.ScrollChanged += (_, e) => KeepPlace(scroller, e);
         // His own input ends the hold, so it can never fight his scrolling (a wheel, a click or drag on the bar, a key, a touch).

@@ -1961,3 +1961,14 @@ DU1. From the session, `task deployed - --unknown` with "no access to the test s
 DU2. Open the note's page: the header says "Finished. Can't check the deploy", the track reads Merged › Deploy: can't check (the last step dashed), and the reason sits under it with "Check it yourself and close the task, or use Mark deployed."
 DU3. "Mark deployed" on the line's menu: the dashed ring fills to the disc and the chip says "Done".
 DU4. `task deployed --unknown` with no text, from the session: refused with "needs the reason", and nothing is stored.
+
+## The manager opens as an Inbox page
+
+The Manager button and the manager's violet line open the manager inside the tasks panel, like a task's Inbox page ([Deskbar task 6c4c067f](https://deskbar.app/task#6c4c067f-e0f8-4853-831a-d86150aaa423)). Claude sessions on, the Inbox chosen.
+
+MI1. Click Manager on the bar: the panel comes forward on the Inbox with the manager's page (violet tile, "Manager", the state under it, a box at the foot reading "Message the manager…"). No terminal window opens, and the manager is started or resumed as before.
+MI2. Type a message and press Enter: your bubble shows at once and the box empties; the manager's reply arrives in the chat as it would on a task's page. No "Manager answered" line appears while the page shows.
+MI3. Open a task's page, then click Manager and ask "is the current task stuck?": the manager names that task. The back arrow returns to the task's page; from the list, back returns to the list where it was scrolled.
+MI4. Press Esc with the keyboard in the box: the page stays. Click outside the box and press Esc: back.
+MI5. "⋯", Open in terminal: the manager's terminal opens docked beside the panel, as the button did before. `deskbar.cmd task manager` opens that terminal too.
+MI6. Close the manager's session (`claude stop <id>`), then send a message from the page: it is resumed with your message, and your bubble shows once, not twice.

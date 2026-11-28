@@ -152,7 +152,7 @@ public partial class TasksWindow
         : $"inbox|{inboxTab}|{inboxSearchOpen}|{inboxFilterOpen}|{inboxPage}|{view.FiltersOn}|{inbox.Tabbed}|{view.MatrixAllowed}|"
           + string.Join(',', inbox.Lines.Select(l => $"{l.Id}{l.Tab}{l.Section}{l.Mark}{l.Since:O}{l.Nested}{l.Linked}"))
           + "|" + string.Join(',', view.Groups.SelectMany(g => g.Rows).Select(r => $"{r.PullRequests.Count}{r.Description.Length}"))
-          + InboxPageSignature(view);
+          + InboxPageSignature(view) + ManagerPageSignature();
 
     // The Inbox in place of the List (DrawRows has emptied the lines' panel and every per-line table before this): the
     // header, the footer, then the chosen tab's lines under their captions, or the task's page over them.
@@ -197,7 +197,9 @@ public partial class TasksWindow
         PaintInboxSelection();
         ApplyInboxGlow();
         ApplyInboxReveal(); // a terminal in front that switched the tab (TasksWindow.InboxPage.cs, InboxFollowsSelection)
-        DrawInboxPage(view);
+        // The manager's page (task 6c4c067f, TasksWindow.ManagerPage.cs) in a task page's place while it is open.
+        if (managerPage) DrawManagerPage();
+        else DrawInboxPage(view);
     }
 
     static string EmptyTabText(InboxTab tab) => tab switch

@@ -100,7 +100,9 @@ public partial class TasksBoardTests
         Func<string, Maybe<string>>? askRepeat = null, Func<string, bool>? folderExists = null,
         Func<TaskSession, Maybe<string>>? transcriptOf = null,
         Func<Guid, Task<IReadOnlyList<SkillChoice>>>? taskSkills = null, Action<Guid>? startClaudeInBackground = null,
-        Func<Result<WindowShot.Shot>>? shootWindow = null)
+        Func<Result<WindowShot.Shot>>? shootWindow = null,
+        Func<string, Maybe<TaskItem>, Result>? sendToManager = null, Func<Result>? openManagerTerminal = null,
+        Func<ChatSource>? managerChat = null)
     {
         var harness = Harness.Build();
         var minutes = 0;
@@ -137,6 +139,10 @@ public partial class TasksBoardTests
         {
             // The manager line's click (task 61e4d143); none by default, so no manager line is drawn.
             OpenManager = openManager,
+            // The manager's page (task 6c4c067f): its box, its "Open in terminal" and its chat; none by default.
+            SendToManager = sendToManager,
+            OpenManagerTerminal = openManagerTerminal,
+            ManagerChat = managerChat,
             // A link's final open (task 26f15d70), recorded or dropped: a run never starts a browser.
             OpenUri = openUri ?? (_ => { }),
             // Whether a repeat's folder still exists (task 0b78269e, final review, item 4); the disk's answer by default.
