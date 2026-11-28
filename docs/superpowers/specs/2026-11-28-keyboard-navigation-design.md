@@ -14,8 +14,8 @@ them.
 
 ## Scope
 
-- In: the tasks panel (Inbox, List, Matrix, Stats, an Inbox page) once it has the keyboard. The task window
-  (`TasksWindow.InboxWindow.cs`) shares the page keys because it is the same class.
+- In: the tasks panel (Inbox, List, Matrix, Stats, an Inbox page) once it has the keyboard. Not the task's own window
+  (`TaskDetailWindow`): its page is drawn by a TasksWindow that is never shown, and its keys stay Esc and F2.
 - Out: bringing the panel up from elsewhere in Windows (Petre picked "inside the panel only"; no new global hotkey).
   The floating bar's task lines. A Tab ring over every button (approach 2 below, kept for later if this misses
   something).

@@ -40,7 +40,14 @@ public partial class TasksWindow
     // Only a box still on screen counts. Esc from a page takes the page, and its box with it, away while WPF can still
     // name that box as the focused element; counted as typing, it kept every arrow dead after the page closed (the
     // duplicate task bd149ac3: "after i leave the chat with an escape ... i can't navigate with arrow keys").
-    static bool TypingIn(object? focused) => focused is TextBoxBase { IsVisible: true };
+    // A read-only box (every comment's body is a read-only RichTextBox, focusable so its text can be selected) is not
+    // typing: clicking a comment must not leave the arrows dead.
+    static bool TypingIn(object? focused) => focused is TextBoxBase { IsVisible: true, IsReadOnly: false };
+
+    // A button that does take the keyboard has it: the dialog, permission and plan cards' choices and the answer buttons
+    // are focusable, reached with Tab from the comment box. Their arrows move between them and their Enter presses them,
+    // as WPF's own keyboard navigation does, so the panel leaves those keys alone.
+    static bool OnAButton(object? focused) => focused is ButtonBase { IsVisible: true };
 
     // The element the key being handled came from (the window's PreviewKeyDown sets it around Press). Normally the focused
     // element; asked as well because a key raised on a box directly, as a test does, must stay that box's.
@@ -78,18 +85,20 @@ public partial class TasksWindow
         var plain = modifiers == ModifierKeys.None && !typing;
         var alt = modifiers == ModifierKeys.Alt;
         var onPage = PlaceShown == PanelPlace.InboxPage;
+        // Arrows and Enter belong to a focused button (OnAButton), and to a box.
+        var free = !typing && !OnAButton(Keyboard.FocusedElement);
         return (key, modifiers) switch
         {
-            (Key.Up, ModifierKeys.None) when !typing => onPage ? ScrollPage(s => s.LineUp()) : Move(PanelKeys.Previous),
-            (Key.Down, ModifierKeys.None) when !typing => onPage ? ScrollPage(s => s.LineDown()) : Move(PanelKeys.Next),
-            (Key.Home, ModifierKeys.None) when !typing => onPage ? ScrollPage(s => s.ScrollToHome()) : Move(PanelKeys.First),
-            (Key.End, ModifierKeys.None) when !typing => onPage ? ScrollPage(s => s.ScrollToEnd()) : Move(PanelKeys.Last),
+            (Key.Up, ModifierKeys.None) when free => onPage ? ScrollPage(s => s.LineUp()) : Move(PanelKeys.Previous) || HoldArrow(),
+            (Key.Down, ModifierKeys.None) when free => onPage ? ScrollPage(s => s.LineDown()) : Move(PanelKeys.Next) || HoldArrow(),
+            (Key.Home, ModifierKeys.None) when free => onPage ? ScrollPage(s => s.ScrollToHome()) : Move(PanelKeys.First),
+            (Key.End, ModifierKeys.None) when free => onPage ? ScrollPage(s => s.ScrollToEnd()) : Move(PanelKeys.Last),
             // Page Up / Page Down: the page scrolls even from its box; a list scrolls only when no box has the keyboard.
             (Key.PageUp, ModifierKeys.None) when onPage || !typing => onPage ? ScrollPage(s => s.PageUp()) : ScrollList(s => s.PageUp()),
             (Key.PageDown, ModifierKeys.None) when onPage || !typing => onPage ? ScrollPage(s => s.PageDown()) : ScrollList(s => s.PageDown()),
-            (Key.Enter or Key.Return, ModifierKeys.None) when !typing => OpenSelected(),
-            (Key.Left, ModifierKeys.None) when !typing => StepTab(-1),
-            (Key.Right, ModifierKeys.None) when !typing => StepTab(1),
+            (Key.Enter or Key.Return, ModifierKeys.None) when free => OpenSelected(),
+            (Key.Left, ModifierKeys.None) when free => StepTab(-1) || HoldArrow(),
+            (Key.Right, ModifierKeys.None) when free => StepTab(1) || HoldArrow(),
             (Key.D1 or Key.NumPad1, ModifierKeys.Control) => ShowView(PanelPlace.InboxList),
             (Key.D2 or Key.NumPad2, ModifierKeys.Control) => ShowView(PanelPlace.List),
             (Key.D3 or Key.NumPad3, ModifierKeys.Control) => ShowView(PanelPlace.Matrix),
@@ -108,6 +117,11 @@ public partial class TasksWindow
             _ => false,
         };
     }
+
+    // An arrow nothing used (an empty view, Left/Right outside the Inbox's tabs), while the keyboard rests where FocusBoard
+    // and KeepKeysInPanel put it (the toolbar or the window): kept, so WPF's own directional navigation does not carry the
+    // keyboard into the search box, where the next letters would be typed.
+    bool HoldArrow() => Keyboard.FocusedElement is { } focused && (ReferenceEquals(focused, Toolbar) || ReferenceEquals(focused, this));
 
     // Up / Down / Home / End over the lines the view draws, in the order it draws them.
     bool Move(int by)
@@ -139,6 +153,8 @@ public partial class TasksWindow
     bool OpenSelected()
     {
         if (KeyTask.HasNoValue || PlaceShown == PanelPlace.InboxPage) return false;
+        // The card listed the list's keys; a page has others.
+        HideKeysCard();
         if (PlaceShown == PanelPlace.InboxList) OpenInboxPage(KeyTask.Value);
         else Actions?.Pick(KeyTask.Value);
         return true;
@@ -150,7 +166,9 @@ public partial class TasksWindow
         if (PlaceShown != PanelPlace.InboxList || InboxShown is not { Tabbed: true }) return false;
         var tabs = Enum.GetValues<InboxTab>();
         var next = tabs[Math.Clamp(Array.IndexOf(tabs, inboxTab) + by, 0, tabs.Length - 1)];
-        if (next != inboxTab) ChooseInboxTab(next);
+        if (next == inboxTab) return true;
+        HideKeysCard();
+        ChooseInboxTab(next);
         return true;
     }
 

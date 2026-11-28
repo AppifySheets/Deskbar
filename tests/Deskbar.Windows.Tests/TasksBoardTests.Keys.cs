@@ -127,9 +127,13 @@ public partial class TasksBoardTests
     [Fact]
     public void Arrows_and_letters_do_nothing_in_an_empty_view() => StaThread.Run(() =>
     {
-        using var t = Build();
+        var selection = new TaskSelection();
+        using var t = Build(selection: selection);
         t.Controller.Show();
-        Assert.False(PressKey(t, Key.Down));
+        // Down selects nothing. It may still be kept (HoldArrow) while the keyboard rests on the toolbar, so WPF does not
+        // move it into the search box; whether it is depends on where the keyboard was left, so only the effect is checked.
+        PressKey(t, Key.Down);
+        Assert.True(selection.Current.HasNoValue);
         Assert.False(PressKey(t, Key.Enter));
         Assert.False(PressKey(t, Key.W));
         Assert.False(PressKey(t, Key.C, ModifierKeys.Control));
@@ -326,5 +330,51 @@ public partial class TasksBoardTests
 
         Click(ButtonNamed(t.Window.InboxFooterShown!, TasksWindow.KeysHintText));
         Assert.True(t.Window.KeysCardShown);
+    });
+
+    // Opening a page or switching a tab from the keyboard changes the place, so the card listing the old place's keys goes.
+    [Fact]
+    public void Enter_and_a_tab_switch_close_the_keys_card() => StaThread.Run(() =>
+    {
+        var selection = new TaskSelection();
+        using var t = Build(selection: selection);
+        InboxTasks(t);
+        t.Controller.Show();
+        ChooseInbox(t);
+        t.Window.ChooseInboxTab(InboxTab.NeedsYou);
+
+        PressKey(t, Key.F1);
+        PressKey(t, Key.Right);
+        Assert.False(t.Window.KeysCardShown);
+
+        t.Window.ChooseInboxTab(InboxTab.All);
+        PressKey(t, Key.Down);
+        PressKey(t, Key.F1);
+        PressKey(t, Key.Enter);
+        Assert.NotNull(t.Window.InboxPageShown);
+        Assert.False(t.Window.KeysCardShown);
+    });
+
+    // A focused answer or card button keeps its own Enter and arrows (WPF presses it and moves between them).
+    [Fact]
+    public void A_focused_button_keeps_its_Enter_and_arrows() => StaThread.Run(() =>
+    {
+        var selection = new TaskSelection();
+        using var t = Build(selection: selection);
+        InboxTasks(t);
+        t.Controller.Show();
+        PressKey(t, Key.Down);
+        var picked = selection.Current.Value;
+        var button = new Button { Focusable = true };
+        // Put where a card's choice would be: inside the panel, on screen (the foot's own row).
+        var foot = (Border)t.Window.InboxFooterShown!;
+        ((Panel)foot.Child).Children.Add(button);
+        t.Window.UpdateLayout();
+        Assert.True(button.Focus());
+
+        Assert.False(PressKey(t, Key.Enter));
+        Assert.False(PressKey(t, Key.Down));
+        Assert.Equal(picked, selection.Current.Value);
+        Assert.False(t.Window.ThreadShown(picked));
     });
 }
