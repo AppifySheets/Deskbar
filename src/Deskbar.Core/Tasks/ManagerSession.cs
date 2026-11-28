@@ -187,6 +187,46 @@ public static class ManagerSession
     public static string PageMessage(string text, Maybe<string> openTaskLine) =>
         $"{PageMessageOpening}\n\n{text.Trim()}" + openTaskLine.Map(line => "\n\n" + line).GetValueOrDefault("");
 
+    // THE ECHO (task fa99f981, "that deskbar in the terminal should be the comment i made, why is it just Deskbar?"). A
+    // page message that reaches a running manager through its comment waiter (CommentInbox) wakes it as an asyncRewake
+    // hook, and Claude Code shows the user only that hook's one-line label, ClaudeHooks.WakeSummary ("Deskbar"); the
+    // message itself goes to the model alone. Measured in Claude Code 2.1.332: the label comes from the hook's settings
+    // entry, read when the hook starts at Stop, so it cannot carry a message that arrives later, and a per-wake label from
+    // the hook's own output (`{"rewakeSummary": ...}` on stdout) is honoured only for plugins from Anthropic's own
+    // marketplace, never for a settings hook like Deskbar's. So the manager shows the words itself: the waiter's copy of a
+    // page message asks it to open its reply with them on one quote line behind EchoMarker, and Deskbar hides that line
+    // where the user already sees the message (WithoutEcho: the manager's page draws the stored bubble, the Inbox line
+    // shows the answer). A resume delivers the message as a prompt, which the terminal shows as the user's own line, so
+    // only the waiter's roads add the request (ByWaiter). The user picked this over typing into the terminal (2026-11-28).
+
+    /// <summary>The start of the reply line that repeats the user's page message in the manager's terminal.</summary>
+    public const string EchoMarker = "> From your page:";
+
+    /// <summary>What the waiter's copy of a page message adds, asking the manager to repeat the user's words first.</summary>
+    public static readonly string EchoRequest =
+        "Deskbar's hook brought you this, so your terminal showed the user only \"Deskbar\", not their words. Begin your "
+        + $"reply with one line, \"{EchoMarker} \" followed by their words copied unchanged on that one line (cut with … "
+        + "after 200 characters), then a blank line and your answer. Deskbar hides that line on your page and in the Inbox.";
+
+    /// <summary>
+    /// A message as the comment waiter delivers it: a page message gets EchoRequest after it (once), anything else (a
+    /// Deskbar wake) stays as it is.
+    /// </summary>
+    public static string ByWaiter(string message) =>
+        message.TrimStart().StartsWith(PageMessageOpening, StringComparison.Ordinal) && !message.Contains(EchoRequest, StringComparison.Ordinal)
+            ? message.TrimEnd() + "\n\n" + EchoRequest
+            : message;
+
+    /// <summary>
+    /// The manager's reply without its echo lines (EchoMarker) and the blank lines around them at its start; a reply that
+    /// does not open with one is returned as it is. Several page messages claimed in one wake may give several echo lines.
+    /// </summary>
+    public static string WithoutEcho(string reply) =>
+        reply.TrimStart().StartsWith(EchoMarker, StringComparison.Ordinal)
+            ? string.Join('\n', reply.Split('\n')
+                .SkipWhile(line => line.Trim().Length == 0 || line.TrimStart().StartsWith(EchoMarker, StringComparison.Ordinal)))
+            : reply;
+
     /// <summary>The record with one more page message, keeping only the newest MessagesKept.</summary>
     public static ManagerRecord WithMessage(ManagerRecord record, ManagerMessage message) =>
         record with { Messages = (record.Messages ?? []).Append(message).TakeLast(MessagesKept).ToList() };

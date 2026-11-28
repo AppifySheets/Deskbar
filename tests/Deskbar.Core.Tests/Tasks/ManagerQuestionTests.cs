@@ -150,6 +150,13 @@ public class ManagerQuestionTests
     public void The_answer_drops_the_marks_the_line_cannot_draw(string reply, string shown) =>
         Assert.Equal(shown, ManagerQuestion.AfterStop(Replying(), Id, reply, false, at).Value.Answer);
 
+    // Task fa99f981: the manager repeats a page message on its reply's first line for its terminal; the Inbox line shows the
+    // answer under it, not the user's own words back.
+    [Fact]
+    public void The_answer_skips_the_echo_of_the_users_message() =>
+        Assert.Equal("Rebased and pushed.", ManagerQuestion.AfterStop(Replying(), Id,
+            $"{ManagerSession.EchoMarker} PR 599 needs rebasing\n\nRebased and pushed.\nMore.", false, at).Value.Answer);
+
     [Fact]
     public void A_long_first_line_is_cut()
     {

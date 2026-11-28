@@ -86,7 +86,8 @@ public static class ManagerQuestion
         stored.Where(record => record.Replying && record.SessionId == sessionId)
             .Map(record => inFront
                 ? record with { Replying = false }
-                : record with { Replying = false, Answer = FirstLine(reply), AnsweredAt = now });
+                // The echo line repeats the user's own message (task fa99f981), so the answer is the line after it.
+                : record with { Replying = false, Answer = FirstLine(reply.Map(ManagerSession.WithoutEcho)), AnsweredAt = now });
 
     /// <summary>
     /// The record once the user has seen the manager (opened it, or its window came to the front): the answer is read, so
