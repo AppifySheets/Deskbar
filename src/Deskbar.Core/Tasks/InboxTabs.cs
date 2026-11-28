@@ -52,7 +52,9 @@ public enum InboxSection { Permissions, Questions, WentQuiet, Finished, WorkingN
 /// </summary>
 // ReadyToMerge (task b99e5596): the question only asks for a pull request's merge (AskedPullRequests.AsksMerge), so it gets
 // a merge glyph instead of the "?" bubble. Added last, so no stored or traced number of the others changes.
-public enum InboxMark { Asks, WentQuiet, Finished, FinishedNotRunning, Working, Idle, UsageLimit, Note, Closed, Snoozed, AsksPermission, WaitsForDeploy, ReadyToMerge }
+// DeployUnchecked (task 485ba96b): finished and merged, and its session cannot tell whether it was deployed
+// (TaskItem.DeployUnknown), so a mark of its own instead of "finished, not running yet", and never the "?" bubble.
+public enum InboxMark { Asks, WentQuiet, Finished, FinishedNotRunning, Working, Idle, UsageLimit, Note, Closed, Snoozed, AsksPermission, WaitsForDeploy, ReadyToMerge, DeployUnchecked }
 
 /// <summary>
 /// One line of the Inbox: the task, its tab and section, its mark, when its state began (the time the line shows), whether
@@ -210,7 +212,8 @@ public static class InboxTabs
             // A question that only asks for a merge (task b99e5596): the merge glyph, not the "?" bubble.
             : AskedPullRequests.AsksMerge(task) ? InboxMark.ReadyToMerge
             : InboxMark.Asks
-        : task.Status == TaskStatus.Done ? hollow?.Invoke(task) == true ? InboxMark.FinishedNotRunning : InboxMark.Finished
+        // Not running yet, and its session said it cannot check the deploy (task 485ba96b): the mark that says so.
+        : task.Status == TaskStatus.Done ? hollow?.Invoke(task) == true ? task.DeployUnknown.HasValue ? InboxMark.DeployUnchecked : InboxMark.FinishedNotRunning : InboxMark.Finished
         : HandedBack(task) ? InboxMark.WentQuiet
         : !task.IsClaudes ? InboxMark.Note
         : stoppedOnLimit(task) ? InboxMark.UsageLimit
@@ -226,7 +229,7 @@ public static class InboxTabs
     {
         InboxMark.Asks or InboxMark.ReadyToMerge or InboxMark.WaitsForDeploy => task.WaitingSince.GetValueOrDefault(task.Raised),
         InboxMark.WentQuiet => task.HandedBack.HasValue ? task.HandedBack.Value : task.WaitingSince.GetValueOrDefault(task.Raised),
-        InboxMark.Finished or InboxMark.FinishedNotRunning => task.Raised,
+        InboxMark.Finished or InboxMark.FinishedNotRunning or InboxMark.DeployUnchecked => task.Raised,
         InboxMark.Note => task.Created,
         _ => task.UpdatedAt,
     };

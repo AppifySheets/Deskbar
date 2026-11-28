@@ -77,6 +77,13 @@ public sealed record StatusChange(DateTimeOffset At, TaskStatus From, TaskStatus
 public sealed record DeployedPullRequest(string Key, DateTimeOffset At, string Note);
 
 /// <summary>
+/// A task's <see cref="TaskItem.DeployUnknown"/> (task 485ba96b): at <see cref="At"/> its session said it cannot tell
+/// whether the change was deployed, and <see cref="Reason"/> says what it has no access to ("no access to the Portainer
+/// logs on contabo1").
+/// </summary>
+public sealed record DeployUnknownReport(DateTimeOffset At, string Reason);
+
+/// <summary>
 /// One comment in a task's thread, as markdown. <see cref="SessionId"/> names the Claude session that wrote it;
 /// none means Petre wrote it, <see cref="DeskbarAuthor"/> means Deskbar itself did (a resume, a stop, a failure), and <see cref="ManagerAuthor"/> means the manager session did.
 /// </summary>
@@ -410,6 +417,21 @@ public sealed record TaskItem(
     /// (RunningChanges.Of). An init property like PullRequests, stored as an optional `deployed` list; absent means none.
     /// </summary>
     public IReadOnlyList<DeployedPullRequest> Deployed { get; init; } = [];
+
+    // THE SESSION CANNOT TELL WHETHER IT DEPLOYED (task 485ba96b, 2026-11-28). Petre: "if the task has no way of knowing if
+    // it's been deployed, show a chip for not knowing, not a question mark, and state that the session has no access to
+    // logs or whatever else it needs to identify whether deploy was successful". A session whose change runs somewhere it
+    // cannot see (no logs, no health page, no deploy output it can reach) had two ways out, both wrong: ask "did it
+    // deploy?", which drew the "?" bubble for a check rather than a decision, or report a deploy it never saw. Now it says
+    // so (`task deployed - --unknown`, the reason on stdin), the task's delivery is DeliveryStage.Unchecked (a mark of its
+    // own on every surface, with the reason as its words), and the session may finish with `task done`: the deploy step
+    // is as settled as the session can make it. A later deploy report (the session's, or "Mark deployed") clears it.
+    /// <summary>
+    /// Why the task's session cannot tell whether its change was deployed, and when it said so, or none (task 485ba96b,
+    /// the comment above). Written only by TaskBoard.MarkDeployUnknown and cleared by TaskBoard.MarkDeployed. Stored as the
+    /// optional `deployUnknown` and `deployUnknownAt`; absent means none.
+    /// </summary>
+    public Maybe<DeployUnknownReport> DeployUnknown { get; init; }
 
     /// <summary>
     /// The task this one duplicates, or none (task links, docs/superpowers/specs/2026-11-25-task-links-design.md; Petre:

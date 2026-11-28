@@ -14,7 +14,8 @@ namespace Deskbar.App;
 //
 // ONE SHAPE PER STATE, colour second (spec, "A line"; the user is colourblind): a bubble with "?" asks you, two joining
 // branches wait only for your merge, a triangle
-// with "!" went quiet, a filled disc with a tick is finished, a ring with a tick is finished but not running here yet, an
+// with "!" went quiet, a filled disc with a tick is finished, a ring with a tick is finished but not running here yet, a
+// dashed ring with a tick is finished but its session cannot check the deploy, an
 // arc turns while Claude works, a pause sign in a circle is idle, a clock is the usage limit, an empty rounded box is a
 // note, a ticked box is closed, a moon is snoozed, a shield with a keyhole asks permission. A test checks no two marks
 // share their shapes.
@@ -55,6 +56,14 @@ internal static class InboxMarks
         // the gap, the step still to come. A shape of its own, as every mark needs one (criterion 13: the screen in grey
         // still tells them apart), where the plain ring in amber had differed from "finished, not running yet" by colour.
         ["doneWait"] = [S("M14.25 8A6.25 6.25 0 1 1 11.125 2.587"), S("M5.2 8.3l1.9 1.9 3.8-4.1"), Disc(13.4, 3.6, 1.3)],
+        // Its session cannot check the deploy (task 485ba96b, InboxMark.DeployUnchecked; the mockup's option A,
+        // https://claude.ai/artifact/GYJRsxJuNsTiZWJsA3XMA1): the "done" ring broken into eight dashes, with its tick. The
+        // ring that would fill on a deploy, not whole because nobody could confirm one; a shape of its own in grey too,
+        // since no other mark has a broken outline. The dashes are arcs of the same 6.25 circle, 30 degrees each with
+        // 15-degree gaps, a gap centred at the top, written out because the icon table has strokes, not dash patterns.
+        ["doneUnknown"] = [S("M8.82 1.8A6.25 6.25 0 0 1 11.8 3.04M13 4.2A6.25 6.25 0 0 1 14.2 7.18M14.2 8.82A6.25 6.25 0 0 1 13 11.8"
+            + "M11.8 13A6.25 6.25 0 0 1 8.82 14.2M7.18 14.2A6.25 6.25 0 0 1 4.2 13M3.04 11.8A6.25 6.25 0 0 1 1.8 8.82"
+            + "M1.8 7.18A6.25 6.25 0 0 1 3.04 4.2M4.2 3.04A6.25 6.25 0 0 1 7.18 1.8"), S("M5.2 8.3l1.9 1.9 3.8-4.1")],
         // Waits only for a merge (task b99e5596, InboxMark.ReadyToMerge; the mockup's option A): two branches joining into
         // one, a node on each. New here: the "pr" glyph below is three nodes and a hooked arrow, and no other mark has a
         // curve meeting a straight stem, so it is told apart from the "?" bubble in grey too.
@@ -128,6 +137,7 @@ internal static class InboxMarks
         InboxMark.WentQuiet => "stuck",
         InboxMark.Finished => "doneFill",
         InboxMark.FinishedNotRunning => "done",
+        InboxMark.DeployUnchecked => "doneUnknown",
         // Task 1565789d (DeployWait): the "merged, not running yet" ring, open with a dot (doneWait), amber below since the
         // deploy is his step.
         InboxMark.WaitsForDeploy => "doneWait",
@@ -148,6 +158,7 @@ internal static class InboxMarks
         InboxMark.WentQuiet => "Went quiet",
         InboxMark.Finished => "Finished",
         InboxMark.FinishedNotRunning => "Finished, not running yet",
+        InboxMark.DeployUnchecked => "Finished, can't check the deploy",
         InboxMark.WaitsForDeploy => "Waits for your deploy",
         InboxMark.Working => "Claude is working",
         InboxMark.Idle => "Idle",
@@ -162,7 +173,7 @@ internal static class InboxMarks
     internal static Brush InkOf(InboxMark mark) => mark switch
     {
         InboxMark.Asks or InboxMark.ReadyToMerge or InboxMark.WentQuiet or InboxMark.AsksPermission or InboxMark.WaitsForDeploy => InboxLook.Amber,
-        InboxMark.Finished or InboxMark.FinishedNotRunning => InboxLook.DoneInk,
+        InboxMark.Finished or InboxMark.FinishedNotRunning or InboxMark.DeployUnchecked => InboxLook.DoneInk,
         InboxMark.Working => InboxLook.Blue,
         _ => InboxLook.Ink3,
     };

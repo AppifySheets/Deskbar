@@ -136,6 +136,12 @@ public sealed class TaskService(ITaskStore store, Func<DateTimeOffset> now, Func
             .Map(board => heard ? board.DeployPullRequestsEnded(id, [link.Key]) : board));
     }
 
+    /// <summary>
+    /// The task's session cannot tell whether its change was deployed, and why (task 485ba96b, TaskBoard.MarkDeployUnknown).
+    /// Tells no other session: nothing was deployed that they could wait on.
+    /// </summary>
+    public Result MarkDeployUnknown(Guid id, string reason) => ApplyIfChanged(Board.MarkDeployUnknown(id, reason, now()));
+
     // A deploy seen running (task 8470d176, phase 2: `task deployed` and "Mark deployed"); reporting it again saves and
     // pulses nothing (TaskBoard.MarkDeployed returns the same board).
     //
@@ -308,7 +314,8 @@ public sealed class TaskService(ITaskStore store, Func<DateTimeOffset> now, Func
     /// </summary>
     public bool CanMarkDeployed(TaskItem task) =>
         runningBuild.HasValue
-        && DeliveryOf(task).Stage == DeliveryStage.Merged
+        // Unchecked too (task 485ba96b): the session could not tell, so the user's "Mark deployed" is how it gets known.
+        && DeliveryOf(task).Stage is DeliveryStage.Merged or DeliveryStage.Unchecked
         && task.PullRequests.Any(p => !runningBuild.Value.Builds(p) && task.Deployed.All(d => d.Key != p.Key)
             // Merged by GitHub's word: an unreported one closed without a merge would be stamped and change nothing.
             && arrivals.TryGetValue(p.Key, out var arrival) && arrival.State == PullRequestState.Merged);

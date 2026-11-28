@@ -304,7 +304,7 @@ public partial class TasksWindow
         var top = PageTop(row, mark);
         DockPanel.SetDock(top, Dock.Top);
         dock.Children.Add(top);
-        if (mark is InboxMark.Finished or InboxMark.FinishedNotRunning && !row.Closing)
+        if (mark is InboxMark.Finished or InboxMark.FinishedNotRunning or InboxMark.DeployUnchecked && !row.Closing)
         {
             var bottom = FinishedRow(row);
             DockPanel.SetDock(bottom, Dock.Bottom);
@@ -385,7 +385,8 @@ public partial class TasksWindow
         // Only a merge asked (task b99e5596, AskedPullRequests.AsksMerge): the merge glyph, as the task's Inbox line has.
         : row.AsksMerge ? InboxMark.ReadyToMerge
         : row.Status == TaskStatus.WaitingOnYou ? InboxMark.Asks
-        : row.Status == TaskStatus.Done ? row.Delivery.Shipping ? InboxMark.FinishedNotRunning : InboxMark.Finished
+        // Its session cannot check the deploy (task 485ba96b): the dashed ring, as the task's Inbox line has.
+        : row.Status == TaskStatus.Done ? row.Delivery.Shipping ? row.Delivery.Unchecked ? InboxMark.DeployUnchecked : InboxMark.FinishedNotRunning : InboxMark.Finished
         : !row.Claudes ? InboxMark.Note
         : row.LiveCount > 0 && row.WorkingCount > 0 ? InboxMark.Working
         : InboxMark.Idle;
@@ -398,6 +399,7 @@ public partial class TasksWindow
         InboxMark.WentQuiet => row.Status == TaskStatus.WaitingOnYou ? "Could not be restarted" : "Went quiet: no update for a while",
         InboxMark.Finished => "Finished. Check it and close",
         InboxMark.FinishedNotRunning => "Finished. Not running yet",
+        InboxMark.DeployUnchecked => "Finished. " + RunningChanges.UncheckedWords,
         InboxMark.Working => "Claude is working",
         InboxMark.Idle => row.LiveCount > 0 ? "Claude is idle" : "No live session",
         InboxMark.UsageLimit => "Stopped on the usage limit",
@@ -425,12 +427,40 @@ public partial class TasksWindow
             Padding = new Thickness(7, 1, 7, 1),
             Child = Text(text, 12, ink, FontWeights.SemiBold, new Thickness(0)),
         };
-        TextBlock Arrow() => Text("›", 12, InboxLook.Ink3, FontWeights.Normal, new Thickness(5, 0, 5, 0));
         var steps = new List<FrameworkElement> { Step("✓ Merged", InboxLook.DoneInk, InboxLook.StrongLine) };
         if (row.DeployBuilt is { } built)
             steps.Add(built ? Step("✓ Built", InboxLook.DoneInk, InboxLook.StrongLine) : Step("Built", InboxLook.Ink3, InboxLook.Hairline));
         steps.Add(Step("Deploy: yours", InboxLook.Amber, InboxLook.Amber));
         steps.Add(Step("Running", InboxLook.Ink3, InboxLook.Hairline));
+        return Track(track, steps);
+    }
+
+    // THE TRACK OF A DEPLOY NOBODY CAN CHECK (task 485ba96b, DeliveryStage.Unchecked; the mockup,
+    // https://claude.ai/artifact/GYJRsxJuNsTiZWJsA3XMA1): Merged › Built › Deploy: can't check, the last step a dashed pill
+    // in grey, the broken outline the mark's dashed ring has. No Running step: nobody can say whether it runs, and that
+    // is what the dashed step already says. Built as the deploy track builds it, from the task's deploy pull requests.
+    FrameworkElement UncheckedTrack(TaskRowView row)
+    {
+        var track = new WrapPanel { Margin = new Thickness(0, 0, 10, 4), VerticalAlignment = VerticalAlignment.Center };
+        AutomationProperties.SetName(track, "State: " + PageStateWords(row, InboxMark.DeployUnchecked));
+        Border Step(string text) => new()
+        {
+            BorderBrush = InboxLook.StrongLine,
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(9),
+            Padding = new Thickness(7, 1, 7, 1),
+            Child = Text(text, 12, InboxLook.DoneInk, FontWeights.SemiBold, new Thickness(0)),
+        };
+        var steps = new List<FrameworkElement> { Step("✓ Merged") };
+        if (row.DeployBuilt == true) steps.Add(Step("✓ Built"));
+        steps.Add(TaskStatusMarks.DashedPill("Deploy: can't check", 12, InboxLook.Ink2, InboxLook.Ink3, FontWeights.SemiBold));
+        return Track(track, steps);
+    }
+
+    // A track's steps with an arrow between each two.
+    static FrameworkElement Track(WrapPanel track, IReadOnlyList<FrameworkElement> steps)
+    {
+        TextBlock Arrow() => Text("›", 12, InboxLook.Ink3, FontWeights.Normal, new Thickness(5, 0, 5, 0));
         steps.Select((step, i) => (step, i)).ToList().ForEach(x =>
         {
             if (x.i > 0) track.Children.Add(Arrow());
@@ -480,7 +510,10 @@ public partial class TasksWindow
             FontWeights.SemiBold, new Thickness(0, 0, 10, 4));
         AutomationProperties.SetName(words, "State");
         // Waiting for his deploy (task 1565789d, option A): the steps instead of the words, done ones ticked, his in amber.
-        second.Children.Add(mark == InboxMark.WaitsForDeploy ? DeployTrack(row) : words);
+        // A deploy its session cannot check (task 485ba96b): the steps too, the last one dashed.
+        second.Children.Add(mark == InboxMark.WaitsForDeploy ? DeployTrack(row)
+            : mark == InboxMark.DeployUnchecked ? UncheckedTrack(row)
+            : words);
         if (InboxChip(row) is FrameworkElement chip)
         {
             chip.Margin = new Thickness(0, 0, 10, 4);
@@ -499,6 +532,17 @@ public partial class TasksWindow
         var top = new StackPanel();
         top.Children.Add(first);
         top.Children.Add(second);
+        // WHY IT CANNOT BE CHECKED (task 485ba96b, Petre: "state that the session has no access to logs or whatever else it
+        // needs"): the session's reason, under the track, and what is left to him. Only while the delivery says Unchecked,
+        // which carries the reason as its note ("Can't check the deploy: no access to …").
+        if (mark == InboxMark.DeployUnchecked && row.Delivery.Unchecked)
+        {
+            var why = Text($"{row.Delivery.Note}. Check it yourself and close the task, or use {MarkDeployedText}.", 12, InboxLook.Ink2,
+                FontWeights.Normal, new Thickness(36, 2, 10, 4));
+            why.TextWrapping = TextWrapping.Wrap;
+            AutomationProperties.SetName(why, "Why the deploy can't be checked");
+            top.Children.Add(why);
+        }
         return new Border
         {
             Padding = new Thickness(8, 10, 10, 6),

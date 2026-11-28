@@ -86,7 +86,7 @@ public static class RunningChanges
             // links carry no time to tell old from new, so a task whose status log shows it Done or Closed before gets no
             // mark until it is Done again.
             _ when task.StatusLog.Any(c => c.To is TaskStatus.Done or TaskStatus.Closed) => TaskDelivery.None,
-            _ => StageOf(task, build, facts, unreachable, blind) is { Stage: DeliveryStage.Merged or DeliveryStage.Running } merged
+            _ => StageOf(task, build, facts, unreachable, blind) is { Stage: DeliveryStage.Merged or DeliveryStage.Unchecked or DeliveryStage.Running } merged
                 ? merged
                 : TaskDelivery.None,
         };
@@ -118,8 +118,21 @@ public static class RunningChanges
         if (waiting.Length == 0) return new TaskDelivery(DeliveryStage.Running, RunningNote(task, shipped, build));
         // Open while any pull request is still open (the chip must not say "Merged" of one that is not), Merged otherwise.
         var stage = waiting.Any(l => facts[l.Key].State == PullRequestState.Open) ? DeliveryStage.Open : DeliveryStage.Merged;
+        // Merged, and its session said it cannot tell whether that was deployed (task 485ba96b, TaskItem.DeployUnknown):
+        // Unchecked, its hover line the session's reason. Only from Merged: one still open is not deployed by anyone.
+        if (stage == DeliveryStage.Merged && task.DeployUnknown.HasValue)
+            return new TaskDelivery(DeliveryStage.Unchecked, UncheckedNote(task.DeployUnknown.Value));
         return new TaskDelivery(stage, string.Join(" ", waiting.Select(l => Waiting(l, facts[l.Key], build))));
     }
+
+    /// <summary>
+    /// The words of a task whose session cannot tell whether its change was deployed (DeliveryStage.Unchecked, task
+    /// 485ba96b): "Can't check the deploy: no access to the Portainer logs on contabo1", the session's reason after the colon.
+    /// </summary>
+    public static string UncheckedNote(DeployUnknownReport report) => $"{UncheckedWords}: {report.Reason.TrimEnd('.')}";
+
+    /// <summary>The state in a few words, for a mark's name and the page's header (DeliveryStage.Unchecked).</summary>
+    public const string UncheckedWords = "Can't check the deploy";
 
     /// <summary>The hover line of a task whose pull requests are still being asked about (DeliveryStage.Checking).</summary>
     public const string CheckingNote = "Checking with GitHub whether its change runs here yet.";
@@ -271,6 +284,13 @@ public enum DeliveryStage
 
     /// <summary>Every pull request it recorded runs (in the running build, or reported deployed): the full tick.</summary>
     Running,
+
+    /// <summary>
+    /// Merged, and its session cannot tell whether it was deployed (task 485ba96b, TaskItem.DeployUnknown): a mark of its
+    /// own, and the note is the session's reason. Counts as Shipping, so whatever has no look of its own for it yet keeps
+    /// the merged ring. Added last, so no stored or traced number of the others changes.
+    /// </summary>
+    Unchecked,
 }
 
 /// <summary>A task's delivery stage and the line its hover text adds (empty for None).</summary>
@@ -278,6 +298,9 @@ public sealed record TaskDelivery(DeliveryStage Stage, string Note)
 {
     public static readonly TaskDelivery None = new(DeliveryStage.None, "");
 
-    /// <summary>Whether the change is not known to run (Checking, Open or Merged): the ring instead of the disc.</summary>
-    public bool Shipping => Stage is DeliveryStage.Checking or DeliveryStage.Open or DeliveryStage.Merged;
+    /// <summary>Whether the change is not known to run (Checking, Open, Merged or Unchecked): the ring instead of the disc.</summary>
+    public bool Shipping => Stage is DeliveryStage.Checking or DeliveryStage.Open or DeliveryStage.Merged or DeliveryStage.Unchecked;
+
+    /// <summary>Whether its session cannot tell whether the change was deployed (DeliveryStage.Unchecked, task 485ba96b).</summary>
+    public bool Unchecked => Stage == DeliveryStage.Unchecked;
 }

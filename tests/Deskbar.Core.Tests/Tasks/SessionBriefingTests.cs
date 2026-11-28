@@ -141,7 +141,9 @@ public sealed class SessionBriefingTests
         Assert.Contains("After the merge, finish in this order: released (if the repository has a release step), deployed, done.", text);
         Assert.Contains("Never mark done before deployed.", text);
         Assert.Contains("\"nothing to deploy\" for a change nothing runs", text);
-        Assert.Contains("When a person deploys or only they see the evidence: task ask - --deploy (\"Redeploy X\"); Deskbar wakes you to check; once it shows: task deployed, task done.", text);
+        Assert.Contains("When a person deploys: task ask - --deploy (\"Redeploy X\"); Deskbar wakes you to check.", text);
+        // Task 485ba96b: a deploy the session cannot see is reported as unknown, with the reason, never asked about.
+        Assert.Contains("If you cannot see the deploy: task deployed - --unknown, saying what you lack. Then task done.", text);
         Assert.Contains("In Deskbar's own repository done follows the release.", text);
         // A task with no pull request (research, an answer) still has a rule for done; a merged change waits for the order.
         Assert.Contains("(when the work is finished and nothing waits on the user, so not while a pull request of yours waits to be merged; for a merged change, after the order above;", text);

@@ -354,6 +354,31 @@ public sealed class TaskPullRequestsTests : IDisposable
         Assert.Contains("is a session's form and needs --session", refused.Output);
     }
 
+    // `task deployed <reason> --unknown --session` (task 485ba96b): the session cannot see its deploy and says why; the
+    // flag with no reason is refused rather than stored as a deploy note, and `task show` carries the reason.
+    [Fact]
+    public void A_session_reports_it_cannot_check_its_deploy()
+    {
+        var manager = Started();
+        Ran(manager, "task", "new", "Portal accounts", "--session", "s1", "--from", @"C:\repos\iam.ge");
+        Ran(manager, "task", "pr", "https://github.com/AppifySheets/iam.ge/pull/537", "--session", "s1");
+
+        Assert.NotEqual(ControlReply.Ok, Ran(manager, "task", "deployed", "--unknown", "--session", "s1").ExitCode);
+        var reply = Ran(manager, "task", "deployed", "no access to the Portainer logs", "--unknown", "--session", "s1");
+
+        Assert.Equal(ControlReply.Ok, reply.ExitCode);
+        Assert.Contains("\"deployUnknown\"", reply.Output);
+        Assert.Equal("no access to the Portainer logs", tasks.Board.Tasks.Single().DeployUnknown.Value.Reason);
+        Assert.Empty(tasks.Board.Tasks.Single().Deployed);
+
+        var refused = Ran(manager, "task", "deployed", "no logs", "--unknown");
+        Assert.Contains("is a session's form and needs --session", refused.Output);
+
+        var id = tasks.Board.Tasks.Single().Id.ToString()[..8];
+        Assert.Equal(ControlReply.Ok, Ran(manager, "task", "deployed", id, "no health page", "--unknown").ExitCode);
+        Assert.Equal("no health page", tasks.Board.Tasks.Single().DeployUnknown.Value.Reason);
+    }
+
     // `task deployed <id> <note>`: the user's or the manager's form, the remote twin of "Mark deployed".
     [Fact]
     public void Anyone_can_report_a_deploy_by_the_task()

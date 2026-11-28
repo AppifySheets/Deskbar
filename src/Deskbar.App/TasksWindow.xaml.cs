@@ -1767,7 +1767,7 @@ public partial class TasksWindow : Window
             var doneTick = TaskStatusMarks.ShowsTick(row.Status, row.Delivery) && !row.Closing;
             if (doneTick && row.ParentTitle is not null)
             {
-                var tick = TaskStatusMarks.DoneTick(12, row.Delivery.Shipping);
+                var tick = TaskStatusMarks.DoneTick(12, row.Delivery.Shipping, row.Delivery.Unchecked);
                 tick.Margin = new Thickness(0, 0, 5, 0);
                 // Inlines[0] is the breadcrumb run (the subtask branch above always adds it first), so the tick is second.
                 title.Inlines.InsertAfter(title.Inlines.FirstInline, new InlineUIContainer(tick) { BaselineAlignment = BaselineAlignment.Center });
@@ -1775,7 +1775,7 @@ public partial class TasksWindow : Window
             }
             else if (doneTick)
             {
-                var tick = TaskStatusMarks.DoneTick(12, row.Delivery.Shipping);
+                var tick = TaskStatusMarks.DoneTick(12, row.Delivery.Shipping, row.Delivery.Unchecked);
                 tick.Margin = new Thickness(0, 2, 5, 0);
                 tick.VerticalAlignment = VerticalAlignment.Top;
                 var titleRow = new DockPanel();
