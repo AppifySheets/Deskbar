@@ -1061,7 +1061,33 @@ public sealed record TaskBoard(IReadOnlyList<TaskItem> Tasks)
             UpdatedAt = now,
             // Petre's comment is his edit (Ruling 11b, see WithoutSessionElsewhere); a session's leaves the mark.
             Adopted = t.Adopted && sessionId.HasValue,
+            // Petre's comment on a task waiting on him is his reply: the question drops below the ones he has not
+            // answered yet (RepliedDown). A session's comment, Deskbar's line or the manager's leaves the place alone.
+            Pin = sessionId.HasNoValue ? RepliedDown(t).Pin : t.Pin,
         }));
+
+    // HIS REPLY TAKES A QUESTION OFF THE TOP (task e7c8fe57, 2026-11-28, Petre: "when i answer a session and come back to
+    // the list, that session should not be the top of the list anymore", with a screenshot of the Needs you list whose
+    // top question he had just answered). A question leaves the waiting block only once its session works on the reply
+    // for StalledTasks.BusyGrace (RepliedTasks, task 8bd18246), and until then it stayed first, so the list he came back
+    // to still led with the one he had dealt with. Now his reply, a comment on the task (Comment) or a prompt in one of
+    // its live sessions (RepliedInSession), moves it to the bottom of the questions straight away, below every question
+    // still waiting for him. It stays a question there: nothing is settled (Ruling 49, the session decides), and the
+    // set-aside follows as before once the session works on it. A later reply moves it down again, under the others he
+    // answered since; a new ask puts it back on top (Ask's TopPin), since a new question is news to him.
+    TaskItem RepliedDown(TaskItem task) =>
+        task is { IsOpen: true, Status: TaskStatus.WaitingOnYou } ? task with { Pin = BottomPin(TaskStatus.WaitingOnYou, task.Id) } : task;
+
+    /// <summary>
+    /// Petre typed into a session's terminal (TaskService.Prompted): every open task waiting on him with that session
+    /// live on it goes to the bottom of the questions (see RepliedDown). Returns this same board when no pin moves, so
+    /// the caller saves nothing for a prompt in a session whose task does not wait.
+    /// </summary>
+    public TaskBoard RepliedInSession(string sessionId, DateTimeOffset now) =>
+        Tasks.Where(t => t is { IsOpen: true, Status: TaskStatus.WaitingOnYou } && LiveOn(t, sessionId))
+            .Select(t => (Was: t, Now: RepliedDown(t)))
+            .Where(pair => pair.Now.Pin != pair.Was.Pin)
+            .Aggregate(this, (board, pair) => board.Replaced(board.RepliedDown(pair.Was) with { UpdatedAt = now }));
 
     // --- Petre's own words on a task (Ruling 58) ---------------------------------------------------------
 
@@ -1584,6 +1610,13 @@ public sealed record TaskBoard(IReadOnlyList<TaskItem> Tasks)
     /// </summary>
     double TopPin(TaskStatus status, Guid except) =>
         PinnedPart(status).Where(t => t.Id != except).Select(t => t.Pin).DefaultIfEmpty(1).Min() - 1;
+
+    /// <summary>
+    /// The pin that puts a task at the bottom of the pinned block's part for <paramref name="status"/>: one below the
+    /// largest of the other pins there, or 0 in an empty part (task e7c8fe57, RepliedDown).
+    /// </summary>
+    double BottomPin(TaskStatus status, Guid except) =>
+        PinnedPart(status).Where(t => t.Id != except).Select(t => t.Pin).DefaultIfEmpty(-1).Max() + 1;
 
     /// <summary>A closed task coming back goes to the top of its quadrant (Ruling 25); an open one keeps its place.</summary>
     TaskItem OnTopIfClosed(TaskItem task) => task.IsOpen ? task : task with { Rank = TopRank(task.Quadrant, task.Id) };

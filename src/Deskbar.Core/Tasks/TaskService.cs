@@ -562,6 +562,9 @@ public sealed class TaskService(ITaskStore store, Func<DateTimeOffset> now, Func
     {
         var at = now();
         ImmutableInterlocked.Update(ref prompted, map => map.SetItem(sessionId, at));
+        // His prompt is his reply to a question the session's task waits on: it drops below the questions he has not
+        // answered yet (task e7c8fe57, TaskBoard.RepliedInSession). Saves only when a pin moved.
+        CommitIfChanged(Board.RepliedInSession(sessionId, at));
     }
 
     // When each session last had ANY prompt submitted, Deskbar's and Claude Code's own included (task 10b49554): a prompt
