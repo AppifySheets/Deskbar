@@ -293,7 +293,7 @@ static class ClaudeSkill
     // Deskbar's own executable before it writes the request (PipeTrust.CheckServerImage, the re-review's N1), so a program
     // that serves the pipe's name while Deskbar is closed gets nothing, and this script prints nothing.
     //
-    // A DIALOG'S SLOT (AskUserQuestion, task c047d0a0): the registration's reply is "<code> dialog", and such a slot takes
+    // A DIALOG'S SLOT (AskUserQuestion, task c047d0a0; a plan to approve, ExitPlanMode, task 8dbbaa0b): the registration's reply is "<code> dialog", and such a slot takes
     // only "<code> dialog", for which the script fetches the answer line from Deskbar over the pipe and lets it through
     // (PermissionAnswer explains the one exception to printing literals, and why the line is never a file). Any other
     // second word in the reply counts as no code.
@@ -337,7 +337,7 @@ static class ClaudeSkill
         "@set \"rest=x!code!\"",
         "@for %%h in (0 1 2 3 4 5 6 7 8 9 a b c d e f) do @set \"rest=!rest:%%h=!\"",
         "@if not \"!rest!\"==\"x\" set \"ok=\"",
-        // The slot's kind is nothing (a tool permission) or exactly the dialog word (AskUserQuestion); anything else counts as no code.
+        // The slot's kind is nothing (a tool permission) or exactly the dialog word (AskUserQuestion, ExitPlanMode); anything else counts as no code.
         $"@if defined kind if not \"!kind!\"==\"{Core.Tasks.PermissionAnswer.DialogKind}\" set \"ok=\"",
         "@endlocal & set \"ok=%ok%\"",
         "@if not defined ok goto done",

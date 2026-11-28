@@ -38,6 +38,12 @@ public static class SessionPrompt
     /// <summary>The first words of a question placed from a dialog that has no more specific wording.</summary>
     public const string Lead = "Answer in the session:";
 
+    /// <summary>The first words of a plan's question when only the session can answer it.</summary>
+    public const string PlanLead = "Approve the plan in the session";
+
+    /// <summary>The first words of a plan's question while the plan card is on the task's page (PlanAsk).</summary>
+    public const string PlanOnCardLead = "Approve Claude's plan";
+
     /// <summary>The tool Claude Code runs to ask for a plan's approval; its tool_input carries the plan.</summary>
     public const string PlanTool = "ExitPlanMode";
 
@@ -64,22 +70,24 @@ public static class SessionPrompt
     /// the session's latest noted one (SessionPrompts.Detail); it names the question only where it is about the same
     /// thing: a tool permission or a plan for the PermissionRequest detail, an MCP dialog for the Elicitation detail.
     /// </summary>
-    public static Maybe<string> Text(string type, string message, Maybe<PromptDetail> detail) =>
+    public static Maybe<string> Text(string type, string message, Maybe<PromptDetail> detail, bool planOnCard = false) =>
         !IsQuestion(type) || OneLine(message) is not { Length: > 0 } said
             ? Maybe<string>.None
-            : Named(type, said, detail).GetValueOrDefault($"{Lead} {said}");
+            : Named(type, said, detail, planOnCard).GetValueOrDefault($"{Lead} {said}");
 
     /// <summary>
     /// The question worded from the detail, or none when the detail is not about this dialog (Text then says Claude
     /// Code's own words). The caller takes the detail's subagent for the transcript watch only when this has a value.
     /// The SDK's "Claude needs your permission to use &lt;tool&gt;" must name the detail's own tool.
     /// </summary>
-    public static Maybe<string> Named(string type, string message, Maybe<PromptDetail> detail) =>
+    /// <paramref name="planOnCard"/>: the plan is on its card on the task's page (PlanAsk, task 8dbbaa0b), so the
+    /// question does not send the user to the session.
+    public static Maybe<string> Named(string type, string message, Maybe<PromptDetail> detail, bool planOnCard = false) =>
         OneLine(message) is var said && said.Length == 0 ? Maybe<string>.None : detail.Bind(d =>
             ElicitationTypes.Contains(type, StringComparer.Ordinal) && d.IsElicitation
                 ? $"Answer {d.Server} in the session: {d.Summary}"
             : type == "permission_prompt" && said.StartsWith(PlanText, StringComparison.Ordinal) && d.Tool == PlanTool
-                ? d.Summary.Length > 0 ? $"Approve the plan in the session: {d.Summary}" : "Approve the plan in the session"
+                ? (planOnCard ? PlanOnCardLead : PlanLead) is var lead && d.Summary.Length > 0 ? $"{lead}: {d.Summary}" : lead
             : type == "permission_prompt" && said.StartsWith(PermissionText, StringComparison.Ordinal) && !d.IsElicitation && d.Tool != PlanTool
                 && (said.Length == PermissionText.Length || said == $"{PermissionText} to use {d.Tool}")
                 ? d.Summary.Length > 0 ? $"Allow {d.Tool} in the session: {d.Summary}" : $"Allow {d.Tool} in the session"

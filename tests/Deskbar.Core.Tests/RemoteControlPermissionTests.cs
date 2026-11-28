@@ -138,6 +138,58 @@ public sealed class RemoteControlPermissionTests : IDisposable
     static string DialogHook(string input = """{"questions":[{"question":"Pick a colour","header":"Colour","options":[{"label":"Red","description":"warm"},{"label":"Blue","description":"cool"}],"multiSelect":false}]}""") =>
         $$$"""{"session_id":"{{{Session}}}","transcript_path":"t","cwd":"C:\\repos\\proj1","permission_mode":"default","hook_event_name":"PermissionRequest","tool_name":"AskUserQuestion","tool_input":{{{input}}}}""";
 
+    // ExitPlanMode as Claude Code 2.1.332 sends it (PlanAsk's header): the plan's markdown and the file it came from.
+    const string PlanInput = """{"plan":"# Fix the bar\n\n1. Do it","planFilePath":"C:\\Users\\x\\.claude\\plans\\fix-the-bar.md"}""";
+
+    static string PlanHook(string input = PlanInput) =>
+        $$$"""{"session_id":"{{{Session}}}","transcript_path":"t","cwd":"C:\\repos\\proj1","permission_mode":"plan","hook_event_name":"PermissionRequest","tool_name":"ExitPlanMode","tool_input":{{{input}}}}""";
+
+    // A WELL-FORMED PLAN IS A QUESTION DESKBAR SHOWS TOO (task 8dbbaa0b, on purpose: it used to answer nothing). It is told
+    // as a dialog is, "<code> dialog", and answered from the plan card (PlanAsk).
+    [Fact]
+    public void A_well_formed_plan_is_held_and_the_reply_is_its_code_and_dialog()
+    {
+        var reply = Registered(Ready(), Call(Slot(), PlanHook()));
+
+        Assert.Matches("^[0-9a-f]{32} dialog\r\n$", reply.Output);
+        var held = desk.Of(Session).Single();
+        Assert.True(held.Request.IsPlan);
+        Assert.True(PlanAsk.Of(held.Request).HasValue);
+        Assert.Equal("req-1-2", held.Slot);
+    }
+
+    // The reply's code is the one the answer file names, and what the script then fetches is the plan's answer line.
+    [Fact]
+    public void The_plan_replys_code_is_the_one_the_answer_file_names_and_fetches_the_line()
+    {
+        var reply = Registered(Ready(), Call(Slot(), PlanHook()));
+        var code = reply.Output.Split(' ')[0];
+
+        Assert.True(desk.AnswerPlan("req-1-2", PlanDecision.Approve).IsSuccess);
+
+        Assert.Equal($"{code} dialog\n", File.ReadAllText(Path.Combine(box, "req-1-2", PermissionDesk.AnswerFile)));
+        var line = desk.Fetch("req-1-2", code).Value;
+        Assert.Equal("allow", (string)System.Text.Json.Nodes.JsonNode.Parse(line)!["hookSpecificOutput"]!["decision"]!["behavior"]!);
+    }
+
+    // While the plan's card is on show, the plan's Notification still places the task's question (a plan is a decision,
+    // unlike a tool permission), worded as approving it from the card (SessionPrompt.PlanOnCardLead).
+    [Fact]
+    public void A_plan_on_its_card_still_places_its_question_worded_for_the_card()
+    {
+        var manager = Ready();
+        var control = Control(manager);
+        string[] hook(string json) => ["claude-hook", "--entry", "cli", "--attended", "0", "--job", Job, "--from", Repo, "--json", json];
+        // The hook that notes the plan's detail, then the card, then the prompt's Notification.
+        control.Execute(hook(PlanHook()));
+        Assert.Matches(" dialog\r\n$", control.Execute(Call(Slot(), PlanHook())).Output);
+        var notified = $$$"""{"session_id":"{{{Session}}}","transcript_path":"t","cwd":"C:\\repos\\proj1","hook_event_name":"Notification","message":"Claude Code needs your approval for the plan","notification_type":"permission_prompt"}""";
+
+        control.Execute(hook(notified));
+
+        Assert.StartsWith(SessionPrompt.PlanOnCardLead, tasks.Board.TaskOf(Session).Value.Question.Value);
+    }
+
     [Fact]
     public void A_well_formed_dialog_is_held_and_the_reply_is_its_code_and_dialog()
     {
@@ -254,7 +306,7 @@ public sealed class RemoteControlPermissionTests : IDisposable
     // dialog stays. Never an allow, never a code.
     public static TheoryData<string> Refusals =>
     [
-        "setting off", "inbox off", "no task", "no desk", "headless", "ask dialog", "plan dialog",
+        "setting off", "inbox off", "no task", "no desk", "headless", "ask dialog", "plan dialog", "plan blank", "plan empty", "plan not text", "plan not an object",
         "not a permission hook", "no slot", "bad slot", "slot already held", "bad json",
     ];
 
@@ -270,7 +322,13 @@ public sealed class RemoteControlPermissionTests : IDisposable
             "headless" => ["claude-permission", "--entry", "sdk-cli", "--attended", "0", "--from", Repo, "--slot", slot, "--json", Hook()],
             // Hook()'s tool_input is a Bash command, not the questions: a malformed AskUserQuestion stays in the terminal.
             "ask dialog" => Call(slot, Hook("AskUserQuestion")),
+            // Hook()'s tool_input is a Bash command, which holds no plan: an ExitPlanMode with no plan to show stays in the
+            // terminal, as does one whose plan is empty, blank or not text, or whose input is not an object (PlanAsk).
             "plan dialog" => Call(slot, Hook("ExitPlanMode")),
+            "plan blank" => Call(slot, PlanHook("""{"plan":"  \n ","planFilePath":"p.md"}""")),
+            "plan empty" => Call(slot, PlanHook("""{"plan":""}""")),
+            "plan not text" => Call(slot, PlanHook("""{"plan":7}""")),
+            "plan not an object" => Call(slot, PlanHook("\"a plan\"")),
             "not a permission hook" => Call(slot, Hook(hookEvent: "PreToolUse")),
             "no slot" => ["claude-permission", "--entry", "cli", "--attended", "0", "--job", Job, "--from", Repo, "--json", Hook()],
             "bad slot" => Call(@"..\..\x", Hook()),

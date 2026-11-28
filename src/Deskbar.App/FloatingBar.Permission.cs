@@ -25,11 +25,12 @@ public partial class FloatingBar
 
     void RepaintForPermissions() => PaintTaskList();
 
-    // Tool permission questions only: a multiple-choice dialog's task already says the dialog's question on its line
-    // (DialogQuestion), so "Asks permission" would be wrong for it (task c047d0a0).
+    // Tool permission questions only: a multiple-choice dialog's task, and one with a plan to approve, already says the
+    // dialog's question on its line (DialogQuestion, SessionPrompt), so "Asks permission" would be wrong for it (tasks
+    // c047d0a0 and 8dbbaa0b).
     IReadOnlyList<PermissionDesk.Pending> BarPermissionsOf(Guid id) =>
         permissionDesk is { } desk && taskService is { } service
-            ? desk.OfTask(service.Board, id).Where(p => !p.Request.IsAskUserQuestion).ToList()
+            ? desk.OfTask(service.Board, id).Where(p => !p.Request.IsDialog).ToList()
             : [];
 
     bool AsksPermission(TaskItem task) => BarPermissionsOf(task.Id).Count > 0;
