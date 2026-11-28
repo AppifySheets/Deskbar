@@ -730,6 +730,44 @@ public class ManagerActionsTests
         Assert.Equal(["one", "two"], rig.Harness.Manager.State.Manager!.Messages!.Select(m => m.Text));
     }
 
+    // Review of task 6c4c067f: the first click of the day starts the manager from the page (no record yet), and a message
+    // typed before it is listed is stored on the record the start made once it exists, and delivered.
+    [Fact]
+    public void A_send_while_the_page_starts_the_first_manager_is_stored_on_its_record()
+    {
+        using var rig = new Rig(wakes: true);
+        // A started manager has its transcript at once; the comment roads skip a session without one.
+        rig.WriteTranscript(rig.Cli.NextId);
+
+        Assert.True(rig.Manager.Open(attach: false).IsSuccess);
+        rig.Manager.Send("hello", Maybe<TaskItem>.None);
+        Assert.Null(rig.Harness.Manager.State.Manager);
+        rig.Clock.AdvanceBy((ManagerActions.ResumePause * (ManagerActions.ResumeChecks + 2)).Ticks);
+
+        var stored = rig.Harness.Manager.State.Manager!;
+        Assert.Equal(rig.Cli.NextId, stored.SessionId);
+        Assert.Equal("hello", Assert.Single(stored.Messages!).Text);
+        Assert.True(stored.Replying);
+        var delivered = ManagerSession.PageMessage("hello", Maybe<string>.None);
+        var inbox = Path.Combine(rig.InboxFolder, rig.Cli.NextId + ".md");
+        Assert.True(rig.Cli.Acts.Any(a => a.Arguments.Contains(delivered)) || File.Exists(inbox) && File.ReadAllText(inbox).Contains(delivered));
+    }
+
+    // Review of task 6c4c067f: "Open in terminal" while the page's own open is still under way is another intent, so it
+    // runs after it instead of being dropped.
+    [Fact]
+    public void Open_in_terminal_during_a_page_open_runs_after_it()
+    {
+        using var rig = PageRig();
+
+        rig.Manager.Open(attach: false);
+        rig.Manager.Open(attach: true);
+        rig.Settle();
+        rig.Settle();
+
+        Assert.Single(rig.Launches);
+    }
+
     [Fact]
     public void Open_without_attach_attaches_no_window()
     {

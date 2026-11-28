@@ -164,6 +164,36 @@ public partial class TasksBoardTests
         Assert.Equal(1, fake.Terminals);
     });
 
+    // Review of task 6c4c067f: the page opened before today's manager was listed shows the chat once it is, and a page
+    // opened over a task's page does not pour the manager's items into that task's stream.
+    [Fact]
+    public void A_page_drawn_before_the_manager_started_shows_its_chat_once_it_has_one() => StaThread.Run(() =>
+    {
+        var transcript = new FakeTranscript();
+        transcript.Add(ClaudeSaid("Started for the day.", 5));
+        var source = ChatSource.Nothing;
+        var fake = new ManagerFake();
+        using var t = BuildWithManager(fake, () => source, TranscriptPath);
+        var task = SessionTask(t);
+        t.Window.TranscriptInline = true;
+        t.Window.TranscriptTimer = t.Timers.Start;
+        t.Window.TranscriptReader = () => transcript.Read;
+        t.Controller.Show();
+        ChooseInbox(t);
+        t.Controller.ShowTask(task);
+        var taskStream = t.Window.StreamShown;
+
+        t.Controller.ShowManager();
+        Assert.Null(t.Window.StreamShown);
+        source = new ChatSource(ChatSourceKind.Live, "C:\\made\\up\\manager.jsonl", "5a1e0c2b");
+        t.Timers.FireAll();
+        PumpUntil(t.Window, () => t.Window.StreamShown is not null);
+
+        Assert.NotNull(t.Window.StreamShown);
+        Assert.NotSame(taskStream, t.Window.StreamShown);
+        Assert.True(PageSays(t, "Started for the day."));
+    });
+
     [Fact]
     public void The_page_reads_the_managers_transcript_and_keeps_its_stream_through_a_redraw() => StaThread.Run(() =>
     {

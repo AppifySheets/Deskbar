@@ -101,6 +101,17 @@ public partial class TasksWindow
     // (a chat follows its newest), one scrolled up keeps its place, since the new entries are added below the view.
     void ApplyTranscript()
     {
+        // THE MANAGER'S PAGE DRAWS AGAIN when its transcript appears, changes or the manager starts or stops (task 6c4c067f,
+        // review): a page drawn before today's manager existed has no stream to take the items, or still holds the stream
+        // of the task page it was opened over. Its signature carries the poll's source (ManagerPageSignature), so the
+        // redraw builds the stream and the state words anew; the items then come in here.
+        // Posted, not run here: the poll's first tick runs inside the draw that follows it (FollowTranscript), and a draw
+        // inside a draw would double the page. Checked again when it runs, since that draw may have built the stream.
+        if (ManagerStreamMissing())
+        {
+            Dispatcher.BeginInvoke(new Action(() => { if (ManagerStreamMissing()) RedrawInbox(); }), DispatcherPriority.Background);
+            return;
+        }
         if (stream is null || transcript is null) return;
         var scroller = pageScroller;
         // What the page is held at wins over where the scroller is now: a stream that was empty has pulled its offset to the top.
@@ -112,6 +123,12 @@ public partial class TasksWindow
             scroller.ScrollToEnd();
         }
     }
+
+    // The manager's page follows a transcript it has no stream of its own for (task 6c4c067f): none built yet, or the stream
+    // still the task page's it was opened over. A source with nothing to read (None) needs none.
+    bool ManagerStreamMissing() =>
+        managerPage && transcript is { Task: { } followed } poll && followed == ManagerSession.PageId
+        && poll.Source.Kind != ChatSourceKind.None && (stream is null || streamTask != followed);
 
     // The dim line at the stream's end: a session that has ended, or one whose record is gone.
     static string? NoteOf(InboxTranscript poll) => poll.Source.Kind switch
