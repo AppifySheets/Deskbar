@@ -838,6 +838,11 @@ S17. A subtask's way to its parent (task 54b39c4c). Give a note three subtasks. 
     subtask's line: **Open parent** shows the parent in the tasks panel. Open a subtask in its own window: the side
     column has a Parent section above Subtasks, and its button opens the parent's window; Details no longer lists
     "Subtask of".
+S17a. A subtask's page names its parent at the top (task 9106eaba). In the Inbox, open a note with a subtask, then
+    the subtask's page. Above the back arrow and the title is a band with a blue edge: "↑ SUBTASK OF" and the note's
+    title, ending in "›". The chat below has no "Subtask of" line. Add comments until the chat scrolls: the band stays
+    in place. Click it: the note's page shows, and back goes to the list. Open the subtask in its own window: the band
+    is at the top there too, and its click brings the note's window. A note without a parent has no band.
 S18. A subtask on a line of its own moves out as a plain task (task 7378433e). Give a task assigned to Claude a
     subtask assigned to you, with the Subtasks box ticked: on the bar the subtask has a line of its own with the arrow,
     and no parent above it. Drag it down and back onto its own line: no drop line, and it is still a

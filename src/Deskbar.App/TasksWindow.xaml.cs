@@ -2290,7 +2290,9 @@ public partial class TasksWindow : Window
         // easily"). A nested line shows only "↳", trusting the parent to be right above, but with a few siblings and an
         // open thread the parent is off the top of the list. So an open subtask names its parent at the head of its
         // thread, and the name is a button that opens the parent (TasksBoard.OpenParent).
-        if (!inParent && row.ParentId is { } parentId && row.ParentTitle is { } parentTitle && Actions?.OpenParent is { } openParent)
+        // ON ITS PAGE THE HEADER SHOWS IT (task 9106eaba, ParentBand): above the title, docked, so it never scrolls out of
+        // sight; drawing it here as well would put it twice on the page, once inside the chat.
+        if (!inParent && !OnItsPage(row.Id) && row.ParentId is { } parentId && row.ParentTitle is { } parentTitle && Actions?.OpenParent is { } openParent)
             head.Children.Add(ParentEntry(parentId, parentTitle, openParent));
         // A SUBTASK OPENED IN PLACE SHOWS ITS DESCRIPTION (task b2ff3fb7; Petre, of a subtask whose two screenshots were
         // nowhere to be seen once it sat under another task: "subtask may have lost its image after being moved into
