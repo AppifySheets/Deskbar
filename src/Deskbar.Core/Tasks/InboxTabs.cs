@@ -7,8 +7,9 @@ namespace Deskbar.Core.Tasks;
 // notes\tasks-inbox-design.md, section 4). The Inbox is a fourth view of the panel beside List, Matrix and Stats. It
 // shows exactly the lines the List shows, under three buttons instead of one long list:
 //
-//   Needs you   the questions (waiting on you), the tasks handed back because their session went quiet, then the Done
-//               tasks (full discs before rings, as the List's pinned block orders them);
+//   Needs you   the questions (waiting on you), the tasks handed back because their session went quiet, the tasks that
+//               only wait for his deploy, then the Done tasks (full discs before rings, as the List's pinned block
+//               orders them);
 //   Claude      the List's Claude working block: working now, then idle, then the ones stopped on the usage limit;
 //   Notes       the List's four quadrants, captioned in plain words (Do first, Plan, Quick ones, Someday).
 //
@@ -45,7 +46,14 @@ public enum InboxTab { NeedsYou, Claude, Notes, All }
 /// </summary>
 // Permissions (Allow / Deny from a task's page) comes first: a permission question holds Claude mid-step, so it is the
 // most urgent thing the Inbox can show.
-public enum InboxSection { Permissions, Questions, WentQuiet, Finished, WorkingNow, Idle, UsageLimit, DoFirst, Plan, QuickOnes, Someday, Matches }
+// Deploys (task 1f6ae26e): a task that only waits for his deploy (InboxMark.WaitsForDeploy, DeployWait) sits below the
+// questions and the quiet sessions, above Finished. Petre, on such a line among the questions: "this chip shouldn't ask
+// for my attention, or should it? if it shouldn't, let it sit below those that are asking for my attention". It is still
+// his step, so it stays in Needs you, but it holds up no session: the change is merged, the session has nothing left to
+// do until the deploy, and the deploy has no deadline the way a question has. A question ("A or B?") or a quiet session
+// stops work until he answers, so those come first. Sections are compared by declaration order (Split's OrderBy), and
+// none is stored or traced as a number (the Inbox's signature writes names), so adding one in the middle is safe.
+public enum InboxSection { Permissions, Questions, WentQuiet, Deploys, Finished, WorkingNow, Idle, UsageLimit, DoFirst, Plan, QuickOnes, Someday, Matches }
 
 /// <summary>
 /// A line's state mark: one shape per state, so the marks are told apart without their colours (spec, "A line").
@@ -99,7 +107,7 @@ public static class InboxTabs
     /// <summary>The tab a section belongs to.</summary>
     public static InboxTab TabOf(InboxSection section) => section switch
     {
-        InboxSection.Permissions or InboxSection.Questions or InboxSection.WentQuiet or InboxSection.Finished => InboxTab.NeedsYou,
+        InboxSection.Permissions or InboxSection.Questions or InboxSection.WentQuiet or InboxSection.Deploys or InboxSection.Finished => InboxTab.NeedsYou,
         InboxSection.WorkingNow or InboxSection.Idle or InboxSection.UsageLimit => InboxTab.Claude,
         _ => InboxTab.Notes,
     };
@@ -113,6 +121,7 @@ public static class InboxTabs
         InboxSection.Permissions => ("Asks permission", "a yes or a no"),
         InboxSection.Questions => ("Questions", ""),
         InboxSection.WentQuiet => ("Went quiet", "no update for a while"),
+        InboxSection.Deploys => ("To deploy", "merged, not running yet"),
         InboxSection.Finished => ("Finished", "check, then close"),
         InboxSection.WorkingNow => ("Working now", ""),
         InboxSection.Idle => ("Idle", "finished a turn, asked nothing"),
@@ -156,8 +165,8 @@ public static class InboxTabs
                 // A line drawn under its parent goes where its parent went; a parent (or a line with no parent above it in
                 // this group, which only a hand-edited file could make) is placed by its own state.
                 var under = nested.Contains(task.Id) && lines.Count > 0 && section != InboxSection.Matches;
-                if (!under) section = SectionOf(group.Kind, task, stoppedOnLimit, asksPermission);
                 var mark = MarkOf(task, stoppedOnLimit, busy, hollow, asksPermission, @unchecked);
+                if (!under) section = ForDeploy(SectionOf(group.Kind, task, stoppedOnLimit, asksPermission), mark);
                 lines.Add(new InboxLine(task.Id, TabOf(section), section, mark, SinceOf(task, mark), nested.Contains(task.Id),
                     board.Links(task.Id).Map(l => !l.IsEmpty).GetValueOrDefault(false)));
             }
@@ -186,6 +195,12 @@ public static class InboxTabs
             TaskGroupKind.III => InboxSection.QuickOnes,
             _ => InboxSection.Someday,
         };
+
+    // A question whose mark says it only waits for his deploy moves from Questions to Deploys (task 1f6ae26e, see the
+    // section's comment). Asked of the mark, so the section can never disagree with the ring the line shows: a merged task asking
+    // with answer buttons, or one whose session said it cannot check the deploy, stays a question here as in MarkOf.
+    static InboxSection ForDeploy(InboxSection section, InboxMark mark) =>
+        section == InboxSection.Questions && mark == InboxMark.WaitsForDeploy ? InboxSection.Deploys : section;
 
     // Handed back to the user because its session went quiet, and still the user's (any change of assignee or status
     // clears the mark; TaskBoard.Change).
