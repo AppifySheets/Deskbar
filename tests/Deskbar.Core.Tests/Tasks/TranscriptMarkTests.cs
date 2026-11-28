@@ -104,4 +104,53 @@ public sealed class TranscriptMarkTests : IDisposable
         File.Delete(path);
         Assert.True(mark.MovedOn());
     }
+
+    // TASK 0978f3f4: the asking AskUserQuestion line was measured landing 0.3 s after the PreToolUse mark. A mark that
+    // names the dialog tool reads that line, and the thinking line of the same API message, as the question itself.
+    static string AssistantLine(string messageId, string block) =>
+        "{\"type\":\"assistant\",\"message\":{\"id\":\"" + messageId + "\",\"role\":\"assistant\",\"content\":[" + block + "]}}\n";
+
+    const string Thinking = "{\"type\":\"thinking\",\"thinking\":\"\"}";
+    const string AskTool = "{\"type\":\"tool_use\",\"id\":\"toolu_01\",\"name\":\"AskUserQuestion\",\"input\":{\"questions\":[]}}";
+
+    [Fact]
+    public void A_dialogs_own_asking_line_written_late_is_not_moving_on()
+    {
+        var mark = TranscriptMark.Take(path, "AskUserQuestion").Value;
+        File.AppendAllText(path, AssistantLine("msg_ask", Thinking) + AssistantLine("msg_ask", AskTool));
+
+        Assert.False(mark.MovedOn());
+    }
+
+    // The answer (the tool's result), a refusal and Esc each write a "user" line: that still settles it.
+    [Fact]
+    public void The_answer_after_the_late_asking_line_is_moving_on()
+    {
+        var mark = TranscriptMark.Take(path, "AskUserQuestion").Value;
+        File.AppendAllText(path, AssistantLine("msg_ask", AskTool)
+            + "{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":[{\"type\":\"tool_result\",\"tool_use_id\":\"toolu_01\"}]}}\n");
+
+        Assert.True(mark.MovedOn());
+    }
+
+    // Another API message from Claude is the conversation going on, even for a dialog's mark.
+    [Fact]
+    public void Another_assistant_message_is_moving_on_for_a_dialogs_mark()
+    {
+        var mark = TranscriptMark.Take(path, "AskUserQuestion").Value;
+        File.AppendAllText(path, AssistantLine("msg_next", "{\"type\":\"text\",\"text\":\"Done.\"}"));
+
+        Assert.True(mark.MovedOn());
+    }
+
+    // A mark that names no tool (a tool permission, a Notification's question) keeps the old rule: any assistant line,
+    // the asking one included, is moving on, since for an allowed command the user line waits for the command to end.
+    [Fact]
+    public void A_mark_naming_no_tool_takes_any_assistant_line()
+    {
+        var mark = Mark();
+        File.AppendAllText(path, AssistantLine("msg_ask", AskTool));
+
+        Assert.True(mark.MovedOn());
+    }
 }

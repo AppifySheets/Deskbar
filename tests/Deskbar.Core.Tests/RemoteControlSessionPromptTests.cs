@@ -204,6 +204,44 @@ public sealed class RemoteControlSessionPromptTests : IDisposable
         Assert.Equal(TaskStatus.InProgress, Task().Status);
     }
 
+    // Task 0978f3f4: Claude Code wrote the asking AskUserQuestion line after PreToolUse had placed the question, and the
+    // next tick settled it while the dialog still waited. That line is the question, not an answer; the answer's is.
+    [Fact]
+    public void The_ask_dialogs_own_line_written_after_the_hook_leaves_it_waiting()
+    {
+        Hook(new
+        {
+            session_id = "s1", transcript_path = transcript, cwd = Repo, hook_event_name = "PreToolUse", tool_name = DialogQuestion.Tool,
+            tool_input = new { questions = new[] { new { question = "Which one?", header = "h", options = new[] { new { label = "A" } } } } },
+        });
+        File.AppendAllText(transcript,
+            "{\"type\":\"assistant\",\"message\":{\"id\":\"msg_1\",\"content\":[{\"type\":\"tool_use\",\"id\":\"toolu_1\",\"name\":\"AskUserQuestion\",\"input\":{}}]}}\n");
+        control.SettlePrompts();
+
+        Assert.Equal(TaskStatus.WaitingOnYou, Task().Status);
+
+        Appended("user");
+        control.SettlePrompts();
+
+        Assert.Equal(TaskStatus.InProgress, Task().Status);
+    }
+
+    // Task 0978f3f4, the same late line seen from the dialog's noted detail: it must not spend the detail, or the
+    // Notification six seconds on no longer knows the dialog and puts a permission question over the dialog's own.
+    [Fact]
+    public void The_ask_dialogs_late_line_leaves_its_detail_so_its_notification_changes_nothing()
+    {
+        var input = new { questions = new[] { new { question = "Which one?", header = "h", options = new[] { new { label = "A" } } } } };
+        Hook(new { session_id = "s1", transcript_path = transcript, cwd = Repo, hook_event_name = "PreToolUse", tool_name = DialogQuestion.Tool, tool_input = input });
+        var asked = Task().Question.Value;
+        Permission(DialogQuestion.Tool, input);
+        File.AppendAllText(transcript,
+            "{\"type\":\"assistant\",\"message\":{\"id\":\"msg_1\",\"content\":[{\"type\":\"tool_use\",\"id\":\"toolu_1\",\"name\":\"AskUserQuestion\",\"input\":{}}]}}\n");
+        Notified();
+
+        Assert.Equal((TaskStatus.WaitingOnYou, asked), (Task().Status, Task().Question.Value));
+    }
+
     // Review finding 1: Claude's multiple-choice dialog is a permission dialog in Claude Code's registry too, so its own
     // Notification ("Claude needs your permission") and PermissionRequest come with it. Its question stays the dialog's
     // and its answer settles it.

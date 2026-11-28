@@ -144,12 +144,15 @@ public sealed partial class RemoteControl
     // Puts the question on the task as `task ask` would (Waiting on you, at the top, asked by the session) and remembers it
     // with where its transcript stands: the subagent's own when a subagent asked (TranscriptMark.For), none when that file
     // is not there, so then only the session's events settle it (a question that stays too long, never one that goes
-    // too soon). The text stored is the task's own after the ask, so the later comparison is exact.
+    // too soon). The text stored is the task's own after the ask, so the later comparison is exact. AskUserQuestion's
+    // PreToolUse fires before Claude Code writes the asking line, so its mark names the tool and that line does not
+    // settle it (TranscriptMark's header, task 0978f3f4); a Notification's hook names no tool and its mark none.
     void PlaceQuestion(TaskService service, TaskItem task, string text, ClaudeHookEvent hook, Maybe<string> detailAgent = default) =>
         service.Ask(task.Id, text, hook.SessionId)
             .Tap(() => prompts.Placed(hook.SessionId, task.Id,
                 service.Board.TaskOf(hook.SessionId).Bind(t => t.Question).GetValueOrDefault(text),
-                TranscriptMark.Take(TranscriptMark.For(hook.Transcript, hook.AgentId.Or(detailAgent)))));
+                TranscriptMark.Take(TranscriptMark.For(hook.Transcript, hook.AgentId.Or(detailAgent)),
+                    hook.ToolName.Where(tool => tool == DialogQuestion.Tool))));
 
     // Whether the task's waiting question is one this session's dialog put there and has not been settled yet.
     bool PlacedOn(TaskItem task) =>
@@ -166,10 +169,12 @@ public sealed partial class RemoteControl
     }
 
     // Also called by `claude-permission` (the card's hook), so the detail is there whether or not the card is on. The
-    // mark is where the transcript the dialog is decided in stands now: once it moves, the detail is spent.
+    // mark is where the transcript the dialog is decided in stands now: once it moves, the detail is spent. A dialog's
+    // mark names its tool (task 0978f3f4): its asking line landing late must not spend the detail, or the Notification
+    // six seconds on would no longer know the dialog and would put a permission question over the dialog's own.
     void NotePermission(PermissionRequest asked, Maybe<string> transcript) =>
         prompts.Note(asked.SessionId, PromptDetail.Of(asked, tasks?.Now ?? DateTimeOffset.UtcNow),
-            TranscriptMark.Take(TranscriptMark.For(transcript, asked.AgentId)));
+            TranscriptMark.Take(TranscriptMark.For(transcript, asked.AgentId), asked.IsDialog ? Maybe.From(asked.Tool) : Maybe<string>.None));
 
     // The session went on: its turn ended (Stop, which cannot come while a dialog waits), the user typed to it (a prompt
     // Claude Code or Deskbar delivered does not count, SessionBriefing.FromTheUser: it may arrive while the dialog still
